@@ -15,9 +15,11 @@
 - `text.set` 与 `text.enter`；
 - 每操作 consumer gate、敏感输入和 side-effect descriptor；
 - `PatchbayFlutterServiceHost`，把 UI catalog/operator 与领域 host 合并到同一 service extension。
+- 无容器的规范化 Semantics 树、节点 generation、节点上限和 obscured value 脱敏；
+- consumer policy 默认拒绝的标准 Semantics action：tap、focus、scroll、setText 等；
+- App lifecycle resumed 门和 gate await 后二次节点解析。
 
-当前尚未实现 `PatchbayRoot`、语义导航、tap、focus、scroll、wait、capture 和日志面。本文后半部分对
-这些能力的描述是兼容方向，不是现有 API 使用说明。
+当前尚未实现 `PatchbayRoot`、语义导航、wait、capture、Widget/Render/Focus 诊断代理和日志面。
 
 Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的下一轮实施
 契约见 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。该文档明确树驱动 action

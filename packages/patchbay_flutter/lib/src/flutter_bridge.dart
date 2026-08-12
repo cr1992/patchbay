@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
+import 'semantics_bridge.dart';
+
 /// A target key whose GlobalKey semantics stay identical in every build mode.
 ///
 /// The key never retains a controller, formatter, or Widget callback. In
@@ -185,14 +187,23 @@ final class PatchbayFlutterBridge {
   PatchbayFlutterBridge({
     required PatchbayGateEvaluator gates,
     PatchbayUiRegistry? registry,
+    PatchbaySemanticsActionPolicy? semanticsActionPolicy,
+    bool Function()? isAppResumed,
     String Function()? newRequestId,
   }) : _gates = gates,
        _registry = registry ?? PatchbayUiRegistry.instance,
-       _newRequestId = newRequestId ?? _defaultRequestId;
+       _newRequestId = newRequestId ?? _defaultRequestId,
+       semantics = PatchbaySemanticsBridge(
+         gates: gates,
+         actionPolicy: semanticsActionPolicy,
+         isAppResumed: isAppResumed,
+         newRequestId: newRequestId,
+       );
 
   final PatchbayGateEvaluator _gates;
   final PatchbayUiRegistry _registry;
   final String Function() _newRequestId;
+  final PatchbaySemanticsBridge semantics;
 
   static int _nextRequest = 0;
   static String _defaultRequestId() => 'patchbay-ui-${++_nextRequest}';

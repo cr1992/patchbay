@@ -29,10 +29,335 @@ void main() {
       jsonDecode(response.result!) as Map<String, dynamic>,
     );
     final List<Object?> commands = catalog['commands']! as List<Object?>;
+    final Set<Object?> names = commands
+        .cast<Map<String, Object?>>()
+        .map((Map<String, Object?> command) => command['name'])
+        .toSet();
+    expect(names, contains('ui.semantics.tree'));
+    expect(names, isNot(contains('ui.semantics.action')));
     for (final Map<String, Object?> command
         in commands.cast<Map<String, Object?>>()) {
       expect(command['factSources'], <String>['uiObserved']);
     }
+  });
+
+  test(
+    'service catalog exposes semantics action only with consumer policy',
+    () async {
+      final Map<String, ServiceExtensionHandler> handlers =
+          <String, ServiceExtensionHandler>{};
+      PatchbayFlutterServiceHost(
+        applicationId: 'dev.patchbay.flutter.test',
+        bridge: _interactiveBridge(PatchbayUiRegistry()),
+        registrar: (String method, ServiceExtensionHandler handler) {
+          handlers[method] = handler;
+        },
+      ).register();
+
+      final ServiceExtensionResponse response =
+          await handlers[PatchbayServiceHost.catalogMethod]!(
+            PatchbayServiceHost.catalogMethod,
+            const <String, String>{},
+          );
+      final Map<String, Object?> catalog = Map<String, Object?>.from(
+        jsonDecode(response.result!) as Map<String, dynamic>,
+      );
+      final Set<Object?> names = (catalog['commands']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map((Map<String, Object?> command) => command['name'])
+          .toSet();
+
+      expect(names, contains('ui.semantics.action'));
+    },
+  );
+
+  group('Patchbay semantics tree', () {
+    testWidgets('observes standard controls without PatchbayKey', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: <Widget>[
+                TextButton(onPressed: () {}, child: const Text('Settings')),
+                const TextField(decoration: InputDecoration(labelText: 'Name')),
+              ],
+            ),
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = _interactiveBridge(
+        PatchbayUiRegistry(),
+      );
+      addTearDown(bridge.semantics.dispose);
+
+      final PatchbayInvocation result = await _semanticsSnapshot(
+        tester,
+        bridge,
+      );
+      final List<Map<String, Object?>> nodes = _semanticsNodes(result);
+      final Map<String, Object?> settings = nodes.singleWhere(
+        (Map<String, Object?> node) => node['label'] == 'Settings',
+      );
+
+      expect(result.admission, PatchbayAdmission.accepted);
+      expect(result.payload['source'], 'uiObserved');
+      expect(settings['actions'], contains('tap'));
+      expect(settings['generation'], isPositive);
+      expect(nodes, isNotEmpty);
+      bridge.semantics.dispose();
+    });
+
+    testWidgets('tap dispatches the existing Flutter callback', (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) => Scaffold(
+              body: TextButton(
+                onPressed: () => setState(() => tapped = true),
+                child: Text(tapped ? 'Opened' : 'Settings'),
+              ),
+            ),
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = _interactiveBridge(
+        PatchbayUiRegistry(),
+      );
+      addTearDown(bridge.semantics.dispose);
+      final PatchbayInvocation tree = await _semanticsSnapshot(tester, bridge);
+      final Map<String, Object?> target = _semanticsNodes(
+        tree,
+      ).singleWhere((Map<String, Object?> node) => node['label'] == 'Settings');
+
+      final PatchbayInvocation result = await _semanticsInvoke(
+        tester,
+        bridge,
+        node: target,
+        action: PatchbaySemanticsAction.tap,
+      );
+
+      expect(result.payload['outcome'], 'dispatched');
+      expect(tapped, isTrue);
+      expect(find.text('Opened'), findsOneWidget);
+      bridge.semantics.dispose();
+    });
+
+    testWidgets('wrong generation fails closed before callback', (
+      tester,
+    ) async {
+      var taps = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TextButton(
+            onPressed: () => taps += 1,
+            child: const Text('Settings'),
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = _interactiveBridge(
+        PatchbayUiRegistry(),
+      );
+      addTearDown(bridge.semantics.dispose);
+      final PatchbayInvocation tree = await _semanticsSnapshot(tester, bridge);
+      final Map<String, Object?> target = _semanticsNodes(
+        tree,
+      ).singleWhere((Map<String, Object?> node) => node['label'] == 'Settings');
+
+      final Future<PatchbayInvocation> pending = bridge.semantics.invoke(
+        nodeId: target['nodeId']! as int,
+        generation: (target['generation']! as int) + 1,
+        action: PatchbaySemanticsAction.tap,
+      );
+      final PatchbayInvocation result = await _pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      expect(result.rejection?.code, 'uiSemanticsGenerationStale');
+      expect(taps, 0);
+      bridge.semantics.dispose();
+    });
+
+    testWidgets('focus scroll and setText dispatch only declared actions', (
+      tester,
+    ) async {
+      final List<String> calls = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Semantics(
+            label: 'Action probe',
+            focusable: true,
+            onFocus: () => calls.add('focus'),
+            onScrollDown: () => calls.add('scrollDown'),
+            onSetText: (String text) => calls.add('setText:$text'),
+            child: const SizedBox(width: 20, height: 20),
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = _interactiveBridge(
+        PatchbayUiRegistry(),
+      );
+      addTearDown(bridge.semantics.dispose);
+      final PatchbayInvocation tree = await _semanticsSnapshot(tester, bridge);
+      final Map<String, Object?> target = _semanticsNodes(tree).singleWhere(
+        (Map<String, Object?> node) => node['label'] == 'Action probe',
+      );
+
+      await _semanticsInvoke(
+        tester,
+        bridge,
+        node: target,
+        action: PatchbaySemanticsAction.focus,
+      );
+      await _semanticsInvoke(
+        tester,
+        bridge,
+        node: target,
+        action: PatchbaySemanticsAction.scrollDown,
+      );
+      final PatchbayInvocation textResult = await _semanticsInvoke(
+        tester,
+        bridge,
+        node: target,
+        action: PatchbaySemanticsAction.setText,
+        text: 'hello',
+      );
+
+      expect(calls, <String>['focus', 'scrollDown', 'setText:hello']);
+      expect(textResult.payload['outcome'], 'dispatched');
+      expect(textResult.payload, isNot(contains('value')));
+      bridge.semantics.dispose();
+    });
+
+    testWidgets('late gate continuation cannot act on a replacement node', (
+      tester,
+    ) async {
+      final Completer<PatchbayGateDecision> gate =
+          Completer<PatchbayGateDecision>();
+      var firstTaps = 0;
+      var replacementTaps = 0;
+      Widget target(Key key, VoidCallback onTap) => MaterialApp(
+        home: Semantics(
+          key: key,
+          label: 'Replaceable',
+          button: true,
+          onTap: onTap,
+          child: const SizedBox(width: 20, height: 20),
+        ),
+      );
+      await tester.pumpWidget(
+        target(const ValueKey<String>('first'), () => firstTaps += 1),
+      );
+      final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+        registry: PatchbayUiRegistry(),
+        gates: PatchbayGateEvaluator(
+          baseGate: () => const PatchbayGateDecision.allow(),
+          consumerGate: (_) => gate.future,
+        ),
+        semanticsActionPolicy: (_, _) =>
+            const PatchbaySemanticsActionDecision.allow(
+              gateIds: <String>{'ui.ready'},
+            ),
+        isAppResumed: () => true,
+      );
+      addTearDown(bridge.semantics.dispose);
+      final PatchbayInvocation tree = await _semanticsSnapshot(tester, bridge);
+      final Map<String, Object?> observed = _semanticsNodes(tree).singleWhere(
+        (Map<String, Object?> node) => node['label'] == 'Replaceable',
+      );
+      final Future<PatchbayInvocation> pending = bridge.semantics.invoke(
+        nodeId: observed['nodeId']! as int,
+        generation: observed['generation']! as int,
+        action: PatchbaySemanticsAction.tap,
+      );
+      await tester.pump();
+
+      await tester.pumpWidget(
+        target(
+          const ValueKey<String>('replacement'),
+          () => replacementTaps += 1,
+        ),
+      );
+      await tester.pump();
+      gate.complete(const PatchbayGateDecision.allow());
+      final PatchbayInvocation result = await _pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      expect(
+        result.rejection?.code,
+        anyOf('uiSemanticsNodeNotFound', 'uiSemanticsGenerationStale'),
+      );
+      expect(firstTaps, 0);
+      expect(replacementTaps, 0);
+      bridge.semantics.dispose();
+    });
+
+    testWidgets('obscured text never appears in the semantics payload', (
+      tester,
+    ) async {
+      final TextEditingController controller = TextEditingController(
+        text: 'secret-value',
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TextField(controller: controller, obscureText: true),
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = _interactiveBridge(
+        PatchbayUiRegistry(),
+      );
+      addTearDown(bridge.semantics.dispose);
+
+      final PatchbayInvocation tree = await _semanticsSnapshot(tester, bridge);
+      final String encoded = jsonEncode(tree.toJson());
+      final Map<String, Object?> field = _semanticsNodes(tree).singleWhere(
+        (Map<String, Object?> node) =>
+            (node['flags']! as List<Object?>).contains('isObscured'),
+      );
+
+      expect(encoded, isNot(contains('secret-value')));
+      expect(field['valueRedacted'], isTrue);
+      expect(field, isNot(contains('value')));
+      bridge.semantics.dispose();
+    });
+
+    testWidgets('node limit is explicit instead of silently dropping nodes', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Column(
+            children: <Widget>[
+              for (var i = 0; i < 5; i++)
+                TextButton(onPressed: () {}, child: Text('Item $i')),
+            ],
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = _interactiveBridge(
+        PatchbayUiRegistry(),
+      );
+      addTearDown(bridge.semantics.dispose);
+      final Future<PatchbayInvocation> pending = bridge.semantics.snapshot(
+        maxNodes: 2,
+      );
+      final PatchbayInvocation result = await _pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      expect(result.payload['nodeCount'], 2);
+      expect(result.payload['truncated'], isTrue);
+      bridge.semantics.dispose();
+    });
   });
 
   group('Patchbay text target', () {
@@ -364,6 +689,62 @@ PatchbayFlutterBridge _allowedBridge(PatchbayUiRegistry registry) =>
         consumerGate: (_) => const PatchbayGateDecision.allow(),
       ),
     );
+
+PatchbayFlutterBridge _interactiveBridge(PatchbayUiRegistry registry) =>
+    PatchbayFlutterBridge(
+      registry: registry,
+      gates: PatchbayGateEvaluator(
+        baseGate: () => const PatchbayGateDecision.allow(),
+        consumerGate: (_) => const PatchbayGateDecision.allow(),
+      ),
+      semanticsActionPolicy: (_, _) =>
+          const PatchbaySemanticsActionDecision.allow(),
+      isAppResumed: () => true,
+    );
+
+Future<PatchbayInvocation> _semanticsSnapshot(
+  WidgetTester tester,
+  PatchbayFlutterBridge bridge,
+) async {
+  final Future<PatchbayInvocation> pending = bridge.semantics.snapshot();
+  return _pumpUntilComplete(tester, pending);
+}
+
+Future<PatchbayInvocation> _semanticsInvoke(
+  WidgetTester tester,
+  PatchbayFlutterBridge bridge, {
+  required Map<String, Object?> node,
+  required PatchbaySemanticsAction action,
+  String? text,
+}) async {
+  final Future<PatchbayInvocation> pending = bridge.semantics.invoke(
+    nodeId: node['nodeId']! as int,
+    generation: node['generation']! as int,
+    action: action,
+    text: text,
+  );
+  return _pumpUntilComplete(tester, pending);
+}
+
+Future<T> _pumpUntilComplete<T>(WidgetTester tester, Future<T> pending) async {
+  var completed = false;
+  unawaited(
+    pending.then<void>(
+      (_) => completed = true,
+      onError: (Object _, StackTrace _) => completed = true,
+    ),
+  );
+  for (var attempt = 0; attempt < 20 && !completed; attempt += 1) {
+    await tester.pump();
+  }
+  if (!completed) {
+    throw StateError('Patchbay test operation did not complete in 20 frames');
+  }
+  return pending;
+}
+
+List<Map<String, Object?>> _semanticsNodes(PatchbayInvocation result) =>
+    (result.payload['nodes']! as List<Object?>).cast<Map<String, Object?>>();
 
 Future<void> _pumpTextField(
   WidgetTester tester, {

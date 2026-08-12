@@ -67,6 +67,7 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
 - action 必须携带最近快照返回的 `nodeId + generation`；
 - gate 中发生 await 后必须重新遍历当前树，复核对象身份、generation 和 action 仍可用；
 - label、runtime type、树路径与坐标只能查询，不能单独充当执行身份；
+- `rect` 使用节点本地坐标系；存在变换时同时返回 `transformToParent`，不能把本地矩形冒充屏幕坐标；
 - 默认限制节点数与深度，截断必须返回 `truncated=true` 和实际计数；
 - `isObscured` 节点不返回原始 value；consumer 可注入更严格的观察脱敏策略；
 - detached、不可见、用户 action 被阻断或 action 不唯一时 fail-closed。

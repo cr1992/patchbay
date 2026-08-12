@@ -1,6 +1,7 @@
 import 'package:patchbay/patchbay.dart';
 
 import 'flutter_bridge.dart';
+import 'semantics_bridge.dart';
 
 /// Registers the Flutter UI catalog and operators on the generic host.
 final class PatchbayFlutterServiceHost {
@@ -36,6 +37,21 @@ final class PatchbayFlutterServiceHost {
                  'sideEffect': 'appState',
                  'factSources': <String>[PatchbayFactSource.uiObserved.name],
                },
+               <String, Object?>{
+                 'name': 'ui.semantics.tree',
+                 'plane': 'flutterUi',
+                 'mode': 'readOnly',
+                 'sideEffect': 'none',
+                 'factSources': <String>[PatchbayFactSource.uiObserved.name],
+               },
+               if (bridge.semantics.actionsEnabled)
+                 <String, Object?>{
+                   'name': 'ui.semantics.action',
+                   'plane': 'flutterUi',
+                   'mode': 'immediate',
+                   'sideEffect': 'appState',
+                   'factSources': <String>[PatchbayFactSource.uiObserved.name],
+                 },
                ...?domain['commands'] as List<Object?>?,
              ],
              'uiTargets': bridge
@@ -47,7 +63,10 @@ final class PatchbayFlutterServiceHost {
          snapshot: snapshot ?? () async => const <String, Object?>{},
          invoke: (command, arguments, requestId) async {
            final bool uiCommand =
-               command == 'ui.text.set' || command == 'ui.text.enter';
+               command == 'ui.text.set' ||
+               command == 'ui.text.enter' ||
+               command == 'ui.semantics.tree' ||
+               command == 'ui.semantics.action';
            if (!uiCommand) {
              if (domainInvoke != null) {
                return domainInvoke(command, arguments, requestId);
@@ -59,6 +78,54 @@ final class PatchbayFlutterServiceHost {
                  details: <String, Object?>{'command': command},
                ),
              ).toJson();
+           }
+           if (command == 'ui.semantics.tree') {
+             final Object? maxDepth = arguments['maxDepth'];
+             final Object? maxNodes = arguments['maxNodes'];
+             if (maxDepth != null && maxDepth is! int ||
+                 maxNodes != null && maxNodes is! int) {
+               return PatchbayInvocation.rejected(
+                 requestId: requestId,
+                 rejection: const PatchbayRejection(code: 'invalidUiArguments'),
+               ).toJson();
+             }
+             return (await bridge.semantics.snapshot(
+               maxDepth: maxDepth as int? ?? 64,
+               maxNodes: maxNodes as int? ?? 1000,
+             )).toJson();
+           }
+           if (command == 'ui.semantics.action') {
+             if (!bridge.semantics.actionsEnabled) {
+               return PatchbayInvocation.rejected(
+                 requestId: requestId,
+                 rejection: const PatchbayRejection(
+                   code: 'commandNotRegistered',
+                 ),
+               ).toJson();
+             }
+             final Object? nodeId = arguments['nodeId'];
+             final Object? generation = arguments['generation'];
+             final Object? actionName = arguments['action'];
+             final PatchbaySemanticsAction? action = actionName is String
+                 ? PatchbaySemanticsAction.fromWireName(actionName)
+                 : null;
+             final Object? text = arguments['text'];
+             if (nodeId is! int ||
+                 generation is! int ||
+                 action == null ||
+                 text != null && text is! String) {
+               return PatchbayInvocation.rejected(
+                 requestId: requestId,
+                 rejection: const PatchbayRejection(code: 'invalidUiArguments'),
+               ).toJson();
+             }
+             return (await bridge.semantics.invoke(
+               nodeId: nodeId,
+               generation: generation,
+               action: action,
+               text: text as String?,
+               inputWasStdin: arguments['inputWasStdin'] == true,
+             )).toJson();
            }
            final Object? id = arguments['id'];
            final Object? generation = arguments['generation'];

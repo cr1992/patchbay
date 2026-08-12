@@ -5,3 +5,4 @@ export 'package:patchbay/patchbay.dart';
 
 export 'src/flutter_bridge.dart';
 export 'src/flutter_service_host.dart';
+export 'src/semantics_bridge.dart';
