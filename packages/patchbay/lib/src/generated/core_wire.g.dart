@@ -228,6 +228,47 @@ final class PatchbayParameterDescriptorWire {
   };
 }
 
+final class PatchbayIdentityWire {
+  const PatchbayIdentityWire({
+    required this.schemaVersion,
+    required this.applicationId,
+    required this.appInstanceId,
+    required this.isolateId,
+  });
+
+  final int schemaVersion;
+  final String applicationId;
+  final String appInstanceId;
+  final String? isolateId;
+
+  factory PatchbayIdentityWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'schemaVersion',
+      'applicationId',
+      'appInstanceId',
+      'isolateId',
+    }, path);
+    return PatchbayIdentityWire(
+      schemaVersion: _wireInt(json['schemaVersion'], '$path.schemaVersion'),
+      applicationId: _wireString(json['applicationId'], '$path.applicationId'),
+      appInstanceId: _wireString(json['appInstanceId'], '$path.appInstanceId'),
+      isolateId: json['isolateId'] == null
+          ? null
+          : _wireString(json['isolateId'], '$path.isolateId'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'schemaVersion': schemaVersion,
+    'applicationId': applicationId,
+    'appInstanceId': appInstanceId,
+    'isolateId': isolateId == null ? null : isolateId!,
+  };
+}
+
 final class PatchbayCommandDescriptorWire {
   const PatchbayCommandDescriptorWire({
     required this.name,

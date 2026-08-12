@@ -62,6 +62,16 @@
     },
     {
       "kind": "object",
+      "name": "PatchbayIdentityWire",
+      "fields": [
+        {"name": "schemaVersion", "type": "int"},
+        {"name": "applicationId", "type": "String"},
+        {"name": "appInstanceId", "type": "String"},
+        {"name": "isolateId", "type": "String", "nullable": true, "emitNull": true}
+      ]
+    },
+    {
+      "kind": "object",
       "name": "PatchbayCommandDescriptorWire",
       "fields": [
         {"name": "name", "type": "String"},

@@ -23,35 +23,11 @@ final class PatchbayFlutterServiceHost {
            return <String, Object?>{
              ...domain,
              'commands': <Object?>[
-               <String, Object?>{
-                 'name': 'ui.text.set',
-                 'plane': 'flutterUi',
-                 'mode': 'immediate',
-                 'sideEffect': 'appState',
-                 'factSources': <String>[PatchbayFactSource.uiObserved.name],
-               },
-               <String, Object?>{
-                 'name': 'ui.text.enter',
-                 'plane': 'flutterUi',
-                 'mode': 'immediate',
-                 'sideEffect': 'appState',
-                 'factSources': <String>[PatchbayFactSource.uiObserved.name],
-               },
-               <String, Object?>{
-                 'name': 'ui.semantics.tree',
-                 'plane': 'flutterUi',
-                 'mode': 'readOnly',
-                 'sideEffect': 'none',
-                 'factSources': <String>[PatchbayFactSource.uiObserved.name],
-               },
-               if (bridge.semantics.actionsEnabled)
-                 <String, Object?>{
-                   'name': 'ui.semantics.action',
-                   'plane': 'flutterUi',
-                   'mode': 'immediate',
-                   'sideEffect': 'appState',
-                   'factSources': <String>[PatchbayFactSource.uiObserved.name],
-                 },
+               for (final PatchbayCommandDescriptor descriptor
+                   in _uiCommandDescriptors(
+                     semanticsActionsEnabled: bridge.semantics.actionsEnabled,
+                   ))
+                 descriptor.toJson(),
                ...?domain['commands'] as List<Object?>?,
              ],
              'uiTargets': bridge
@@ -164,4 +140,118 @@ final class PatchbayFlutterServiceHost {
   String get appInstanceId => _host.appInstanceId;
 
   void register() => _host.register();
+
+  static List<PatchbayCommandDescriptor> _uiCommandDescriptors({
+    required bool semanticsActionsEnabled,
+  }) => <PatchbayCommandDescriptor>[
+    const PatchbayCommandDescriptor(
+      name: 'ui.text.set',
+      summary: 'Set a registered Flutter text target without IME semantics.',
+      plane: PatchbayPlane.flutterUi,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.appState,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'id',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'generation',
+          type: PatchbayParameterType.integer,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'text',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: 'ui.text.enter',
+      summary: 'Enter text through the registered Flutter target policy.',
+      plane: PatchbayPlane.flutterUi,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.appState,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'id',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'generation',
+          type: PatchbayParameterType.integer,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'text',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: 'ui.semantics.tree',
+      summary: 'Observe the current Flutter Semantics tree.',
+      plane: PatchbayPlane.flutterUi,
+      mode: PatchbayCommandMode.readOnly,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'maxDepth',
+          type: PatchbayParameterType.integer,
+          defaultValue: 64,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'maxNodes',
+          type: PatchbayParameterType.integer,
+          defaultValue: 1000,
+        ),
+      ],
+    ),
+    if (semanticsActionsEnabled)
+      const PatchbayCommandDescriptor(
+        name: 'ui.semantics.action',
+        summary: 'Invoke an allowed action on an observed Semantics node.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.immediate,
+        sideEffect: PatchbaySideEffect.appState,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+        parameters: <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'nodeId',
+            type: PatchbayParameterType.integer,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'generation',
+            type: PatchbayParameterType.integer,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'action',
+            type: PatchbayParameterType.enumeration,
+            required: true,
+            allowedValues: <String>[
+              'tap',
+              'focus',
+              'scrollUp',
+              'scrollDown',
+              'scrollLeft',
+              'scrollRight',
+              'setText',
+            ],
+          ),
+          PatchbayParameterDescriptor(
+            name: 'text',
+            type: PatchbayParameterType.string,
+          ),
+        ],
+      ),
+  ];
 }

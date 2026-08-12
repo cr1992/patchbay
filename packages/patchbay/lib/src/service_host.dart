@@ -3,6 +3,8 @@ import 'dart:developer';
 import 'dart:isolate';
 import 'dart:math';
 
+import 'generated/core_wire.g.dart';
+
 typedef PatchbayCatalogSource = Future<Map<String, Object?>> Function();
 typedef PatchbaySnapshotSource = Future<Map<String, Object?>> Function();
 typedef PatchbayInvocationSource =
@@ -72,12 +74,14 @@ final class PatchbayServiceHost {
     if (method != identityMethod || _hasUserParameters(parameters)) {
       return _invalidParams('identity does not accept parameters');
     }
-    return _result(<String, Object?>{
-      'schemaVersion': schemaVersion,
-      'applicationId': applicationId,
-      'appInstanceId': appInstanceId,
-      'isolateId': Service.getIsolateId(Isolate.current),
-    });
+    return _result(
+      PatchbayIdentityWire(
+        schemaVersion: schemaVersion,
+        applicationId: applicationId,
+        appInstanceId: appInstanceId,
+        isolateId: Service.getIsolateId(Isolate.current),
+      ).toJson(),
+    );
   }
 
   Future<ServiceExtensionResponse> handleCatalog(
