@@ -72,7 +72,9 @@ Future<int> runPatchbayCli(List<String> arguments) async {
     for (final String choice in error.choices) {
       stderr.writeln('  --session ${choice.split(' ').first}  $choice');
     }
-    return PatchbayExitCode.transport;
+    return error.code == 'sessionIdentityMismatch'
+        ? PatchbayExitCode.protocol
+        : PatchbayExitCode.transport;
   } on PatchbayJobWaitTimeout {
     stderr.writeln('patchbay job failed: waitTimeout');
     return PatchbayExitCode.typedFailure;
@@ -206,7 +208,10 @@ Future<PatchbayClient> _connect(ArgResults parsed) async {
     );
   } on PatchbayProtocolException {
     sessionStore.remove(discovered.record.sessionId);
-    throw const PatchbaySessionException('sessionIdentityMismatch');
+    // The transport connected but proved to be a different App/isolate.
+    // Removing the stale discovery record is lifecycle cleanup; callers must
+    // still receive the protocol/identity exit class (4), not transport (3).
+    throw const PatchbayProtocolException('sessionIdentityMismatch');
   } on Object {
     sessionStore.remove(discovered.record.sessionId);
     throw const PatchbaySessionException('sessionStaleTransport');

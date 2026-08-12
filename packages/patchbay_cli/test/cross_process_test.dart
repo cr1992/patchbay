@@ -241,7 +241,7 @@ void main() {
             mismatchedSessions.path,
             'identity',
           ], workingDirectory: Directory.current.path);
-      expect(mismatchedCli.exitCode, PatchbayExitCode.transport);
+      expect(mismatchedCli.exitCode, PatchbayExitCode.protocol);
       expect(
         mismatchedCli.stderr.toString(),
         contains('sessionIdentityMismatch'),
