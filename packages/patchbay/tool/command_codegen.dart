@@ -138,8 +138,9 @@ final class _Contract {
           ),
         )
         .toList(growable: false);
-    if (commands.isEmpty)
+    if (commands.isEmpty) {
       throw const FormatException('commands must not be empty');
+    }
     _unique(commands.map((value) => value.id), 'command id');
     _unique(commands.map((value) => value.name), 'command name');
     final Map<String, String> parameterTypes = {};
@@ -242,8 +243,9 @@ final class _Command {
     final summary = _nonEmpty(json['summary'], '$path.summary');
     final profileName = _identifier(json['profile'], '$path.profile');
     final profile = profiles[profileName];
-    if (profile == null)
+    if (profile == null) {
       throw FormatException('$path.profile is unknown: $profileName');
+    }
     final parameters = json['parameters'] == null
         ? <_Parameter>[]
         : _list(json['parameters'], '$path.parameters').indexed
@@ -375,8 +377,9 @@ String _render(_Contract contract, String path) {
   for (final command in commands) {
     for (final parameter in command.parameters) {
       getters[parameter.name] = parameter;
-      if (!parameter.required && parameter.defaultValue == null)
+      if (!parameter.required && parameter.defaultValue == null) {
         nullable.add(parameter.name);
+      }
     }
   }
   final out = StringBuffer()
@@ -387,7 +390,9 @@ String _render(_Contract contract, String path) {
     ..writeln("import '${contract.descriptorImport}';")
     ..writeln()
     ..writeln('enum $enumPrefix {');
-  for (final command in commands) out.writeln('  ${command.id},');
+  for (final command in commands) {
+    out.writeln('  ${command.id},');
+  }
   out
     ..writeln('  ;')
     ..writeln('  String get wireName => switch (this) {');
@@ -430,11 +435,11 @@ String _render(_Contract contract, String path) {
       '  $type${isNullable ? '?' : ''} get ${entry.key} => values[\'${entry.key}\'] as $type${isNullable ? '?' : ''};',
     );
   }
-  out..writeln('  T dispatch<T>({');
+  out.writeln('  T dispatch<T>({');
   for (final command in commands) {
     out.writeln('    required T Function($decodedType) ${command.id},');
   }
-  out..writeln('  }) => switch (command) {');
+  out.writeln('  }) => switch (command) {');
   for (final command in commands) {
     out.writeln('    $enumPrefix.${command.id} => ${command.id}(this),');
   }

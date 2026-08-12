@@ -314,7 +314,7 @@ String _render(_Contract contract, String contractPath) {
   final StringBuffer out = StringBuffer()
     ..writeln('// GENERATED CODE - DO NOT MODIFY BY HAND.')
     ..writeln(
-      '// ignore_for_file: curly_braces_in_flow_control_structures, unused_element, use_null_aware_elements',
+      '// ignore_for_file: curly_braces_in_flow_control_structures, prefer_null_aware_operators, unused_element, use_null_aware_elements',
     )
     ..writeln('// Contract: $contractPath')
     ..writeln('// Generator: packages/patchbay/tool/wire_codegen.dart')
