@@ -1,4 +1,5 @@
 import 'facts.dart';
+import 'generated/core_wire.g.dart';
 
 enum PatchbayPlane { domain, flutterUi }
 
@@ -83,24 +84,48 @@ final class PatchbayUiTargetDescriptor {
   final PatchbaySideEffect sideEffect;
   final Set<PatchbayFactSource> factSources;
 
-  Map<String, Object?> toJson() => <String, Object?>{
-    'id': id,
-    'generation': generation,
-    'kind': kind.name,
-    'mounted': mounted,
-    'ambiguous': ambiguous,
-    'operations':
-        operations.map((PatchbayUiOperation value) => value.wireName).toList()
-          ..sort(),
-    'operationGates': <String, Object?>{
-      for (final PatchbayUiOperation operation in operations)
-        operation.wireName:
-            (operationGates[operation] ?? const <String>{}).toList()..sort(),
-    },
-    'sensitivePolicy': sensitivePolicy.name,
-    'sideEffect': sideEffect.name,
-    'factSources':
-        factSources.map((PatchbayFactSource value) => value.name).toList()
-          ..sort(),
-  };
+  Map<String, Object?> toJson() {
+    final List<String> sortedOperations =
+        operations.map((value) => value.wireName).toList(growable: false)
+          ..sort();
+    final List<PatchbayFactSourceWire> sortedFactSources =
+        factSources.map(_factSourceWire).toList(growable: false)
+          ..sort((a, b) => a.name.compareTo(b.name));
+    return PatchbayUiTargetDescriptorWire(
+      id: id,
+      generation: generation,
+      kind: switch (kind) {
+        PatchbayUiTargetKind.text => PatchbayUiTargetKindWire.text,
+      },
+      mounted: mounted,
+      ambiguous: ambiguous,
+      operations: sortedOperations,
+      operationGates: <String, Object?>{
+        for (final PatchbayUiOperation operation in operations)
+          operation.wireName:
+              (operationGates[operation] ?? const <String>{}).toList()..sort(),
+      },
+      sensitivePolicy: switch (sensitivePolicy) {
+        PatchbaySensitivePolicy.public => PatchbaySensitivePolicyWire.public,
+        PatchbaySensitivePolicy.redacted =>
+          PatchbaySensitivePolicyWire.redacted,
+      },
+      sideEffect: switch (sideEffect) {
+        PatchbaySideEffect.none => PatchbaySideEffectWire.none,
+        PatchbaySideEffect.appState => PatchbaySideEffectWire.appState,
+        PatchbaySideEffect.external => PatchbaySideEffectWire.external,
+      },
+      factSources: sortedFactSources,
+    ).toJson();
+  }
 }
+
+PatchbayFactSourceWire _factSourceWire(PatchbayFactSource value) =>
+    switch (value) {
+      PatchbayFactSource.appRecorded => PatchbayFactSourceWire.appRecorded,
+      PatchbayFactSource.commandEcho => PatchbayFactSourceWire.commandEcho,
+      PatchbayFactSource.deviceReported =>
+        PatchbayFactSourceWire.deviceReported,
+      PatchbayFactSource.uiObserved => PatchbayFactSourceWire.uiObserved,
+      PatchbayFactSource.unknown => PatchbayFactSourceWire.unknown,
+    };

@@ -64,4 +64,28 @@ void main() {
       throwsA(isA<PatchbayJobWaitTimeout>()),
     );
   });
+
+  test('wait honors a consumer-neutral admission timeout hint', () async {
+    var reads = 0;
+    final Map<String, Object?> result = await waitForPatchbayJob(
+      admission: const <String, Object?>{
+        'jobId': 'job-1',
+        'payload': <String, Object?>{'suggestedWaitTimeoutMs': 100},
+      },
+      pollInterval: Duration.zero,
+      read: (_) async {
+        reads += 1;
+        return <String, Object?>{
+          'payload': <String, Object?>{
+            'terminal': reads > 1,
+            'events': <Object?>[
+              <String, Object?>{'phase': reads > 1 ? 'completed' : 'running'},
+            ],
+          },
+        };
+      },
+    );
+
+    expect((result['payload']! as Map<Object?, Object?>)['terminal'], isTrue);
+  });
 }

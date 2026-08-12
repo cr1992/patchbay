@@ -53,14 +53,24 @@ final class PatchbayJobWaitTimeout implements Exception {
 Future<Map<String, Object?>> waitForPatchbayJob({
   required Map<String, Object?> admission,
   required PatchbayJobReader read,
-  Duration timeout = const Duration(seconds: 60),
+  Duration? timeout,
   Duration pollInterval = const Duration(milliseconds: 100),
 }) async {
   final Object? jobId = admission['jobId'];
   if (jobId is! String) return admission;
 
+  final Object? admissionPayload = admission['payload'];
+  final Object? suggestedWaitTimeoutMs = admissionPayload is Map
+      ? admissionPayload['suggestedWaitTimeoutMs']
+      : null;
+  final Duration effectiveTimeout =
+      timeout ??
+      (suggestedWaitTimeoutMs is int && suggestedWaitTimeoutMs > 0
+          ? Duration(milliseconds: suggestedWaitTimeoutMs)
+          : const Duration(seconds: 60));
+
   final Stopwatch elapsed = Stopwatch()..start();
-  while (elapsed.elapsed < timeout) {
+  while (elapsed.elapsed < effectiveTimeout) {
     final Map<String, Object?> result = await read(jobId);
     final Object? payload = result['payload'];
     if (payload is Map && payload['terminal'] == true) return result;

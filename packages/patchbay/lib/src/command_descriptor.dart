@@ -1,4 +1,5 @@
 import 'facts.dart';
+import 'generated/core_wire.g.dart';
 import 'ui_descriptor.dart';
 
 enum PatchbayCommandMode { readOnly, immediate, job }
@@ -32,15 +33,17 @@ final class PatchbayParameterDescriptor {
   final List<Object?> allowedValues;
   final String? summary;
 
-  Map<String, Object?> toJson() => <String, Object?>{
-    'name': name,
-    'type': type.name,
-    'required': required,
-    'sensitive': sensitive,
-    if (defaultValue != null) 'default': defaultValue,
-    if (allowedValues.isNotEmpty) 'allowedValues': allowedValues,
-    if (summary != null) 'summary': summary,
-  };
+  PatchbayParameterDescriptorWire _toWire() => PatchbayParameterDescriptorWire(
+    name: name,
+    type: _parameterTypeWire(type),
+    required: required,
+    sensitive: sensitive,
+    defaultValue: defaultValue,
+    allowedValues: allowedValues,
+    summary: summary,
+  );
+
+  Map<String, Object?> toJson() => _toWire().toJson();
 }
 
 /// Consumer-neutral catalog entry. Business namespaces remain consumer-owned.
@@ -71,18 +74,62 @@ final class PatchbayCommandDescriptor {
   final List<PatchbayParameterDescriptor> parameters;
   final Set<String> gates;
 
-  Map<String, Object?> toJson() => <String, Object?>{
-    'name': name,
-    'summary': summary,
-    'plane': plane.name,
-    'mode': mode.name,
-    'sideEffect': sideEffect.name,
-    'factSources':
-        factSources.map((PatchbayFactSource value) => value.name).toList()
-          ..sort(),
-    'gates': gates.toList()..sort(),
-    'parameters': parameters
-        .map((PatchbayParameterDescriptor value) => value.toJson())
-        .toList(growable: false),
-  };
+  Map<String, Object?> toJson() {
+    final List<PatchbayFactSourceWire> sortedFactSources =
+        factSources.map(_factSourceWire).toList(growable: false)
+          ..sort((a, b) => a.name.compareTo(b.name));
+    final List<String> sortedGates = gates.toList(growable: false)..sort();
+    return PatchbayCommandDescriptorWire(
+      name: name,
+      summary: summary,
+      plane: _planeWire(plane),
+      mode: _commandModeWire(mode),
+      sideEffect: _sideEffectWire(sideEffect),
+      factSources: sortedFactSources,
+      gates: sortedGates,
+      parameters: parameters
+          .map((value) => value._toWire())
+          .toList(growable: false),
+    ).toJson();
+  }
 }
+
+PatchbayCommandModeWire _commandModeWire(PatchbayCommandMode value) =>
+    switch (value) {
+      PatchbayCommandMode.readOnly => PatchbayCommandModeWire.readOnly,
+      PatchbayCommandMode.immediate => PatchbayCommandModeWire.immediate,
+      PatchbayCommandMode.job => PatchbayCommandModeWire.job,
+    };
+
+PatchbayParameterTypeWire _parameterTypeWire(PatchbayParameterType value) =>
+    switch (value) {
+      PatchbayParameterType.string => PatchbayParameterTypeWire.string,
+      PatchbayParameterType.integer => PatchbayParameterTypeWire.integer,
+      PatchbayParameterType.number => PatchbayParameterTypeWire.number,
+      PatchbayParameterType.boolean => PatchbayParameterTypeWire.boolean,
+      PatchbayParameterType.enumeration =>
+        PatchbayParameterTypeWire.enumeration,
+      PatchbayParameterType.json => PatchbayParameterTypeWire.json,
+    };
+
+PatchbayPlaneWire _planeWire(PatchbayPlane value) => switch (value) {
+  PatchbayPlane.domain => PatchbayPlaneWire.domain,
+  PatchbayPlane.flutterUi => PatchbayPlaneWire.flutterUi,
+};
+
+PatchbaySideEffectWire _sideEffectWire(PatchbaySideEffect value) =>
+    switch (value) {
+      PatchbaySideEffect.none => PatchbaySideEffectWire.none,
+      PatchbaySideEffect.appState => PatchbaySideEffectWire.appState,
+      PatchbaySideEffect.external => PatchbaySideEffectWire.external,
+    };
+
+PatchbayFactSourceWire _factSourceWire(PatchbayFactSource value) =>
+    switch (value) {
+      PatchbayFactSource.appRecorded => PatchbayFactSourceWire.appRecorded,
+      PatchbayFactSource.commandEcho => PatchbayFactSourceWire.commandEcho,
+      PatchbayFactSource.deviceReported =>
+        PatchbayFactSourceWire.deviceReported,
+      PatchbayFactSource.uiObserved => PatchbayFactSourceWire.uiObserved,
+      PatchbayFactSource.unknown => PatchbayFactSourceWire.unknown,
+    };

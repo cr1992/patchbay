@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'facts.dart';
+import 'generated/core_wire.g.dart';
 
 enum PatchbayJobPhase { running, completed, failed, cancelled }
 
@@ -23,15 +24,22 @@ final class PatchbayJobEvent {
   final Map<String, Object?> payload;
   final String? reason;
 
-  Map<String, Object?> toJson() => <String, Object?>{
-    'sequence': sequence,
-    'at': at.toIso8601String(),
-    'phase': phase.name,
-    'source': source.name,
-    if (operation != null) 'operation': operation,
-    'payload': payload,
-    if (reason != null) 'reason': reason,
-  };
+  PatchbayJobEventWire _toWire() => PatchbayJobEventWire(
+    sequence: sequence,
+    at: at.toIso8601String(),
+    phase: switch (phase) {
+      PatchbayJobPhase.running => PatchbayJobPhaseWire.running,
+      PatchbayJobPhase.completed => PatchbayJobPhaseWire.completed,
+      PatchbayJobPhase.failed => PatchbayJobPhaseWire.failed,
+      PatchbayJobPhase.cancelled => PatchbayJobPhaseWire.cancelled,
+    },
+    source: _factSourceWire(source),
+    operation: operation,
+    payload: payload,
+    reason: reason,
+  );
+
+  Map<String, Object?> toJson() => _toWire().toJson();
 }
 
 final class PatchbayJobSnapshot {
@@ -49,17 +57,48 @@ final class PatchbayJobSnapshot {
         PatchbayJobPhase.running => false,
       };
 
-  Map<String, Object?> toJson() => <String, Object?>{
-    'jobId': jobId,
-    'terminal': terminal,
-    'events': events
-        .map((PatchbayJobEvent event) => event.toJson())
-        .toList(growable: false),
-  };
+  Map<String, Object?> toJson() => PatchbayJobSnapshotWire(
+    jobId: jobId,
+    terminal: terminal,
+    events: events.map((event) => event._toWire()).toList(growable: false),
+  ).toJson();
 }
+
+PatchbayFactSourceWire _factSourceWire(PatchbayFactSource value) =>
+    switch (value) {
+      PatchbayFactSource.appRecorded => PatchbayFactSourceWire.appRecorded,
+      PatchbayFactSource.commandEcho => PatchbayFactSourceWire.commandEcho,
+      PatchbayFactSource.deviceReported =>
+        PatchbayFactSourceWire.deviceReported,
+      PatchbayFactSource.uiObserved => PatchbayFactSourceWire.uiObserved,
+      PatchbayFactSource.unknown => PatchbayFactSourceWire.unknown,
+    };
 
 typedef PatchbayJobBody = Future<Map<String, Object?>> Function();
 typedef PatchbayJobCancellation = FutureOr<void> Function();
+
+/// A consumer-observed domain failure whose payload is already redacted.
+///
+/// Generic exceptions are deliberately reduced to `errorType`. Consumers may
+/// throw this only when they have a stable reason and a payload that is safe to
+/// cross the debug protocol boundary.
+final class PatchbayJobFailure implements Exception {
+  const PatchbayJobFailure({required this.reason, this.payload = const {}});
+
+  final String reason;
+  final Map<String, Object?> payload;
+}
+
+/// A consumer-observed domain cancellation whose payload is already redacted.
+final class PatchbayJobCancellationSignal implements Exception {
+  const PatchbayJobCancellationSignal({
+    required this.reason,
+    this.payload = const {},
+  });
+
+  final String reason;
+  final Map<String, Object?> payload;
+}
 
 /// In-isolate job ledger for operations whose completion cannot be represented
 /// honestly by the admission response.
@@ -140,6 +179,26 @@ final class PatchbayJobRegistry {
         operation: operation,
         payload: payload,
       );
+    } on PatchbayJobCancellationSignal catch (cancellation) {
+      if (_terminal(record)) return;
+      _append(
+        record,
+        PatchbayJobPhase.cancelled,
+        source: source,
+        operation: operation,
+        payload: cancellation.payload,
+        reason: cancellation.reason,
+      );
+    } on PatchbayJobFailure catch (failure) {
+      if (_terminal(record)) return;
+      _append(
+        record,
+        PatchbayJobPhase.failed,
+        source: source,
+        operation: operation,
+        payload: failure.payload,
+        reason: failure.reason,
+      );
     } catch (error) {
       if (_terminal(record)) return;
       _append(
@@ -150,8 +209,8 @@ final class PatchbayJobRegistry {
         payload: <String, Object?>{'errorType': error.runtimeType.toString()},
         // Exceptions may embed credentials, device identifiers, or vendor
         // response bodies. The generic ledger records only the stable type;
-        // consumers may return an explicitly redacted domain reason in a
-        // successful payload when that is safe.
+        // consumers may throw PatchbayJobFailure with an explicitly redacted
+        // domain reason and payload when that is safe.
         reason: 'operationFailed',
       );
     }

@@ -102,6 +102,27 @@ void main() {
         'details': <String, Object?>{'stage': 'booting'},
       });
     });
+
+    test('generated codec round-trips the stable null-bearing envelope', () {
+      final Map<String, Object?> json = PatchbayInvocation.accepted(
+        requestId: 'req-generated',
+      ).toJson();
+
+      expect(json, containsPair('notice', null));
+      expect(json, containsPair('jobId', null));
+      expect(json, containsPair('rejection', null));
+      expect(PatchbayInvocationWire.fromJson(json).toJson(), json);
+    });
+
+    test('generated codec rejects values outside the JSON contract', () {
+      expect(
+        () => PatchbayInvocation.accepted(
+          requestId: 'req-invalid-json',
+          payload: <String, Object?>{'timestamp': DateTime.utc(2026)},
+        ).toJson(),
+        throwsFormatException,
+      );
+    });
   });
 
   group('Patchbay gates', () {
@@ -250,4 +271,25 @@ void main() {
       pending.complete(const <String, Object?>{'ignored': true});
     },
   );
+
+  test('job registry preserves redacted domain failure evidence', () async {
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+    final String jobId = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      operation: 'pairing.ble.pair',
+      body: () async => throw const PatchbayJobFailure(
+        reason: 'pairingFailed',
+        payload: <String, Object?>{
+          'terminalState': 'failed',
+          'errorCode': 'device.offline',
+        },
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final PatchbayJobEvent terminal = jobs.snapshot(jobId)!.events.last;
+    expect(terminal.phase, PatchbayJobPhase.failed);
+    expect(terminal.reason, 'pairingFailed');
+    expect(terminal.payload['errorCode'], 'device.offline');
+  });
 }

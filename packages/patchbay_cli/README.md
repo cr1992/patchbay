@@ -46,7 +46,9 @@ catalog 解析不应复制到 consumer 工程。
 ## 输入与结果
 
 普通结构化参数通过 `--args` 传 JSON object。descriptor 标记为敏感的参数必须把完整 JSON object 从
-stdin 传入，并显式使用 `--stdin`；输出只保留 redacted 元数据。
+stdin 传入，并显式使用 `--stdin`；输出只保留 redacted 元数据。stdin 接管真实 TTY 时 CLI 会临时关闭
+terminal echo，读取后恢复；无法关闭回显时以 `terminalEchoControlFailed` fail-closed。管道输入不修改
+终端模式。
 
 `admission=accepted` 只表示 App 已受理请求，不代表副作用已完成。长任务会返回 `jobId`：
 
@@ -54,8 +56,9 @@ stdin 传入，并显式使用 `--stdin`；输出只保留 redacted 元数据。
 - `job get` 读取当前快照；
 - `job cancel` 请求取消，但取消结果仍以 App 返回的 job 状态为准。
 
-`--wait` 默认最多等待 60 秒。超时表示 App 已受理但在观察窗口内没有终态，归为类型化操作失败
-（退出码 `6`），不是连接失败。
+`--wait` 默认最多等待 60 秒；admission 带 `suggestedWaitTimeoutMs` 时采用 consumer 提示的观察窗口。
+例如 BLE 配网提示 150 秒，以覆盖其 120 秒激活终态。超时表示 App 已受理但在观察窗口内没有终态，
+归为类型化操作失败（退出码 `6`），不是连接失败。
 
 JSON 输出保留事实来源、rejection code、job event sequence 和 capability warning。CLI 不把这些字段
 升级解释为设备执行成功、像素正确或系统 UI 已操作。

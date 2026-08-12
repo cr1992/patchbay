@@ -4,6 +4,7 @@ library;
 export 'src/command_descriptor.dart';
 export 'src/facts.dart';
 export 'src/gates.dart';
+export 'src/generated/core_wire.g.dart';
 export 'src/invocation.dart';
 export 'src/jobs.dart';
 export 'src/service_host.dart';

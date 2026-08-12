@@ -397,7 +397,7 @@ final class PatchbaySemanticsBridge {
     required int maxDepth,
     required int maxNodes,
   }) {
-    final List<Map<String, Object?>> nodes = <Map<String, Object?>>[];
+    final List<PatchbaySemanticsNodeWire> nodes = <PatchbaySemanticsNodeWire>[];
     final Set<int> observedIds = <int>{};
     var truncated = false;
 
@@ -415,7 +415,7 @@ final class PatchbaySemanticsBridge {
         return true;
       });
       nodes.add(
-        _nodeJson(
+        _nodeWire(
           node,
           entry.generation,
           data,
@@ -456,7 +456,7 @@ final class PatchbaySemanticsBridge {
     return next;
   }
 
-  static Map<String, Object?> _nodeJson(
+  static PatchbaySemanticsNodeWire _nodeWire(
     SemanticsNode node,
     int generation,
     SemanticsData data, {
@@ -471,37 +471,39 @@ final class PatchbaySemanticsBridge {
           in PatchbaySemanticsAction.values)
         if (data.hasAction(action.flutterAction)) action.name,
     ]..sort();
-    return <String, Object?>{
-      'nodeId': node.id,
-      'generation': generation,
-      'parentNodeId': parentId,
-      'depth': depth,
-      'identifier': data.identifier,
-      'label': data.label,
-      if (obscured) 'valueRedacted': true else 'value': data.value,
-      if (data.hint.isNotEmpty) 'hint': data.hint,
-      if (data.tooltip.isNotEmpty) 'tooltip': data.tooltip,
-      'flags': flags,
-      'actions': actions,
-      'invisible': node.isInvisible,
-      'userActionsBlocked': node.areUserActionsBlocked,
-      'rect': <String, Object?>{
-        'left': data.rect.left,
-        'top': data.rect.top,
-        'width': data.rect.width,
-        'height': data.rect.height,
-      },
-      'rectCoordinateSpace': 'semanticsNodeLocal',
-      if (data.transform != null)
-        'transformToParent': data.transform!.storage.toList(growable: false),
-      if (data.scrollPosition != null) ...<String, Object?>{
-        'scrollPosition': data.scrollPosition,
-        'scrollExtentMin': data.scrollExtentMin,
-        'scrollExtentMax': data.scrollExtentMax,
-      },
-      if (data.platformViewId != null) 'platformViewId': data.platformViewId,
-      'children': childIds,
-    };
+    return PatchbaySemanticsNodeWire(
+      nodeId: node.id,
+      generation: generation,
+      parentNodeId: parentId,
+      depth: depth,
+      identifier: data.identifier,
+      label: data.label,
+      value: obscured ? null : data.value,
+      valueRedacted: obscured ? true : null,
+      hint: data.hint.isEmpty ? null : data.hint,
+      tooltip: data.tooltip.isEmpty ? null : data.tooltip,
+      flags: flags,
+      actions: actions,
+      invisible: node.isInvisible,
+      userActionsBlocked: node.areUserActionsBlocked,
+      rect: PatchbaySemanticsRectWire(
+        left: data.rect.left,
+        top: data.rect.top,
+        width: data.rect.width,
+        height: data.rect.height,
+      ),
+      rectCoordinateSpace: 'semanticsNodeLocal',
+      transformToParent: data.transform?.storage.toList(growable: false),
+      scrollPosition: data.scrollPosition,
+      scrollExtentMin: data.scrollPosition == null
+          ? null
+          : data.scrollExtentMin,
+      scrollExtentMax: data.scrollPosition == null
+          ? null
+          : data.scrollExtentMax,
+      platformViewId: data.platformViewId,
+      children: childIds,
+    );
   }
 
   static PatchbaySemanticsTarget _target(
@@ -593,18 +595,18 @@ final class _Snapshot {
   });
 
   final int rootNodeId;
-  final List<Map<String, Object?>> nodes;
+  final List<PatchbaySemanticsNodeWire> nodes;
   final bool truncated;
 
-  Map<String, Object?> toJson(int revision) => <String, Object?>{
-    'outcome': 'observed',
-    'source': PatchbayFactSource.uiObserved.name,
-    'treeRevision': revision,
-    'rootNodeId': rootNodeId,
-    'truncated': truncated,
-    'nodeCount': nodes.length,
-    'nodes': nodes,
-  };
+  Map<String, Object?> toJson(int revision) => PatchbaySemanticsSnapshotWire(
+    outcome: 'observed',
+    source: PatchbayFactSourceWire.uiObserved,
+    treeRevision: revision,
+    rootNodeId: rootNodeId,
+    truncated: truncated,
+    nodeCount: nodes.length,
+    nodes: nodes,
+  ).toJson();
 }
 
 final class _SemanticsResolution {

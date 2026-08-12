@@ -71,7 +71,7 @@ Future<void> main(List<String> arguments) async {
             'id': id,
             'generation': int.parse(generation),
             'text': parsed.flag('stdin')
-                ? (stdin.readLineSync() ?? '')
+                ? readSensitiveStdinLine()
                 : words.join(' '),
             'inputWasStdin': parsed.flag('stdin'),
           },
@@ -100,7 +100,7 @@ Future<void> main(List<String> arguments) async {
             'action': action,
             if (action == 'setText')
               'text': parsed.flag('stdin')
-                  ? (stdin.readLineSync() ?? '')
+                  ? readSensitiveStdinLine()
                   : words.join(' '),
             'inputWasStdin': parsed.flag('stdin'),
           },
@@ -131,6 +131,9 @@ Future<void> main(List<String> arguments) async {
   } on PatchbayJobWaitTimeout {
     stderr.writeln('patchbay job failed: waitTimeout');
     exitCode = PatchbayExitCode.typedFailure;
+  } on PatchbaySensitiveInputException catch (error) {
+    stderr.writeln('patchbay sensitive input error: ${error.code}');
+    exitCode = PatchbayExitCode.usage;
   } on Object catch (error) {
     // VM Service URIs carry authentication material. Exception strings from
     // socket clients may echo the URI, so ordinary CLI output exposes only the
@@ -144,7 +147,7 @@ Future<void> main(List<String> arguments) async {
 
 Map<String, Object?> _domainArguments(ArgResults parsed) {
   final String encoded = parsed.flag('stdin')
-      ? (stdin.readLineSync() ?? '')
+      ? readSensitiveStdinLine()
       : (parsed.option('args') ?? '{}');
   final Object? decoded = jsonDecode(encoded);
   if (decoded is! Map<String, dynamic>) {

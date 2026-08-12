@@ -112,6 +112,18 @@ consumer 可以增加领域内的细分字段，但不能把较弱来源升级�
 叶子都有可解析来源，同时避免把每个标量包装成 `{value, source}`。descriptor 的 `factSources` 只是
 可能来源的闭集，实际 payload 上的 `source` 才是该次结果的事实。
 
+## Wire contract 与生成代码
+
+协议层的 descriptor、invocation、job、UI target 和 Semantics tree DTO，以及 Moii 试点的配网快照与终态
+证据，都从 JSON contract 生成双向 codec。生成物负责字段名、枚举、嵌套结构、未知字段拒绝、JSON 值
+校验和 `toJson` / `fromJson`；任何 consumer 不再手写协议 map。
+
+仍需人工维护的是语义投影：领域状态对应哪个稳定枚举、哪些字段必须脱敏、事实来源强度和什么才算业务
+终态。这些判断必须用穷举 switch 映射到生成 DTO，不能用 `runtimeType` / `toString()` 推导协议值。
+
+契约格式与生成命令见 [contracts/wire-contract-v1.md](contracts/wire-contract-v1.md)。仓库统一入口是
+`just gen patchbay-wire write|check`，两份零漂移检查已进入 commit、push 与 CI 门禁。
+
 ## Descriptor
 
 `PatchbayCommandDescriptor` 是 CLI 帮助、参数校验和副作用提示的唯一来源，至少描述：
@@ -156,6 +168,14 @@ service extension 没有对称注销能力，因此 consumer 状态撤回后 han
 3. 每个事件有单调 sequence、时间、phase、source 和 payload；
 4. 取消只终止对应 job，不推导外部系统已经停止；
 5. App/isolate 消失时 client 以连接终止收尾，不伪造 App job 终态。
+
+consumer 的异步 API 若只表示“订阅已建立/请求已发出”，job body 不能在该 Future 返回时直接记
+`completed`，必须继续观察领域状态直到真实终态。consumer 已完成脱敏与稳定分类时可用
+`PatchbayJobFailure` / `PatchbayJobCancellationSignal` 把结构化终态证据写入 job；普通异常仍只记录
+`errorType`，避免把凭据或 vendor 响应体带出进程。
+
+admission payload 可给出 consumer-neutral 的 `suggestedWaitTimeoutMs`。CLI 默认等待 60 秒；存在该提示
+时使用提示值，但提示只决定观察窗口，不改变 job 的完成语义。
 
 consumer 负责把生命周期撤回、generation 失效和自身 runtime 销毁映射为稳定取消原因。
 

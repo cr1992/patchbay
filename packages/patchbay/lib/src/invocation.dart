@@ -1,3 +1,5 @@
+import 'generated/core_wire.g.dart';
+
 enum PatchbayAdmission { accepted, rejected }
 
 /// Stable rejection attached only when a request was not admitted.
@@ -12,11 +14,10 @@ final class PatchbayRejection {
   final String? notice;
   final Map<String, Object?> details;
 
-  Map<String, Object?> toJson() => <String, Object?>{
-    'code': code,
-    if (notice != null) 'notice': notice,
-    if (details.isNotEmpty) 'details': details,
-  };
+  PatchbayRejectionWire _toWire() =>
+      PatchbayRejectionWire(code: code, notice: notice, details: details);
+
+  Map<String, Object?> toJson() => _toWire().toJson();
 }
 
 /// Admission envelope. It deliberately does not claim domain execution.
@@ -63,13 +64,16 @@ final class PatchbayInvocation {
   final String? jobId;
   final PatchbayRejection? rejection;
 
-  Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': schemaVersion,
-    'requestId': requestId,
-    'admission': admission.name,
-    'payload': payload,
-    'notice': notice,
-    'jobId': jobId,
-    'rejection': rejection?.toJson(),
-  };
+  Map<String, Object?> toJson() => PatchbayInvocationWire(
+    schemaVersion: schemaVersion,
+    requestId: requestId,
+    admission: switch (admission) {
+      PatchbayAdmission.accepted => PatchbayAdmissionWire.accepted,
+      PatchbayAdmission.rejected => PatchbayAdmissionWire.rejected,
+    },
+    payload: payload,
+    notice: notice,
+    jobId: jobId,
+    rejection: rejection?._toWire(),
+  ).toJson();
 }

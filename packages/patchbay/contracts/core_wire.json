@@ -1,0 +1,189 @@
+{
+  "contractVersion": 1,
+  "library": "patchbay_core_wire",
+  "types": [
+    {
+      "kind": "enum",
+      "name": "PatchbayCommandModeWire",
+      "values": ["readOnly", "immediate", "job"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayParameterTypeWire",
+      "values": ["string", "integer", "number", "boolean", "enumeration", "json"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayPlaneWire",
+      "values": ["domain", "flutterUi"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbaySideEffectWire",
+      "values": ["none", "appState", "external"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayFactSourceWire",
+      "values": ["appRecorded", "commandEcho", "deviceReported", "uiObserved", "unknown"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayAdmissionWire",
+      "values": ["accepted", "rejected"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayJobPhaseWire",
+      "values": ["running", "completed", "failed", "cancelled"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayUiTargetKindWire",
+      "values": ["text"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbaySensitivePolicyWire",
+      "values": ["public", "redacted"]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayParameterDescriptorWire",
+      "fields": [
+        {"name": "name", "type": "String"},
+        {"name": "type", "type": "PatchbayParameterTypeWire"},
+        {"name": "required", "type": "bool"},
+        {"name": "sensitive", "type": "bool"},
+        {"name": "defaultValue", "wireName": "default", "type": "Json", "nullable": true},
+        {"name": "allowedValues", "type": "Json", "list": true, "omitIfEmpty": true},
+        {"name": "summary", "type": "String", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayCommandDescriptorWire",
+      "fields": [
+        {"name": "name", "type": "String"},
+        {"name": "summary", "type": "String"},
+        {"name": "plane", "type": "PatchbayPlaneWire"},
+        {"name": "mode", "type": "PatchbayCommandModeWire"},
+        {"name": "sideEffect", "type": "PatchbaySideEffectWire"},
+        {"name": "factSources", "type": "PatchbayFactSourceWire", "list": true},
+        {"name": "gates", "type": "String", "list": true},
+        {"name": "parameters", "type": "PatchbayParameterDescriptorWire", "list": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayRejectionWire",
+      "fields": [
+        {"name": "code", "type": "String"},
+        {"name": "notice", "type": "String", "nullable": true},
+        {"name": "details", "type": "JsonObject", "omitIfEmpty": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayInvocationWire",
+      "fields": [
+        {"name": "schemaVersion", "type": "int"},
+        {"name": "requestId", "type": "String"},
+        {"name": "admission", "type": "PatchbayAdmissionWire"},
+        {"name": "payload", "type": "JsonObject"},
+        {"name": "notice", "type": "String", "nullable": true, "emitNull": true},
+        {"name": "jobId", "type": "String", "nullable": true, "emitNull": true},
+        {"name": "rejection", "type": "PatchbayRejectionWire", "nullable": true, "emitNull": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayJobEventWire",
+      "fields": [
+        {"name": "sequence", "type": "int"},
+        {"name": "at", "type": "String"},
+        {"name": "phase", "type": "PatchbayJobPhaseWire"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "operation", "type": "String", "nullable": true},
+        {"name": "payload", "type": "JsonObject"},
+        {"name": "reason", "type": "String", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayJobSnapshotWire",
+      "fields": [
+        {"name": "jobId", "type": "String"},
+        {"name": "terminal", "type": "bool"},
+        {"name": "events", "type": "PatchbayJobEventWire", "list": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayUiTargetDescriptorWire",
+      "fields": [
+        {"name": "id", "type": "String"},
+        {"name": "generation", "type": "int"},
+        {"name": "kind", "type": "PatchbayUiTargetKindWire"},
+        {"name": "mounted", "type": "bool"},
+        {"name": "ambiguous", "type": "bool"},
+        {"name": "operations", "type": "String", "list": true},
+        {"name": "operationGates", "type": "JsonObject"},
+        {"name": "sensitivePolicy", "type": "PatchbaySensitivePolicyWire"},
+        {"name": "sideEffect", "type": "PatchbaySideEffectWire"},
+        {"name": "factSources", "type": "PatchbayFactSourceWire", "list": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbaySemanticsRectWire",
+      "fields": [
+        {"name": "left", "type": "num"},
+        {"name": "top", "type": "num"},
+        {"name": "width", "type": "num"},
+        {"name": "height", "type": "num"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbaySemanticsNodeWire",
+      "fields": [
+        {"name": "nodeId", "type": "int"},
+        {"name": "generation", "type": "int"},
+        {"name": "parentNodeId", "type": "int", "nullable": true, "emitNull": true},
+        {"name": "depth", "type": "int"},
+        {"name": "identifier", "type": "String"},
+        {"name": "label", "type": "String"},
+        {"name": "value", "type": "String", "nullable": true},
+        {"name": "valueRedacted", "type": "bool", "nullable": true},
+        {"name": "hint", "type": "String", "nullable": true},
+        {"name": "tooltip", "type": "String", "nullable": true},
+        {"name": "flags", "type": "String", "list": true},
+        {"name": "actions", "type": "String", "list": true},
+        {"name": "invisible", "type": "bool"},
+        {"name": "userActionsBlocked", "type": "bool"},
+        {"name": "rect", "type": "PatchbaySemanticsRectWire"},
+        {"name": "rectCoordinateSpace", "type": "String"},
+        {"name": "transformToParent", "type": "num", "list": true, "nullable": true},
+        {"name": "scrollPosition", "type": "num", "nullable": true},
+        {"name": "scrollExtentMin", "type": "num", "nullable": true},
+        {"name": "scrollExtentMax", "type": "num", "nullable": true},
+        {"name": "platformViewId", "type": "int", "nullable": true},
+        {"name": "children", "type": "int", "list": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbaySemanticsSnapshotWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "treeRevision", "type": "int"},
+        {"name": "rootNodeId", "type": "int"},
+        {"name": "truncated", "type": "bool"},
+        {"name": "nodeCount", "type": "int"},
+        {"name": "nodes", "type": "PatchbaySemanticsNodeWire", "list": true}
+      ]
+    }
+  ]
+}
