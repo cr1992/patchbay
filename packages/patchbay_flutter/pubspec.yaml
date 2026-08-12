@@ -1,0 +1,19 @@
+name: patchbay_flutter
+description: Optional low-intrusion Flutter UI bridge for Patchbay.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.11.0 <4.0.0'
+  flutter: '>=3.38.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  patchbay:
+    path: ../patchbay
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

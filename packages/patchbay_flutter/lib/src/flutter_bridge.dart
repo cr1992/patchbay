@@ -1,0 +1,428 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show TextField;
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
+import 'package:patchbay/patchbay.dart';
+
+/// A target key whose GlobalKey semantics stay identical in every build mode.
+///
+/// The key never retains a controller, formatter, or Widget callback. In
+/// release builds its declaration and registry registration are const-pruned.
+final class PatchbayKey extends GlobalKey<State<StatefulWidget>> {
+  PatchbayKey.text(
+    String id, {
+    bool sensitive = false,
+    PatchbaySideEffect sideEffect = PatchbaySideEffect.appState,
+    Map<PatchbayUiOperation, Set<String>> operationGates =
+        const <PatchbayUiOperation, Set<String>>{},
+    PatchbayUiRegistry? registry,
+  }) : declaration = kReleaseMode
+           ? null
+           : PatchbayUiTargetDeclaration.text(
+               id: id,
+               sensitive: sensitive,
+               sideEffect: sideEffect,
+               operationGates: operationGates,
+             ),
+       super.constructor() {
+    if (!kReleaseMode) {
+      (registry ?? PatchbayUiRegistry.instance)._register(this);
+    }
+  }
+
+  /// Null only in release, where descriptor/operator code is unreachable.
+  final PatchbayUiTargetDeclaration? declaration;
+
+  @override
+  String toString() => declaration == null
+      ? '[PatchbayKey]'
+      : '[PatchbayKey ${declaration!.id}]';
+}
+
+/// Weak target registry. Consumers create Keys, not registration lifecycles.
+final class PatchbayUiRegistry {
+  PatchbayUiRegistry();
+
+  static final PatchbayUiRegistry instance = PatchbayUiRegistry();
+
+  final Map<String, List<_RegistryEntry>> _entries =
+      <String, List<_RegistryEntry>>{};
+  final Map<String, int> _nextGenerationById = <String, int>{};
+
+  void _register(PatchbayKey key) {
+    final PatchbayUiTargetDeclaration? declaration = key.declaration;
+    if (declaration == null) return;
+    _entries
+        .putIfAbsent(declaration.id, () => <_RegistryEntry>[])
+        .add(_RegistryEntry(WeakReference<PatchbayKey>(key)));
+  }
+
+  /// Returns one entry per stable ID. Duplicate mounted targets are marked
+  /// ambiguous and expose no operation.
+  List<PatchbayUiTargetDescriptor> catalog() {
+    final List<PatchbayUiTargetDescriptor> result =
+        <PatchbayUiTargetDescriptor>[];
+    final List<String> ids = _entries.keys.toList()..sort();
+    for (final String id in ids) {
+      final List<_ObservedTarget> live = _observe(id);
+      if (live.isEmpty) continue;
+      final List<_ObservedTarget> mounted = live
+          .where((_ObservedTarget target) => target.element != null)
+          .toList(growable: false);
+      final bool ambiguous = mounted.length > 1;
+      final _ObservedTarget representative = mounted.isNotEmpty
+          ? mounted.first
+          : live.first;
+      result.add(
+        _descriptor(
+          representative,
+          mounted: mounted.isNotEmpty,
+          ambiguous: ambiguous,
+          operations: ambiguous || mounted.isEmpty
+              ? const <PatchbayUiOperation>{}
+              : _supportedOperations(representative.key.currentWidget),
+        ),
+      );
+    }
+    return List<PatchbayUiTargetDescriptor>.unmodifiable(result);
+  }
+
+  List<_ObservedTarget> _observe(String id) {
+    final List<_RegistryEntry>? entries = _entries[id];
+    if (entries == null) return const <_ObservedTarget>[];
+    final List<_ObservedTarget> result = <_ObservedTarget>[];
+    entries.removeWhere((_RegistryEntry entry) => entry.key.target == null);
+    for (final _RegistryEntry entry in entries) {
+      final PatchbayKey? key = entry.key.target;
+      if (key == null) continue;
+      final Element? element = key.currentContext as Element?;
+      final Element? previous = entry.element?.target;
+      if (element == null) {
+        entry.element = null;
+      } else if (!identical(element, previous)) {
+        entry.generation = (_nextGenerationById[id] ?? 0) + 1;
+        _nextGenerationById[id] = entry.generation;
+        entry.element = WeakReference<Element>(element);
+      }
+      result.add(
+        _ObservedTarget(
+          entry: entry,
+          key: key,
+          element: element,
+          generation: entry.generation,
+        ),
+      );
+    }
+    if (entries.isEmpty) _entries.remove(id);
+    return result;
+  }
+
+  _TargetResolution _resolve({
+    required String id,
+    required int generation,
+    required PatchbayUiOperation operation,
+  }) {
+    final List<_ObservedTarget> live = _observe(id);
+    if (live.isEmpty) {
+      return const _TargetResolution.rejected('uiTargetNotFound');
+    }
+    final List<_ObservedTarget> mounted = live
+        .where((_ObservedTarget target) => target.element != null)
+        .toList(growable: false);
+    if (mounted.isEmpty) {
+      return const _TargetResolution.rejected('uiTargetUnmounted');
+    }
+    if (mounted.length > 1) {
+      return const _TargetResolution.rejected('uiTargetAmbiguous');
+    }
+    final _ObservedTarget target = mounted.single;
+    if (target.generation != generation) {
+      return _TargetResolution.rejected(
+        'uiGenerationStale',
+        details: <String, Object?>{'currentGeneration': target.generation},
+      );
+    }
+    if (!_supportedOperations(target.key.currentWidget).contains(operation)) {
+      return const _TargetResolution.rejected('uiOperationUnavailable');
+    }
+    return _TargetResolution.resolved(target);
+  }
+
+  static PatchbayUiTargetDescriptor _descriptor(
+    _ObservedTarget target, {
+    required bool mounted,
+    required bool ambiguous,
+    required Set<PatchbayUiOperation> operations,
+  }) {
+    final PatchbayUiTargetDeclaration declaration = target.key.declaration!;
+    return PatchbayUiTargetDescriptor(
+      id: declaration.id,
+      generation: target.generation,
+      kind: declaration.kind,
+      mounted: mounted,
+      ambiguous: ambiguous,
+      operations: Set<PatchbayUiOperation>.unmodifiable(operations),
+      operationGates: declaration.operationGates,
+      sensitivePolicy: declaration.sensitivePolicy,
+      sideEffect: declaration.sideEffect,
+    );
+  }
+
+  static Set<PatchbayUiOperation> _supportedOperations(Widget? widget) {
+    final _TextBinding? binding = _TextBinding.fromWidget(widget);
+    if (binding == null) return const <PatchbayUiOperation>{};
+    return const <PatchbayUiOperation>{
+      PatchbayUiOperation.textSet,
+      PatchbayUiOperation.textEnter,
+    };
+  }
+}
+
+/// Executes cataloged UI operators after base and descriptor gates.
+final class PatchbayFlutterBridge {
+  PatchbayFlutterBridge({
+    required PatchbayGateEvaluator gates,
+    PatchbayUiRegistry? registry,
+    String Function()? newRequestId,
+  }) : _gates = gates,
+       _registry = registry ?? PatchbayUiRegistry.instance,
+       _newRequestId = newRequestId ?? _defaultRequestId;
+
+  final PatchbayGateEvaluator _gates;
+  final PatchbayUiRegistry _registry;
+  final String Function() _newRequestId;
+
+  static int _nextRequest = 0;
+  static String _defaultRequestId() => 'patchbay-ui-${++_nextRequest}';
+
+  List<PatchbayUiTargetDescriptor> catalog() => _registry.catalog();
+
+  Future<PatchbayInvocation> setText({
+    required String id,
+    required int generation,
+    required String text,
+    bool inputWasStdin = false,
+  }) => _applyText(
+    id: id,
+    generation: generation,
+    text: text,
+    inputWasStdin: inputWasStdin,
+    operation: PatchbayUiOperation.textSet,
+  );
+
+  Future<PatchbayInvocation> enterText({
+    required String id,
+    required int generation,
+    required String text,
+    bool inputWasStdin = false,
+  }) => _applyText(
+    id: id,
+    generation: generation,
+    text: text,
+    inputWasStdin: inputWasStdin,
+    operation: PatchbayUiOperation.textEnter,
+  );
+
+  Future<PatchbayInvocation> _applyText({
+    required String id,
+    required int generation,
+    required String text,
+    required bool inputWasStdin,
+    required PatchbayUiOperation operation,
+  }) async {
+    final String requestId = _newRequestId();
+    _TargetResolution resolution = _registry._resolve(
+      id: id,
+      generation: generation,
+      operation: operation,
+    );
+    if (!resolution.resolved) {
+      return _rejected(requestId, resolution);
+    }
+
+    final PatchbayUiTargetDeclaration declaration =
+        resolution.target!.key.declaration!;
+    if (declaration.sensitivePolicy == PatchbaySensitivePolicy.redacted &&
+        !inputWasStdin) {
+      return PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(
+          code: 'sensitiveInputRequiresStdin',
+          notice: 'Sensitive UI text is accepted only from stdin.',
+        ),
+      );
+    }
+
+    final PatchbayGateRejection? gate = await _gates.evaluate(
+      declaration.gatesFor(operation),
+    );
+    if (gate != null) {
+      return PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: PatchbayRejection(
+          code: gate.code,
+          notice: gate.notice,
+          details: <String, Object?>{'gateId': gate.gateId},
+        ),
+      );
+    }
+
+    // A gate may await. Resolve again so a remounted target or newly introduced
+    // duplicate cannot receive the continuation meant for the old generation.
+    resolution = _registry._resolve(
+      id: id,
+      generation: generation,
+      operation: operation,
+    );
+    if (!resolution.resolved) {
+      return _rejected(requestId, resolution);
+    }
+
+    final _ObservedTarget target = resolution.target!;
+    final _TextBinding? binding = _TextBinding.fromWidget(
+      target.key.currentWidget,
+    );
+    if (binding == null) {
+      return PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'uiOperationUnavailable'),
+      );
+    }
+
+    try {
+      final TextEditingValue next = switch (operation) {
+        PatchbayUiOperation.textSet => _replacement(text),
+        PatchbayUiOperation.textEnter => binding.format(text),
+      };
+      binding.controller.value = next;
+      if (operation == PatchbayUiOperation.textEnter) {
+        binding.onChanged?.call(next.text);
+      }
+      return PatchbayInvocation.accepted(
+        requestId: requestId,
+        payload: <String, Object?>{
+          'outcome': 'applied',
+          'source': 'uiObserved',
+          'targetId': id,
+          'generation': generation,
+          'operation': operation.wireName,
+          if (declaration.sensitivePolicy == PatchbaySensitivePolicy.redacted)
+            'valueRedacted': true
+          else
+            'value': next.text,
+          'length': next.text.length,
+        },
+      );
+    } catch (error) {
+      return PatchbayInvocation.accepted(
+        requestId: requestId,
+        payload: <String, Object?>{
+          'outcome': 'failed',
+          'source': 'uiObserved',
+          'targetId': id,
+          'generation': generation,
+          'operation': operation.wireName,
+          'failureType': error.runtimeType.toString(),
+        },
+      );
+    }
+  }
+
+  static TextEditingValue _replacement(String text) => TextEditingValue(
+    text: text,
+    selection: TextSelection.collapsed(offset: text.length),
+  );
+
+  static PatchbayInvocation _rejected(
+    String requestId,
+    _TargetResolution resolution,
+  ) => PatchbayInvocation.rejected(
+    requestId: requestId,
+    rejection: PatchbayRejection(
+      code: resolution.code!,
+      details: resolution.details,
+    ),
+  );
+}
+
+final class _TextBinding {
+  const _TextBinding({
+    required this.controller,
+    required this.inputFormatters,
+    required this.onChanged,
+  });
+
+  static _TextBinding? fromWidget(Widget? widget) {
+    if (widget is TextField) {
+      final TextEditingController? controller = widget.controller;
+      if (controller == null) return null;
+      return _TextBinding(
+        controller: controller,
+        inputFormatters: widget.inputFormatters ?? const <TextInputFormatter>[],
+        onChanged: widget.onChanged,
+      );
+    }
+    if (widget is EditableText) {
+      return _TextBinding(
+        controller: widget.controller,
+        inputFormatters: widget.inputFormatters ?? const <TextInputFormatter>[],
+        onChanged: widget.onChanged,
+      );
+    }
+    return null;
+  }
+
+  final TextEditingController controller;
+  final List<TextInputFormatter> inputFormatters;
+  final ValueChanged<String>? onChanged;
+
+  TextEditingValue format(String text) {
+    final TextEditingValue oldValue = controller.value;
+    TextEditingValue next = PatchbayFlutterBridge._replacement(text);
+    for (final TextInputFormatter formatter in inputFormatters) {
+      next = formatter.formatEditUpdate(oldValue, next);
+    }
+    return next;
+  }
+}
+
+final class _RegistryEntry {
+  _RegistryEntry(this.key);
+
+  final WeakReference<PatchbayKey> key;
+  WeakReference<Element>? element;
+  int generation = 0;
+}
+
+final class _ObservedTarget {
+  const _ObservedTarget({
+    required this.entry,
+    required this.key,
+    required this.element,
+    required this.generation,
+  });
+
+  final _RegistryEntry entry;
+  final PatchbayKey key;
+  final Element? element;
+  final int generation;
+}
+
+final class _TargetResolution {
+  const _TargetResolution.resolved(_ObservedTarget this.target)
+    : code = null,
+      details = const <String, Object?>{};
+
+  const _TargetResolution.rejected(
+    String this.code, {
+    this.details = const <String, Object?>{},
+  }) : target = null;
+
+  final _ObservedTarget? target;
+  final String? code;
+  final Map<String, Object?> details;
+
+  bool get resolved => target != null;
+}
