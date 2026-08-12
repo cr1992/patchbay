@@ -45,6 +45,25 @@ final class PatchbayServiceHost {
   final PatchbayExtensionRegistrar _registrar;
   bool _registered = false;
 
+  /// Transport-neutral dispatch seam used by alternate, explicitly enabled
+  /// hosts. VM Service registration and direct transports must call these
+  /// same handlers instead of rebuilding command routing.
+  Future<Map<String, Object?>> dispatchCatalog() async => <String, Object?>{
+    'schemaVersion': schemaVersion,
+    ...await _catalog(),
+  };
+
+  Future<Map<String, Object?>> dispatchSnapshot() async => <String, Object?>{
+    'schemaVersion': schemaVersion,
+    ...await _snapshot(),
+  };
+
+  Future<Map<String, Object?>> dispatchInvoke(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId,
+  ) => _invoke(command, arguments, requestId);
+
   void register() {
     if (_registered) return;
     _registered = true;
@@ -61,10 +80,7 @@ final class PatchbayServiceHost {
     if (method != snapshotMethod || _hasUserParameters(parameters)) {
       return _invalidParams('snapshot does not accept parameters');
     }
-    return _result(<String, Object?>{
-      'schemaVersion': schemaVersion,
-      ...await _snapshot(),
-    });
+    return _result(await dispatchSnapshot());
   }
 
   Future<ServiceExtensionResponse> handleIdentity(
@@ -91,10 +107,7 @@ final class PatchbayServiceHost {
     if (method != catalogMethod || _hasUserParameters(parameters)) {
       return _invalidParams('catalog does not accept parameters');
     }
-    return _result(<String, Object?>{
-      'schemaVersion': schemaVersion,
-      ...await _catalog(),
-    });
+    return _result(await dispatchCatalog());
   }
 
   Future<ServiceExtensionResponse> handleInvoke(
@@ -116,7 +129,11 @@ final class PatchbayServiceHost {
       return _invalidParams('args must be a JSON object');
     }
     return _result(
-      await _invoke(command, Map<String, Object?>.from(decoded), requestId),
+      await dispatchInvoke(
+        command,
+        Map<String, Object?>.from(decoded),
+        requestId,
+      ),
     );
   }
 

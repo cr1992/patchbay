@@ -252,7 +252,21 @@ final class PatchbayFlutterServiceHost {
 
   final PatchbayServiceHost _host;
 
+  String get applicationId => _host.applicationId;
+
   String get appInstanceId => _host.appInstanceId;
+
+  int get schemaVersion => PatchbayServiceHost.schemaVersion;
+
+  Future<Map<String, Object?>> dispatchCatalog() => _host.dispatchCatalog();
+
+  Future<Map<String, Object?>> dispatchSnapshot() => _host.dispatchSnapshot();
+
+  Future<Map<String, Object?>> dispatchInvoke(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId,
+  ) => _host.dispatchInvoke(command, arguments, requestId);
 
   void register() => _host.register();
 

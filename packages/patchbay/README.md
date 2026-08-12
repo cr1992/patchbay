@@ -12,9 +12,10 @@ Dart/Flutter App，读取运行时身份和目录、获取状态快照，并调�
 |---|---|---|
 | `patchbay` | 协议、service extension host、gate、descriptor、invocation、job | 纯 Dart，不依赖 Flutter 或 consumer |
 | `patchbay_flutter` | 可选 Flutter target registry 与 UI operator | 只依赖 Flutter 和 `patchbay` |
-| `patchbay_cli` | VM Service client、通用命令行和稳定输出 | 纯 Dart，不依赖 consumer |
+| `patchbay_cli` | VM Service/direct client、通用命令行和稳定输出 | 纯 Dart，不依赖 consumer |
+| `patchbay_transport` | 显式启用的 direct HTTP/JSON host/client | 纯 Dart，不依赖 VM Service、Flutter 或 consumer |
 
-consumer adapter、品牌命令别名、领域 DTO、路由映射和日志源都留在 consumer 工程。三个通用包不得
+consumer adapter、品牌命令别名、领域 DTO、路由映射和日志源都留在 consumer 工程。通用包不得
 依赖 consumer feature、vendor adapter、设备 SDK 或 consumer observability。
 
 Flutter 控制面的接入与语义导航设计见
@@ -35,12 +36,13 @@ Flutter 控制面的接入与语义导航设计见
 - consumer 注入的已脱敏结构化日志 `query` / `tail` / `export`；
 - 带 TTL、总容量、SHA-256 和 offset/limit chunk 的通用内存 blob store；
 - 可选 Flutter root/registered boundary PNG capture（由 `patchbay_flutter` 提供）；
-- VM Service client 和 Flutter Widget/Render/Focus 诊断 extension 代理。
+- VM Service client 和 Flutter Widget/Render/Focus 诊断 extension 代理；
+- 构造惰性、显式 `start` 的 direct HTTP/JSON host/client，复用同一组 transport-neutral dispatcher。
 
 下列能力仍属于设计方向，不是当前公共 API：
 
 - 自动会话发现和 stale session 文件清理；
-- 不依赖 VM Service 端口转发的局域网/反向 WebSocket 传输；
+- direct transport 的自动发现、TLS、端点 pinning 与反向连接；
 - 持续日志 watch/job；
 - 物理屏幕、系统 UI 或 PlatformView 的完整 capture。
 
@@ -215,17 +217,22 @@ chunk 64 KiB、TTL 5 分钟（最大 15 分钟）；过期、越界、非法 chu
 
 ## 传输
 
-协议层不应绑定某一种连接方式。当前实现以 Dart VM Service extension 为唯一 transport，CLI 接受显式
-VM Service URI。命令执行本身不调用 ADB，但 Android 上由 `flutter run` 建立 VM Service 转发时，
-launcher 底层仍可能使用 ADB，因此当前实现不是端到端 zero-ADB。
+协议层不绑定某一种连接方式。VM Service extension 与 `patchbay_transport` 的 direct HTTP/JSON host
+复用同一组 identity、catalog、snapshot 和 invoke dispatcher；consumer 不得为 direct 通道复制命令路由。
+VM Service 模式在 Android 上仍可能由 `flutter run` 间接使用 ADB。direct 模式不依赖 VM Service 端口
+转发，但是否真正 zero-ADB 仍取决于产品如何启动 App、交付一次性 endpoint/token 及平台网络策略。
 
-若 consumer 需要日常调试完全不依赖 ADB，后续 transport 必须满足相同 identity、catalog、gate 和
-信封契约，可采用 debug-only 的局域网 WebSocket，或由 App 主动反连桌面 CLI。该 transport：
+direct host 构造不监听，默认只绑 loopback；LAN 必须显式选择
+`experimentalSameTrustedNetworkOnly`。LAN 是明文 HTTP，bearer 只提供持有者认证，不提供机密性、服务端
+身份认证或重放防护，因此：
 
 - 只能在允许的 debug/profile 构建中可达；
 - 必须有短期认证材料和 App 实例身份校验；
 - 不得把认证 URI 或 token 写进普通日志；
 - 不得改变上层 descriptor、invocation 和 job 语义。
+
+更完整的固定协议与安全边界见
+[`../patchbay_transport/README.md`](../patchbay_transport/README.md)。
 
 ## Release 边界
 
@@ -264,6 +271,7 @@ descriptor、operator 和 consumer callback 的可达引用。
 |---|---|---|
 | v0.1a | 显式 URI 下的 identity、catalog、snapshot 和 schema/instance 校验 | 至少一个 iOS profile 真机会话跑通 extension 纵切；未跑通不得扩展 consumer 命令目录 |
 | v0.1b | launcher machine protocol、会话文件、stale 与多会话选择 | 分片 machine 事件、原子写入、PID/wsUri/identity 三类 stale 判据和 URI 脱敏测试通过 |
+| v0.1c | 显式 direct transport 产品装配 | 默认零监听、用户确认后 start、短期 token 不进日志/URL/持久化/剪贴板、前后台与 dispose 关闭、两 transport handler parity 通过；各平台 LAN 可达性分别真机验收 |
 | v0.2a | 无容器的 Widget/Render/Semantics 只读观察 | debug/profile 读取、节点上限、脱敏、generation 与 release 裁剪通过；不注入 action policy 时只读 |
 | v0.2b | 标准 Semantics action 与单 Key 增强 | tap/scroll/focus/setText、gate await 后二次解析、敏感值、三模式 Key/State 等价性及 UI/领域门隔离通过 |
 | v0.2c | DevTools 诊断代理 | extension 运行时发现、object group 释放、passthrough schema 与 extension 不可用失败语义通过 |
@@ -282,6 +290,8 @@ descriptor、operator 和 consumer callback 的可达引用。
 | DevTools 与 CLI 多客户端共存 | 使用 DDS 暴露的 URI；真机纵切同时打开 DevTools 验证互不抢占 |
 | 多设备或多 worktree 会话混淆 | 会话记录携带 workspace/device/instance 身份；歧义时要求显式选择 |
 | VM Service URI 含认证信息 | 最小权限存储、普通输出脱敏、进程退出清理 |
+| 明文 LAN bearer 被监听或重放 | 只标 experimental/trusted-network，短 TTL、显式用户确认、后台即关闭；需要不受信网络时另立 TLS 与 pinning 设计 |
+| iOS Local Network 策略阻断 direct LAN | consumer 未声明 Info.plist 时明确不承诺 LAN 可达；不得以纯 Dart socket 编译通过替代真机验收 |
 | 大量 GlobalKey 影响重建 | 只标明确需要控制的目标；根观察不要求 Key；标准 harness 保留性能基线 |
 | Flutter operator 随 SDK 漂移 | 只用公开 API，catalog 取运行时能力，每次 Flutter 升级跑 operator 契约测试 |
 | capture 漏掉 PlatformView、texture 或系统 UI | 返回 capability warning，不把 Flutter PNG 宣称为完整物理屏幕 |
