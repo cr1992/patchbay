@@ -32,14 +32,17 @@ Flutter 控制面的接入与语义导航设计见
 - Flutter 文本 target、规范化 Semantics 树与 policy-gated 标准 action；
 - consumer-neutral destination catalog/current/go/push/back 与类型化导航结果；
 - 有界 `ui.wait` 条件 DTO（Semantics、destination、tree/frame revision）；
+- consumer 注入的已脱敏结构化日志 `query` / `tail` / `export`；
+- 带 TTL、总容量、SHA-256 和 offset/limit chunk 的通用内存 blob store；
+- 可选 Flutter root/registered boundary PNG capture（由 `patchbay_flutter` 提供）；
 - VM Service client 和 Flutter Widget/Render/Focus 诊断 extension 代理。
 
 下列能力仍属于设计方向，不是当前公共 API：
 
 - 自动会话发现和 stale session 文件清理；
 - 不依赖 VM Service 端口转发的局域网/反向 WebSocket 传输；
-- 结构化日志 query/tail/watch/export；
-- Flutter capture。
+- 持续日志 watch/job；
+- 物理屏幕、系统 UI 或 PlatformView 的完整 capture。
 
 ## 架构
 
@@ -121,7 +124,8 @@ consumer 可以增加领域内的细分字段，但不能把较弱来源升级�
 校验和 `toJson` / `fromJson`；任何 consumer 不再手写协议 map。
 
 Moii consumer 的 57 条领域命令目录以 `lib/debug_console/contracts/patchbay_commands.json` 为唯一真源；
-Flutter host 继续合并 `patchbay_flutter` 的 4 条 UI 命令，运行时总 catalog 为 61 条。
+Flutter host 在不改该目录的前提下合并通用 UI 命令，并仅在 consumer 显式注入对应 bridge 时增加
+navigation、日志、blob 与 capture 条目；因此运行时 catalog 是实际能力，不维护固定总数。
 `just gen patchbay-commands write` 生成 command ID/string parse、descriptor、默认值已应用的类型化参数入口，
 以及权限、取消、等待和显式确认元数据；`just gen patchbay-commands check` 只读检查漂移。生成的
 `dispatch` 把每个命令暴露为 required callback，commit gate 还会比对 adapter callback，因此新增契约
@@ -193,6 +197,22 @@ admission payload 可给出 consumer-neutral 的 `suggestedWaitTimeoutMs`。CLI 
 
 consumer 负责把生命周期撤回、generation 失效和自身 runtime 销毁映射为稳定取消原因。
 
+## 结构化日志与 blob
+
+`PatchbayLogSource` 只是一条 consumer 注入的查询 seam。它不接管、复制或订阅 App 的日志管线；
+consumer 先执行自己的 schema-aware 脱敏，再构造 `PatchbayRedactedLogRecord`。该类型额外拒绝常见敏感
+字段名、Bearer/JWT/私钥形态，但这是防御层，不是万能脱敏器，也不能替代 consumer policy。
+
+`logs.query` 与 `logs.tail` 同时受条数、编码字节和时间上限约束。cursor 是 consumer 的 opaque token；
+source 必须保证同页唯一且 `nextCursor` 等于实际末条 cursor，过期 cursor 返回类型化 `staleCursor`。
+长轮询 `tail` 是单次请求：到时返回 `timedOut`，service dispose/连接终止时 cancellation signal 关闭
+consumer wait，不建立常驻 watch 或隐式后台订阅。首条记录本身超过响应上限时返回
+`logRecordTooLarge`，绝不前移 cursor。
+
+`logs.export` 把 NDJSON 写入同一个 `PatchbayMemoryBlobStore`。capture 也复用该 store；service extension
+响应只返回 metadata/blobId，二进制由 `blob.read(blobId, offset, limit)` 分块读取。默认容量 16 MiB、
+chunk 64 KiB、TTL 5 分钟（最大 15 分钟）；过期、越界、非法 chunk、单 blob/总容量超限都有稳定拒绝码。
+
 ## 传输
 
 协议层不应绑定某一种连接方式。当前实现以 Dart VM Service extension 为唯一 transport，CLI 接受显式
@@ -250,7 +270,7 @@ descriptor、operator 和 consumer callback 的可达引用。
 | v0.2d | 稳定导航与等待 | destination observer/revision/redirect/超时语义按需独立退出；不作为树驱动标准 action 的前置 |
 | v0.3a | consumer runtime 所有权和类型化 invocation facade | 页面与 adapter 复用同一 controller/并发账本，生命周期和迟到 continuation 回归通过 |
 | v0.3b | consumer 领域命令与 job | permit 单一所有权，失败/取消/撤回/generation 失效终态可测，并按共同真机门逐项验证本批 CLI 能力 |
-| v0.4 | 结构化事件与日志；生成型 descriptor | tail 无敏感字段，生成真源全量映射，新增条目无需手改通用 CLI |
+| v0.4 | 结构化事件、日志与 capture blob | wire DTO 全部生成，tail 无敏感字段，二进制不进入单个 extension 响应；consumer 接线与真机证据另批退出 |
 | v0.5 | 评估迁入共享仓 | 两个真实 consumer、连续兼容批次、consumer adapter 留在各 App，且发布维护者明确 |
 
 ## 风险登记

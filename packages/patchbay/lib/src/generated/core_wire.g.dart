@@ -124,7 +124,8 @@ enum PatchbayJobPhaseWire {
 }
 
 enum PatchbayUiTargetKindWire {
-  text;
+  text,
+  capture;
 
   static PatchbayUiTargetKindWire fromJson(
     Object? value, {
@@ -199,6 +200,155 @@ enum PatchbayUiWaitConditionWire {
     }
     throw FormatException(
       '$path has unknown PatchbayUiWaitConditionWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayLogLevelWire {
+  trace,
+  debug,
+  info,
+  warning,
+  error,
+  fatal;
+
+  static PatchbayLogLevelWire fromJson(Object? value, {String path = r'$'}) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException('$path has unknown PatchbayLogLevelWire: $wire');
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayLogDirectionWire {
+  forward,
+  backward;
+
+  static PatchbayLogDirectionWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException('$path has unknown PatchbayLogDirectionWire: $wire');
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayLogBatchOutcomeWire {
+  records,
+  staleCursor,
+  timedOut,
+  cancelled;
+
+  static PatchbayLogBatchOutcomeWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayLogBatchOutcomeWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayLogTruncationWire {
+  entryLimit,
+  byteLimit,
+  sourceLimit;
+
+  static PatchbayLogTruncationWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException('$path has unknown PatchbayLogTruncationWire: $wire');
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayLogRedactionWire {
+  consumerRedacted;
+
+  static PatchbayLogRedactionWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException('$path has unknown PatchbayLogRedactionWire: $wire');
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayBlobSourceWire {
+  logExport,
+  flutterCapture;
+
+  static PatchbayBlobSourceWire fromJson(Object? value, {String path = r'$'}) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException('$path has unknown PatchbayBlobSourceWire: $wire');
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayCaptureTargetWire {
+  root,
+  registeredTarget;
+
+  static PatchbayCaptureTargetWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException('$path has unknown PatchbayCaptureTargetWire: $wire');
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayCaptureWarningWire {
+  flutterSubtreeOnly,
+  platformViewsMayBeMissing,
+  systemUiNotIncluded;
+
+  static PatchbayCaptureWarningWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayCaptureWarningWire: $wire',
     );
   }
 
@@ -1350,6 +1500,758 @@ final class PatchbayUiWaitResultWire {
     if (navigationRevision != null) 'navigationRevision': navigationRevision!,
     if (treeRevision != null) 'treeRevision': treeRevision!,
     'frameRevision': frameRevision,
+  };
+}
+
+final class PatchbayLogRecordWire {
+  const PatchbayLogRecordWire({
+    required this.cursor,
+    required this.at,
+    required this.level,
+    required this.category,
+    required this.message,
+    required this.fields,
+    required this.redaction,
+    required this.source,
+  });
+
+  final String cursor;
+  final String at;
+  final PatchbayLogLevelWire level;
+  final String category;
+  final String message;
+  final Map<String, Object?> fields;
+  final PatchbayLogRedactionWire redaction;
+  final PatchbayFactSourceWire source;
+
+  factory PatchbayLogRecordWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'cursor',
+      'at',
+      'level',
+      'category',
+      'message',
+      'fields',
+      'redaction',
+      'source',
+    }, path);
+    return PatchbayLogRecordWire(
+      cursor: _wireString(json['cursor'], '$path.cursor'),
+      at: _wireString(json['at'], '$path.at'),
+      level: PatchbayLogLevelWire.fromJson(json['level'], path: '$path.level'),
+      category: _wireString(json['category'], '$path.category'),
+      message: _wireString(json['message'], '$path.message'),
+      fields: json['fields'] == null
+          ? const <String, Object?>{}
+          : _wireJsonObject(json['fields'], '$path.fields'),
+      redaction: PatchbayLogRedactionWire.fromJson(
+        json['redaction'],
+        path: '$path.redaction',
+      ),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'cursor': cursor,
+    'at': at,
+    'level': level.toJson(),
+    'category': category,
+    'message': message,
+    if (fields.isNotEmpty) 'fields': _wireJsonObject(fields, r'$.fields'),
+    'redaction': redaction.toJson(),
+    'source': source.toJson(),
+  };
+}
+
+final class PatchbayLogQueryRequestWire {
+  const PatchbayLogQueryRequestWire({
+    required this.cursor,
+    required this.direction,
+    required this.limit,
+    required this.levels,
+    required this.categories,
+    required this.since,
+    required this.until,
+  });
+
+  final String? cursor;
+  final PatchbayLogDirectionWire? direction;
+  final int? limit;
+  final List<PatchbayLogLevelWire> levels;
+  final List<String> categories;
+  final String? since;
+  final String? until;
+
+  factory PatchbayLogQueryRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'cursor',
+      'direction',
+      'limit',
+      'levels',
+      'categories',
+      'since',
+      'until',
+    }, path);
+    return PatchbayLogQueryRequestWire(
+      cursor: json['cursor'] == null
+          ? null
+          : _wireString(json['cursor'], '$path.cursor'),
+      direction: json['direction'] == null
+          ? null
+          : PatchbayLogDirectionWire.fromJson(
+              json['direction'],
+              path: '$path.direction',
+            ),
+      limit: json['limit'] == null
+          ? null
+          : _wireInt(json['limit'], '$path.limit'),
+      levels: json['levels'] == null
+          ? const <PatchbayLogLevelWire>[]
+          : _wireList(json['levels'], '$path.levels')
+                .map(
+                  (item) => PatchbayLogLevelWire.fromJson(
+                    item,
+                    path: '$path.levels[]',
+                  ),
+                )
+                .toList(growable: false),
+      categories: json['categories'] == null
+          ? const <String>[]
+          : _wireList(json['categories'], '$path.categories')
+                .map((item) => _wireString(item, '$path.categories[]'))
+                .toList(growable: false),
+      since: json['since'] == null
+          ? null
+          : _wireString(json['since'], '$path.since'),
+      until: json['until'] == null
+          ? null
+          : _wireString(json['until'], '$path.until'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    if (cursor != null) 'cursor': cursor!,
+    if (direction != null) 'direction': direction!.toJson(),
+    if (limit != null) 'limit': limit!,
+    if (levels.isNotEmpty)
+      'levels': levels.map((item) => item.toJson()).toList(growable: false),
+    if (categories.isNotEmpty)
+      'categories': categories.map((item) => item).toList(growable: false),
+    if (since != null) 'since': since!,
+    if (until != null) 'until': until!,
+  };
+}
+
+final class PatchbayLogTailRequestWire {
+  const PatchbayLogTailRequestWire({
+    required this.cursor,
+    required this.limit,
+    required this.timeoutMs,
+    required this.levels,
+    required this.categories,
+  });
+
+  final String? cursor;
+  final int? limit;
+  final int? timeoutMs;
+  final List<PatchbayLogLevelWire> levels;
+  final List<String> categories;
+
+  factory PatchbayLogTailRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'cursor',
+      'limit',
+      'timeoutMs',
+      'levels',
+      'categories',
+    }, path);
+    return PatchbayLogTailRequestWire(
+      cursor: json['cursor'] == null
+          ? null
+          : _wireString(json['cursor'], '$path.cursor'),
+      limit: json['limit'] == null
+          ? null
+          : _wireInt(json['limit'], '$path.limit'),
+      timeoutMs: json['timeoutMs'] == null
+          ? null
+          : _wireInt(json['timeoutMs'], '$path.timeoutMs'),
+      levels: json['levels'] == null
+          ? const <PatchbayLogLevelWire>[]
+          : _wireList(json['levels'], '$path.levels')
+                .map(
+                  (item) => PatchbayLogLevelWire.fromJson(
+                    item,
+                    path: '$path.levels[]',
+                  ),
+                )
+                .toList(growable: false),
+      categories: json['categories'] == null
+          ? const <String>[]
+          : _wireList(json['categories'], '$path.categories')
+                .map((item) => _wireString(item, '$path.categories[]'))
+                .toList(growable: false),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    if (cursor != null) 'cursor': cursor!,
+    if (limit != null) 'limit': limit!,
+    if (timeoutMs != null) 'timeoutMs': timeoutMs!,
+    if (levels.isNotEmpty)
+      'levels': levels.map((item) => item.toJson()).toList(growable: false),
+    if (categories.isNotEmpty)
+      'categories': categories.map((item) => item).toList(growable: false),
+  };
+}
+
+final class PatchbayLogExportRequestWire {
+  const PatchbayLogExportRequestWire({
+    required this.cursor,
+    required this.direction,
+    required this.limit,
+    required this.levels,
+    required this.categories,
+    required this.since,
+    required this.until,
+    required this.ttlMs,
+  });
+
+  final String? cursor;
+  final PatchbayLogDirectionWire? direction;
+  final int? limit;
+  final List<PatchbayLogLevelWire> levels;
+  final List<String> categories;
+  final String? since;
+  final String? until;
+  final int? ttlMs;
+
+  factory PatchbayLogExportRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'cursor',
+      'direction',
+      'limit',
+      'levels',
+      'categories',
+      'since',
+      'until',
+      'ttlMs',
+    }, path);
+    return PatchbayLogExportRequestWire(
+      cursor: json['cursor'] == null
+          ? null
+          : _wireString(json['cursor'], '$path.cursor'),
+      direction: json['direction'] == null
+          ? null
+          : PatchbayLogDirectionWire.fromJson(
+              json['direction'],
+              path: '$path.direction',
+            ),
+      limit: json['limit'] == null
+          ? null
+          : _wireInt(json['limit'], '$path.limit'),
+      levels: json['levels'] == null
+          ? const <PatchbayLogLevelWire>[]
+          : _wireList(json['levels'], '$path.levels')
+                .map(
+                  (item) => PatchbayLogLevelWire.fromJson(
+                    item,
+                    path: '$path.levels[]',
+                  ),
+                )
+                .toList(growable: false),
+      categories: json['categories'] == null
+          ? const <String>[]
+          : _wireList(json['categories'], '$path.categories')
+                .map((item) => _wireString(item, '$path.categories[]'))
+                .toList(growable: false),
+      since: json['since'] == null
+          ? null
+          : _wireString(json['since'], '$path.since'),
+      until: json['until'] == null
+          ? null
+          : _wireString(json['until'], '$path.until'),
+      ttlMs: json['ttlMs'] == null
+          ? null
+          : _wireInt(json['ttlMs'], '$path.ttlMs'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    if (cursor != null) 'cursor': cursor!,
+    if (direction != null) 'direction': direction!.toJson(),
+    if (limit != null) 'limit': limit!,
+    if (levels.isNotEmpty)
+      'levels': levels.map((item) => item.toJson()).toList(growable: false),
+    if (categories.isNotEmpty)
+      'categories': categories.map((item) => item).toList(growable: false),
+    if (since != null) 'since': since!,
+    if (until != null) 'until': until!,
+    if (ttlMs != null) 'ttlMs': ttlMs!,
+  };
+}
+
+final class PatchbayLogBatchWire {
+  const PatchbayLogBatchWire({
+    required this.outcome,
+    required this.source,
+    required this.records,
+    required this.nextCursor,
+    required this.currentCursor,
+    required this.truncated,
+    required this.truncation,
+    required this.elapsedMs,
+  });
+
+  final PatchbayLogBatchOutcomeWire outcome;
+  final PatchbayFactSourceWire source;
+  final List<PatchbayLogRecordWire> records;
+  final String? nextCursor;
+  final String? currentCursor;
+  final bool truncated;
+  final PatchbayLogTruncationWire? truncation;
+  final int elapsedMs;
+
+  factory PatchbayLogBatchWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'records',
+      'nextCursor',
+      'currentCursor',
+      'truncated',
+      'truncation',
+      'elapsedMs',
+    }, path);
+    return PatchbayLogBatchWire(
+      outcome: PatchbayLogBatchOutcomeWire.fromJson(
+        json['outcome'],
+        path: '$path.outcome',
+      ),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      records: _wireList(json['records'], '$path.records')
+          .map(
+            (item) => PatchbayLogRecordWire.fromJson(
+              _wireMap(item, '$path.records[]'),
+              path: '$path.records[]',
+            ),
+          )
+          .toList(growable: false),
+      nextCursor: json['nextCursor'] == null
+          ? null
+          : _wireString(json['nextCursor'], '$path.nextCursor'),
+      currentCursor: json['currentCursor'] == null
+          ? null
+          : _wireString(json['currentCursor'], '$path.currentCursor'),
+      truncated: _wireBool(json['truncated'], '$path.truncated'),
+      truncation: json['truncation'] == null
+          ? null
+          : PatchbayLogTruncationWire.fromJson(
+              json['truncation'],
+              path: '$path.truncation',
+            ),
+      elapsedMs: _wireInt(json['elapsedMs'], '$path.elapsedMs'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome.toJson(),
+    'source': source.toJson(),
+    'records': records.map((item) => item.toJson()).toList(growable: false),
+    'nextCursor': nextCursor == null ? null : nextCursor!,
+    'currentCursor': currentCursor == null ? null : currentCursor!,
+    'truncated': truncated,
+    'truncation': truncation == null ? null : truncation!.toJson(),
+    'elapsedMs': elapsedMs,
+  };
+}
+
+final class PatchbayBlobMetadataWire {
+  const PatchbayBlobMetadataWire({
+    required this.blobId,
+    required this.source,
+    required this.kind,
+    required this.contentType,
+    required this.length,
+    required this.sha256,
+    required this.createdAt,
+    required this.expiresAt,
+    required this.filename,
+    required this.properties,
+  });
+
+  final String blobId;
+  final PatchbayFactSourceWire source;
+  final PatchbayBlobSourceWire kind;
+  final String contentType;
+  final int length;
+  final String sha256;
+  final String createdAt;
+  final String expiresAt;
+  final String? filename;
+  final Map<String, Object?> properties;
+
+  factory PatchbayBlobMetadataWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'blobId',
+      'source',
+      'kind',
+      'contentType',
+      'length',
+      'sha256',
+      'createdAt',
+      'expiresAt',
+      'filename',
+      'properties',
+    }, path);
+    return PatchbayBlobMetadataWire(
+      blobId: _wireString(json['blobId'], '$path.blobId'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      kind: PatchbayBlobSourceWire.fromJson(json['kind'], path: '$path.kind'),
+      contentType: _wireString(json['contentType'], '$path.contentType'),
+      length: _wireInt(json['length'], '$path.length'),
+      sha256: _wireString(json['sha256'], '$path.sha256'),
+      createdAt: _wireString(json['createdAt'], '$path.createdAt'),
+      expiresAt: _wireString(json['expiresAt'], '$path.expiresAt'),
+      filename: json['filename'] == null
+          ? null
+          : _wireString(json['filename'], '$path.filename'),
+      properties: json['properties'] == null
+          ? const <String, Object?>{}
+          : _wireJsonObject(json['properties'], '$path.properties'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'blobId': blobId,
+    'source': source.toJson(),
+    'kind': kind.toJson(),
+    'contentType': contentType,
+    'length': length,
+    'sha256': sha256,
+    'createdAt': createdAt,
+    'expiresAt': expiresAt,
+    if (filename != null) 'filename': filename!,
+    if (properties.isNotEmpty)
+      'properties': _wireJsonObject(properties, r'$.properties'),
+  };
+}
+
+final class PatchbayBlobMetadataRequestWire {
+  const PatchbayBlobMetadataRequestWire({required this.blobId});
+
+  final String blobId;
+
+  factory PatchbayBlobMetadataRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'blobId'}, path);
+    return PatchbayBlobMetadataRequestWire(
+      blobId: _wireString(json['blobId'], '$path.blobId'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{'blobId': blobId};
+}
+
+final class PatchbayBlobReadRequestWire {
+  const PatchbayBlobReadRequestWire({
+    required this.blobId,
+    required this.offset,
+    required this.limit,
+  });
+
+  final String blobId;
+  final int offset;
+  final int limit;
+
+  factory PatchbayBlobReadRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'blobId', 'offset', 'limit'}, path);
+    return PatchbayBlobReadRequestWire(
+      blobId: _wireString(json['blobId'], '$path.blobId'),
+      offset: _wireInt(json['offset'], '$path.offset'),
+      limit: _wireInt(json['limit'], '$path.limit'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'blobId': blobId,
+    'offset': offset,
+    'limit': limit,
+  };
+}
+
+final class PatchbayBlobChunkWire {
+  const PatchbayBlobChunkWire({
+    required this.metadata,
+    required this.offset,
+    required this.length,
+    required this.nextOffset,
+    required this.eof,
+    required this.dataBase64,
+  });
+
+  final PatchbayBlobMetadataWire metadata;
+  final int offset;
+  final int length;
+  final int nextOffset;
+  final bool eof;
+  final String dataBase64;
+
+  factory PatchbayBlobChunkWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'metadata',
+      'offset',
+      'length',
+      'nextOffset',
+      'eof',
+      'dataBase64',
+    }, path);
+    return PatchbayBlobChunkWire(
+      metadata: PatchbayBlobMetadataWire.fromJson(
+        _wireMap(json['metadata'], '$path.metadata'),
+        path: '$path.metadata',
+      ),
+      offset: _wireInt(json['offset'], '$path.offset'),
+      length: _wireInt(json['length'], '$path.length'),
+      nextOffset: _wireInt(json['nextOffset'], '$path.nextOffset'),
+      eof: _wireBool(json['eof'], '$path.eof'),
+      dataBase64: _wireString(json['dataBase64'], '$path.dataBase64'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'metadata': metadata.toJson(),
+    'offset': offset,
+    'length': length,
+    'nextOffset': nextOffset,
+    'eof': eof,
+    'dataBase64': dataBase64,
+  };
+}
+
+final class PatchbayLogExportResultWire {
+  const PatchbayLogExportResultWire({
+    required this.source,
+    required this.blob,
+    required this.recordCount,
+    required this.truncated,
+    required this.truncation,
+  });
+
+  final PatchbayFactSourceWire source;
+  final PatchbayBlobMetadataWire blob;
+  final int recordCount;
+  final bool truncated;
+  final PatchbayLogTruncationWire? truncation;
+
+  factory PatchbayLogExportResultWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'source',
+      'blob',
+      'recordCount',
+      'truncated',
+      'truncation',
+    }, path);
+    return PatchbayLogExportResultWire(
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      blob: PatchbayBlobMetadataWire.fromJson(
+        _wireMap(json['blob'], '$path.blob'),
+        path: '$path.blob',
+      ),
+      recordCount: _wireInt(json['recordCount'], '$path.recordCount'),
+      truncated: _wireBool(json['truncated'], '$path.truncated'),
+      truncation: json['truncation'] == null
+          ? null
+          : PatchbayLogTruncationWire.fromJson(
+              json['truncation'],
+              path: '$path.truncation',
+            ),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'source': source.toJson(),
+    'blob': blob.toJson(),
+    'recordCount': recordCount,
+    'truncated': truncated,
+    'truncation': truncation == null ? null : truncation!.toJson(),
+  };
+}
+
+final class PatchbayCaptureRequestWire {
+  const PatchbayCaptureRequestWire({
+    required this.targetId,
+    required this.generation,
+    required this.pixelRatio,
+    required this.timeoutMs,
+  });
+
+  final String? targetId;
+  final int? generation;
+  final num? pixelRatio;
+  final int? timeoutMs;
+
+  factory PatchbayCaptureRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'targetId',
+      'generation',
+      'pixelRatio',
+      'timeoutMs',
+    }, path);
+    return PatchbayCaptureRequestWire(
+      targetId: json['targetId'] == null
+          ? null
+          : _wireString(json['targetId'], '$path.targetId'),
+      generation: json['generation'] == null
+          ? null
+          : _wireInt(json['generation'], '$path.generation'),
+      pixelRatio: json['pixelRatio'] == null
+          ? null
+          : _wireNum(json['pixelRatio'], '$path.pixelRatio'),
+      timeoutMs: json['timeoutMs'] == null
+          ? null
+          : _wireInt(json['timeoutMs'], '$path.timeoutMs'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    if (targetId != null) 'targetId': targetId!,
+    if (generation != null) 'generation': generation!,
+    if (pixelRatio != null) 'pixelRatio': pixelRatio!,
+    if (timeoutMs != null) 'timeoutMs': timeoutMs!,
+  };
+}
+
+final class PatchbayCaptureResultWire {
+  const PatchbayCaptureResultWire({
+    required this.outcome,
+    required this.source,
+    required this.target,
+    required this.targetId,
+    required this.generation,
+    required this.width,
+    required this.height,
+    required this.pixelRatio,
+    required this.warnings,
+    required this.blob,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final PatchbayCaptureTargetWire target;
+  final String? targetId;
+  final int? generation;
+  final int width;
+  final int height;
+  final num pixelRatio;
+  final List<PatchbayCaptureWarningWire> warnings;
+  final PatchbayBlobMetadataWire blob;
+
+  factory PatchbayCaptureResultWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'target',
+      'targetId',
+      'generation',
+      'width',
+      'height',
+      'pixelRatio',
+      'warnings',
+      'blob',
+    }, path);
+    return PatchbayCaptureResultWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      target: PatchbayCaptureTargetWire.fromJson(
+        json['target'],
+        path: '$path.target',
+      ),
+      targetId: json['targetId'] == null
+          ? null
+          : _wireString(json['targetId'], '$path.targetId'),
+      generation: json['generation'] == null
+          ? null
+          : _wireInt(json['generation'], '$path.generation'),
+      width: _wireInt(json['width'], '$path.width'),
+      height: _wireInt(json['height'], '$path.height'),
+      pixelRatio: _wireNum(json['pixelRatio'], '$path.pixelRatio'),
+      warnings: _wireList(json['warnings'], '$path.warnings')
+          .map(
+            (item) => PatchbayCaptureWarningWire.fromJson(
+              item,
+              path: '$path.warnings[]',
+            ),
+          )
+          .toList(growable: false),
+      blob: PatchbayBlobMetadataWire.fromJson(
+        _wireMap(json['blob'], '$path.blob'),
+        path: '$path.blob',
+      ),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'target': target.toJson(),
+    'targetId': targetId == null ? null : targetId!,
+    'generation': generation == null ? null : generation!,
+    'width': width,
+    'height': height,
+    'pixelRatio': pixelRatio,
+    'warnings': warnings.map((item) => item.toJson()).toList(growable: false),
+    'blob': blob.toJson(),
   };
 }
 

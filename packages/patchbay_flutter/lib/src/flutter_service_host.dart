@@ -27,8 +27,13 @@ final class PatchbayFlutterServiceHost {
                    in _uiCommandDescriptors(
                      semanticsActionsEnabled: bridge.semantics.actionsEnabled,
                      navigationEnabled: bridge.navigation != null,
+                     captureEnabled: bridge.capture != null,
+                     captureGates: bridge.capture?.gateIds ?? const <String>{},
                    ))
                  descriptor.toJson(),
+               ...?bridge.artifacts?.descriptors.map(
+                 (PatchbayCommandDescriptor descriptor) => descriptor.toJson(),
+               ),
                ...?domain['commands'] as List<Object?>?,
              ],
              'uiTargets': bridge
@@ -39,12 +44,37 @@ final class PatchbayFlutterServiceHost {
          },
          snapshot: snapshot ?? () async => const <String, Object?>{},
          invoke: (command, arguments, requestId) async {
+           if (bridge.artifacts?.handles(command) == true) {
+             return bridge.artifacts!.invoke(command, arguments, requestId);
+           }
+           if (command == 'ui.capture') {
+             final capture = bridge.capture;
+             if (capture == null) {
+               return PatchbayInvocation.rejected(
+                 requestId: requestId,
+                 rejection: const PatchbayRejection(
+                   code: 'commandNotRegistered',
+                 ),
+               ).toJson();
+             }
+             final PatchbayCaptureRequestWire request;
+             try {
+               request = PatchbayCaptureRequestWire.fromJson(arguments);
+             } on Object {
+               return _invalidUiArguments(requestId);
+             }
+             return (await capture.capture(
+               request,
+               requestId: requestId,
+             )).toJson();
+           }
            final bool uiCommand =
                command == 'ui.text.set' ||
                command == 'ui.text.enter' ||
                command == 'ui.semantics.tree' ||
                command == 'ui.semantics.action' ||
                command == 'ui.wait' ||
+               command == 'ui.capture' ||
                command.startsWith('navigation.');
            if (!uiCommand) {
              if (domainInvoke != null) {
@@ -235,6 +265,8 @@ final class PatchbayFlutterServiceHost {
   static List<PatchbayCommandDescriptor> _uiCommandDescriptors({
     required bool semanticsActionsEnabled,
     required bool navigationEnabled,
+    required bool captureEnabled,
+    required Set<String> captureGates,
   }) => <PatchbayCommandDescriptor>[
     const PatchbayCommandDescriptor(
       name: 'ui.text.set',
@@ -389,6 +421,36 @@ final class PatchbayFlutterServiceHost {
         ),
       ],
     ),
+    if (captureEnabled)
+      PatchbayCommandDescriptor(
+        name: 'ui.capture',
+        summary: 'Capture a bounded Flutter repaint boundary as a PNG blob.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.readOnly,
+        sideEffect: PatchbaySideEffect.none,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+        gates: captureGates,
+        parameters: const <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'targetId',
+            type: PatchbayParameterType.string,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'generation',
+            type: PatchbayParameterType.integer,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'pixelRatio',
+            type: PatchbayParameterType.number,
+            defaultValue: 1,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'timeoutMs',
+            type: PatchbayParameterType.integer,
+            defaultValue: 5000,
+          ),
+        ],
+      ),
     if (navigationEnabled) ...<PatchbayCommandDescriptor>[
       const PatchbayCommandDescriptor(
         name: 'navigation.catalog',

@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show TextField;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
@@ -10,6 +12,8 @@ import 'frame_observer.dart';
 import 'navigation_bridge.dart';
 import 'semantics_bridge.dart';
 import 'ui_wait_bridge.dart';
+
+part 'capture_bridge.dart';
 
 /// A target key whose GlobalKey semantics stay identical in every build mode.
 ///
@@ -31,6 +35,19 @@ final class PatchbayKey extends GlobalKey<State<StatefulWidget>> {
                sideEffect: sideEffect,
                operationGates: operationGates,
              ),
+       super.constructor() {
+    if (!kReleaseMode) {
+      (registry ?? PatchbayUiRegistry.instance)._register(this);
+    }
+  }
+
+  PatchbayKey.capture(
+    String id, {
+    Set<String> gates = const <String>{},
+    PatchbayUiRegistry? registry,
+  }) : declaration = kReleaseMode
+           ? null
+           : PatchbayUiTargetDeclaration.capture(id: id, gates: gates),
        super.constructor() {
     if (!kReleaseMode) {
       (registry ?? PatchbayUiRegistry.instance)._register(this);
@@ -87,7 +104,7 @@ final class PatchbayUiRegistry {
           ambiguous: ambiguous,
           operations: ambiguous || mounted.isEmpty
               ? const <PatchbayUiOperation>{}
-              : _supportedOperations(representative.key.currentWidget),
+              : _supportedOperations(representative),
         ),
       );
     }
@@ -149,7 +166,7 @@ final class PatchbayUiRegistry {
         details: <String, Object?>{'currentGeneration': target.generation},
       );
     }
-    if (!_supportedOperations(target.key.currentWidget).contains(operation)) {
+    if (!_supportedOperations(target).contains(operation)) {
       return const _TargetResolution.rejected('uiOperationUnavailable');
     }
     return _TargetResolution.resolved(target);
@@ -175,12 +192,20 @@ final class PatchbayUiRegistry {
     );
   }
 
-  static Set<PatchbayUiOperation> _supportedOperations(Widget? widget) {
-    final _TextBinding? binding = _TextBinding.fromWidget(widget);
-    if (binding == null) return const <PatchbayUiOperation>{};
-    return const <PatchbayUiOperation>{
-      PatchbayUiOperation.textSet,
-      PatchbayUiOperation.textEnter,
+  static Set<PatchbayUiOperation> _supportedOperations(_ObservedTarget target) {
+    final PatchbayUiTargetDeclaration declaration = target.key.declaration!;
+    return switch (declaration.kind) {
+      PatchbayUiTargetKind.text =>
+        _TextBinding.fromWidget(target.key.currentWidget) == null
+            ? const <PatchbayUiOperation>{}
+            : const <PatchbayUiOperation>{
+                PatchbayUiOperation.textSet,
+                PatchbayUiOperation.textEnter,
+              },
+      PatchbayUiTargetKind.capture =>
+        target.element?.renderObject is RenderRepaintBoundary
+            ? const <PatchbayUiOperation>{PatchbayUiOperation.capture}
+            : const <PatchbayUiOperation>{},
     };
   }
 }
@@ -192,6 +217,10 @@ final class PatchbayFlutterBridge {
     PatchbayUiRegistry? registry,
     PatchbaySemanticsActionPolicy? semanticsActionPolicy,
     PatchbayNavigationAdapter? navigationAdapter,
+    this.artifacts,
+    Set<String> captureGates = const <String>{},
+    PatchbayRootController? rootController,
+    PatchbayCaptureEncoder? captureEncoder,
     bool Function()? isAppResumed,
     String Function()? newRequestId,
   }) : _gates = gates,
@@ -222,9 +251,22 @@ final class PatchbayFlutterBridge {
       navigation: navigation,
       newRequestId: newRequestId,
     );
+    capture = artifacts == null
+        ? null
+        : PatchbayCaptureBridge(
+            gates: gates,
+            registry: _registry,
+            frames: _frames,
+            artifacts: artifacts!,
+            gateIds: captureGates,
+            root: rootController,
+            isAppResumed: _isAppResumed,
+            encoder: captureEncoder,
+          );
   }
 
   final PatchbayGateEvaluator _gates;
+  final PatchbayArtifactService? artifacts;
   final PatchbayUiRegistry _registry;
   final String Function() _newRequestId;
   final bool Function() _isAppResumed;
@@ -232,6 +274,7 @@ final class PatchbayFlutterBridge {
   late final PatchbaySemanticsBridge semantics;
   late final PatchbayNavigationBridge? navigation;
   late final PatchbayUiWaitBridge wait;
+  late final PatchbayCaptureBridge? capture;
 
   static int _nextRequest = 0;
   static String _defaultRequestId() => 'patchbay-ui-${++_nextRequest}';
@@ -338,6 +381,9 @@ final class PatchbayFlutterBridge {
       final TextEditingValue next = switch (operation) {
         PatchbayUiOperation.textSet => _replacement(text),
         PatchbayUiOperation.textEnter => binding.format(text),
+        PatchbayUiOperation.capture => throw StateError(
+          'capture is not a text operation',
+        ),
       };
       binding.controller.value = next;
       if (operation == PatchbayUiOperation.textEnter) {

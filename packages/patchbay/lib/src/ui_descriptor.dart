@@ -3,11 +3,12 @@ import 'generated/core_wire.g.dart';
 
 enum PatchbayPlane { domain, flutterUi }
 
-enum PatchbayUiTargetKind { text }
+enum PatchbayUiTargetKind { text, capture }
 
 enum PatchbayUiOperation {
   textSet('text.set'),
-  textEnter('text.enter');
+  textEnter('text.enter'),
+  capture('capture');
 
   const PatchbayUiOperation(this.wireName);
 
@@ -37,6 +38,20 @@ final class PatchbayUiTargetDeclaration {
              entry.key: Set<String>.unmodifiable(entry.value),
          },
        ) {
+    if (!_validId.hasMatch(id)) {
+      throw ArgumentError.value(id, 'id', 'must be a stable dotted identifier');
+    }
+  }
+
+  PatchbayUiTargetDeclaration.capture({
+    required this.id,
+    Set<String> gates = const <String>{},
+  }) : kind = PatchbayUiTargetKind.capture,
+       sensitivePolicy = PatchbaySensitivePolicy.public,
+       sideEffect = PatchbaySideEffect.none,
+       operationGates = <PatchbayUiOperation, Set<String>>{
+         PatchbayUiOperation.capture: Set<String>.unmodifiable(gates),
+       } {
     if (!_validId.hasMatch(id)) {
       throw ArgumentError.value(id, 'id', 'must be a stable dotted identifier');
     }
@@ -96,6 +111,7 @@ final class PatchbayUiTargetDescriptor {
       generation: generation,
       kind: switch (kind) {
         PatchbayUiTargetKind.text => PatchbayUiTargetKindWire.text,
+        PatchbayUiTargetKind.capture => PatchbayUiTargetKindWire.capture,
       },
       mounted: mounted,
       ambiguous: ambiguous,

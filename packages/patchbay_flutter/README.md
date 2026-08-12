@@ -22,8 +22,11 @@
 - navigation revision、串行化、redirect/timeout/background/stale 类型化拒绝和 observer + 下一帧确认；
 - `ui.wait` 的 Semantics identifier mounted/unmounted/value、navigation destination、Semantics tree
   revision 与 Patchbay-observed frame revision 条件。
+- 可选 `PatchbayRoot` 根截图与已注册 `RenderRepaintBoundary` target 截图；
+- 下一帧、lifecycle/gate 二次复核、像素/字节上限和共享 chunked blob 输出。
 
-当前尚未实现 `PatchbayRoot`、capture 和日志面。Widget/Render/Focus 诊断树由
+日志面位于 core `patchbay`，只有 consumer 显式注入 `PatchbayArtifactService` 时才进入本 host 的
+catalog。Widget/Render/Focus 诊断树由
 `patchbay_cli` 直接代理 Flutter 运行时 extension，不经过本包复制协议。
 
 Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的契约
@@ -36,7 +39,7 @@ Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 D
 |---|---|---|
 | Host only | App 组合根启动 service host | identity、领域 catalog/snapshot/invoke；不承诺稳定 Widget 操作 |
 | Runtime observation | 只启动 Flutter host，不改 Widget 树（已实现） | Widget/Render/Semantics 摘要和标准 Semantics action |
-| Optional root bridge | App 最上层包一次 root bridge（规划） | 根截图和确实需要根渲染上下文的帧协调 |
+| Optional root bridge | App 最上层包一次 root bridge | 根截图和确实需要根渲染上下文的帧协调 |
 | Single Key | 目标 Widget 的 `key` 换成 `PatchbayKey` | 该目标 catalog 明示的操作 |
 
 不要求页面继承基类，不要求逐页面容器，不要求给所有 Widget 标 Key，也不维护一份与 Widget 树重复的
@@ -104,7 +107,7 @@ Tab 可以直接从 Semantics 快照发现并执行原 callback，完整复用 W
 详细协议、隐私边界和分批退出条件见
 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。
 
-## Optional root bridge（规划）
+## Optional root bridge 与 capture（已实现）
 
 需要全局 Flutter 观察时，允许 consumer 在 `MaterialApp.builder` 最上层包一次 root bridge：
 
@@ -115,10 +118,19 @@ MaterialApp.router(
 ```
 
 root bridge 只负责确实需要根渲染上下文的截图与帧调度。它不负责 Widget/Semantics 树发现，不登记
-业务页面，不把所有后代自动变成可操作 target，也不在 release 改变布局。
+业务页面，不把所有后代自动变成可操作 target，也不在 release 改变布局；release 构建直接返回原
+`child`，不保留运行时重新开启入口。
+
+默认路径是 root capture。确需局部截图时，可把现有 `RenderRepaintBoundary` 的 key 换成
+`PatchbayKey.capture('stable.id')`；Key 只负责稳定定位与 generation fencing，**不会**把任意 Widget
+变成 repaint boundary。目标不是唯一、未挂载、generation 过期或 render object 不是现成 boundary 时
+一律 fail-closed。
 
 根截图只证明 Flutter 合成树在该帧产生了这些像素。`PlatformView`、texture、系统弹窗和其他 App
-可能不在图像中，capture 必须返回 capability warning，不能冒充完整物理屏幕截图。
+可能不在图像中，结果固定返回 `flutterSubtreeOnly`、`platformViewsMayBeMissing`、
+`systemUiNotIncluded` warning，不能冒充完整物理屏幕截图。capture 等待下一帧，调用前、gate await 后及
+编码前复核 resumed/target；默认限制 16 MP、8 MiB PNG、pixelRatio 不超过 3。PNG 只进入共享 blob
+store，响应返回尺寸、ratio、SHA-256、TTL 和 blobId，大字节不塞进单个 service-extension 响应。
 
 ## 语义导航（已实现）
 

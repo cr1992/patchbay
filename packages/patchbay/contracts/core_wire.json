@@ -40,7 +40,7 @@
     {
       "kind": "enum",
       "name": "PatchbayUiTargetKindWire",
-      "values": ["text"]
+      "values": ["text", "capture"]
     },
     {
       "kind": "enum",
@@ -63,6 +63,46 @@
         "treeRevision",
         "frameRevision"
       ]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayLogLevelWire",
+      "values": ["trace", "debug", "info", "warning", "error", "fatal"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayLogDirectionWire",
+      "values": ["forward", "backward"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayLogBatchOutcomeWire",
+      "values": ["records", "staleCursor", "timedOut", "cancelled"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayLogTruncationWire",
+      "values": ["entryLimit", "byteLimit", "sourceLimit"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayLogRedactionWire",
+      "values": ["consumerRedacted"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayBlobSourceWire",
+      "values": ["logExport", "flutterCapture"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayCaptureTargetWire",
+      "values": ["root", "registeredTarget"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayCaptureWarningWire",
+      "values": ["flutterSubtreeOnly", "platformViewsMayBeMissing", "systemUiNotIncluded"]
     },
     {
       "kind": "object",
@@ -285,6 +325,153 @@
         {"name": "navigationRevision", "type": "int", "nullable": true},
         {"name": "treeRevision", "type": "int", "nullable": true},
         {"name": "frameRevision", "type": "int"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayLogRecordWire",
+      "fields": [
+        {"name": "cursor", "type": "String"},
+        {"name": "at", "type": "String"},
+        {"name": "level", "type": "PatchbayLogLevelWire"},
+        {"name": "category", "type": "String"},
+        {"name": "message", "type": "String"},
+        {"name": "fields", "type": "JsonObject", "omitIfEmpty": true},
+        {"name": "redaction", "type": "PatchbayLogRedactionWire"},
+        {"name": "source", "type": "PatchbayFactSourceWire"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayLogQueryRequestWire",
+      "fields": [
+        {"name": "cursor", "type": "String", "nullable": true},
+        {"name": "direction", "type": "PatchbayLogDirectionWire", "nullable": true},
+        {"name": "limit", "type": "int", "nullable": true},
+        {"name": "levels", "type": "PatchbayLogLevelWire", "list": true, "omitIfEmpty": true},
+        {"name": "categories", "type": "String", "list": true, "omitIfEmpty": true},
+        {"name": "since", "type": "String", "nullable": true},
+        {"name": "until", "type": "String", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayLogTailRequestWire",
+      "fields": [
+        {"name": "cursor", "type": "String", "nullable": true},
+        {"name": "limit", "type": "int", "nullable": true},
+        {"name": "timeoutMs", "type": "int", "nullable": true},
+        {"name": "levels", "type": "PatchbayLogLevelWire", "list": true, "omitIfEmpty": true},
+        {"name": "categories", "type": "String", "list": true, "omitIfEmpty": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayLogExportRequestWire",
+      "fields": [
+        {"name": "cursor", "type": "String", "nullable": true},
+        {"name": "direction", "type": "PatchbayLogDirectionWire", "nullable": true},
+        {"name": "limit", "type": "int", "nullable": true},
+        {"name": "levels", "type": "PatchbayLogLevelWire", "list": true, "omitIfEmpty": true},
+        {"name": "categories", "type": "String", "list": true, "omitIfEmpty": true},
+        {"name": "since", "type": "String", "nullable": true},
+        {"name": "until", "type": "String", "nullable": true},
+        {"name": "ttlMs", "type": "int", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayLogBatchWire",
+      "fields": [
+        {"name": "outcome", "type": "PatchbayLogBatchOutcomeWire"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "records", "type": "PatchbayLogRecordWire", "list": true},
+        {"name": "nextCursor", "type": "String", "nullable": true, "emitNull": true},
+        {"name": "currentCursor", "type": "String", "nullable": true, "emitNull": true},
+        {"name": "truncated", "type": "bool"},
+        {"name": "truncation", "type": "PatchbayLogTruncationWire", "nullable": true, "emitNull": true},
+        {"name": "elapsedMs", "type": "int"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayBlobMetadataWire",
+      "fields": [
+        {"name": "blobId", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "kind", "type": "PatchbayBlobSourceWire"},
+        {"name": "contentType", "type": "String"},
+        {"name": "length", "type": "int"},
+        {"name": "sha256", "type": "String"},
+        {"name": "createdAt", "type": "String"},
+        {"name": "expiresAt", "type": "String"},
+        {"name": "filename", "type": "String", "nullable": true},
+        {"name": "properties", "type": "JsonObject", "omitIfEmpty": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayBlobMetadataRequestWire",
+      "fields": [
+        {"name": "blobId", "type": "String"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayBlobReadRequestWire",
+      "fields": [
+        {"name": "blobId", "type": "String"},
+        {"name": "offset", "type": "int"},
+        {"name": "limit", "type": "int"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayBlobChunkWire",
+      "fields": [
+        {"name": "metadata", "type": "PatchbayBlobMetadataWire"},
+        {"name": "offset", "type": "int"},
+        {"name": "length", "type": "int"},
+        {"name": "nextOffset", "type": "int"},
+        {"name": "eof", "type": "bool"},
+        {"name": "dataBase64", "type": "String"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayLogExportResultWire",
+      "fields": [
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "blob", "type": "PatchbayBlobMetadataWire"},
+        {"name": "recordCount", "type": "int"},
+        {"name": "truncated", "type": "bool"},
+        {"name": "truncation", "type": "PatchbayLogTruncationWire", "nullable": true, "emitNull": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayCaptureRequestWire",
+      "fields": [
+        {"name": "targetId", "type": "String", "nullable": true},
+        {"name": "generation", "type": "int", "nullable": true},
+        {"name": "pixelRatio", "type": "num", "nullable": true},
+        {"name": "timeoutMs", "type": "int", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayCaptureResultWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "target", "type": "PatchbayCaptureTargetWire"},
+        {"name": "targetId", "type": "String", "nullable": true, "emitNull": true},
+        {"name": "generation", "type": "int", "nullable": true, "emitNull": true},
+        {"name": "width", "type": "int"},
+        {"name": "height", "type": "int"},
+        {"name": "pixelRatio", "type": "num"},
+        {"name": "warnings", "type": "PatchbayCaptureWarningWire", "list": true},
+        {"name": "blob", "type": "PatchbayBlobMetadataWire"}
       ]
     }
   ]

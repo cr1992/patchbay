@@ -1,6 +1,8 @@
 /// Consumer-neutral Patchbay protocol surface.
 library;
 
+export 'src/artifacts.dart';
+export 'src/blob_store.dart';
 export 'src/command_descriptor.dart';
 export 'src/facts.dart';
 export 'src/gates.dart';
