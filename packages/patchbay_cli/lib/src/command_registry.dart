@@ -8,53 +8,123 @@ enum PatchbayArtifactDisposition { none, payloadBlob, responseBlob }
 /// response remains authoritative. This table is syntax, not a capability
 /// inventory.
 enum PatchbayFriendlyCommand {
-  navigationCatalog('navigation.catalog', <String>['navigation', 'catalog']),
-  navigationCurrent('navigation.current', <String>['navigation', 'current']),
-  navigationGo('navigation.go', <String>['navigation', 'go']),
-  navigationPush('navigation.push', <String>['navigation', 'push']),
-  navigationBack('navigation.back', <String>['navigation', 'back']),
-  uiWaitSemanticsMounted('ui.wait', <String>[
-    'ui',
-    'wait',
-    'semantics-mounted',
-  ]),
-  uiWaitSemanticsUnmounted('ui.wait', <String>[
-    'ui',
-    'wait',
-    'semantics-unmounted',
-  ]),
-  uiWaitSemanticsValue('ui.wait', <String>['ui', 'wait', 'semantics-value']),
-  uiWaitDestination('ui.wait', <String>['ui', 'wait', 'destination']),
-  uiWaitTreeRevision('ui.wait', <String>['ui', 'wait', 'tree-revision']),
-  uiWaitFrameRevision('ui.wait', <String>['ui', 'wait', 'frame-revision']),
-  logsQuery('logs.query', <String>['logs', 'query']),
-  logsTail('logs.tail', <String>['logs', 'tail']),
-  logsExport('logs.export', <String>[
+  navigationCatalog('navigation.catalog', <String>[
+    'navigation',
+    'catalog',
+  ], summary: 'List destinations exposed by the running App.'),
+  navigationCurrent('navigation.current', <String>[
+    'navigation',
+    'current',
+  ], summary: 'Read the current destination and revision.'),
+  navigationGo(
+    'navigation.go',
+    <String>['navigation', 'go'],
+    summary: 'Replace navigation state with a destination.',
+    usageSuffix: '<destination-id> --revision <revision>',
+  ),
+  navigationPush(
+    'navigation.push',
+    <String>['navigation', 'push'],
+    summary: 'Push a cataloged destination.',
+    usageSuffix: '<destination-id> --revision <revision>',
+  ),
+  navigationBack(
+    'navigation.back',
+    <String>['navigation', 'back'],
+    summary: 'Navigate back from an observed revision.',
+    usageSuffix: '--revision <revision>',
+  ),
+  uiWaitSemanticsMounted(
+    'ui.wait',
+    <String>['ui', 'wait', 'semantics-mounted'],
+    summary: 'Wait for a semantics identifier to mount.',
+    usageSuffix: '<identifier>',
+  ),
+  uiWaitSemanticsUnmounted(
+    'ui.wait',
+    <String>['ui', 'wait', 'semantics-unmounted'],
+    summary: 'Wait for a semantics identifier to unmount.',
+    usageSuffix: '<identifier>',
+  ),
+  uiWaitSemanticsValue(
+    'ui.wait',
+    <String>['ui', 'wait', 'semantics-value'],
+    summary: 'Wait for a semantics value.',
+    usageSuffix: '<identifier> <value>',
+  ),
+  uiWaitDestination(
+    'ui.wait',
+    <String>['ui', 'wait', 'destination'],
+    summary: 'Wait for a navigation destination.',
+    usageSuffix: '<destination-id>',
+  ),
+  uiWaitTreeRevision(
+    'ui.wait',
+    <String>['ui', 'wait', 'tree-revision'],
+    summary: 'Wait for the semantics tree revision.',
+    usageSuffix: '<revision>',
+  ),
+  uiWaitFrameRevision(
+    'ui.wait',
+    <String>['ui', 'wait', 'frame-revision'],
+    summary: 'Wait for the rendered frame revision.',
+    usageSuffix: '<revision>',
+  ),
+  logsQuery('logs.query', <String>[
     'logs',
-    'export',
-  ], artifact: PatchbayArtifactDisposition.payloadBlob),
-  captureRoot('ui.capture', <String>[
-    'capture',
-    'root',
-  ], artifact: PatchbayArtifactDisposition.payloadBlob),
-  captureTarget('ui.capture', <String>[
-    'capture',
-    'target',
-  ], artifact: PatchbayArtifactDisposition.payloadBlob),
-  blobGet('blob.metadata', <String>[
-    'blob',
-    'get',
-  ], artifact: PatchbayArtifactDisposition.responseBlob),
-  blobMetadata('blob.metadata', <String>['blob', 'metadata']);
+    'query',
+  ], summary: 'Query structured App logs.'),
+  logsTail('logs.tail', <String>[
+    'logs',
+    'tail',
+  ], summary: 'Long-poll for structured App logs.'),
+  logsExport(
+    'logs.export',
+    <String>['logs', 'export'],
+    summary: 'Export structured logs to a verified artifact.',
+    usageSuffix: '--output <path>',
+    artifact: PatchbayArtifactDisposition.payloadBlob,
+  ),
+  captureRoot(
+    'ui.capture',
+    <String>['capture', 'root'],
+    summary: 'Capture the Flutter root repaint boundary.',
+    usageSuffix: '--output <path>',
+    artifact: PatchbayArtifactDisposition.payloadBlob,
+  ),
+  captureTarget(
+    'ui.capture',
+    <String>['capture', 'target'],
+    summary: 'Capture a registered Flutter UI target.',
+    usageSuffix: '<target-id> <generation> --output <path>',
+    artifact: PatchbayArtifactDisposition.payloadBlob,
+  ),
+  blobGet(
+    'blob.metadata',
+    <String>['blob', 'get'],
+    summary: 'Download and verify a blob artifact.',
+    usageSuffix: '<blob-id> --output <path>',
+    artifact: PatchbayArtifactDisposition.responseBlob,
+  ),
+  blobMetadata(
+    'blob.metadata',
+    <String>['blob', 'metadata'],
+    summary: 'Read blob metadata without downloading it.',
+    usageSuffix: '<blob-id>',
+  );
 
   const PatchbayFriendlyCommand(
     this.serviceCommand,
     this.path, {
+    required this.summary,
+    this.usageSuffix = '',
     this.artifact = PatchbayArtifactDisposition.none,
   });
 
   final String serviceCommand;
   final List<String> path;
+  final String summary;
+  final String usageSuffix;
   final PatchbayArtifactDisposition artifact;
 }
 
@@ -206,64 +276,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand spec,
     ArgResults options,
   ) {
-    final Set<String> allowed = switch (spec) {
-      PatchbayFriendlyCommand.navigationCatalog ||
-      PatchbayFriendlyCommand.navigationCurrent ||
-      PatchbayFriendlyCommand.blobMetadata => const <String>{},
-      PatchbayFriendlyCommand.navigationGo ||
-      PatchbayFriendlyCommand.navigationPush ||
-      PatchbayFriendlyCommand.navigationBack => const <String>{
-        'revision',
-        'timeout-ms',
-      },
-      PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
-      PatchbayFriendlyCommand.uiWaitSemanticsUnmounted ||
-      PatchbayFriendlyCommand.uiWaitSemanticsValue ||
-      PatchbayFriendlyCommand.uiWaitTreeRevision ||
-      PatchbayFriendlyCommand.uiWaitFrameRevision => const <String>{
-        'timeout-ms',
-      },
-      PatchbayFriendlyCommand.uiWaitDestination => const <String>{
-        'revision',
-        'timeout-ms',
-      },
-      PatchbayFriendlyCommand.logsQuery => const <String>{
-        'cursor',
-        'direction',
-        'limit',
-        'levels',
-        'categories',
-        'since',
-        'until',
-      },
-      PatchbayFriendlyCommand.logsTail => const <String>{
-        'cursor',
-        'limit',
-        'levels',
-        'categories',
-        'timeout-ms',
-      },
-      PatchbayFriendlyCommand.logsExport => const <String>{
-        'cursor',
-        'direction',
-        'limit',
-        'levels',
-        'categories',
-        'since',
-        'until',
-        'ttl-ms',
-        'output',
-        'force',
-      },
-      PatchbayFriendlyCommand.captureRoot ||
-      PatchbayFriendlyCommand.captureTarget => const <String>{
-        'pixel-ratio',
-        'timeout-ms',
-        'output',
-        'force',
-      },
-      PatchbayFriendlyCommand.blobGet => const <String>{'output', 'force'},
-    };
+    final Set<String> allowed = allowedOptions(spec);
     const Set<String> friendlyOptions = <String>{
       'args',
       'stdin',
@@ -292,6 +305,67 @@ abstract final class PatchbayFriendlyCommandRegistry {
       throw const FormatException('--force requires --output');
     }
   }
+
+  /// CLI options accepted by [spec]. Help and validation share this mapping.
+  static Set<String> allowedOptions(PatchbayFriendlyCommand spec) =>
+      switch (spec) {
+        PatchbayFriendlyCommand.navigationCatalog ||
+        PatchbayFriendlyCommand.navigationCurrent ||
+        PatchbayFriendlyCommand.blobMetadata => const <String>{},
+        PatchbayFriendlyCommand.navigationGo ||
+        PatchbayFriendlyCommand.navigationPush ||
+        PatchbayFriendlyCommand.navigationBack => const <String>{
+          'revision',
+          'timeout-ms',
+        },
+        PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
+        PatchbayFriendlyCommand.uiWaitSemanticsUnmounted ||
+        PatchbayFriendlyCommand.uiWaitSemanticsValue ||
+        PatchbayFriendlyCommand.uiWaitTreeRevision ||
+        PatchbayFriendlyCommand.uiWaitFrameRevision => const <String>{
+          'timeout-ms',
+        },
+        PatchbayFriendlyCommand.uiWaitDestination => const <String>{
+          'revision',
+          'timeout-ms',
+        },
+        PatchbayFriendlyCommand.logsQuery => const <String>{
+          'cursor',
+          'direction',
+          'limit',
+          'levels',
+          'categories',
+          'since',
+          'until',
+        },
+        PatchbayFriendlyCommand.logsTail => const <String>{
+          'cursor',
+          'limit',
+          'levels',
+          'categories',
+          'timeout-ms',
+        },
+        PatchbayFriendlyCommand.logsExport => const <String>{
+          'cursor',
+          'direction',
+          'limit',
+          'levels',
+          'categories',
+          'since',
+          'until',
+          'ttl-ms',
+          'output',
+          'force',
+        },
+        PatchbayFriendlyCommand.captureRoot ||
+        PatchbayFriendlyCommand.captureTarget => const <String>{
+          'pixel-ratio',
+          'timeout-ms',
+          'output',
+          'force',
+        },
+        PatchbayFriendlyCommand.blobGet => const <String>{'output', 'force'},
+      };
 
   static Map<String, Object?> _argumentsWithoutPositionals(
     PatchbayFriendlyCommand spec,

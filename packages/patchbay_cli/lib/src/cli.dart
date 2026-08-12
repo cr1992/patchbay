@@ -5,6 +5,7 @@ import 'package:args/args.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
+import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'result.dart';
@@ -23,6 +24,10 @@ Future<int> runPatchbayCli(List<String> arguments) async {
 
   PatchbayClient? connection;
   try {
+    if (_helpTopic(parsed) case final List<String> topic) {
+      stdout.write(PatchbayCommandHelp.render(parser, topic));
+      return PatchbayExitCode.accepted;
+    }
     _validateGlobalShape(parsed);
     if (parsed.rest.isEmpty) throw const FormatException(_usage);
     connection = await _connect(parsed);
@@ -92,6 +97,12 @@ Future<int> runPatchbayCli(List<String> arguments) async {
 }
 
 ArgParser patchbayCliParser() => ArgParser()
+  ..addFlag(
+    'help',
+    abbr: 'h',
+    negatable: false,
+    help: 'Show root, group, or command help without connecting to an App.',
+  )
   ..addOption('ws-uri', help: 'VM Service http(s) or ws(s) URI.')
   ..addOption('session', help: 'Select one discovered Patchbay session ID.')
   ..addOption(
@@ -108,10 +119,18 @@ ArgParser patchbayCliParser() => ArgParser()
     defaultsTo: false,
     help: 'Read the direct bearer token from no-echo stdin.',
   )
-  ..addOption('direct-application-id')
-  ..addOption('direct-app-instance-id')
-  ..addOption('direct-schema-version', defaultsTo: '1')
-  ..addOption('transport-timeout-ms', defaultsTo: '60000')
+  ..addOption('direct-application-id', help: 'Expected direct App identity.')
+  ..addOption('direct-app-instance-id', help: 'Expected direct App instance.')
+  ..addOption(
+    'direct-schema-version',
+    defaultsTo: '1',
+    help: 'Expected direct protocol schema version.',
+  )
+  ..addOption(
+    'transport-timeout-ms',
+    defaultsTo: '60000',
+    help: 'Direct transport timeout in milliseconds.',
+  )
   ..addOption('args', help: 'JSON object passed to a domain command.')
   ..addFlag(
     'stdin',
@@ -124,19 +143,30 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Wait for a returned jobId to reach a terminal event.',
   )
   ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
-  ..addOption('revision')
-  ..addOption('timeout-ms')
-  ..addOption('cursor')
-  ..addOption('direction', allowed: const <String>['forward', 'backward'])
-  ..addOption('limit')
+  ..addOption('revision', help: 'Observed navigation revision.')
+  ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
+  ..addOption('cursor', help: 'Opaque structured-log cursor.')
+  ..addOption(
+    'direction',
+    allowed: const <String>['forward', 'backward'],
+    help: 'Structured-log traversal direction.',
+  )
+  ..addOption('limit', help: 'Maximum number of log records.')
   ..addOption('levels', help: 'Comma-separated log levels.')
   ..addOption('categories', help: 'Comma-separated log categories.')
   ..addOption('since', help: 'ISO-8601 lower log time bound.')
   ..addOption('until', help: 'ISO-8601 upper log time bound.')
-  ..addOption('ttl-ms')
-  ..addOption('pixel-ratio')
-  ..addOption('output')
+  ..addOption('ttl-ms', help: 'Artifact lifetime in milliseconds.')
+  ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
+  ..addOption('output', help: 'Local artifact output path.')
   ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.');
+
+List<String>? _helpTopic(ArgResults parsed) {
+  final List<String> words = parsed.rest;
+  if (words case ['help', ...final List<String> topic]) return topic;
+  if (parsed.flag('help')) return words;
+  return null;
+}
 
 void _validateGlobalShape(ArgResults parsed) {
   final bool direct = parsed.option('direct-endpoint') != null;

@@ -3,6 +3,7 @@ library;
 export 'src/client.dart';
 export 'src/artifact_download.dart';
 export 'src/cli.dart';
+export 'src/command_help.dart';
 export 'src/command_registry.dart';
 export 'src/direct_connection.dart';
 export 'src/result.dart';

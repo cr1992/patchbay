@@ -8,6 +8,16 @@
 
 ## 当前命令
 
+帮助由 CLI parser 与 `PatchbayFriendlyCommand` 声明生成，不维护第二份手写 friendly 命令清单；
+查看帮助不会发现会话、连接 App 或读取 bearer/敏感 stdin：
+
+```text
+dart run bin/patchbay.dart --help
+dart run bin/patchbay.dart help
+dart run bin/patchbay.dart help navigation
+dart run bin/patchbay.dart logs --help
+```
+
 由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：
 
 ```text
