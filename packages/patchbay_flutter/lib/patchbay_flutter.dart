@@ -5,4 +5,6 @@ export 'package:patchbay/patchbay.dart';
 
 export 'src/flutter_bridge.dart';
 export 'src/flutter_service_host.dart';
+export 'src/navigation_bridge.dart';
 export 'src/semantics_bridge.dart';
+export 'src/ui_wait_bridge.dart';

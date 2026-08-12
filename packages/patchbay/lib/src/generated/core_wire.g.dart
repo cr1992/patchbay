@@ -160,6 +160,51 @@ enum PatchbaySensitivePolicyWire {
   String toJson() => name;
 }
 
+enum PatchbayNavigationOperationWire {
+  go,
+  push,
+  back;
+
+  static PatchbayNavigationOperationWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayNavigationOperationWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayUiWaitConditionWire {
+  semanticsMounted,
+  semanticsUnmounted,
+  semanticsValue,
+  navigationDestination,
+  treeRevision,
+  frameRevision;
+
+  static PatchbayUiWaitConditionWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayUiWaitConditionWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
 final class PatchbayParameterDescriptorWire {
   const PatchbayParameterDescriptorWire({
     required this.name,
@@ -902,6 +947,409 @@ final class PatchbaySemanticsSnapshotWire {
     'truncated': truncated,
     'nodeCount': nodeCount,
     'nodes': nodes.map((item) => item.toJson()).toList(growable: false),
+  };
+}
+
+final class PatchbayDestinationDescriptorWire {
+  const PatchbayDestinationDescriptorWire({
+    required this.id,
+    required this.summary,
+    required this.operations,
+    required this.gates,
+    required this.ambiguous,
+  });
+
+  final String id;
+  final String? summary;
+  final List<PatchbayNavigationOperationWire> operations;
+  final List<String> gates;
+  final bool ambiguous;
+
+  factory PatchbayDestinationDescriptorWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'id',
+      'summary',
+      'operations',
+      'gates',
+      'ambiguous',
+    }, path);
+    return PatchbayDestinationDescriptorWire(
+      id: _wireString(json['id'], '$path.id'),
+      summary: json['summary'] == null
+          ? null
+          : _wireString(json['summary'], '$path.summary'),
+      operations: _wireList(json['operations'], '$path.operations')
+          .map(
+            (item) => PatchbayNavigationOperationWire.fromJson(
+              item,
+              path: '$path.operations[]',
+            ),
+          )
+          .toList(growable: false),
+      gates: _wireList(json['gates'], '$path.gates')
+          .map((item) => _wireString(item, '$path.gates[]'))
+          .toList(growable: false),
+      ambiguous: _wireBool(json['ambiguous'], '$path.ambiguous'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    if (summary != null) 'summary': summary!,
+    'operations': operations
+        .map((item) => item.toJson())
+        .toList(growable: false),
+    'gates': gates.map((item) => item).toList(growable: false),
+    'ambiguous': ambiguous,
+  };
+}
+
+final class PatchbayNavigationCatalogWire {
+  const PatchbayNavigationCatalogWire({
+    required this.outcome,
+    required this.source,
+    required this.navigationRevision,
+    required this.destinations,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final int navigationRevision;
+  final List<PatchbayDestinationDescriptorWire> destinations;
+
+  factory PatchbayNavigationCatalogWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'navigationRevision',
+      'destinations',
+    }, path);
+    return PatchbayNavigationCatalogWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      navigationRevision: _wireInt(
+        json['navigationRevision'],
+        '$path.navigationRevision',
+      ),
+      destinations: _wireList(json['destinations'], '$path.destinations')
+          .map(
+            (item) => PatchbayDestinationDescriptorWire.fromJson(
+              _wireMap(item, '$path.destinations[]'),
+              path: '$path.destinations[]',
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'navigationRevision': navigationRevision,
+    'destinations': destinations
+        .map((item) => item.toJson())
+        .toList(growable: false),
+  };
+}
+
+final class PatchbayNavigationCurrentWire {
+  const PatchbayNavigationCurrentWire({
+    required this.outcome,
+    required this.source,
+    required this.navigationRevision,
+    required this.destinationId,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final int navigationRevision;
+  final String? destinationId;
+
+  factory PatchbayNavigationCurrentWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'navigationRevision',
+      'destinationId',
+    }, path);
+    return PatchbayNavigationCurrentWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      navigationRevision: _wireInt(
+        json['navigationRevision'],
+        '$path.navigationRevision',
+      ),
+      destinationId: json['destinationId'] == null
+          ? null
+          : _wireString(json['destinationId'], '$path.destinationId'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'navigationRevision': navigationRevision,
+    'destinationId': destinationId == null ? null : destinationId!,
+  };
+}
+
+final class PatchbayNavigationResultWire {
+  const PatchbayNavigationResultWire({
+    required this.outcome,
+    required this.source,
+    required this.operation,
+    required this.requestedDestinationId,
+    required this.destinationId,
+    required this.beforeNavigationRevision,
+    required this.afterNavigationRevision,
+    required this.frameRevision,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final PatchbayNavigationOperationWire operation;
+  final String? requestedDestinationId;
+  final String destinationId;
+  final int beforeNavigationRevision;
+  final int afterNavigationRevision;
+  final int frameRevision;
+
+  factory PatchbayNavigationResultWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'operation',
+      'requestedDestinationId',
+      'destinationId',
+      'beforeNavigationRevision',
+      'afterNavigationRevision',
+      'frameRevision',
+    }, path);
+    return PatchbayNavigationResultWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      operation: PatchbayNavigationOperationWire.fromJson(
+        json['operation'],
+        path: '$path.operation',
+      ),
+      requestedDestinationId: json['requestedDestinationId'] == null
+          ? null
+          : _wireString(
+              json['requestedDestinationId'],
+              '$path.requestedDestinationId',
+            ),
+      destinationId: _wireString(json['destinationId'], '$path.destinationId'),
+      beforeNavigationRevision: _wireInt(
+        json['beforeNavigationRevision'],
+        '$path.beforeNavigationRevision',
+      ),
+      afterNavigationRevision: _wireInt(
+        json['afterNavigationRevision'],
+        '$path.afterNavigationRevision',
+      ),
+      frameRevision: _wireInt(json['frameRevision'], '$path.frameRevision'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'operation': operation.toJson(),
+    'requestedDestinationId': requestedDestinationId == null
+        ? null
+        : requestedDestinationId!,
+    'destinationId': destinationId,
+    'beforeNavigationRevision': beforeNavigationRevision,
+    'afterNavigationRevision': afterNavigationRevision,
+    'frameRevision': frameRevision,
+  };
+}
+
+final class PatchbayUiWaitRequestWire {
+  const PatchbayUiWaitRequestWire({
+    required this.condition,
+    required this.timeoutMs,
+    required this.semanticsIdentifier,
+    required this.value,
+    required this.destinationId,
+    required this.revision,
+  });
+
+  final PatchbayUiWaitConditionWire condition;
+  final int timeoutMs;
+  final String? semanticsIdentifier;
+  final String? value;
+  final String? destinationId;
+  final int? revision;
+
+  factory PatchbayUiWaitRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'condition',
+      'timeoutMs',
+      'semanticsIdentifier',
+      'value',
+      'destinationId',
+      'revision',
+    }, path);
+    return PatchbayUiWaitRequestWire(
+      condition: PatchbayUiWaitConditionWire.fromJson(
+        json['condition'],
+        path: '$path.condition',
+      ),
+      timeoutMs: _wireInt(json['timeoutMs'], '$path.timeoutMs'),
+      semanticsIdentifier: json['semanticsIdentifier'] == null
+          ? null
+          : _wireString(
+              json['semanticsIdentifier'],
+              '$path.semanticsIdentifier',
+            ),
+      value: json['value'] == null
+          ? null
+          : _wireString(json['value'], '$path.value'),
+      destinationId: json['destinationId'] == null
+          ? null
+          : _wireString(json['destinationId'], '$path.destinationId'),
+      revision: json['revision'] == null
+          ? null
+          : _wireInt(json['revision'], '$path.revision'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'condition': condition.toJson(),
+    'timeoutMs': timeoutMs,
+    if (semanticsIdentifier != null)
+      'semanticsIdentifier': semanticsIdentifier!,
+    if (value != null) 'value': value!,
+    if (destinationId != null) 'destinationId': destinationId!,
+    if (revision != null) 'revision': revision!,
+  };
+}
+
+final class PatchbayUiWaitResultWire {
+  const PatchbayUiWaitResultWire({
+    required this.outcome,
+    required this.source,
+    required this.condition,
+    required this.elapsedMs,
+    required this.semanticsIdentifier,
+    required this.nodeId,
+    required this.generation,
+    required this.value,
+    required this.destinationId,
+    required this.navigationRevision,
+    required this.treeRevision,
+    required this.frameRevision,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final PatchbayUiWaitConditionWire condition;
+  final int elapsedMs;
+  final String? semanticsIdentifier;
+  final int? nodeId;
+  final int? generation;
+  final String? value;
+  final String? destinationId;
+  final int? navigationRevision;
+  final int? treeRevision;
+  final int frameRevision;
+
+  factory PatchbayUiWaitResultWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'condition',
+      'elapsedMs',
+      'semanticsIdentifier',
+      'nodeId',
+      'generation',
+      'value',
+      'destinationId',
+      'navigationRevision',
+      'treeRevision',
+      'frameRevision',
+    }, path);
+    return PatchbayUiWaitResultWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      condition: PatchbayUiWaitConditionWire.fromJson(
+        json['condition'],
+        path: '$path.condition',
+      ),
+      elapsedMs: _wireInt(json['elapsedMs'], '$path.elapsedMs'),
+      semanticsIdentifier: json['semanticsIdentifier'] == null
+          ? null
+          : _wireString(
+              json['semanticsIdentifier'],
+              '$path.semanticsIdentifier',
+            ),
+      nodeId: json['nodeId'] == null
+          ? null
+          : _wireInt(json['nodeId'], '$path.nodeId'),
+      generation: json['generation'] == null
+          ? null
+          : _wireInt(json['generation'], '$path.generation'),
+      value: json['value'] == null
+          ? null
+          : _wireString(json['value'], '$path.value'),
+      destinationId: json['destinationId'] == null
+          ? null
+          : _wireString(json['destinationId'], '$path.destinationId'),
+      navigationRevision: json['navigationRevision'] == null
+          ? null
+          : _wireInt(json['navigationRevision'], '$path.navigationRevision'),
+      treeRevision: json['treeRevision'] == null
+          ? null
+          : _wireInt(json['treeRevision'], '$path.treeRevision'),
+      frameRevision: _wireInt(json['frameRevision'], '$path.frameRevision'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'condition': condition.toJson(),
+    'elapsedMs': elapsedMs,
+    if (semanticsIdentifier != null)
+      'semanticsIdentifier': semanticsIdentifier!,
+    if (nodeId != null) 'nodeId': nodeId!,
+    if (generation != null) 'generation': generation!,
+    if (value != null) 'value': value!,
+    if (destinationId != null) 'destinationId': destinationId!,
+    if (navigationRevision != null) 'navigationRevision': navigationRevision!,
+    if (treeRevision != null) 'treeRevision': treeRevision!,
+    'frameRevision': frameRevision,
   };
 }
 

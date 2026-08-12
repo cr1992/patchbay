@@ -30,6 +30,8 @@ Flutter 控制面的接入与语义导航设计见
 - `accepted` / `rejected` invocation 信封；
 - App 内 job registry、单调事件序号、取消和终态快照；
 - Flutter 文本 target、规范化 Semantics 树与 policy-gated 标准 action；
+- consumer-neutral destination catalog/current/go/push/back 与类型化导航结果；
+- 有界 `ui.wait` 条件 DTO（Semantics、destination、tree/frame revision）；
 - VM Service client 和 Flutter Widget/Render/Focus 诊断 extension 代理。
 
 下列能力仍属于设计方向，不是当前公共 API：
@@ -37,7 +39,7 @@ Flutter 控制面的接入与语义导航设计见
 - 自动会话发现和 stale session 文件清理；
 - 不依赖 VM Service 端口转发的局域网/反向 WebSocket 传输；
 - 结构化日志 query/tail/watch/export；
-- Flutter 语义导航、wait 和 capture。
+- Flutter capture。
 
 ## 架构
 

@@ -6,7 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
+import 'frame_observer.dart';
+import 'navigation_bridge.dart';
 import 'semantics_bridge.dart';
+import 'ui_wait_bridge.dart';
 
 /// A target key whose GlobalKey semantics stay identical in every build mode.
 ///
@@ -188,25 +191,54 @@ final class PatchbayFlutterBridge {
     required PatchbayGateEvaluator gates,
     PatchbayUiRegistry? registry,
     PatchbaySemanticsActionPolicy? semanticsActionPolicy,
+    PatchbayNavigationAdapter? navigationAdapter,
     bool Function()? isAppResumed,
     String Function()? newRequestId,
   }) : _gates = gates,
        _registry = registry ?? PatchbayUiRegistry.instance,
        _newRequestId = newRequestId ?? _defaultRequestId,
-       semantics = PatchbaySemanticsBridge(
-         gates: gates,
-         actionPolicy: semanticsActionPolicy,
-         isAppResumed: isAppResumed,
-         newRequestId: newRequestId,
-       );
+       _isAppResumed = isAppResumed ?? _defaultIsAppResumed,
+       _frames = PatchbayFrameObserver() {
+    semantics = PatchbaySemanticsBridge(
+      gates: gates,
+      actionPolicy: semanticsActionPolicy,
+      isAppResumed: _isAppResumed,
+      newRequestId: newRequestId,
+    );
+    navigation = navigationAdapter == null
+        ? null
+        : PatchbayNavigationBridge(
+            gates: gates,
+            adapter: navigationAdapter,
+            frames: _frames,
+            isAppResumed: _isAppResumed,
+            newRequestId: newRequestId,
+          );
+    wait = PatchbayUiWaitBridge(
+      gates: gates,
+      semantics: semantics,
+      frames: _frames,
+      isAppResumed: _isAppResumed,
+      navigation: navigation,
+      newRequestId: newRequestId,
+    );
+  }
 
   final PatchbayGateEvaluator _gates;
   final PatchbayUiRegistry _registry;
   final String Function() _newRequestId;
-  final PatchbaySemanticsBridge semantics;
+  final bool Function() _isAppResumed;
+  final PatchbayFrameObserver _frames;
+  late final PatchbaySemanticsBridge semantics;
+  late final PatchbayNavigationBridge? navigation;
+  late final PatchbayUiWaitBridge wait;
 
   static int _nextRequest = 0;
   static String _defaultRequestId() => 'patchbay-ui-${++_nextRequest}';
+  static bool _defaultIsAppResumed() =>
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+
+  int get frameRevision => _frames.revision;
 
   List<PatchbayUiTargetDescriptor> catalog() => _registry.catalog();
 
@@ -356,6 +388,8 @@ final class PatchbayFlutterBridge {
       details: resolution.details,
     ),
   );
+
+  void dispose() => semantics.dispose();
 }
 
 final class _TextBinding {

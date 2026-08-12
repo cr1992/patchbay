@@ -18,8 +18,12 @@
 - 无容器的规范化 Semantics 树、节点 generation、节点上限和 obscured value 脱敏；
 - consumer policy 默认拒绝的标准 Semantics action：tap、focus、scroll、setText 等；
 - App lifecycle resumed 门和 gate await 后二次节点解析。
+- composition-root `PatchbayNavigationAdapter`、destination catalog/current/go/push/back；
+- navigation revision、串行化、redirect/timeout/background/stale 类型化拒绝和 observer + 下一帧确认；
+- `ui.wait` 的 Semantics identifier mounted/unmounted/value、navigation destination、Semantics tree
+  revision 与 Patchbay-observed frame revision 条件。
 
-当前尚未实现 `PatchbayRoot`、语义导航、wait、capture 和日志面。Widget/Render/Focus 诊断树由
+当前尚未实现 `PatchbayRoot`、capture 和日志面。Widget/Render/Focus 诊断树由
 `patchbay_cli` 直接代理 Flutter 运行时 extension，不经过本包复制协议。
 
 Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的契约
@@ -116,7 +120,7 @@ root bridge 只负责确实需要根渲染上下文的截图与帧调度。它�
 根截图只证明 Flutter 合成树在该帧产生了这些像素。`PlatformView`、texture、系统弹窗和其他 App
 可能不在图像中，capture 必须返回 capability warning，不能冒充完整物理屏幕截图。
 
-## 语义导航（规划）
+## 语义导航（已实现）
 
 导航不应通过给首页、设置按钮加 Key 后模拟点击完成。推荐在 App 组合根注入一个 consumer adapter，
 协议只暴露稳定 destination ID：
@@ -133,13 +137,21 @@ navigation.back
 dialog。差异只存在于 consumer adapter，通用 CLI 不认识路径和页面实现。
 
 ```dart
-// 设计示例，不是当前公共 API。
-PatchbayDestination(
-  id: 'settings',
-  gateIds: <String>{'debug.navigation'},
-  navigate: () => shellController.select(settingsTab),
-  observe: () => shellController.current == settingsTab,
-)
+final navigation = PatchbayNavigationAdapter(
+  destinations: () => <PatchbayNavigationDestination>[
+    PatchbayNavigationDestination(
+      id: 'settings',
+      gateIds: <String>{'debug.navigation'},
+      go: () => shellController.select(settingsTab),
+      push: () => router.pushNamed('settings'),
+    ),
+  ],
+  current: () => PatchbayNavigationObservation(
+    revision: navigationRevision,
+    destinationId: settledDestinationId,
+  ),
+  back: router.pop,
+);
 ```
 
 低侵入约束：
@@ -156,7 +168,29 @@ PatchbayDestination(
 导航命令串行化并携带 navigation revision，避免迟到的 `back`/`go` 操作新的页面栈。需要声明
 “页面已展示”的操作应要求 App lifecycle 为 `resumed`；后台或熄屏时最多报告路由状态变化。
 
-## 后续标准 operator
+`navigation.catalog` 和 `navigation.current` 是只读命令。`go`、`push`、`back` 必须携带调用方刚观察到的
+`revision`，可选 `timeoutMs` 默认 5000。consumer callback 返回只代表请求已交给既有 router/controller；
+bridge 继续观察 settled destination，并在下一帧复核后才返回 `outcome=arrived`、`source=uiObserved`。
+
+consumer observer 必须只发布已经 settled 的 destination，并在 settled destination 变化时单调增加
+revision。请求被业务 guard 改写到其他 settled destination 时返回 `navigationRedirected`；此外稳定拒绝码
+包括 `navigationTimeout`、`navigationLifecycleNotResumed`、`navigationRevisionStale`、
+`navigationDestinationAmbiguous`。gate 发生 await 后会重新解析 destination callback、歧义和 revision。
+
+## ui.wait（已实现）
+
+`ui.wait` 是无副作用、有明确 `timeoutMs` 的长轮询调用，不把“开始等待”包装成完成。当前条件为：
+
+- `semanticsMounted` / `semanticsUnmounted` / `semanticsValue`：只接受稳定、非空的 Semantics
+  `identifier`，重复 identifier 返回 `uiSemanticsTargetAmbiguous`，obscured value 不可读取；
+- `navigationDestination`：等待 cataloged destination，可选要求 navigation revision 必须前进；
+- `treeRevision` / `frameRevision`：等待 revision 严格大于调用方基线。
+
+成功结果统一为 `outcome=observed`、`source=uiObserved`，并返回该次可直接观测到的 revision/节点事实；
+超时统一返回 `uiWaitTimeout` 和明确的 timeout/当前 revision 摘要。App 不在 resumed 时返回
+`uiWaitLifecycleNotResumed`。
+
+## 标准 operator 状态
 
 新增 operator 时只使用公开 Flutter API，并由 runtime catalog 决定目标实际支持什么：
 
@@ -165,7 +199,7 @@ PatchbayDestination(
 | `focus` | 唯一可聚焦目标 | 不可聚焦或歧义即拒绝 |
 | `action.invoke` | 唯一公开 Semantics/Actions 动作 | 不退化到 label、类型或坐标猜测 |
 | `scroll` | 唯一 ScrollableState | 返回操作前后 ScrollMetrics |
-| `wait` | mounted/value/semantics/frame 条件 | 超时返回稳定 rejection |
+| `wait`（已实现） | Semantics identifier、destination、tree/frame revision | 超时与歧义返回稳定 rejection |
 | `capture` | root 或唯一 target RenderObject | 返回 warning、blob metadata 和 sha256 |
 
 普通 `ValueKey`、Widget 文案、runtime type 和 Element 路径可以出现在只读摘要中，但不会自动成为稳定

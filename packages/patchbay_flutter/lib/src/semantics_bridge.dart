@@ -69,6 +69,34 @@ final class PatchbaySemanticsTarget {
   final bool obscured;
 }
 
+/// One currently attached node selected by a stable Semantics identifier.
+final class PatchbaySemanticsIdentifierMatch {
+  const PatchbaySemanticsIdentifierMatch({
+    required this.nodeId,
+    required this.generation,
+    required this.value,
+    required this.obscured,
+    required this.invisible,
+  });
+
+  final int nodeId;
+  final int generation;
+  final String value;
+  final bool obscured;
+  final bool invisible;
+}
+
+/// Current result of resolving a Semantics identifier.
+final class PatchbaySemanticsIdentifierObservation {
+  const PatchbaySemanticsIdentifierObservation({
+    required this.treeRevision,
+    required this.matches,
+  });
+
+  final int treeRevision;
+  final List<PatchbaySemanticsIdentifierMatch> matches;
+}
+
 /// Consumer-owned decision for one currently observed semantics action.
 final class PatchbaySemanticsActionDecision {
   const PatchbaySemanticsActionDecision.allow({
@@ -132,6 +160,48 @@ final class PatchbaySemanticsBridge {
   static String _defaultRequestId() => 'patchbay-semantics-${++_nextRequest}';
 
   bool get actionsEnabled => _actionPolicy != null;
+
+  /// Resolves a stable Semantics identifier without using labels or paths.
+  Future<PatchbaySemanticsIdentifierObservation?> observeIdentifier(
+    String identifier,
+  ) async {
+    final SemanticsOwner? owner = await _ensureOwner();
+    final SemanticsNode? root = owner?.rootSemanticsNode;
+    if (root == null) return null;
+    final List<PatchbaySemanticsIdentifierMatch> matches =
+        <PatchbaySemanticsIdentifierMatch>[];
+
+    void visit(SemanticsNode node) {
+      final SemanticsData data = node.getSemanticsData();
+      if (data.identifier == identifier) {
+        final _SemanticsEntry entry = _observe(node);
+        matches.add(
+          PatchbaySemanticsIdentifierMatch(
+            nodeId: node.id,
+            generation: entry.generation,
+            value: data.value,
+            obscured: data.flagsCollection.isObscured,
+            invisible: node.isInvisible,
+          ),
+        );
+      }
+      node.visitChildren((SemanticsNode child) {
+        visit(child);
+        return true;
+      });
+    }
+
+    visit(root);
+    return PatchbaySemanticsIdentifierObservation(
+      treeRevision: _treeRevision,
+      matches: List<PatchbaySemanticsIdentifierMatch>.unmodifiable(matches),
+    );
+  }
+
+  Future<int?> observeTreeRevision() async {
+    final SemanticsOwner? owner = await _ensureOwner();
+    return owner?.rootSemanticsNode == null ? null : _treeRevision;
+  }
 
   Future<PatchbayInvocation> snapshot({
     int maxDepth = 64,

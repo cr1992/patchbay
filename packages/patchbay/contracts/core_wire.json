@@ -48,6 +48,23 @@
       "values": ["public", "redacted"]
     },
     {
+      "kind": "enum",
+      "name": "PatchbayNavigationOperationWire",
+      "values": ["go", "push", "back"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayUiWaitConditionWire",
+      "values": [
+        "semanticsMounted",
+        "semanticsUnmounted",
+        "semanticsValue",
+        "navigationDestination",
+        "treeRevision",
+        "frameRevision"
+      ]
+    },
+    {
       "kind": "object",
       "name": "PatchbayParameterDescriptorWire",
       "fields": [
@@ -193,6 +210,81 @@
         {"name": "truncated", "type": "bool"},
         {"name": "nodeCount", "type": "int"},
         {"name": "nodes", "type": "PatchbaySemanticsNodeWire", "list": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayDestinationDescriptorWire",
+      "fields": [
+        {"name": "id", "type": "String"},
+        {"name": "summary", "type": "String", "nullable": true},
+        {"name": "operations", "type": "PatchbayNavigationOperationWire", "list": true},
+        {"name": "gates", "type": "String", "list": true},
+        {"name": "ambiguous", "type": "bool"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayNavigationCatalogWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "navigationRevision", "type": "int"},
+        {"name": "destinations", "type": "PatchbayDestinationDescriptorWire", "list": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayNavigationCurrentWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "navigationRevision", "type": "int"},
+        {"name": "destinationId", "type": "String", "nullable": true, "emitNull": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayNavigationResultWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "operation", "type": "PatchbayNavigationOperationWire"},
+        {"name": "requestedDestinationId", "type": "String", "nullable": true, "emitNull": true},
+        {"name": "destinationId", "type": "String"},
+        {"name": "beforeNavigationRevision", "type": "int"},
+        {"name": "afterNavigationRevision", "type": "int"},
+        {"name": "frameRevision", "type": "int"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayUiWaitRequestWire",
+      "fields": [
+        {"name": "condition", "type": "PatchbayUiWaitConditionWire"},
+        {"name": "timeoutMs", "type": "int"},
+        {"name": "semanticsIdentifier", "type": "String", "nullable": true},
+        {"name": "value", "type": "String", "nullable": true},
+        {"name": "destinationId", "type": "String", "nullable": true},
+        {"name": "revision", "type": "int", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayUiWaitResultWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "condition", "type": "PatchbayUiWaitConditionWire"},
+        {"name": "elapsedMs", "type": "int"},
+        {"name": "semanticsIdentifier", "type": "String", "nullable": true},
+        {"name": "nodeId", "type": "int", "nullable": true},
+        {"name": "generation", "type": "int", "nullable": true},
+        {"name": "value", "type": "String", "nullable": true},
+        {"name": "destinationId", "type": "String", "nullable": true},
+        {"name": "navigationRevision", "type": "int", "nullable": true},
+        {"name": "treeRevision", "type": "int", "nullable": true},
+        {"name": "frameRevision", "type": "int"}
       ]
     }
   ]

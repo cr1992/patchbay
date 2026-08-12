@@ -151,6 +151,15 @@ Patchbay 不另建状态机，也不绕过它。
 navigation adapter 仍只在 composition root 接一次，复用 consumer 既有 router/controller；它不能成为
 获取 Widget/Semantics 树的前置条件。
 
+当前已实现的 adapter 只登记 destination ID、允许的 go/push callback、gate 与 settled observation；
+back callback 由 adapter 顶层提供。所有写导航携带 revision 并串行化，gate await 后重新解析。callback
+返回后还要由 observer 确认 destination 并等待下一帧，才能声明 `uiObserved`；redirect、timeout、后台和
+stale revision 均以稳定 rejection 收尾。
+
+`ui.wait` 当前支持稳定 Semantics identifier 的 mounted/unmounted/value、navigation destination、tree
+revision 与 frame revision。它不使用 label、Widget path 或坐标作为身份；重复 identifier fail-closed，
+obscured value 不读取，每次调用必须显式给出 timeout。
+
 ## Release 与平台边界
 
 - release 不启动 Patchbay host，不持有 SemanticsHandle，不注册 action policy；
@@ -192,7 +201,7 @@ navigation adapter 仍只在 composition root 接一次，复用 consumer 既有
 
 ### D. 稳定导航与等待
 
-- 有真实需求后再实现 destination catalog/current/go/back 与 `ui.wait`；
-- observer、revision、redirect、后台化和超时语义通过测试；
+- destination catalog/current/go/push/back 与 `ui.wait` 已实现；
+- observer、revision、串行化、redirect、歧义、后台化和超时语义已有 unit/widget 覆盖；
 - 不倒灌为 A/B/C 的前置条件。
-- 真机至少完成一次 destination 到达与一次超时/redirect 反向路径。
+- 真机仍须至少完成一次 destination 到达与一次超时/redirect 反向路径，完成前不宣称 v0.2d 退出。

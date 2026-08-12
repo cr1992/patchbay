@@ -26,6 +26,7 @@ final class PatchbayFlutterServiceHost {
                for (final PatchbayCommandDescriptor descriptor
                    in _uiCommandDescriptors(
                      semanticsActionsEnabled: bridge.semantics.actionsEnabled,
+                     navigationEnabled: bridge.navigation != null,
                    ))
                  descriptor.toJson(),
                ...?domain['commands'] as List<Object?>?,
@@ -42,7 +43,9 @@ final class PatchbayFlutterServiceHost {
                command == 'ui.text.set' ||
                command == 'ui.text.enter' ||
                command == 'ui.semantics.tree' ||
-               command == 'ui.semantics.action';
+               command == 'ui.semantics.action' ||
+               command == 'ui.wait' ||
+               command.startsWith('navigation.');
            if (!uiCommand) {
              if (domainInvoke != null) {
                return domainInvoke(command, arguments, requestId);
@@ -103,6 +106,88 @@ final class PatchbayFlutterServiceHost {
                inputWasStdin: arguments['inputWasStdin'] == true,
              )).toJson();
            }
+           if (command == 'ui.wait') {
+             final PatchbayUiWaitRequest request;
+             try {
+               request = PatchbayUiWaitRequest.fromWire(
+                 PatchbayUiWaitRequestWire.fromJson(arguments),
+               );
+             } on Object {
+               return _invalidUiArguments(requestId);
+             }
+             return (await bridge.wait.wait(
+               request,
+               requestId: requestId,
+             )).toJson();
+           }
+           if (command.startsWith('navigation.')) {
+             final navigation = bridge.navigation;
+             if (navigation == null) {
+               return PatchbayInvocation.rejected(
+                 requestId: requestId,
+                 rejection: const PatchbayRejection(
+                   code: 'commandNotRegistered',
+                 ),
+               ).toJson();
+             }
+             if (command == 'navigation.catalog') {
+               if (arguments.isNotEmpty) return _invalidUiArguments(requestId);
+               return (await navigation.catalog(requestId: requestId)).toJson();
+             }
+             if (command == 'navigation.current') {
+               if (arguments.isNotEmpty) return _invalidUiArguments(requestId);
+               return (await navigation.current(requestId: requestId)).toJson();
+             }
+             final Object? revision = arguments['revision'];
+             final Object? timeoutMs = arguments['timeoutMs'];
+             if (revision is! int ||
+                 timeoutMs != null && timeoutMs is! int ||
+                 arguments.keys.any(
+                   (String key) =>
+                       key != 'destinationId' &&
+                       key != 'revision' &&
+                       key != 'timeoutMs',
+                 )) {
+               return _invalidUiArguments(requestId);
+             }
+             final Duration timeout = Duration(
+               milliseconds: timeoutMs as int? ?? 5000,
+             );
+             if (command == 'navigation.back') {
+               if (arguments.containsKey('destinationId')) {
+                 return _invalidUiArguments(requestId);
+               }
+               return (await navigation.back(
+                 revision: revision,
+                 timeout: timeout,
+                 requestId: requestId,
+               )).toJson();
+             }
+             final Object? destinationId = arguments['destinationId'];
+             if (destinationId is! String) {
+               return _invalidUiArguments(requestId);
+             }
+             if (command == 'navigation.go') {
+               return (await navigation.go(
+                 destinationId: destinationId,
+                 revision: revision,
+                 timeout: timeout,
+                 requestId: requestId,
+               )).toJson();
+             }
+             if (command == 'navigation.push') {
+               return (await navigation.push(
+                 destinationId: destinationId,
+                 revision: revision,
+                 timeout: timeout,
+                 requestId: requestId,
+               )).toJson();
+             }
+             return PatchbayInvocation.rejected(
+               requestId: requestId,
+               rejection: const PatchbayRejection(code: 'commandNotRegistered'),
+             ).toJson();
+           }
            final Object? id = arguments['id'];
            final Object? generation = arguments['generation'];
            final Object? text = arguments['text'];
@@ -141,8 +226,15 @@ final class PatchbayFlutterServiceHost {
 
   void register() => _host.register();
 
+  static Map<String, Object?> _invalidUiArguments(String requestId) =>
+      PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'invalidUiArguments'),
+      ).toJson();
+
   static List<PatchbayCommandDescriptor> _uiCommandDescriptors({
     required bool semanticsActionsEnabled,
+    required bool navigationEnabled,
   }) => <PatchbayCommandDescriptor>[
     const PatchbayCommandDescriptor(
       name: 'ui.text.set',
@@ -253,5 +345,115 @@ final class PatchbayFlutterServiceHost {
           ),
         ],
       ),
+    const PatchbayCommandDescriptor(
+      name: 'ui.wait',
+      summary: 'Wait for one bounded Flutter observation condition.',
+      plane: PatchbayPlane.flutterUi,
+      mode: PatchbayCommandMode.readOnly,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'condition',
+          type: PatchbayParameterType.enumeration,
+          required: true,
+          allowedValues: <String>[
+            'semanticsMounted',
+            'semanticsUnmounted',
+            'semanticsValue',
+            'navigationDestination',
+            'treeRevision',
+            'frameRevision',
+          ],
+        ),
+        PatchbayParameterDescriptor(
+          name: 'timeoutMs',
+          type: PatchbayParameterType.integer,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'semanticsIdentifier',
+          type: PatchbayParameterType.string,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'value',
+          type: PatchbayParameterType.string,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'destinationId',
+          type: PatchbayParameterType.string,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'revision',
+          type: PatchbayParameterType.integer,
+        ),
+      ],
+    ),
+    if (navigationEnabled) ...<PatchbayCommandDescriptor>[
+      const PatchbayCommandDescriptor(
+        name: 'navigation.catalog',
+        summary: 'Read the consumer destination catalog.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.readOnly,
+        sideEffect: PatchbaySideEffect.none,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      ),
+      const PatchbayCommandDescriptor(
+        name: 'navigation.current',
+        summary: 'Read the current settled consumer destination.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.readOnly,
+        sideEffect: PatchbaySideEffect.none,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      ),
+      for (final String operation in <String>['go', 'push'])
+        PatchbayCommandDescriptor(
+          name: 'navigation.$operation',
+          summary: '$operation to a cataloged consumer destination.',
+          plane: PatchbayPlane.flutterUi,
+          mode: PatchbayCommandMode.immediate,
+          sideEffect: PatchbaySideEffect.appState,
+          factSources: const <PatchbayFactSource>{
+            PatchbayFactSource.uiObserved,
+          },
+          parameters: const <PatchbayParameterDescriptor>[
+            PatchbayParameterDescriptor(
+              name: 'destinationId',
+              type: PatchbayParameterType.string,
+              required: true,
+            ),
+            PatchbayParameterDescriptor(
+              name: 'revision',
+              type: PatchbayParameterType.integer,
+              required: true,
+            ),
+            PatchbayParameterDescriptor(
+              name: 'timeoutMs',
+              type: PatchbayParameterType.integer,
+              defaultValue: 5000,
+            ),
+          ],
+        ),
+      const PatchbayCommandDescriptor(
+        name: 'navigation.back',
+        summary: 'Navigate back through the consumer adapter.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.immediate,
+        sideEffect: PatchbaySideEffect.appState,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+        parameters: <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'revision',
+            type: PatchbayParameterType.integer,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'timeoutMs',
+            type: PatchbayParameterType.integer,
+            defaultValue: 5000,
+          ),
+        ],
+      ),
+    ],
   ];
 }
