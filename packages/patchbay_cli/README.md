@@ -21,6 +21,11 @@ dart run bin/patchbay.dart --ws-uri <uri> --json job get <job-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json job cancel <job-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json ui text set <target-id> <generation> <text>
 dart run bin/patchbay.dart --ws-uri <uri> --json ui text enter <target-id> <generation> <text>
+dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics tree
+dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics action <node-id> <generation> <action>
+dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
+dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
+dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
 ```
 
 完整命令名是协议身份。consumer 可以在自己的工具入口提供薄别名，但通用 parser、输出、退出码和
@@ -70,10 +75,13 @@ JSON 输出保留事实来源、rejection code、job event sequence 和 capabili
 
 ## 后续方向
 
+Widget/Render/Focus 命令是 Flutter SDK 诊断 extension 的只读代理。输出带
+`schema=flutterSdkPassthrough`，字段随 Flutter SDK 变化；profile 中对应 extension 不存在时稳定返回
+`flutterDiagnosticUnavailable`。稳定自动化应消费 `ui semantics tree` 的 Patchbay schema。
+
 下列能力尚未实现：
 
 - 安全会话发现、identity 复核和 stale session 清理；
-- Widget/Render/Focus 诊断树代理、规范化 Semantics 树与标准 action；
 - 语义导航、wait 与 Flutter capture 命令；
 - consumer 注册的结构化 App 日志 query/tail/watch/export；
 - 不依赖 VM Service 端口转发的独立调试传输。

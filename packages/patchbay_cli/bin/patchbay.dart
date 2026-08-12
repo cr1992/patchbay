@@ -76,6 +76,35 @@ Future<void> main(List<String> arguments) async {
             'inputWasStdin': parsed.flag('stdin'),
           },
         ),
+      ['ui', 'semantics', 'tree'] => await connection.invoke(
+        command: 'ui.semantics.tree',
+        arguments: _domainArguments(parsed),
+      ),
+      ['ui', 'widget-tree'] => await connection.widgetTree(),
+      ['ui', 'render-tree'] => await connection.renderTree(),
+      ['ui', 'focus-tree'] => await connection.focusTree(),
+      [
+        'ui',
+        'semantics',
+        'action',
+        final String nodeId,
+        final String generation,
+        final String action,
+        ...final List<String> words,
+      ] =>
+        await connection.invoke(
+          command: 'ui.semantics.action',
+          arguments: <String, Object?>{
+            'nodeId': int.parse(nodeId),
+            'generation': int.parse(generation),
+            'action': action,
+            if (action == 'setText')
+              'text': parsed.flag('stdin')
+                  ? (stdin.readLineSync() ?? '')
+                  : words.join(' '),
+            'inputWasStdin': parsed.flag('stdin'),
+          },
+        ),
       _ => throw const FormatException('unknown command'),
     };
     final Map<String, Object?> output = parsed.flag('wait')

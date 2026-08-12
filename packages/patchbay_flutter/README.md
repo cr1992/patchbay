@@ -19,7 +19,8 @@
 - consumer policy 默认拒绝的标准 Semantics action：tap、focus、scroll、setText 等；
 - App lifecycle resumed 门和 gate await 后二次节点解析。
 
-当前尚未实现 `PatchbayRoot`、语义导航、wait、capture、Widget/Render/Focus 诊断代理和日志面。
+当前尚未实现 `PatchbayRoot`、语义导航、wait、capture 和日志面。Widget/Render/Focus 诊断树由
+`patchbay_cli` 直接代理 Flutter 运行时 extension，不经过本包复制协议。
 
 Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的下一轮实施
 契约见 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。该文档明确树驱动 action

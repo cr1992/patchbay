@@ -112,6 +112,71 @@ void main() {
           ], workingDirectory: Directory.current.path);
       expect(failedJob.exitCode, PatchbayExitCode.typedFailure);
 
+      final ProcessResult semanticsTree =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            'ui',
+            'semantics',
+            'tree',
+          ], workingDirectory: Directory.current.path);
+      expect(
+        semanticsTree.exitCode,
+        0,
+        reason: semanticsTree.stderr.toString(),
+      );
+      expect(
+        ((jsonDecode(semanticsTree.stdout.toString())
+                as Map<String, Object?>)['payload']!
+            as Map<String, Object?>)['outcome'],
+        'observed',
+      );
+
+      final ProcessResult semanticsTap =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            'ui',
+            'semantics',
+            'action',
+            '42',
+            '7',
+            'tap',
+          ], workingDirectory: Directory.current.path);
+      expect(semanticsTap.exitCode, 0, reason: semanticsTap.stderr.toString());
+      final Map<String, Object?> tapPayload =
+          (jsonDecode(semanticsTap.stdout.toString())
+                  as Map<String, Object?>)['payload']!
+              as Map<String, Object?>;
+      expect(tapPayload['outcome'], 'dispatched');
+      expect((tapPayload['arguments']! as Map<String, Object?>)['nodeId'], 42);
+
+      final ProcessResult unavailableFlutterTree =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            'ui',
+            'widget-tree',
+          ], workingDirectory: Directory.current.path);
+      expect(
+        unavailableFlutterTree.exitCode,
+        PatchbayExitCode.protocol,
+        reason: unavailableFlutterTree.stderr.toString(),
+      );
+      expect(
+        unavailableFlutterTree.stderr.toString(),
+        contains('flutterDiagnosticUnavailable'),
+      );
+
       final Map<String, Object?> invocation = await connection.invoke(
         command: 'device.list',
         arguments: const <String, Object?>{},

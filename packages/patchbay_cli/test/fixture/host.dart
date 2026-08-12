@@ -24,6 +24,22 @@ void main() {
                 requestId: requestId,
                 jobId: 'fixture-job',
               ).toJson(),
+              'ui.semantics.tree' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'outcome': 'observed',
+                  'source': 'uiObserved',
+                  'nodes': <Object?>[],
+                },
+              ).toJson(),
+              'ui.semantics.action' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'dispatched',
+                  'source': 'uiObserved',
+                  'arguments': args,
+                },
+              ).toJson(),
               'patchbay.job.get' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: const <String, Object?>{

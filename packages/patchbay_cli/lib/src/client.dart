@@ -11,10 +11,19 @@ final class PatchbayProtocolException implements Exception {
 }
 
 final class PatchbayConnection {
-  PatchbayConnection._(this._service, this.isolateId);
+  PatchbayConnection._(this._service, this.isolateId, this._extensionRPCs);
 
   final VmService _service;
   final String isolateId;
+  final Set<String> _extensionRPCs;
+
+  static const String _inspectorTreeExtension =
+      'ext.flutter.inspector.getRootWidgetTree';
+  static const String _inspectorDisposeGroupExtension =
+      'ext.flutter.inspector.disposeGroup';
+  static const String _widgetDumpExtension = 'ext.flutter.debugDumpApp';
+  static const String _renderDumpExtension = 'ext.flutter.debugDumpRenderTree';
+  static const String _focusDumpExtension = 'ext.flutter.debugDumpFocusTree';
 
   static Future<PatchbayConnection> connect(Uri serviceUri) async {
     final VmService service = await vmServiceConnectUri(
@@ -34,6 +43,7 @@ final class PatchbayConnection {
             final PatchbayConnection connection = PatchbayConnection._(
               service,
               id,
+              Set<String>.of(detail.extensionRPCs ?? const <String>[]),
             );
             final Map<String, Object?> identity = await connection.identity();
             if (identity['schemaVersion'] !=
@@ -62,6 +72,52 @@ final class PatchbayConnection {
 
   Future<Map<String, Object?>> snapshot() =>
       _call(PatchbayServiceHost.snapshotMethod);
+
+  /// Reads Flutter's own diagnostic extensions without translating their
+  /// SDK-specific schema into the stable Patchbay protocol.
+  Future<Map<String, Object?>> widgetTree() async {
+    if (await _supportsExtension(_inspectorTreeExtension)) {
+      final String group =
+          'patchbay-cli-${DateTime.now().microsecondsSinceEpoch}';
+      try {
+        final Map<String, Object?> response = await _callRaw(
+          _inspectorTreeExtension,
+          arguments: <String, Object?>{
+            'groupName': group,
+            'isSummaryTree': 'true',
+            'withPreviews': 'true',
+            'fullDetails': 'true',
+          },
+        );
+        return _diagnosticEnvelope(
+          extension: _inspectorTreeExtension,
+          format: 'flutterInspectorJson',
+          data: response['result'],
+        );
+      } finally {
+        if (await _supportsExtension(_inspectorDisposeGroupExtension)) {
+          await _callRaw(
+            _inspectorDisposeGroupExtension,
+            arguments: <String, Object?>{'objectGroup': group},
+          );
+        }
+      }
+    }
+    return _textDiagnostic(
+      extension: _widgetDumpExtension,
+      format: 'flutterWidgetDumpText',
+    );
+  }
+
+  Future<Map<String, Object?>> renderTree() => _textDiagnostic(
+    extension: _renderDumpExtension,
+    format: 'flutterRenderDumpText',
+  );
+
+  Future<Map<String, Object?>> focusTree() => _textDiagnostic(
+    extension: _focusDumpExtension,
+    format: 'flutterFocusDumpText',
+  );
 
   Future<Map<String, Object?>> invoke({
     required String command,
@@ -92,6 +148,60 @@ final class PatchbayConnection {
     }
     return Map<String, Object?>.from(json);
   }
+
+  Future<Map<String, Object?>> _textDiagnostic({
+    required String extension,
+    required String format,
+  }) async {
+    if (!await _supportsExtension(extension)) {
+      throw const PatchbayProtocolException('flutterDiagnosticUnavailable');
+    }
+    final Map<String, Object?> response = await _callRaw(extension);
+    return _diagnosticEnvelope(
+      extension: extension,
+      format: format,
+      data: response['data'],
+    );
+  }
+
+  Future<bool> _supportsExtension(String method) async {
+    if (_extensionRPCs.contains(method)) return true;
+    final Isolate isolate = await _service.getIsolate(isolateId);
+    _extensionRPCs
+      ..clear()
+      ..addAll(isolate.extensionRPCs ?? const <String>[]);
+    return _extensionRPCs.contains(method);
+  }
+
+  Future<Map<String, Object?>> _callRaw(
+    String method, {
+    Map<String, Object?>? arguments,
+  }) async {
+    final Response response = await _service.callServiceExtension(
+      method,
+      isolateId: isolateId,
+      args: arguments,
+    );
+    final Map<String, dynamic>? json = response.json;
+    if (json == null) throw StateError('$method returned no JSON object');
+    return Map<String, Object?>.from(json);
+  }
+
+  static Map<String, Object?> _diagnosticEnvelope({
+    required String extension,
+    required String format,
+    required Object? data,
+  }) => <String, Object?>{
+    'source': PatchbayFactSource.uiObserved.name,
+    'plane': 'flutterDiagnostic',
+    'schema': 'flutterSdkPassthrough',
+    'extension': extension,
+    'format': format,
+    'data': data,
+    'warnings': const <String>[
+      'Flutter diagnostic fields may change with the Flutter SDK.',
+    ],
+  };
 
   Future<void> close() => _service.dispose();
 

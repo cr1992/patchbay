@@ -30,7 +30,7 @@ Flutter 控制面的接入与语义导航设计见
 - `accepted` / `rejected` invocation 信封；
 - App 内 job registry、单调事件序号、取消和终态快照；
 - Flutter 文本 target、规范化 Semantics 树与 policy-gated 标准 action；
-- VM Service client。
+- VM Service client 和 Flutter Widget/Render/Focus 诊断 extension 代理。
 
 下列能力仍属于设计方向，不是当前公共 API：
 
