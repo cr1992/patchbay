@@ -49,6 +49,9 @@ stdin 传入，并显式使用 `--stdin`；输出只保留 redacted 元数据。
 - `job get` 读取当前快照；
 - `job cancel` 请求取消，但取消结果仍以 App 返回的 job 状态为准。
 
+`--wait` 默认最多等待 60 秒。超时表示 App 已受理但在观察窗口内没有终态，归为类型化操作失败
+（退出码 `6`），不是连接失败。
+
 JSON 输出保留事实来源、rejection code、job event sequence 和 capability warning。CLI 不把这些字段
 升级解释为设备执行成功、像素正确或系统 UI 已操作。
 
@@ -58,7 +61,9 @@ JSON 输出保留事实来源、rejection code、job event sequence 和 capabili
 |---|---|
 | `0` | 请求完成，或 App 返回了可解析的非错误结果 |
 | `3` | 连接、传输或 VM Service RPC 失败 |
+| `4` | schema/identity 不兼容，或目录中没有该命令 |
 | `5` | App adapter 或 Flutter bridge 拒绝受理 |
+| `6` | 已受理的 operation 返回 `outcome=failed`、job 失败/取消，或等待终态超时 |
 | `64` | 命令格式、参数或本地输入不合法 |
 
 调用方应同时读取 JSON 信封；退出码不承载设备完成性。

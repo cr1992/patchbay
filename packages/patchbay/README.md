@@ -106,6 +106,11 @@ payload 中的观测值应使用以下来源词汇：
 
 consumer 可以增加领域内的细分字段，但不能把较弱来源升级成较强结论。
 
+`source` 采用层级继承：对象上的来源适用于其未另行标注的后代；更深层字段可以用自己的 `source`
+覆盖。例如整个 snapshot 可标为 `appRecorded`，其中一条状态读回再明确标为 `deviceReported`。这样每个
+叶子都有可解析来源，同时避免把每个标量包装成 `{value, source}`。descriptor 的 `factSources` 只是
+可能来源的闭集，实际 payload 上的 `source` 才是该次结果的事实。
+
 ## Descriptor
 
 `PatchbayCommandDescriptor` 是 CLI 帮助、参数校验和副作用提示的唯一来源，至少描述：
@@ -116,6 +121,7 @@ consumer 可以增加领域内的细分字段，但不能把较弱来源升级�
 - consumer gate ID 集合；
 - `none`、`appState` 或 `external` side-effect；
 - 敏感参数策略。
+- 结果中允许出现的 `factSources` 集合。
 
 consumer 可注册任意 namespace，例如 `cache.refresh` 或 `session.connect`。通用包不预留设备、配网、
 呼叫或其他业务 namespace，也不在 CLI 维护第二份命令表。
@@ -183,3 +189,38 @@ descriptor、operator 和 consumer callback 的可达引用。
 - UI 观测、领域状态和外部设备结果分别标明来源，不能互相反推。
 
 一个 consumer 的品牌入口可以转发到通用 CLI，但不得 fork parser、协议或 catalog。
+
+## 交付阶段与退出条件
+
+阶段表是依赖闸，不是功能数量承诺。某个 consumer 可以在同一 worktree 连续实现多个批次，但不得用
+后续代码量替代前置证据；当前实现范围仍以本文开头的“当前实现”为准。
+
+| 阶段 | 内容 | 退出条件 |
+|---|---|---|
+| v0.1a | 显式 URI 下的 identity、catalog、snapshot 和 schema/instance 校验 | 至少一个 iOS profile 真机会话跑通 extension 纵切；未跑通不得扩展 consumer 命令目录 |
+| v0.1b | launcher machine protocol、会话文件、stale 与多会话选择 | 分片 machine 事件、原子写入、PID/wsUri/identity 三类 stale 判据和 URI 脱敏测试通过 |
+| v0.2a | 可选 Flutter root bridge、Render/Semantics 摘要与 capture | 不接 root 时 host 不受影响；接一次 root 后完成 blob hash/TTL 与合成能力 warning 验证 |
+| v0.2b | 单 Key 控制面、文本、焦点、动作、滚动与等待 | 重复 ID、stale generation、敏感值、三模式 Key/State 等价性及 UI/领域门隔离通过 |
+| v0.3a | consumer runtime 所有权和类型化 invocation facade | 页面与 adapter 复用同一 controller/并发账本，生命周期和迟到 continuation 回归通过 |
+| v0.3b | consumer 领域命令与 job | permit 单一所有权，失败/取消/撤回/generation 失效终态可测，真机完成一条无外部副作用纵切 |
+| v0.4 | 结构化事件与日志；生成型 descriptor | tail 无敏感字段，生成真源全量映射，新增条目无需手改通用 CLI |
+| v0.5 | 评估迁入共享仓 | 两个真实 consumer、连续兼容批次、consumer adapter 留在各 App，且发布维护者明确 |
+
+## 风险登记
+
+| 风险 | 必须保留的处置 |
+|---|---|
+| iOS profile 的 service extension 行为 | v0.1a 首个 spike 验证；未跑通不扩 consumer 命令集 |
+| hot restart 后 extension、isolate 与实例漂移 | 每次连接重做 schema、isolate、`appInstanceId` 校验，不复用旧 identity |
+| DevTools 与 CLI 多客户端共存 | 使用 DDS 暴露的 URI；真机纵切同时打开 DevTools 验证互不抢占 |
+| 多设备或多 worktree 会话混淆 | 会话记录携带 workspace/device/instance 身份；歧义时要求显式选择 |
+| VM Service URI 含认证信息 | 最小权限存储、普通输出脱敏、进程退出清理 |
+| 大量 GlobalKey 影响重建 | 只标明确需要控制的目标；根观察不要求 Key；标准 harness 保留性能基线 |
+| Flutter operator 随 SDK 漂移 | 只用公开 API，catalog 取运行时能力，每次 Flutter 升级跑 operator 契约测试 |
+| capture 漏掉 PlatformView、texture 或系统 UI | 返回 capability warning，不把 Flutter PNG 宣称为完整物理屏幕 |
+| Semantics 合并、offstage 或 ID 重复 | 只接受唯一且声明支持的动作；歧义时 fail-closed，不退化到 label 或坐标 |
+| build mode 间 Key 种类漂移 | 所有模式保持同一种 GlobalKey 和 State 语义，release 只裁登记与 operator |
+| UI 调试门绕过领域门 | descriptor 是 consumer gate 唯一真源；可能产生领域副作用的 UI action 显式声明强门 |
+| registry、operator 或 callback 残留 release | AOT 做 extension/descriptor/operator/callback 引用扫描，并验证 root 只透传 child |
+| 命令产生外部副作用 | descriptor 明示 side-effect；真机写操作遵守 consumer 的设备占用、备份与恢复纪律 |
+| release 没有 VM Service | 明确非目标，不建立隐式降级或运行时后门 |
