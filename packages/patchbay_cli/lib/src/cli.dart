@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:patchbay/patchbay.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
@@ -467,19 +468,29 @@ Future<Map<String, Object?>> _waitForJob(
     );
     if (response['admission'] == 'rejected') return response;
     final Object? payload = response['payload'];
-    if (payload is Map<Object?, Object?>) {
-      final Object? events = payload['events'];
-      if (events is List<Object?>) {
-        for (final Object? event in events) {
-          if (event is Map<Object?, Object?> && event['sequence'] is int) {
-            final int sequence = event['sequence']! as int;
-            if (sequence > afterSequence) afterSequence = sequence;
-          }
-        }
-      }
-      if (payload['terminal'] == true) {
-        return <String, Object?>{...response, 'waitMode': 'serverLongPoll'};
-      }
+    if (payload is! Map<Object?, Object?>) {
+      throw const PatchbayProtocolException('jobWaitPayloadContractViolated');
+    }
+    final PatchbayJobWaitResultWire result;
+    try {
+      result = PatchbayJobWaitResultWire.fromJson(
+        Map<String, Object?>.from(payload),
+      );
+    } on Object {
+      throw const PatchbayProtocolException('jobWaitPayloadContractViolated');
+    }
+    for (final PatchbayJobEventWire event in result.snapshot.events) {
+      if (event.sequence > afterSequence) afterSequence = event.sequence;
+    }
+    if (result.snapshot.terminal) {
+      return <String, Object?>{
+        ...response,
+        'payload': <String, Object?>{
+          ...result.snapshot.toJson(),
+          'waitOutcome': result.outcome.toJson(),
+        },
+        'waitMode': 'serverLongPoll',
+      };
     }
   }
   throw PatchbayJobWaitTimeout(jobIdValue);

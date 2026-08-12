@@ -209,11 +209,30 @@ void main() {
               'patchbay.job.wait' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: const <String, Object?>{
-                  'terminal': true,
-                  'events': <Object?>[
-                    <String, Object?>{'sequence': 1, 'phase': 'running'},
-                    <String, Object?>{'sequence': 2, 'phase': 'failed'},
-                  ],
+                  'outcome': 'changed',
+                  'snapshot': <String, Object?>{
+                    'jobId': 'job-1',
+                    'terminal': true,
+                    'events': <Object?>[
+                      <String, Object?>{
+                        'sequence': 1,
+                        'at': '2026-01-01T00:00:00Z',
+                        'phase': 'running',
+                        'source': 'appRecorded',
+                        'operation': 'fixture.failedJob',
+                        'payload': <String, Object?>{},
+                      },
+                      <String, Object?>{
+                        'sequence': 2,
+                        'at': '2026-01-01T00:00:01Z',
+                        'phase': 'failed',
+                        'source': 'appRecorded',
+                        'operation': 'fixture.failedJob',
+                        'payload': <String, Object?>{},
+                        'reason': 'fixtureFailure',
+                      },
+                    ],
+                  },
                 },
               ).toJson(),
               _ => PatchbayInvocation.rejected(
