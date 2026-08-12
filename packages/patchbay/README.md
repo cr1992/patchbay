@@ -199,8 +199,9 @@ descriptor、operator 和 consumer callback 的可达引用。
 |---|---|---|
 | v0.1a | 显式 URI 下的 identity、catalog、snapshot 和 schema/instance 校验 | 至少一个 iOS profile 真机会话跑通 extension 纵切；未跑通不得扩展 consumer 命令目录 |
 | v0.1b | launcher machine protocol、会话文件、stale 与多会话选择 | 分片 machine 事件、原子写入、PID/wsUri/identity 三类 stale 判据和 URI 脱敏测试通过 |
-| v0.2a | 可选 Flutter root bridge、Render/Semantics 摘要与 capture | 不接 root 时 host 不受影响；接一次 root 后完成 blob hash/TTL 与合成能力 warning 验证 |
-| v0.2b | 单 Key 控制面、文本、焦点、动作、滚动与等待 | 重复 ID、stale generation、敏感值、三模式 Key/State 等价性及 UI/领域门隔离通过 |
+| v0.2a | 无容器的 Widget/Render/Semantics 只读观察 | debug/profile 读取、节点上限、脱敏、generation 与 release 裁剪通过；不注入 action policy 时只读 |
+| v0.2b | 标准 Semantics action 与单 Key 增强 | tap/scroll/focus/setText、gate await 后二次解析、敏感值、三模式 Key/State 等价性及 UI/领域门隔离通过 |
+| v0.2c | DevTools 诊断代理、稳定导航与等待 | extension 运行时发现、object group 释放；destination observer/revision/redirect/超时语义按需独立退出 |
 | v0.3a | consumer runtime 所有权和类型化 invocation facade | 页面与 adapter 复用同一 controller/并发账本，生命周期和迟到 continuation 回归通过 |
 | v0.3b | consumer 领域命令与 job | permit 单一所有权，失败/取消/撤回/generation 失效终态可测，真机完成一条无外部副作用纵切 |
 | v0.4 | 结构化事件与日志；生成型 descriptor | tail 无敏感字段，生成真源全量映射，新增条目无需手改通用 CLI |
@@ -219,6 +220,8 @@ descriptor、operator 和 consumer callback 的可达引用。
 | Flutter operator 随 SDK 漂移 | 只用公开 API，catalog 取运行时能力，每次 Flutter 升级跑 operator 契约测试 |
 | capture 漏掉 PlatformView、texture 或系统 UI | 返回 capability warning，不把 Flutter PNG 宣称为完整物理屏幕 |
 | Semantics 合并、offstage 或 ID 重复 | 只接受唯一且声明支持的动作；歧义时 fail-closed，不退化到 label 或坐标 |
+| Widget Inspector schema 随 Flutter SDK 漂移 | 诊断代理标明 passthrough 与 SDK 版本；稳定自动化只消费 Patchbay 规范化 Semantics schema |
+| Semantics 快照泄露输入值 | `isObscured` 强制隐藏 value，consumer 可注入更严格脱敏；敏感 setText 只接受 stdin |
 | build mode 间 Key 种类漂移 | 所有模式保持同一种 GlobalKey 和 State 语义，release 只裁登记与 operator |
 | UI 调试门绕过领域门 | descriptor 是 consumer gate 唯一真源；可能产生领域副作用的 UI action 显式声明强门 |
 | registry、operator 或 callback 残留 release | AOT 做 extension/descriptor/operator/callback 引用扫描，并验证 root 只透传 child |

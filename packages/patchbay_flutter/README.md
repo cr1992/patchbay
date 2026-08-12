@@ -19,12 +19,17 @@
 当前尚未实现 `PatchbayRoot`、语义导航、tap、focus、scroll、wait、capture 和日志面。本文后半部分对
 这些能力的描述是兼容方向，不是现有 API 使用说明。
 
+Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的下一轮实施
+契约见 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。该文档明确树驱动 action
+是默认低侵入路径，语义导航只作稳定增强。
+
 ## 低侵入分级
 
 | 接入级别 | Consumer 改动 | 能力 |
 |---|---|---|
 | Host only | App 组合根启动 service host | identity、领域 catalog/snapshot/invoke；不承诺稳定 Widget 操作 |
-| Optional root bridge | App 最上层包一次 root bridge（规划） | 根 Render/Semantics 摘要、帧等待和 Flutter 合成树截图 |
+| Runtime observation | 只启动 Flutter host，不改 Widget 树（规划） | Widget/Render/Semantics 摘要和标准 Semantics action |
+| Optional root bridge | App 最上层包一次 root bridge（规划） | 根截图和确实需要根渲染上下文的帧协调 |
 | Single Key | 目标 Widget 的 `key` 换成 `PatchbayKey` | 该目标 catalog 明示的操作 |
 
 不要求页面继承基类，不要求逐页面容器，不要求给所有 Widget 标 Key，也不维护一份与 Widget 树重复的
@@ -81,6 +86,17 @@ registry 不因为 Key 对象存在就宣称目标已挂载：
 敏感 target 必须声明 `sensitive: true`。这类输入只接受 CLI stdin，catalog 和结果只返回长度及
 redacted 标记，不回显明文。
 
+## Runtime observation（规划）
+
+Widget 与 Semantics 树不要求 consumer 包一层 root。Flutter host 可以通过公开 binding、Inspector 和
+Semantics API 读取当前树；Semantics action 由 consumer 在 composition root 注入一次 policy，默认拒绝。
+
+标准组件已有 label、flags 与 action 时不需要 `PatchbayKey`。例如一个带 `button + label + tap` 的底部
+Tab 可以直接从 Semantics 快照发现并执行原 callback，完整复用 Widget 自身的退出与切换流程。
+
+详细协议、隐私边界和分批退出条件见
+[`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。
+
 ## Optional root bridge（规划）
 
 需要全局 Flutter 观察时，允许 consumer 在 `MaterialApp.builder` 最上层包一次 root bridge：
@@ -91,8 +107,8 @@ MaterialApp.router(
 )
 ```
 
-root bridge 只负责持有根 context、帧调度、根 RenderObject 和 SemanticsOwner。它不登记业务页面，
-不把所有后代自动变成可操作 target，也不在 release 改变布局。
+root bridge 只负责确实需要根渲染上下文的截图与帧调度。它不负责 Widget/Semantics 树发现，不登记
+业务页面，不把所有后代自动变成可操作 target，也不在 release 改变布局。
 
 根截图只证明 Flutter 合成树在该帧产生了这些像素。`PlatformView`、texture、系统弹窗和其他 App
 可能不在图像中，capture 必须返回 capability warning，不能冒充完整物理屏幕截图。

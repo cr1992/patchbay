@@ -73,8 +73,11 @@ JSON 输出保留事实来源、rejection code、job event sequence 和 capabili
 下列能力尚未实现：
 
 - 安全会话发现、identity 复核和 stale session 清理；
-- 语义导航、focus、action、scroll、wait 与 Flutter capture 命令；
+- Widget/Render/Focus 诊断树代理、规范化 Semantics 树与标准 action；
+- 语义导航、wait 与 Flutter capture 命令；
 - consumer 注册的结构化 App 日志 query/tail/watch/export；
 - 不依赖 VM Service 端口转发的独立调试传输。
 
 这些能力必须继续由运行时 catalog 声明。CLI 不通过 ADB、坐标点击或 Widget 文本猜测补齐缺失能力。
+三树与 action 的稳定命令、passthrough 边界和退出条件见
+[`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)。
