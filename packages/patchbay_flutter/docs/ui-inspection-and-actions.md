@@ -64,6 +64,9 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
 
 - `nodeId` 是 Flutter 当前 SemanticsOwner 内的瞬时 ID，不是跨挂载稳定身份；
 - bridge 按 `SemanticsNode` 对象身份维护单调 `generation`；同 ID 绑定新对象时 generation 增长；
+- 需要被稳定执行的 `identifier` 必须与目标 action 落在同一个 Semantics 节点；仅给按钮外层观察节点加
+  identifier 会形成“可定位但不可操作”的空 action 节点。低侵入 wrapper 应合并子节点语义并在同层
+  公开 label、role 与 callback，不能靠 CLI 猜它的可点击子节点；
 - action 必须携带最近快照返回的 `nodeId + generation`；
 - gate 中发生 await 后必须重新遍历当前树，复核对象身份、generation 和 action 仍可用；
 - label、runtime type、树路径与坐标只能查询，不能单独充当执行身份；
