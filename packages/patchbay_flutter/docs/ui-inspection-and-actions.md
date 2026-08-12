@@ -162,12 +162,17 @@ navigation adapter 仍只在 composition root 接一次，复用 consumer 既有
 
 ## 实施批次与退出条件
 
+以下每批除自动化测试外，都必须在真实 iPhone 或 Android 的 debug/profile App 上用通用 CLI 完成闭环。
+平台中性能力至少选一台真机；涉及平台差异或声称 Android/iOS 一致时两端都跑。只看到命令出现在 catalog、
+只连通 VM Service、或只在 widget test 中派发 action，都不算该能力完成。
+
 ### A. 只读观察
 
 - 规范化 Semantics 快照、节点上限、脱敏和 generation 完成；
 - debug/profile Widget harness 都能读取标准按钮、文本框、滚动区；
 - 不注入 action policy 时 catalog 不出现可执行语义 action；
 - release 引用扫描确认 observer、handle 和 callback 不可达。
+- 真机 CLI 能读取非空 Semantics tree，并与手机当前可见页面相互印证。
 
 ### B. 标准 action
 
@@ -175,6 +180,7 @@ navigation adapter 仍只在 composition root 接一次，复用 consumer 既有
 - gate await 后节点 remount、action 消失、重复/失效身份全部拒绝；
 - action 结果只声明 dispatched，不冒充页面或领域完成；
 - consumer 真实 Shell tab 通过 Semantics tap 切换，并复用其原 teardown 顺序。
+- 真机从 action 前树定位节点，执行后读取新 revision/目标页面；旧 generation 必须稳定拒绝。
 
 ### C. DevTools 诊断代理
 
@@ -182,9 +188,11 @@ navigation adapter 仍只在 composition root 接一次，复用 consumer 既有
 - profile 中扩展缺失稳定返回 unavailable；
 - object group 在读取后释放，连续调用不累计保活对象；
 - Flutter SDK schema 与 Patchbay 稳定 Semantics schema 在输出中明确区分。
+- 真机记录当前 build mode 下各诊断 extension 的真实可用性；空或 unavailable 不得包装成有效树。
 
 ### D. 稳定导航与等待
 
 - 有真实需求后再实现 destination catalog/current/go/back 与 `ui.wait`；
 - observer、revision、redirect、后台化和超时语义通过测试；
 - 不倒灌为 A/B/C 的前置条件。
+- 真机至少完成一次 destination 到达与一次超时/redirect 反向路径。

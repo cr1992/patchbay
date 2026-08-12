@@ -216,6 +216,16 @@ descriptor、operator 和 consumer callback 的可达引用。
 阶段表是依赖闸，不是功能数量承诺。某个 consumer 可以在同一 worktree 连续实现多个批次，但不得用
 后续代码量替代前置证据；当前实现范围仍以本文开头的“当前实现”为准。
 
+所有新增或改变的 CLI 能力还有一道共同退出门：必须在真实 iPhone 或 Android 上完成
+`启动 App → identity/catalog → CLI 调用 → 类型化结果/job 终态 → snapshot、UI tree 或外部读回` 闭环。
+单元测试、fake、桌面 Dart VM 和仅证明 RPC 可连都不能替代真机闭环。平台中性的 Flutter/领域能力每批
+至少一台真机；涉及原生平台、权限、transport、build mode 或宣称双端一致的能力，必须覆盖每个受影响
+平台。无法安全执行解绑、写 DP 等副作用时，该项保持“未真机验证”，不能用只读邻近能力代为销账。
+
+真机证据至少记录目标 commit、设备平台与 build mode、运行时 catalog 是否含目标命令、脱敏后的输入
+类别、admission/job 事件序列、最终事实来源和可独立观察的完成证据。敏感值、VM Service 认证 URI 与
+设备凭据不得进入记录。
+
 | 阶段 | 内容 | 退出条件 |
 |---|---|---|
 | v0.1a | 显式 URI 下的 identity、catalog、snapshot 和 schema/instance 校验 | 至少一个 iOS profile 真机会话跑通 extension 纵切；未跑通不得扩展 consumer 命令目录 |
@@ -225,7 +235,7 @@ descriptor、operator 和 consumer callback 的可达引用。
 | v0.2c | DevTools 诊断代理 | extension 运行时发现、object group 释放、passthrough schema 与 extension 不可用失败语义通过 |
 | v0.2d | 稳定导航与等待 | destination observer/revision/redirect/超时语义按需独立退出；不作为树驱动标准 action 的前置 |
 | v0.3a | consumer runtime 所有权和类型化 invocation facade | 页面与 adapter 复用同一 controller/并发账本，生命周期和迟到 continuation 回归通过 |
-| v0.3b | consumer 领域命令与 job | permit 单一所有权，失败/取消/撤回/generation 失效终态可测，真机完成一条无外部副作用纵切 |
+| v0.3b | consumer 领域命令与 job | permit 单一所有权，失败/取消/撤回/generation 失效终态可测，并按共同真机门逐项验证本批 CLI 能力 |
 | v0.4 | 结构化事件与日志；生成型 descriptor | tail 无敏感字段，生成真源全量映射，新增条目无需手改通用 CLI |
 | v0.5 | 评估迁入共享仓 | 两个真实 consumer、连续兼容批次、consumer adapter 留在各 App，且发布维护者明确 |
 
