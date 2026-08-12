@@ -62,6 +62,26 @@ final class PatchbayJobSnapshot {
     terminal: terminal,
     events: events.map((event) => event._toWire()).toList(growable: false),
   ).toJson();
+
+  PatchbayJobSnapshotWire _toWire() =>
+      PatchbayJobSnapshotWire.fromJson(toJson());
+}
+
+enum PatchbayJobWaitOutcome { changed, timedOut }
+
+final class PatchbayJobWaitResult {
+  const PatchbayJobWaitResult({required this.outcome, required this.snapshot});
+
+  final PatchbayJobWaitOutcome outcome;
+  final PatchbayJobSnapshot snapshot;
+
+  Map<String, Object?> toJson() => PatchbayJobWaitResultWire(
+    outcome: switch (outcome) {
+      PatchbayJobWaitOutcome.changed => PatchbayJobWaitOutcomeWire.changed,
+      PatchbayJobWaitOutcome.timedOut => PatchbayJobWaitOutcomeWire.timedOut,
+    },
+    snapshot: snapshot._toWire(),
+  ).toJson();
 }
 
 PatchbayFactSourceWire _factSourceWire(PatchbayFactSource value) =>
@@ -139,6 +159,73 @@ final class PatchbayJobRegistry {
       jobId: jobId,
       events: List<PatchbayJobEvent>.unmodifiable(record.events),
     );
+  }
+
+  /// Waits without polling for a terminal state or an event strictly after
+  /// [afterSequence]. A timeout is a typed result, while an unknown job stays
+  /// `null` so consumers can return `jobNotFound` honestly.
+  Future<PatchbayJobWaitResult?> waitForChange(
+    String jobId, {
+    required int afterSequence,
+    required Duration timeout,
+  }) async {
+    if (afterSequence < 0 || timeout <= Duration.zero) {
+      throw ArgumentError(
+        'afterSequence must be non-negative and timeout positive.',
+      );
+    }
+    final _PatchbayJobRecord? record = _records[jobId];
+    if (record == null) return null;
+    PatchbayJobSnapshot current() => PatchbayJobSnapshot(
+      jobId: jobId,
+      events: List<PatchbayJobEvent>.unmodifiable(record.events),
+    );
+    final PatchbayJobSnapshot initial = current();
+    final int latestSequence = initial.events.isEmpty
+        ? 0
+        : initial.events.last.sequence;
+    if (initial.terminal || latestSequence > afterSequence) {
+      return PatchbayJobWaitResult(
+        outcome: PatchbayJobWaitOutcome.changed,
+        snapshot: initial,
+      );
+    }
+
+    final Completer<void> waiter = Completer<void>();
+    record.waiters.add(waiter);
+    final PatchbayJobSnapshot afterRegistration = current();
+    final int sequenceAfterRegistration = afterRegistration.events.isEmpty
+        ? 0
+        : afterRegistration.events.last.sequence;
+    if (afterRegistration.terminal ||
+        sequenceAfterRegistration > afterSequence) {
+      record.waiters.remove(waiter);
+      return PatchbayJobWaitResult(
+        outcome: PatchbayJobWaitOutcome.changed,
+        snapshot: afterRegistration,
+      );
+    }
+    final Completer<bool> timedOut = Completer<bool>();
+    final Timer timer = Timer(timeout, () => timedOut.complete(false));
+    try {
+      final bool changed = await Future.any<bool>(<Future<bool>>[
+        waiter.future.then((_) => true),
+        timedOut.future,
+      ]);
+      final PatchbayJobSnapshot result = current();
+      final int resultSequence = result.events.isEmpty
+          ? 0
+          : result.events.last.sequence;
+      return PatchbayJobWaitResult(
+        outcome: changed || result.terminal || resultSequence > afterSequence
+            ? PatchbayJobWaitOutcome.changed
+            : PatchbayJobWaitOutcome.timedOut,
+        snapshot: result,
+      );
+    } finally {
+      timer.cancel();
+      record.waiters.remove(waiter);
+    }
   }
 
   Future<bool> cancel(String jobId, {String reason = 'cancelled'}) async {
@@ -235,6 +322,12 @@ final class PatchbayJobRegistry {
         reason: reason,
       ),
     );
+    for (final Completer<void> waiter in record.waiters.toList(
+      growable: false,
+    )) {
+      if (!waiter.isCompleted) waiter.complete();
+    }
+    record.waiters.clear();
   }
 
   static bool _terminal(_PatchbayJobRecord record) =>
@@ -248,4 +341,5 @@ final class _PatchbayJobRecord {
   final PatchbayJobCancellation? cancel;
   final String? operation;
   final List<PatchbayJobEvent> events = <PatchbayJobEvent>[];
+  final Set<Completer<void>> waiters = <Completer<void>>{};
 }

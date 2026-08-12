@@ -39,6 +39,11 @@
     },
     {
       "kind": "enum",
+      "name": "PatchbayJobWaitOutcomeWire",
+      "values": ["changed", "timedOut"]
+    },
+    {
+      "kind": "enum",
       "name": "PatchbayUiTargetKindWire",
       "values": ["text", "capture"]
     },
@@ -183,6 +188,14 @@
         {"name": "jobId", "type": "String"},
         {"name": "terminal", "type": "bool"},
         {"name": "events", "type": "PatchbayJobEventWire", "list": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayJobWaitResultWire",
+      "fields": [
+        {"name": "outcome", "type": "PatchbayJobWaitOutcomeWire"},
+        {"name": "snapshot", "type": "PatchbayJobSnapshotWire"}
       ]
     },
     {

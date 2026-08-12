@@ -123,6 +123,26 @@ enum PatchbayJobPhaseWire {
   String toJson() => name;
 }
 
+enum PatchbayJobWaitOutcomeWire {
+  changed,
+  timedOut;
+
+  static PatchbayJobWaitOutcomeWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayJobWaitOutcomeWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
 enum PatchbayUiTargetKindWire {
   text,
   capture;
@@ -741,6 +761,38 @@ final class PatchbayJobSnapshotWire {
     'jobId': jobId,
     'terminal': terminal,
     'events': events.map((item) => item.toJson()).toList(growable: false),
+  };
+}
+
+final class PatchbayJobWaitResultWire {
+  const PatchbayJobWaitResultWire({
+    required this.outcome,
+    required this.snapshot,
+  });
+
+  final PatchbayJobWaitOutcomeWire outcome;
+  final PatchbayJobSnapshotWire snapshot;
+
+  factory PatchbayJobWaitResultWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'outcome', 'snapshot'}, path);
+    return PatchbayJobWaitResultWire(
+      outcome: PatchbayJobWaitOutcomeWire.fromJson(
+        json['outcome'],
+        path: '$path.outcome',
+      ),
+      snapshot: PatchbayJobSnapshotWire.fromJson(
+        _wireMap(json['snapshot'], '$path.snapshot'),
+        path: '$path.snapshot',
+      ),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome.toJson(),
+    'snapshot': snapshot.toJson(),
   };
 }
 

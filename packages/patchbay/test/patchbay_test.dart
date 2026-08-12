@@ -292,4 +292,64 @@ void main() {
     expect(terminal.reason, 'pairingFailed');
     expect(terminal.payload['errorCode'], 'device.offline');
   });
+
+  test(
+    'job wait observes changes without polling and returns generated wire',
+    () async {
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+      final Completer<Map<String, Object?>> body =
+          Completer<Map<String, Object?>>();
+      final String jobId = jobs.start(
+        source: PatchbayFactSource.deviceReported,
+        operation: 'fixture.complete',
+        body: () => body.future,
+      );
+
+      final Future<PatchbayJobWaitResult?> waiting = jobs.waitForChange(
+        jobId,
+        afterSequence: 1,
+        timeout: const Duration(seconds: 1),
+      );
+      var completed = false;
+      waiting.then((_) => completed = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(completed, isFalse);
+
+      body.complete(const <String, Object?>{'deviceId': 'redacted-fixture'});
+      final PatchbayJobWaitResult result = (await waiting)!;
+      expect(result.outcome, PatchbayJobWaitOutcome.changed);
+      expect(result.snapshot.terminal, isTrue);
+      expect(
+        PatchbayJobWaitResultWire.fromJson(result.toJson()).outcome,
+        PatchbayJobWaitOutcomeWire.changed,
+      );
+    },
+  );
+
+  test('job wait distinguishes timeout and unknown job', () async {
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+    final Completer<Map<String, Object?>> body =
+        Completer<Map<String, Object?>>();
+    final String jobId = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => body.future,
+    );
+
+    final PatchbayJobWaitResult timedOut = (await jobs.waitForChange(
+      jobId,
+      afterSequence: 1,
+      timeout: const Duration(milliseconds: 1),
+    ))!;
+    expect(timedOut.outcome, PatchbayJobWaitOutcome.timedOut);
+    expect(timedOut.snapshot.terminal, isFalse);
+    expect(
+      await jobs.waitForChange(
+        'missing',
+        afterSequence: 0,
+        timeout: const Duration(milliseconds: 1),
+      ),
+      isNull,
+    );
+    body.complete(const <String, Object?>{});
+  });
 }
