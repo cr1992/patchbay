@@ -22,8 +22,8 @@
 当前尚未实现 `PatchbayRoot`、语义导航、wait、capture 和日志面。Widget/Render/Focus 诊断树由
 `patchbay_cli` 直接代理 Flutter 运行时 extension，不经过本包复制协议。
 
-Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的下一轮实施
-契约见 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。该文档明确树驱动 action
+Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的契约
+见 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。该文档明确树驱动 action
 是默认低侵入路径，语义导航只作稳定增强。
 
 ## 低侵入分级
@@ -31,7 +31,7 @@ Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 D
 | 接入级别 | Consumer 改动 | 能力 |
 |---|---|---|
 | Host only | App 组合根启动 service host | identity、领域 catalog/snapshot/invoke；不承诺稳定 Widget 操作 |
-| Runtime observation | 只启动 Flutter host，不改 Widget 树（规划） | Widget/Render/Semantics 摘要和标准 Semantics action |
+| Runtime observation | 只启动 Flutter host，不改 Widget 树（已实现） | Widget/Render/Semantics 摘要和标准 Semantics action |
 | Optional root bridge | App 最上层包一次 root bridge（规划） | 根截图和确实需要根渲染上下文的帧协调 |
 | Single Key | 目标 Widget 的 `key` 换成 `PatchbayKey` | 该目标 catalog 明示的操作 |
 
@@ -89,7 +89,7 @@ registry 不因为 Key 对象存在就宣称目标已挂载：
 敏感 target 必须声明 `sensitive: true`。这类输入只接受 CLI stdin，catalog 和结果只返回长度及
 redacted 标记，不回显明文。
 
-## Runtime observation（规划）
+## Runtime observation（已实现）
 
 Widget 与 Semantics 树不要求 consumer 包一层 root。Flutter host 可以通过公开 binding、Inspector 和
 Semantics API 读取当前树；Semantics action 由 consumer 在 composition root 注入一次 policy，默认拒绝。
