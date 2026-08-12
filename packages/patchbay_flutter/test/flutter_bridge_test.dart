@@ -297,6 +297,120 @@ void main() {
       bridge.semantics.dispose();
     });
 
+    testWidgets('late gate continuation cannot act after app is paused', (
+      tester,
+    ) async {
+      final Completer<PatchbayGateDecision> gate =
+          Completer<PatchbayGateDecision>();
+      var resumed = true;
+      var taps = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Semantics(
+            label: 'Pauseable',
+            button: true,
+            onTap: () => taps += 1,
+            child: const SizedBox(width: 20, height: 20),
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+        registry: PatchbayUiRegistry(),
+        gates: PatchbayGateEvaluator(
+          baseGate: () => const PatchbayGateDecision.allow(),
+          consumerGate: (_) => gate.future,
+        ),
+        semanticsActionPolicy: (_, _) =>
+            const PatchbaySemanticsActionDecision.allow(
+              gateIds: <String>{'ui.ready'},
+            ),
+        isAppResumed: () => resumed,
+      );
+      addTearDown(bridge.semantics.dispose);
+      final PatchbayInvocation tree = await _semanticsSnapshot(tester, bridge);
+      final Map<String, Object?> observed = _semanticsNodes(tree).singleWhere(
+        (Map<String, Object?> node) => node['label'] == 'Pauseable',
+      );
+      final Future<PatchbayInvocation> pending = bridge.semantics.invoke(
+        nodeId: observed['nodeId']! as int,
+        generation: observed['generation']! as int,
+        action: PatchbaySemanticsAction.tap,
+      );
+      await tester.pump();
+
+      resumed = false;
+      gate.complete(const PatchbayGateDecision.allow());
+      final PatchbayInvocation result = await _pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      expect(result.rejection?.code, 'uiLifecycleNotResumed');
+      expect(taps, 0);
+      bridge.semantics.dispose();
+    });
+
+    testWidgets('late sensitive transition still requires stdin', (
+      tester,
+    ) async {
+      final Completer<PatchbayGateDecision> gate =
+          Completer<PatchbayGateDecision>();
+      var obscured = false;
+      String? receivedText;
+      late StateSetter updateField;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              updateField = setState;
+              return Semantics(
+                label: 'Sensitive transition',
+                obscured: obscured,
+                onSetText: (String text) => receivedText = text,
+                child: const SizedBox(width: 20, height: 20),
+              );
+            },
+          ),
+        ),
+      );
+      final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+        registry: PatchbayUiRegistry(),
+        gates: PatchbayGateEvaluator(
+          baseGate: () => const PatchbayGateDecision.allow(),
+          consumerGate: (_) => gate.future,
+        ),
+        semanticsActionPolicy: (_, _) =>
+            const PatchbaySemanticsActionDecision.allow(
+              gateIds: <String>{'ui.ready'},
+            ),
+        isAppResumed: () => true,
+      );
+      addTearDown(bridge.semantics.dispose);
+      final PatchbayInvocation tree = await _semanticsSnapshot(tester, bridge);
+      final Map<String, Object?> observed = _semanticsNodes(tree).singleWhere(
+        (Map<String, Object?> node) => node['label'] == 'Sensitive transition',
+      );
+      final Future<PatchbayInvocation> pending = bridge.semantics.invoke(
+        nodeId: observed['nodeId']! as int,
+        generation: observed['generation']! as int,
+        action: PatchbaySemanticsAction.setText,
+        text: 'must-not-dispatch',
+      );
+      await tester.pump();
+
+      updateField(() => obscured = true);
+      await tester.pump();
+      gate.complete(const PatchbayGateDecision.allow());
+      final PatchbayInvocation result = await _pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      expect(result.rejection?.code, 'sensitiveInputRequiresStdin');
+      expect(receivedText, isNull);
+      bridge.semantics.dispose();
+    });
+
     testWidgets('obscured text never appears in the semantics payload', (
       tester,
     ) async {

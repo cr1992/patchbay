@@ -210,8 +210,7 @@ final class PatchbaySemanticsBridge {
     );
     if (!decision.allowed) return _policyRejected(requestId, decision);
     final Set<String> initialGateIds = Set<String>.of(decision.gateIds);
-    final bool sensitive =
-        resolution.target!.obscured || decision.sensitiveInput;
+    var sensitive = resolution.target!.obscured || decision.sensitiveInput;
     final bool initialSensitiveInput = decision.sensitiveInput;
     if (action == PatchbaySemanticsAction.setText) {
       if (text == null) {
@@ -237,6 +236,12 @@ final class PatchbaySemanticsBridge {
 
     final PatchbayGateRejection? gate = await _gates.evaluate(decision.gateIds);
     if (gate != null) return _gateRejected(requestId, gate);
+    if (!_isAppResumed()) {
+      return PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
+      );
+    }
 
     // Both a gate and the consumer policy may observe mutable state. Resolve
     // and decide again so a late continuation cannot target a replacement.
@@ -253,6 +258,15 @@ final class PatchbaySemanticsBridge {
       return PatchbayInvocation.rejected(
         requestId: requestId,
         rejection: const PatchbayRejection(code: 'uiSemanticsPolicyChanged'),
+      );
+    }
+    sensitive = sensitive || resolution.target!.obscured;
+    if (action == PatchbaySemanticsAction.setText &&
+        sensitive &&
+        !inputWasStdin) {
+      return PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'sensitiveInputRequiresStdin'),
       );
     }
 
