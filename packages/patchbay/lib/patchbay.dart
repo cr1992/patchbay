@@ -3,4 +3,5 @@ library;
 
 export 'src/gates.dart';
 export 'src/invocation.dart';
+export 'src/service_host.dart';
 export 'src/ui_descriptor.dart';

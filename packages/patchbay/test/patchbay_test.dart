@@ -1,7 +1,50 @@
+import 'dart:convert';
+import 'dart:developer';
+
 import 'package:patchbay/patchbay.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('service host registers fixed RPCs and serves identity', () async {
+    final Map<String, ServiceExtensionHandler> handlers =
+        <String, ServiceExtensionHandler>{};
+    final PatchbayServiceHost host = PatchbayServiceHost(
+      applicationId: 'dev.patchbay.test',
+      appInstanceId: 'instance-1',
+      registrar: (String method, ServiceExtensionHandler handler) {
+        handlers[method] = handler;
+      },
+      catalog: () async => <String, Object?>{'commands': const <Object?>[]},
+      invoke: (command, arguments, requestId) async =>
+          PatchbayInvocation.rejected(
+            requestId: requestId,
+            rejection: PatchbayRejection(
+              code: 'notRegistered',
+              details: <String, Object?>{
+                'command': command,
+                'argumentCount': arguments.length,
+              },
+            ),
+          ).toJson(),
+    )..register();
+    host.register();
+
+    expect(handlers.keys, <String>{
+      PatchbayServiceHost.identityMethod,
+      PatchbayServiceHost.catalogMethod,
+      PatchbayServiceHost.invokeMethod,
+    });
+    final ServiceExtensionResponse response =
+        await handlers[PatchbayServiceHost.identityMethod]!(
+          PatchbayServiceHost.identityMethod,
+          const <String, String>{},
+        );
+    expect(
+      jsonDecode(response.result!),
+      containsPair('appInstanceId', 'instance-1'),
+    );
+  });
+
   group('Patchbay invocation envelope', () {
     test('expresses admission without completion-like outer fields', () {
       final Map<String, Object?> json = PatchbayInvocation.accepted(
