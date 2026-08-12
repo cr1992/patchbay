@@ -4,6 +4,12 @@ import 'package:patchbay/patchbay.dart';
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
+final class PatchbayProtocolException implements Exception {
+  const PatchbayProtocolException(this.code);
+
+  final String code;
+}
+
 final class PatchbayConnection {
   PatchbayConnection._(this._service, this.isolateId);
 
@@ -34,7 +40,7 @@ final class PatchbayConnection {
                     PatchbayServiceHost.schemaVersion ||
                 identity['isolateId'] != id ||
                 identity['appInstanceId'] is! String) {
-              throw StateError('Patchbay identity validation failed');
+              throw const PatchbayProtocolException('identityValidationFailed');
             }
             return connection;
           }
@@ -81,6 +87,9 @@ final class PatchbayConnection {
     );
     final Map<String, dynamic>? json = response.json;
     if (json == null) throw StateError('$method returned no JSON object');
+    if (json['schemaVersion'] != PatchbayServiceHost.schemaVersion) {
+      throw const PatchbayProtocolException('schemaVersionMismatch');
+    }
     return Map<String, Object?>.from(json);
   }
 

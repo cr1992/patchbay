@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +8,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
 void main() {
+  test('service catalog declares UI command fact sources', () async {
+    final Map<String, ServiceExtensionHandler> handlers =
+        <String, ServiceExtensionHandler>{};
+    final PatchbayFlutterServiceHost host = PatchbayFlutterServiceHost(
+      applicationId: 'dev.patchbay.flutter.test',
+      bridge: _allowedBridge(PatchbayUiRegistry()),
+      registrar: (String method, ServiceExtensionHandler handler) {
+        handlers[method] = handler;
+      },
+    )..register();
+    expect(host.appInstanceId, isNotEmpty);
+
+    final ServiceExtensionResponse response =
+        await handlers[PatchbayServiceHost.catalogMethod]!(
+          PatchbayServiceHost.catalogMethod,
+          const <String, String>{},
+        );
+    final Map<String, Object?> catalog = Map<String, Object?>.from(
+      jsonDecode(response.result!) as Map<String, dynamic>,
+    );
+    final List<Object?> commands = catalog['commands']! as List<Object?>;
+    for (final Map<String, Object?> command
+        in commands.cast<Map<String, Object?>>()) {
+      expect(command['factSources'], <String>['uiObserved']);
+    }
+  });
+
   group('Patchbay text target', () {
     testWidgets('catalog exposes only mounted public-API operations', (
       tester,

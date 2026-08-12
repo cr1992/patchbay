@@ -16,7 +16,9 @@ void main() {
         handlers[method] = handler;
       },
       catalog: () async => <String, Object?>{'commands': const <Object?>[]},
-      snapshot: () async => <String, Object?>{'source': 'appRuntime'},
+      snapshot: () async => <String, Object?>{
+        'source': PatchbayFactSource.appRecorded.name,
+      },
       invoke: (command, arguments, requestId) async =>
           PatchbayInvocation.rejected(
             requestId: requestId,
@@ -54,7 +56,9 @@ void main() {
       appInstanceId: 'instance-2',
       registrar: (_, _) {},
       catalog: () async => const <String, Object?>{},
-      snapshot: () async => const <String, Object?>{'source': 'appRuntime'},
+      snapshot: () async => <String, Object?>{
+        'source': PatchbayFactSource.appRecorded.name,
+      },
       invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
         requestId: requestId,
         rejection: const PatchbayRejection(code: 'notRegistered'),
@@ -66,7 +70,10 @@ void main() {
       const <String, String>{},
     );
 
-    expect(jsonDecode(response.result!), containsPair('source', 'appRuntime'));
+    expect(
+      jsonDecode(response.result!),
+      containsPair('source', PatchbayFactSource.appRecorded.name),
+    );
   });
 
   group('Patchbay invocation envelope', () {
@@ -171,6 +178,7 @@ void main() {
       },
       'sensitivePolicy': 'public',
       'sideEffect': 'appState',
+      'factSources': <String>['uiObserved'],
     });
   });
 
@@ -183,6 +191,7 @@ void main() {
         plane: PatchbayPlane.domain,
         mode: PatchbayCommandMode.immediate,
         sideEffect: PatchbaySideEffect.appState,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
         gates: <String>{'consumer.ready'},
         parameters: <PatchbayParameterDescriptor>[
           PatchbayParameterDescriptor(
@@ -194,6 +203,10 @@ void main() {
       );
 
       expect(descriptor.toJson(), containsPair('name', 'device.select'));
+      expect(
+        descriptor.toJson(),
+        containsPair('factSources', <String>['appRecorded']),
+      );
       expect(
         descriptor.toJson()['parameters'],
         contains(containsPair('name', 'deviceId')),
@@ -211,7 +224,8 @@ void main() {
           Completer<Map<String, Object?>>();
       var cancelled = false;
       final String jobId = jobs.start(
-        source: 'appFlow',
+        source: PatchbayFactSource.appRecorded,
+        operation: 'fixture.wait',
         body: () => pending.future,
         cancel: () => cancelled = true,
       );
@@ -225,6 +239,14 @@ void main() {
         <int>[1, 2],
       );
       expect(jobs.snapshot(jobId)?.events.last.reason, 'consentRevoked');
+      expect(
+        jobs.snapshot(jobId)?.events.first.toJson(),
+        containsPair('source', PatchbayFactSource.appRecorded.name),
+      );
+      expect(
+        jobs.snapshot(jobId)?.events.first.toJson(),
+        containsPair('operation', 'fixture.wait'),
+      );
       pending.complete(const <String, Object?>{'ignored': true});
     },
   );

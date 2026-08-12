@@ -1,3 +1,4 @@
+import 'facts.dart';
 import 'ui_descriptor.dart';
 
 enum PatchbayCommandMode { readOnly, immediate, job }
@@ -50,6 +51,7 @@ final class PatchbayCommandDescriptor {
     required this.plane,
     required this.mode,
     required this.sideEffect,
+    required this.factSources,
     this.parameters = const <PatchbayParameterDescriptor>[],
     this.gates = const <String>{},
   });
@@ -59,6 +61,13 @@ final class PatchbayCommandDescriptor {
   final PatchbayPlane plane;
   final PatchbayCommandMode mode;
   final PatchbaySideEffect sideEffect;
+
+  /// Sources that may occur in this command's result payload.
+  ///
+  /// The actual payload remains authoritative and may refine the source at a
+  /// deeper object path. This declaration lets clients reject undocumented
+  /// provenance instead of guessing from a command name.
+  final Set<PatchbayFactSource> factSources;
   final List<PatchbayParameterDescriptor> parameters;
   final Set<String> gates;
 
@@ -68,6 +77,9 @@ final class PatchbayCommandDescriptor {
     'plane': plane.name,
     'mode': mode.name,
     'sideEffect': sideEffect.name,
+    'factSources':
+        factSources.map((PatchbayFactSource value) => value.name).toList()
+          ..sort(),
     'gates': gates.toList()..sort(),
     'parameters': parameters
         .map((PatchbayParameterDescriptor value) => value.toJson())

@@ -1,3 +1,5 @@
+import 'facts.dart';
+
 enum PatchbayPlane { domain, flutterUi }
 
 enum PatchbayUiTargetKind { text }
@@ -65,6 +67,9 @@ final class PatchbayUiTargetDescriptor {
     required this.operationGates,
     required this.sensitivePolicy,
     required this.sideEffect,
+    this.factSources = const <PatchbayFactSource>{
+      PatchbayFactSource.uiObserved,
+    },
   });
 
   final String id;
@@ -76,6 +81,7 @@ final class PatchbayUiTargetDescriptor {
   final Map<PatchbayUiOperation, Set<String>> operationGates;
   final PatchbaySensitivePolicy sensitivePolicy;
   final PatchbaySideEffect sideEffect;
+  final Set<PatchbayFactSource> factSources;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
@@ -93,5 +99,8 @@ final class PatchbayUiTargetDescriptor {
     },
     'sensitivePolicy': sensitivePolicy.name,
     'sideEffect': sideEffect.name,
+    'factSources':
+        factSources.map((PatchbayFactSource value) => value.name).toList()
+          ..sort(),
   };
 }

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'facts.dart';
+
 enum PatchbayJobPhase { running, completed, failed, cancelled }
 
 final class PatchbayJobEvent {
@@ -8,6 +10,7 @@ final class PatchbayJobEvent {
     required this.at,
     required this.phase,
     required this.source,
+    this.operation,
     this.payload = const <String, Object?>{},
     this.reason,
   });
@@ -15,7 +18,8 @@ final class PatchbayJobEvent {
   final int sequence;
   final DateTime at;
   final PatchbayJobPhase phase;
-  final String source;
+  final PatchbayFactSource source;
+  final String? operation;
   final Map<String, Object?> payload;
   final String? reason;
 
@@ -23,7 +27,8 @@ final class PatchbayJobEvent {
     'sequence': sequence,
     'at': at.toIso8601String(),
     'phase': phase.name,
-    'source': source,
+    'source': source.name,
+    if (operation != null) 'operation': operation,
     'payload': payload,
     if (reason != null) 'reason': reason,
   };
@@ -67,15 +72,24 @@ final class PatchbayJobRegistry {
   int _nextJob = 0;
 
   String start({
-    required String source,
+    required PatchbayFactSource source,
+    String? operation,
     required PatchbayJobBody body,
     PatchbayJobCancellation? cancel,
   }) {
     final String jobId = 'patchbay-job-${++_nextJob}';
-    final _PatchbayJobRecord record = _PatchbayJobRecord(cancel: cancel);
+    final _PatchbayJobRecord record = _PatchbayJobRecord(
+      cancel: cancel,
+      operation: operation,
+    );
     _records[jobId] = record;
-    _append(record, PatchbayJobPhase.running, source: source);
-    unawaited(_run(record, source: source, body: body));
+    _append(
+      record,
+      PatchbayJobPhase.running,
+      source: source,
+      operation: operation,
+    );
+    unawaited(_run(record, source: source, operation: operation, body: body));
     return jobId;
   }
 
@@ -96,7 +110,8 @@ final class PatchbayJobRegistry {
       _append(
         record,
         PatchbayJobPhase.cancelled,
-        source: 'appFlow',
+        source: PatchbayFactSource.appRecorded,
+        operation: record.operation,
         reason: reason,
       );
     }
@@ -111,7 +126,8 @@ final class PatchbayJobRegistry {
 
   Future<void> _run(
     _PatchbayJobRecord record, {
-    required String source,
+    required PatchbayFactSource source,
+    String? operation,
     required PatchbayJobBody body,
   }) async {
     try {
@@ -121,6 +137,7 @@ final class PatchbayJobRegistry {
         record,
         PatchbayJobPhase.completed,
         source: source,
+        operation: operation,
         payload: payload,
       );
     } catch (error) {
@@ -129,6 +146,7 @@ final class PatchbayJobRegistry {
         record,
         PatchbayJobPhase.failed,
         source: source,
+        operation: operation,
         payload: <String, Object?>{'errorType': error.runtimeType.toString()},
         // Exceptions may embed credentials, device identifiers, or vendor
         // response bodies. The generic ledger records only the stable type;
@@ -142,7 +160,8 @@ final class PatchbayJobRegistry {
   void _append(
     _PatchbayJobRecord record,
     PatchbayJobPhase phase, {
-    required String source,
+    required PatchbayFactSource source,
+    String? operation,
     Map<String, Object?> payload = const <String, Object?>{},
     String? reason,
   }) {
@@ -152,6 +171,7 @@ final class PatchbayJobRegistry {
         at: _now(),
         phase: phase,
         source: source,
+        operation: operation,
         payload: payload,
         reason: reason,
       ),
@@ -164,8 +184,9 @@ final class PatchbayJobRegistry {
 }
 
 final class _PatchbayJobRecord {
-  _PatchbayJobRecord({required this.cancel});
+  _PatchbayJobRecord({required this.cancel, required this.operation});
 
   final PatchbayJobCancellation? cancel;
+  final String? operation;
   final List<PatchbayJobEvent> events = <PatchbayJobEvent>[];
 }

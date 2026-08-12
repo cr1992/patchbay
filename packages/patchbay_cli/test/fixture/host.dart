@@ -10,13 +10,37 @@ void main() {
       'commands': const <Object?>[],
       'uiTargets': const <Object?>[],
     },
-    snapshot: () async => <String, Object?>{'source': 'fixture'},
+    snapshot: () async => <String, Object?>{
+      'source': PatchbayFactSource.appRecorded.name,
+    },
     invoke:
         (String command, Map<String, Object?> args, String requestId) async =>
-            PatchbayInvocation.rejected(
-              requestId: requestId,
-              rejection: const PatchbayRejection(code: 'commandNotRegistered'),
-            ).toJson(),
+            switch (command) {
+              'fixture.typedFailure' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{'outcome': 'failed'},
+              ).toJson(),
+              'fixture.failedJob' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                jobId: 'fixture-job',
+              ).toJson(),
+              'patchbay.job.get' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'terminal': true,
+                  'events': <Object?>[
+                    <String, Object?>{'phase': 'running'},
+                    <String, Object?>{'phase': 'failed'},
+                  ],
+                },
+              ).toJson(),
+              _ => PatchbayInvocation.rejected(
+                requestId: requestId,
+                rejection: const PatchbayRejection(
+                  code: 'commandNotRegistered',
+                ),
+              ).toJson(),
+            },
   );
   host.register();
   Timer.periodic(const Duration(hours: 1), (_) {});

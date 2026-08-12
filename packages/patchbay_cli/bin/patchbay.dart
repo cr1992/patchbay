@@ -79,23 +79,35 @@ Future<void> main(List<String> arguments) async {
       _ => throw const FormatException('unknown command'),
     };
     final Map<String, Object?> output = parsed.flag('wait')
-        ? await _waitForJob(connection, result)
+        ? await waitForPatchbayJob(
+            admission: result,
+            read: (String jobId) => connection!.invoke(
+              command: 'patchbay.job.get',
+              arguments: <String, Object?>{'jobId': jobId},
+            ),
+          )
         : result;
     stdout.writeln(
       parsed.flag('json')
           ? const JsonEncoder.withIndent('  ').convert(output)
           : _summary(output),
     );
-    if (output['admission'] == 'rejected') exitCode = 5;
+    exitCode = patchbayExitCodeFor(output);
   } on FormatException catch (error) {
     stderr.writeln(error.message);
-    exitCode = 64;
+    exitCode = PatchbayExitCode.usage;
+  } on PatchbayProtocolException catch (error) {
+    stderr.writeln('patchbay protocol error: ${error.code}');
+    exitCode = PatchbayExitCode.protocol;
+  } on PatchbayJobWaitTimeout {
+    stderr.writeln('patchbay job failed: waitTimeout');
+    exitCode = PatchbayExitCode.typedFailure;
   } on Object catch (error) {
     // VM Service URIs carry authentication material. Exception strings from
     // socket clients may echo the URI, so ordinary CLI output exposes only the
     // stable error type.
     stderr.writeln('patchbay transport error: ${error.runtimeType}');
-    exitCode = 3;
+    exitCode = PatchbayExitCode.transport;
   } finally {
     await connection?.close();
   }
@@ -113,26 +125,6 @@ Map<String, Object?> _domainArguments(ArgResults parsed) {
     ...Map<String, Object?>.from(decoded),
     if (parsed.flag('stdin')) 'inputWasStdin': true,
   };
-}
-
-Future<Map<String, Object?>> _waitForJob(
-  PatchbayConnection connection,
-  Map<String, Object?> admission,
-) async {
-  final Object? jobId = admission['jobId'];
-  if (jobId is! String) return admission;
-  for (var attempt = 0; attempt < 600; attempt += 1) {
-    final Map<String, Object?> result = await connection.invoke(
-      command: 'patchbay.job.get',
-      arguments: <String, Object?>{'jobId': jobId},
-    );
-    final Object? payload = result['payload'];
-    if (payload is Map && payload['terminal'] == true) {
-      return result;
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-  }
-  throw StateError('job wait timed out');
 }
 
 String _summary(Map<String, Object?> value) {

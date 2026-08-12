@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:test/test.dart';
 
@@ -54,7 +55,7 @@ void main() {
       expect(identity['appInstanceId'], 'fixture-instance');
 
       final Map<String, Object?> snapshot = await connection.snapshot();
-      expect(snapshot['source'], 'fixture');
+      expect(snapshot['source'], PatchbayFactSource.appRecorded.name);
 
       final ProcessResult cli = await Process.run(
         Platform.resolvedExecutable,
@@ -71,8 +72,45 @@ void main() {
       expect(cli.exitCode, 0, reason: cli.stderr.toString());
       expect(
         (jsonDecode(cli.stdout.toString()) as Map<String, Object?>)['source'],
-        'fixture',
+        PatchbayFactSource.appRecorded.name,
       );
+
+      final ProcessResult missingCommand =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            'exec',
+            'fixture.missing',
+          ], workingDirectory: Directory.current.path);
+      expect(missingCommand.exitCode, PatchbayExitCode.protocol);
+
+      final ProcessResult typedFailure =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            'exec',
+            'fixture.typedFailure',
+          ], workingDirectory: Directory.current.path);
+      expect(typedFailure.exitCode, PatchbayExitCode.typedFailure);
+
+      final ProcessResult failedJob =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            '--wait',
+            'exec',
+            'fixture.failedJob',
+          ], workingDirectory: Directory.current.path);
+      expect(failedJob.exitCode, PatchbayExitCode.typedFailure);
 
       final Map<String, Object?> invocation = await connection.invoke(
         command: 'device.list',
