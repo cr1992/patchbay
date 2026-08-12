@@ -25,11 +25,19 @@ void main() {
       final String generated = output.readAsStringSync();
       expect(generated, contains("import 'package:patchbay/patchbay.dart';"));
       expect(generated, isNot(contains('patchbay_flutter')));
-      expect(generated, contains('enum MoiiPatchbayCommandId'));
+      expect(generated, contains('enum FixturePatchbayCommandId'));
+      expect(generated, isNot(contains('Moii')));
+      expect(generated, isNot(contains('bleProvisioning')));
+      expect(generated, isNot(contains('wifiSsid')));
+      expect(generated, contains('enum FixturePatchbayPermission'));
+      expect(generated, contains('FixturePatchbayPermission.fixtureAccess'));
+      expect(generated, contains('FixturePatchbayCancellation.fixtureStop'));
       expect(generated, contains('int get count'));
       expect(
         generated,
-        contains('required T Function(MoiiPatchbayDecodedCommand) fixtureRun'),
+        contains(
+          'required T Function(FixturePatchbayDecodedCommand) fixtureRun',
+        ),
       );
       expect(generated, contains("defaultValue: 3"));
       expect(await _run(contract, output, '--check'), 0);
@@ -54,7 +62,9 @@ void main() {
     expect(await _run(contract, output, '--write'), 0);
     expect(
       output.readAsStringSync(),
-      contains('required T Function(MoiiPatchbayDecodedCommand) fixtureStop'),
+      contains(
+        'required T Function(FixturePatchbayDecodedCommand) fixtureStop',
+      ),
     );
   });
 
@@ -136,9 +146,11 @@ void main() {
 }
 
 Map<String, Object?> _fixtureContract() => <String, Object?>{
-  'contractVersion': 1,
-  'library': 'fixture_commands',
+  'contractVersion': 2,
+  'apiPrefix': 'FixturePatchbay',
   'descriptorImport': 'package:patchbay/patchbay.dart',
+  'permissions': <String>['fixtureAccess'],
+  'cancellations': <String>['fixtureStop'],
   'profiles': <String, Object?>{
     'job': <String, Object?>{
       'mode': 'job',
@@ -153,6 +165,8 @@ Map<String, Object?> _fixtureContract() => <String, Object?>{
       'name': 'fixture.run',
       'summary': 'Run fixture',
       'profile': 'job',
+      'permissions': <String>['fixtureAccess'],
+      'cancellation': 'fixtureStop',
       'parameters': <Object?>[
         <String, Object?>{'name': 'count', 'type': 'integer', 'default': 3},
       ],

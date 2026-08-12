@@ -125,7 +125,7 @@ consumer 可以增加领域内的细分字段，但不能把较弱来源升级�
 证据，都从 JSON contract 生成双向 codec。生成物负责字段名、枚举、嵌套结构、未知字段拒绝、JSON 值
 校验和 `toJson` / `fromJson`；任何 consumer 不再手写协议 map。
 
-Moii consumer 的 57 条领域命令目录以 `lib/debug_console/contracts/patchbay_commands.json` 为唯一真源；
+Moii consumer 的 61 条领域命令目录以 `lib/debug_console/contracts/patchbay_commands.json` 为唯一真源；
 Flutter host 在不改该目录的前提下合并通用 UI 命令，并仅在 consumer 显式注入对应 bridge 时增加
 navigation、日志、blob 与 capture 条目；因此运行时 catalog 是实际能力，不维护固定总数。
 `just gen patchbay-commands write` 生成 command ID/string parse、descriptor、默认值已应用的类型化参数入口，
@@ -134,7 +134,9 @@ navigation、日志、blob 与 capture 条目；因此运行时 catalog 是实�
 命令但未接业务 handler 会在生成/编译或专项检查阶段失败。snapshot、领域终态和 projection 的事实判断
 仍由 consumer adapter 手写，不进入生成器。
 
-契约的 `descriptorImport` 必须显式选择 consumer 已直接依赖的 descriptor export，且只接受
+命令生成器是 consumer-neutral 的：契约用 `apiPrefix` 决定生成类型与顶层符号前缀，并自行声明
+`permissions` / `cancellations` 封闭词表；通用 generator 不包含 Moii、BLE、Wi-Fi 或 call 词汇。
+`descriptorImport` 必须显式选择 consumer 已直接依赖的 descriptor export，且只接受
 `package:patchbay/patchbay.dart` 或 `package:patchbay_flutter/patchbay_flutter.dart`。生成器本身不硬编码
 Flutter；Moii App 因当前直接依赖 `patchbay_flutter` 而选择后者，纯 Dart consumer 选择 core 包。
 

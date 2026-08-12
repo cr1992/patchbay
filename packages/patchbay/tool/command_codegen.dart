@@ -75,33 +75,47 @@ final class _Options {
 
 final class _Contract {
   const _Contract(
-    this.library,
+    this.apiPrefix,
     this.descriptorImport,
+    this.permissions,
+    this.cancellations,
     this.profiles,
     this.commands,
   );
-  final String library;
+  final String apiPrefix;
   final String descriptorImport;
+  final List<String> permissions;
+  final List<String> cancellations;
   final Map<String, _Profile> profiles;
   final List<_Command> commands;
 
   static _Contract parse(Map<String, dynamic> json) {
     _keys(json, const {
       'contractVersion',
-      'library',
+      'apiPrefix',
       'descriptorImport',
+      'permissions',
+      'cancellations',
       'profiles',
       'commands',
     }, r'$');
-    if (json['contractVersion'] != 1) {
+    if (json['contractVersion'] != 2) {
       throw const FormatException('unsupported command contractVersion');
     }
-    final String library = _identifier(json['library'], 'library');
+    final String apiPrefix = _typePrefix(json['apiPrefix'], 'apiPrefix');
     final String descriptorImport =
         _choice(json['descriptorImport'], 'descriptorImport', const {
           'package:patchbay/patchbay.dart',
           'package:patchbay_flutter/patchbay_flutter.dart',
         });
+    final List<String> permissions = _vocabulary(
+      json['permissions'],
+      'permissions',
+    );
+    final List<String> cancellations = _vocabulary(
+      json['cancellations'],
+      'cancellations',
+    );
     final Map<String, dynamic> rawProfiles = _object(
       json['profiles'],
       'profiles',
@@ -118,6 +132,8 @@ final class _Contract {
           (entry) => _Command.parse(
             _object(entry.$2, 'commands[${entry.$1}]'),
             profiles,
+            permissions,
+            cancellations,
             'commands[${entry.$1}]',
           ),
         )
@@ -138,7 +154,14 @@ final class _Contract {
         parameterTypes[parameter.name] = parameter.type;
       }
     }
-    return _Contract(library, descriptorImport, profiles, commands);
+    return _Contract(
+      apiPrefix,
+      descriptorImport,
+      permissions,
+      cancellations,
+      profiles,
+      commands,
+    );
   }
 }
 
@@ -198,6 +221,8 @@ final class _Command {
   static _Command parse(
     Map<String, dynamic> json,
     Map<String, _Profile> profiles,
+    List<String> permissionVocabulary,
+    List<String> cancellationVocabulary,
     String path,
   ) {
     _keys(json, const {
@@ -234,23 +259,15 @@ final class _Command {
         ? <String>[]
         : _strings(json['permissions'], '$path.permissions');
     for (final permission in permissions) {
-      _choice(permission, '$path.permissions', const {
-        'bleProvisioning',
-        'wifiSsid',
-        'call',
-        'localVideoCapture',
-      });
+      _choice(permission, '$path.permissions', permissionVocabulary.toSet());
     }
     final cancellation = json['cancellation'] as String?;
     if (cancellation != null) {
-      _choice(cancellation, '$path.cancellation', const {
-        'bleScanStop',
-        'blePairAbort',
-        'pairingSoakStop',
-        'pairingClaimAbort',
-        'pairingQrAbort',
-        'callFlowCancel',
-      });
+      _choice(
+        cancellation,
+        '$path.cancellation',
+        cancellationVocabulary.toSet(),
+      );
     }
     final wait = json['suggestedWaitTimeoutMs'];
     if (wait != null && (wait is! int || wait <= 0)) {
@@ -344,6 +361,15 @@ final class _Parameter {
 
 String _render(_Contract contract, String path) {
   final commands = contract.commands;
+  final typePrefix = contract.apiPrefix;
+  final valuePrefix = _lowerInitial(typePrefix);
+  final enumPrefix = '${typePrefix}CommandId';
+  final permissionType = '${typePrefix}Permission';
+  final cancellationType = '${typePrefix}Cancellation';
+  final metadataType = '${typePrefix}CommandMetadata';
+  final decodedType = '${typePrefix}DecodedCommand';
+  final decodeResultType = '${typePrefix}DecodeResult';
+  final metadataName = '${valuePrefix}CommandMetadata';
   final Map<String, _Parameter> getters = {};
   final Set<String> nullable = {};
   for (final command in commands) {
@@ -360,7 +386,7 @@ String _render(_Contract contract, String path) {
     ..writeln('// Generator: packages/patchbay/tool/command_codegen.dart')
     ..writeln("import '${contract.descriptorImport}';")
     ..writeln()
-    ..writeln('enum MoiiPatchbayCommandId {');
+    ..writeln('enum $enumPrefix {');
   for (final command in commands) out.writeln('  ${command.id},');
   out
     ..writeln('  ;')
@@ -370,9 +396,7 @@ String _render(_Contract contract, String path) {
   }
   out
     ..writeln('  };')
-    ..writeln(
-      '  static MoiiPatchbayCommandId? parse(String value) => switch (value) {',
-    );
+    ..writeln('  static $enumPrefix? parse(String value) => switch (value) {');
   for (final command in commands) {
     out.writeln("    '${_escape(command.name)}' => $enumPrefix.${command.id},");
   }
@@ -381,27 +405,23 @@ String _render(_Contract contract, String path) {
     ..writeln('  };')
     ..writeln('}')
     ..writeln()
-    ..writeln(
-      'enum MoiiPatchbayPermission { bleProvisioning, wifiSsid, call, localVideoCapture }',
-    )
-    ..writeln(
-      'enum MoiiPatchbayCancellation { bleScanStop, blePairAbort, pairingSoakStop, pairingClaimAbort, pairingQrAbort, callFlowCancel }',
-    )
+    ..writeln('enum $permissionType { ${contract.permissions.join(', ')} }')
+    ..writeln('enum $cancellationType { ${contract.cancellations.join(', ')} }')
     ..writeln()
-    ..writeln('final class MoiiPatchbayCommandMetadata {')
+    ..writeln('final class $metadataType {')
     ..writeln(
-      '  const MoiiPatchbayCommandMetadata({required this.descriptor, this.permissions = const [], this.cancellation, this.suggestedWaitTimeoutMs, this.confirmationArgument});',
+      '  const $metadataType({required this.descriptor, this.permissions = const [], this.cancellation, this.suggestedWaitTimeoutMs, this.confirmationArgument});',
     )
     ..writeln('  final PatchbayCommandDescriptor descriptor;')
-    ..writeln('  final List<MoiiPatchbayPermission> permissions;')
-    ..writeln('  final MoiiPatchbayCancellation? cancellation;')
+    ..writeln('  final List<$permissionType> permissions;')
+    ..writeln('  final $cancellationType? cancellation;')
     ..writeln('  final int? suggestedWaitTimeoutMs;')
     ..writeln('  final String? confirmationArgument;')
     ..writeln('}')
     ..writeln()
-    ..writeln('final class MoiiPatchbayDecodedCommand {')
-    ..writeln('  const MoiiPatchbayDecodedCommand(this.command, this.values);')
-    ..writeln('  final MoiiPatchbayCommandId command;')
+    ..writeln('final class $decodedType {')
+    ..writeln('  const $decodedType(this.command, this.values);')
+    ..writeln('  final $enumPrefix command;')
     ..writeln('  final Map<String, Object?> values;');
   for (final entry in getters.entries) {
     final type = _dartType(entry.value.type);
@@ -412,9 +432,7 @@ String _render(_Contract contract, String path) {
   }
   out..writeln('  T dispatch<T>({');
   for (final command in commands) {
-    out.writeln(
-      '    required T Function(MoiiPatchbayDecodedCommand) ${command.id},',
-    );
+    out.writeln('    required T Function($decodedType) ${command.id},');
   }
   out..writeln('  }) => switch (command) {');
   for (final command in commands) {
@@ -424,23 +442,21 @@ String _render(_Contract contract, String path) {
     ..writeln('  };')
     ..writeln('}')
     ..writeln()
-    ..writeln('final class MoiiPatchbayDecodeResult {')
+    ..writeln('final class $decodeResultType {')
     ..writeln(
-      '  const MoiiPatchbayDecodeResult.accepted(this.command) : rejection = null;',
+      '  const $decodeResultType.accepted(this.command) : rejection = null;',
     )
     ..writeln(
-      '  const MoiiPatchbayDecodeResult.rejected(this.rejection) : command = null;',
+      '  const $decodeResultType.rejected(this.rejection) : command = null;',
     )
-    ..writeln('  final MoiiPatchbayDecodedCommand? command;')
+    ..writeln('  final $decodedType? command;')
     ..writeln('  final PatchbayRejection? rejection;')
     ..writeln('}')
     ..writeln()
-    ..writeln(
-      'final Map<MoiiPatchbayCommandId, MoiiPatchbayCommandMetadata> moiiPatchbayCommandMetadata = {',
-    );
+    ..writeln('final Map<$enumPrefix, $metadataType> $metadataName = {');
   for (final command in commands) {
     out
-      ..writeln('  $enumPrefix.${command.id}: MoiiPatchbayCommandMetadata(')
+      ..writeln('  $enumPrefix.${command.id}: $metadataType(')
       ..writeln('    descriptor: PatchbayCommandDescriptor(')
       ..writeln("      name: '${_escape(command.name)}',")
       ..writeln("      summary: '${_escape(command.summary)}',")
@@ -471,10 +487,10 @@ String _render(_Contract contract, String path) {
       ..writeln('      ],')
       ..writeln('    ),')
       ..writeln(
-        '    permissions: [${command.permissions.map((value) => 'MoiiPatchbayPermission.$value').join(', ')}],',
+        '    permissions: [${command.permissions.map((value) => '$permissionType.$value').join(', ')}],',
       )
       ..writeln(
-        '    cancellation: ${command.cancellation == null ? 'null' : 'MoiiPatchbayCancellation.${command.cancellation}'},',
+        '    cancellation: ${command.cancellation == null ? 'null' : '$cancellationType.${command.cancellation}'},',
       )
       ..writeln(
         '    suggestedWaitTimeoutMs: ${command.suggestedWaitTimeoutMs},',
@@ -488,17 +504,17 @@ String _render(_Contract contract, String path) {
     ..writeln('};')
     ..writeln()
     ..writeln(
-      'List<PatchbayCommandDescriptor> get moiiPatchbayCommandDescriptors => List.unmodifiable(moiiPatchbayCommandMetadata.values.map((value) => value.descriptor));',
+      'List<PatchbayCommandDescriptor> get ${valuePrefix}CommandDescriptors => List.unmodifiable($metadataName.values.map((value) => value.descriptor));',
     )
     ..writeln()
     ..writeln(
-      'MoiiPatchbayDecodeResult decodeMoiiPatchbayCommand(String name, Map<String, Object?> raw) {',
+      '$decodeResultType decode${typePrefix}Command(String name, Map<String, Object?> raw) {',
     )
-    ..writeln('  final id = MoiiPatchbayCommandId.parse(name);')
+    ..writeln('  final id = $enumPrefix.parse(name);')
     ..writeln(
-      "  if (id == null) return const MoiiPatchbayDecodeResult.rejected(PatchbayRejection(code: 'commandNotRegistered')); ",
+      "  if (id == null) return const $decodeResultType.rejected(PatchbayRejection(code: 'commandNotRegistered')); ",
     )
-    ..writeln('  final metadata = moiiPatchbayCommandMetadata[id]!;')
+    ..writeln('  final metadata = $metadataName[id]!;')
     ..writeln(
       '  final declared = {for (final parameter in metadata.descriptor.parameters) parameter.name: parameter};',
     )
@@ -506,7 +522,7 @@ String _render(_Contract contract, String path) {
       "  final unknown = raw.keys.where((key) => !declared.containsKey(key) && key != 'inputWasStdin').toList()..sort();",
     )
     ..writeln(
-      "  if (unknown.isNotEmpty) return MoiiPatchbayDecodeResult.rejected(PatchbayRejection(code: 'invalidArguments', details: {'unknown': unknown}));",
+      "  if (unknown.isNotEmpty) return $decodeResultType.rejected(PatchbayRejection(code: 'invalidArguments', details: {'unknown': unknown}));",
     )
     ..writeln('  final values = <String, Object?>{};')
     ..writeln('  for (final parameter in metadata.descriptor.parameters) {')
@@ -514,7 +530,7 @@ String _render(_Contract contract, String path) {
       '    final value = raw.containsKey(parameter.name) ? raw[parameter.name] : parameter.defaultValue;',
     )
     ..writeln(
-      "    if (parameter.required && value == null) return MoiiPatchbayDecodeResult.rejected(PatchbayRejection(code: 'invalidArguments', details: {'missing': parameter.name}));",
+      "    if (parameter.required && value == null) return $decodeResultType.rejected(PatchbayRejection(code: 'invalidArguments', details: {'missing': parameter.name}));",
     )
     ..writeln(
       '    if (value == null) { values[parameter.name] = null; continue; }',
@@ -529,25 +545,23 @@ String _render(_Contract contract, String path) {
     ..writeln('      PatchbayParameterType.json => true,')
     ..writeln('    };')
     ..writeln(
-      "    if (!typeOk || (parameter.allowedValues.isNotEmpty && !parameter.allowedValues.contains(value))) return MoiiPatchbayDecodeResult.rejected(PatchbayRejection(code: 'invalidArguments', details: {'parameter': parameter.name}));",
+      "    if (!typeOk || (parameter.allowedValues.isNotEmpty && !parameter.allowedValues.contains(value))) return $decodeResultType.rejected(PatchbayRejection(code: 'invalidArguments', details: {'parameter': parameter.name}));",
     )
     ..writeln(
-      "    if (parameter.sensitive && raw['inputWasStdin'] != true) return const MoiiPatchbayDecodeResult.rejected(PatchbayRejection(code: 'sensitiveInputRequiresStdin'));",
+      "    if (parameter.sensitive && raw['inputWasStdin'] != true) return const $decodeResultType.rejected(PatchbayRejection(code: 'sensitiveInputRequiresStdin'));",
     )
     ..writeln('    values[parameter.name] = value;')
     ..writeln('  }')
     ..writeln('  final confirmation = metadata.confirmationArgument;')
     ..writeln(
-      "  if (confirmation != null && values[confirmation] != true) return const MoiiPatchbayDecodeResult.rejected(PatchbayRejection(code: 'explicitConfirmationRequired'));",
+      "  if (confirmation != null && values[confirmation] != true) return const $decodeResultType.rejected(PatchbayRejection(code: 'explicitConfirmationRequired'));",
     )
     ..writeln(
-      '  return MoiiPatchbayDecodeResult.accepted(MoiiPatchbayDecodedCommand(id, Map.unmodifiable(values)));',
+      '  return $decodeResultType.accepted($decodedType(id, Map.unmodifiable(values)));',
     )
     ..writeln('}');
   return out.toString();
 }
-
-const String enumPrefix = 'MoiiPatchbayCommandId';
 
 String _formatDart(String source) {
   final directory = Directory.systemTemp.createTempSync('patchbay-command-');
@@ -613,6 +627,27 @@ String _identifier(Object? value, String path) {
   }
   return text;
 }
+
+String _typePrefix(Object? value, String path) {
+  final text = _identifier(value, path);
+  if (!RegExp(r'^[A-Z]').hasMatch(text)) {
+    throw FormatException('$path must start with an uppercase letter');
+  }
+  return text;
+}
+
+List<String> _vocabulary(Object? value, String path) {
+  final words = _strings(value, path);
+  if (words.isEmpty) throw FormatException('$path must not be empty');
+  for (final word in words) {
+    _identifier(word, path);
+  }
+  _unique(words, path);
+  return words;
+}
+
+String _lowerInitial(String value) =>
+    '${value[0].toLowerCase()}${value.substring(1)}';
 
 String _nonEmpty(Object? value, String path) {
   if (value is! String || value.isEmpty) {
