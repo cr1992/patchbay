@@ -10,6 +10,7 @@ void main() {
       'commands': const <Object?>[],
       'uiTargets': const <Object?>[],
     },
+    snapshot: () async => <String, Object?>{'source': 'fixture'},
     invoke:
         (String command, Map<String, Object?> args, String requestId) async =>
             PatchbayInvocation.rejected(

@@ -7,31 +7,55 @@ final class PatchbayFlutterServiceHost {
   PatchbayFlutterServiceHost({
     required String applicationId,
     required PatchbayFlutterBridge bridge,
+    PatchbayCatalogSource? domainCatalog,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayInvocationSource? domainInvoke,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
   }) : _host = PatchbayServiceHost(
          applicationId: applicationId,
          appInstanceId: appInstanceId,
          registrar: registrar,
-         catalog: () async => <String, Object?>{
-           'commands': const <Map<String, Object?>>[
-             <String, Object?>{
-               'name': 'ui.text.set',
-               'plane': 'flutterUi',
-               'mode': 'immediate',
-             },
-             <String, Object?>{
-               'name': 'ui.text.enter',
-               'plane': 'flutterUi',
-               'mode': 'immediate',
-             },
-           ],
-           'uiTargets': bridge
-               .catalog()
-               .map((PatchbayUiTargetDescriptor target) => target.toJson())
-               .toList(growable: false),
+         catalog: () async {
+           final Map<String, Object?> domain =
+               await domainCatalog?.call() ?? const <String, Object?>{};
+           return <String, Object?>{
+             ...domain,
+             'commands': <Object?>[
+               <String, Object?>{
+                 'name': 'ui.text.set',
+                 'plane': 'flutterUi',
+                 'mode': 'immediate',
+               },
+               <String, Object?>{
+                 'name': 'ui.text.enter',
+                 'plane': 'flutterUi',
+                 'mode': 'immediate',
+               },
+               ...?domain['commands'] as List<Object?>?,
+             ],
+             'uiTargets': bridge
+                 .catalog()
+                 .map((PatchbayUiTargetDescriptor target) => target.toJson())
+                 .toList(growable: false),
+           };
          },
+         snapshot: snapshot ?? () async => const <String, Object?>{},
          invoke: (command, arguments, requestId) async {
+           final bool uiCommand =
+               command == 'ui.text.set' || command == 'ui.text.enter';
+           if (!uiCommand) {
+             if (domainInvoke != null) {
+               return domainInvoke(command, arguments, requestId);
+             }
+             return PatchbayInvocation.rejected(
+               requestId: requestId,
+               rejection: PatchbayRejection(
+                 code: 'commandNotRegistered',
+                 details: <String, Object?>{'command': command},
+               ),
+             ).toJson();
+           }
            final Object? id = arguments['id'];
            final Object? generation = arguments['generation'];
            final Object? text = arguments['text'];
@@ -58,13 +82,7 @@ final class PatchbayFlutterServiceHost {
                text: text,
                inputWasStdin: stdin,
              ),
-             _ => PatchbayInvocation.rejected(
-               requestId: requestId,
-               rejection: PatchbayRejection(
-                 code: 'commandNotRegistered',
-                 details: <String, Object?>{'command': command},
-               ),
-             ),
+             _ => throw StateError('unreachable UI command $command'),
            };
            return result.toJson();
          },

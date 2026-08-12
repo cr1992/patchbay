@@ -7,10 +7,16 @@ import 'package:patchbay_cli/patchbay_cli.dart';
 Future<void> main(List<String> arguments) async {
   final ArgParser parser = ArgParser()
     ..addOption('ws-uri', help: 'VM Service http(s) or ws(s) URI.')
+    ..addOption('args', help: 'JSON object passed to a domain command.')
     ..addFlag(
       'stdin',
       defaultsTo: false,
       help: 'Read a sensitive text value from one stdin line.',
+    )
+    ..addFlag(
+      'wait',
+      defaultsTo: false,
+      help: 'Wait for a returned jobId to reach a terminal event.',
     )
     ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.');
   final ArgResults parsed;
@@ -24,7 +30,8 @@ Future<void> main(List<String> arguments) async {
   final String? uriText = parsed.option('ws-uri');
   if (uriText == null || parsed.rest.isEmpty) {
     stderr.writeln(
-      'usage: patchbay --ws-uri <uri> [--json] <identity|catalog|ui>',
+      'usage: patchbay --ws-uri <uri> [--json] '
+      '<identity|catalog|snapshot|exec|job|ui>',
     );
     exitCode = 64;
     return;
@@ -36,6 +43,19 @@ Future<void> main(List<String> arguments) async {
     final Map<String, Object?> result = switch (parsed.rest) {
       ['identity'] => await connection.identity(),
       ['catalog'] => await connection.catalog(),
+      ['snapshot'] => await connection.snapshot(),
+      ['exec', final String command] => await connection.invoke(
+        command: command,
+        arguments: _domainArguments(parsed),
+      ),
+      ['job', 'get', final String jobId] => await connection.invoke(
+        command: 'patchbay.job.get',
+        arguments: <String, Object?>{'jobId': jobId},
+      ),
+      ['job', 'cancel', final String jobId] => await connection.invoke(
+        command: 'patchbay.job.cancel',
+        arguments: <String, Object?>{'jobId': jobId},
+      ),
       [
         'ui',
         'text',
@@ -58,12 +78,15 @@ Future<void> main(List<String> arguments) async {
         ),
       _ => throw const FormatException('unknown command'),
     };
+    final Map<String, Object?> output = parsed.flag('wait')
+        ? await _waitForJob(connection, result)
+        : result;
     stdout.writeln(
       parsed.flag('json')
-          ? const JsonEncoder.withIndent('  ').convert(result)
-          : _summary(result),
+          ? const JsonEncoder.withIndent('  ').convert(output)
+          : _summary(output),
     );
-    if (result['admission'] == 'rejected') exitCode = 5;
+    if (output['admission'] == 'rejected') exitCode = 5;
   } on FormatException catch (error) {
     stderr.writeln(error.message);
     exitCode = 64;
@@ -78,6 +101,40 @@ Future<void> main(List<String> arguments) async {
   }
 }
 
+Map<String, Object?> _domainArguments(ArgResults parsed) {
+  final String encoded = parsed.flag('stdin')
+      ? (stdin.readLineSync() ?? '')
+      : (parsed.option('args') ?? '{}');
+  final Object? decoded = jsonDecode(encoded);
+  if (decoded is! Map<String, dynamic>) {
+    throw const FormatException('--args/stdin must contain a JSON object');
+  }
+  return <String, Object?>{
+    ...Map<String, Object?>.from(decoded),
+    if (parsed.flag('stdin')) 'inputWasStdin': true,
+  };
+}
+
+Future<Map<String, Object?>> _waitForJob(
+  PatchbayConnection connection,
+  Map<String, Object?> admission,
+) async {
+  final Object? jobId = admission['jobId'];
+  if (jobId is! String) return admission;
+  for (var attempt = 0; attempt < 600; attempt += 1) {
+    final Map<String, Object?> result = await connection.invoke(
+      command: 'patchbay.job.get',
+      arguments: <String, Object?>{'jobId': jobId},
+    );
+    final Object? payload = result['payload'];
+    if (payload is Map && payload['terminal'] == true) {
+      return result;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+  throw StateError('job wait timed out');
+}
+
 String _summary(Map<String, Object?> value) {
   if (value case {
     'applicationId': final Object app,
@@ -88,5 +145,6 @@ String _summary(Map<String, Object?> value) {
   if (value['uiTargets'] case final List<Object?> targets) {
     return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} uiTargets=${targets.length}';
   }
+  if (value['jobId'] case final String jobId) return 'jobId=$jobId';
   return jsonEncode(value);
 }

@@ -54,6 +54,9 @@ final class PatchbayConnection {
   Future<Map<String, Object?>> catalog() =>
       _call(PatchbayServiceHost.catalogMethod);
 
+  Future<Map<String, Object?>> snapshot() =>
+      _call(PatchbayServiceHost.snapshotMethod);
+
   Future<Map<String, Object?>> invoke({
     required String command,
     required Map<String, Object?> arguments,

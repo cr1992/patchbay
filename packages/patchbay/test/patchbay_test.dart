@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 
@@ -15,6 +16,7 @@ void main() {
         handlers[method] = handler;
       },
       catalog: () async => <String, Object?>{'commands': const <Object?>[]},
+      snapshot: () async => <String, Object?>{'source': 'appRuntime'},
       invoke: (command, arguments, requestId) async =>
           PatchbayInvocation.rejected(
             requestId: requestId,
@@ -32,6 +34,7 @@ void main() {
     expect(handlers.keys, <String>{
       PatchbayServiceHost.identityMethod,
       PatchbayServiceHost.catalogMethod,
+      PatchbayServiceHost.snapshotMethod,
       PatchbayServiceHost.invokeMethod,
     });
     final ServiceExtensionResponse response =
@@ -43,6 +46,27 @@ void main() {
       jsonDecode(response.result!),
       containsPair('appInstanceId', 'instance-1'),
     );
+  });
+
+  test('service host serves a fixed snapshot RPC', () async {
+    final PatchbayServiceHost host = PatchbayServiceHost(
+      applicationId: 'dev.patchbay.test',
+      appInstanceId: 'instance-2',
+      registrar: (_, _) {},
+      catalog: () async => const <String, Object?>{},
+      snapshot: () async => const <String, Object?>{'source': 'appRuntime'},
+      invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'notRegistered'),
+      ).toJson(),
+    );
+
+    final ServiceExtensionResponse response = await host.handleSnapshot(
+      PatchbayServiceHost.snapshotMethod,
+      const <String, String>{},
+    );
+
+    expect(jsonDecode(response.result!), containsPair('source', 'appRuntime'));
   });
 
   group('Patchbay invocation envelope', () {
@@ -149,4 +173,59 @@ void main() {
       'sideEffect': 'appState',
     });
   });
+
+  test(
+    'domain command descriptor is a complete machine-readable catalog row',
+    () {
+      const PatchbayCommandDescriptor descriptor = PatchbayCommandDescriptor(
+        name: 'device.select',
+        summary: 'Select the shared debug device.',
+        plane: PatchbayPlane.domain,
+        mode: PatchbayCommandMode.immediate,
+        sideEffect: PatchbaySideEffect.appState,
+        gates: <String>{'consumer.ready'},
+        parameters: <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'deviceId',
+            type: PatchbayParameterType.string,
+            required: true,
+          ),
+        ],
+      );
+
+      expect(descriptor.toJson(), containsPair('name', 'device.select'));
+      expect(
+        descriptor.toJson()['parameters'],
+        contains(containsPair('name', 'deviceId')),
+      );
+    },
+  );
+
+  test(
+    'job registry records ordered terminal events and cancellation',
+    () async {
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry(
+        now: () => DateTime.utc(2026, 8, 12),
+      );
+      final Completer<Map<String, Object?>> pending =
+          Completer<Map<String, Object?>>();
+      var cancelled = false;
+      final String jobId = jobs.start(
+        source: 'appFlow',
+        body: () => pending.future,
+        cancel: () => cancelled = true,
+      );
+
+      expect(jobs.snapshot(jobId)?.terminal, isFalse);
+      expect(await jobs.cancel(jobId, reason: 'consentRevoked'), isTrue);
+      expect(cancelled, isTrue);
+      expect(jobs.snapshot(jobId)?.terminal, isTrue);
+      expect(
+        jobs.snapshot(jobId)?.events.map((PatchbayJobEvent e) => e.sequence),
+        <int>[1, 2],
+      );
+      expect(jobs.snapshot(jobId)?.events.last.reason, 'consentRevoked');
+      pending.complete(const <String, Object?>{'ignored': true});
+    },
+  );
 }
