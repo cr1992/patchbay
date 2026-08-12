@@ -118,6 +118,14 @@ consumer 可以增加领域内的细分字段，但不能把较弱来源升级�
 证据，都从 JSON contract 生成双向 codec。生成物负责字段名、枚举、嵌套结构、未知字段拒绝、JSON 值
 校验和 `toJson` / `fromJson`；任何 consumer 不再手写协议 map。
 
+Moii consumer 的 57 条领域命令目录以 `lib/debug_console/contracts/patchbay_commands.json` 为唯一真源；
+Flutter host 继续合并 `patchbay_flutter` 的 4 条 UI 命令，运行时总 catalog 为 61 条。
+`just gen patchbay-commands write` 生成 command ID/string parse、descriptor、默认值已应用的类型化参数入口，
+以及权限、取消、等待和显式确认元数据；`just gen patchbay-commands check` 只读检查漂移。生成的
+`dispatch` 把每个命令暴露为 required callback，commit gate 还会比对 adapter callback，因此新增契约
+命令但未接业务 handler 会在生成/编译或专项检查阶段失败。snapshot、领域终态和 projection 的事实判断
+仍由 consumer adapter 手写，不进入生成器。
+
 仍需人工维护的是语义投影：领域状态对应哪个稳定枚举、哪些字段必须脱敏、事实来源强度和什么才算业务
 终态。这些判断必须用穷举 switch 映射到生成 DTO，不能用 `runtimeType` / `toString()` 推导协议值。
 
