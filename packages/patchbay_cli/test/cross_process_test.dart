@@ -284,6 +284,152 @@ void main() {
             'fixture.failedJob',
           ], workingDirectory: Directory.current.path);
       expect(failedJob.exitCode, PatchbayExitCode.typedFailure);
+      expect(
+        (jsonDecode(failedJob.stdout.toString())
+            as Map<String, Object?>)['waitMode'],
+        'serverLongPoll',
+      );
+
+      final ProcessResult navigationCatalog = await _runCli(uri, <String>[
+        'navigation',
+        'catalog',
+      ]);
+      expect(navigationCatalog.exitCode, 0, reason: navigationCatalog.stderr);
+      expect(
+        ((jsonDecode(navigationCatalog.stdout.toString())
+                as Map<String, Object?>)['payload']!
+            as Map<String, Object?>)['navigationRevision'],
+        7,
+      );
+
+      final ProcessResult navigationGo = await _runCli(uri, <String>[
+        '--revision',
+        '7',
+        'navigation',
+        'go',
+        'settings',
+      ]);
+      expect(navigationGo.exitCode, 0, reason: navigationGo.stderr);
+      expect(
+        (((jsonDecode(navigationGo.stdout.toString())
+                    as Map<String, Object?>)['payload']!
+                as Map<String, Object?>)['arguments']!
+            as Map<String, Object?>)['destinationId'],
+        'settings',
+      );
+
+      final ProcessResult uiWait = await _runCli(uri, <String>[
+        '--timeout-ms',
+        '250',
+        'ui',
+        'wait',
+        'semantics-mounted',
+        'moii.settings.screen',
+      ]);
+      expect(uiWait.exitCode, 0, reason: uiWait.stderr);
+      expect(
+        ((jsonDecode(uiWait.stdout.toString())
+                as Map<String, Object?>)['payload']!
+            as Map<String, Object?>)['condition'],
+        'semanticsMounted',
+      );
+
+      final ProcessResult logsQuery = await _runCli(uri, <String>[
+        '--limit',
+        '10',
+        'logs',
+        'query',
+      ]);
+      expect(logsQuery.exitCode, 0, reason: logsQuery.stderr);
+      expect(
+        ((jsonDecode(logsQuery.stdout.toString())
+                    as Map<String, Object?>)['payload']!
+                as Map<String, Object?>)['records']
+            as List<Object?>,
+        hasLength(1),
+      );
+
+      final ProcessResult logsTail = await _runCli(uri, <String>[
+        '--timeout-ms',
+        '5',
+        'logs',
+        'tail',
+      ]);
+      expect(logsTail.exitCode, 0, reason: logsTail.stderr);
+      expect(
+        ((jsonDecode(logsTail.stdout.toString())
+                as Map<String, Object?>)['payload']!
+            as Map<String, Object?>)['outcome'],
+        'timedOut',
+      );
+
+      final Directory artifacts = Directory.systemTemp.createTempSync(
+        'patchbay-cli-artifacts-',
+      );
+      addTearDown(() => artifacts.deleteSync(recursive: true));
+      final String logsPath = '${artifacts.path}/logs.ndjson';
+      final ProcessResult logsExport = await _runCli(uri, <String>[
+        '--output',
+        logsPath,
+        'logs',
+        'export',
+      ]);
+      expect(logsExport.exitCode, 0, reason: logsExport.stderr);
+      expect(File(logsPath).readAsStringSync(), 'fixture artifact\n');
+      expect(
+        (jsonDecode(logsExport.stdout.toString())
+            as Map<String, Object?>)['localArtifact'],
+        isA<Map<String, Object?>>(),
+      );
+
+      final String capturePath = '${artifacts.path}/capture.png';
+      final ProcessResult capture = await _runCli(uri, <String>[
+        '--output',
+        capturePath,
+        'capture',
+        'root',
+      ]);
+      expect(capture.exitCode, 0, reason: capture.stderr);
+      expect(File(capturePath).readAsStringSync(), 'fixture artifact\n');
+
+      final String corruptPath = '${artifacts.path}/corrupt.png';
+      final ProcessResult corruptCapture = await _runCli(uri, <String>[
+        '--pixel-ratio',
+        '3',
+        '--output',
+        corruptPath,
+        'capture',
+        'root',
+      ]);
+      expect(corruptCapture.exitCode, PatchbayExitCode.protocol);
+      expect(File(corruptPath).existsSync(), isFalse);
+      expect(
+        artifacts.listSync().where(
+          (entry) => entry.path.contains('.patchbay-part-'),
+        ),
+        isEmpty,
+      );
+
+      final String blobPath = '${artifacts.path}/blob.bin';
+      final ProcessResult blob = await _runCli(uri, <String>[
+        '--output',
+        blobPath,
+        'blob',
+        'get',
+        'fixture-blob',
+      ]);
+      expect(blob.exitCode, 0, reason: blob.stderr);
+      expect(File(blobPath).readAsStringSync(), 'fixture artifact\n');
+
+      final ProcessResult refusesOverwrite = await _runCli(uri, <String>[
+        '--output',
+        blobPath,
+        'blob',
+        'get',
+        'fixture-blob',
+      ]);
+      expect(refusesOverwrite.exitCode, PatchbayExitCode.usage);
+      expect(refusesOverwrite.stderr.toString(), contains('--force'));
 
       final ProcessResult semanticsTree =
           await Process.run(Platform.resolvedExecutable, <String>[
@@ -363,3 +509,13 @@ void main() {
     timeout: const Timeout(Duration(seconds: 30)),
   );
 }
+
+Future<ProcessResult> _runCli(Uri uri, List<String> arguments) =>
+    Process.run(Platform.resolvedExecutable, <String>[
+      'run',
+      'bin/patchbay.dart',
+      '--ws-uri',
+      uri.toString(),
+      '--json',
+      ...arguments,
+    ], workingDirectory: Directory.current.path);

@@ -42,10 +42,35 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics action <node-id> <
 dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
+dart run bin/patchbay.dart --ws-uri <uri> --json navigation catalog
+dart run bin/patchbay.dart --ws-uri <uri> --json navigation current
+dart run bin/patchbay.dart --ws-uri <uri> --json --revision 4 navigation go settings
+dart run bin/patchbay.dart --ws-uri <uri> --json --revision 5 navigation push details
+dart run bin/patchbay.dart --ws-uri <uri> --json --revision 6 navigation back
+dart run bin/patchbay.dart --ws-uri <uri> --json --timeout-ms 5000 ui wait semantics-mounted app.settings
+dart run bin/patchbay.dart --ws-uri <uri> --json --timeout-ms 5000 ui wait semantics-unmounted app.loading
+dart run bin/patchbay.dart --ws-uri <uri> --json --timeout-ms 5000 ui wait semantics-value app.status ready
+dart run bin/patchbay.dart --ws-uri <uri> --json --revision 4 ui wait destination settings
+dart run bin/patchbay.dart --ws-uri <uri> --json ui wait tree-revision 10
+dart run bin/patchbay.dart --ws-uri <uri> --json ui wait frame-revision 20
+dart run bin/patchbay.dart --ws-uri <uri> --json --limit 100 logs query
+dart run bin/patchbay.dart --ws-uri <uri> --json --cursor <cursor> --timeout-ms 5000 logs tail
+dart run bin/patchbay.dart --ws-uri <uri> --json --output ./logs.ndjson logs export
+dart run bin/patchbay.dart --ws-uri <uri> --json --output ./screen.png capture root
+dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture target <target-id> <generation>
+dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
+dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
 
-完整命令名是协议身份。consumer 可以在自己的工具入口提供薄别名，但通用 parser、输出、退出码和
-catalog 解析不应复制到 consumer 工程。
+friendly command 只是稳定协议名的通用参数映射，不是另一份 capability 清单。CLI 每次执行仍读取
+App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocationDrift`，缺失命令仍保留 App 的
+`commandNotRegistered` rejection 和退出码 `4`。CLI 从不按命令数量推断能力。完整命令名仍是协议身份，
+任意 consumer 命令继续使用 `exec <namespace.command>`。
+
+日志过滤支持 `--cursor`、`--direction`、`--limit`、逗号分隔的 `--levels`/`--categories` 以及
+ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio` 和 `--timeout-ms`。所有 artifact 下载先写同目录
+临时文件，分块校验 blob metadata、offset、base64、总长度与 SHA-256，全部通过后才 rename；已有输出
+默认拒绝，只有显式 `--force` 才替换。过期、拒绝、错序、哈希错误和中断不会留下完整输出名的残文件。
 
 ## 连接边界
 
@@ -69,8 +94,26 @@ session error：PID 不活、URI 不可连接、schema/identity 不匹配。hot 
 文件分别收紧到 `0700` / `0600`，普通输出、错误和选择列表都不包含 URI/token。
 
 当前命令执行路径自身不调用 ADB。不过在 Android 上，如果 URI 来自 `flutter run`，Flutter 的启动、
-安装和端口转发仍可能间接使用 ADB；因此当前实现不能宣称端到端零 ADB。独立局域网或反向 WebSocket
-传输属于后续设计，且不改变 catalog、gate 和 invocation 语义。
+安装和端口转发仍可能间接使用 ADB；因此 VM Service 路径不能宣称端到端零 ADB。
+
+CLI 也可连接 consumer 显式启动的 `patchbay_transport` direct host。direct host 不做发现，调用方必须从
+可信的带外渠道取得 endpoint、runtime identity 和短期 bearer；token 只能从 no-echo stdin 读取，CLI
+不提供 token argv/env/query 入口：
+
+```text
+dart run bin/patchbay.dart \
+  --direct-endpoint http://192.0.2.10:12345/patchbay/direct/v1 \
+  --direct-token-stdin \
+  --direct-application-id dev.example.app \
+  --direct-app-instance-id <instance-id> \
+  --json identity
+# CLI 在这里从当前 TTY 读取一行且不回显
+```
+
+上例是交互 TTY 形状；不要把 bearer 字面量写进 shell history。CLI 读取 bearer 时会自动关闭 echo。direct
+LAN 是实验性的明文 HTTP：bearer 提供认证但不提供机密性，不能防止同网段被动监听和重放，不能称为
+secure channel。应只在可信隔离网络和短 TTL 下显式启用；Flutter SDK 的 widget/render/focus diagnostic
+extensions 仍只存在于 VM Service 路径。
 
 ## 输入与结果
 
@@ -85,9 +128,14 @@ terminal echo，读取后恢复；无法关闭回显时以 `terminalEchoControlF
 - `job get` 读取当前快照；
 - `job cancel` 请求取消，但取消结果仍以 App 返回的 job 状态为准。
 
-`--wait` 默认最多等待 60 秒；admission 带 `suggestedWaitTimeoutMs` 时采用 consumer 提示的观察窗口。
+`--wait` 默认最多等待 60 秒；descriptor/admission 带 `suggestedWaitTimeoutMs` 时采用 consumer 提示的观察窗口。
 例如 BLE 配网提示 150 秒，以覆盖其 120 秒激活终态。超时表示 App 已受理但在观察窗口内没有终态，
 归为类型化操作失败（退出码 `6`），不是连接失败。
+
+host catalog 有 `patchbay.job.wait` 时，CLI 以 `afterSequence` 做 bounded long-poll，并在结果标记
+`waitMode=serverLongPoll`。旧 host 没有该命令时保留 `patchbay.job.get` 兼容轮询，结果明确标记
+`waitMode=legacyPolling` 和 `waitNotice`，不冒充服务端等待。`logs tail` 的 `outcome=timedOut` 是一次成功的
+长轮询观察结果，退出码仍为 `0`，不会误报 transport error。
 
 JSON 输出保留事实来源、rejection code、job event sequence 和 capability warning。CLI 不把这些字段
 升级解释为设备执行成功、像素正确或系统 UI 已操作。
@@ -111,13 +159,9 @@ Widget/Render/Focus 命令是 Flutter SDK 诊断 extension 的只读代理。输
 `schema=flutterSdkPassthrough`，字段随 Flutter SDK 变化；profile 中对应 extension 不存在时稳定返回
 `flutterDiagnosticUnavailable`。稳定自动化应消费 `ui semantics tree` 的 Patchbay schema。
 
-下列能力尚未实现：
-
-- 语义导航、wait 与 Flutter capture 命令；
-- consumer 注册的结构化 App 日志 query/tail/watch/export；
-- 不依赖 VM Service 端口转发的独立调试传输。当前会话发现只登记 launcher 已建立的 VM Service，
-  不监听局域网端口，也不改变 Android 上 Flutter bootstrap 可能间接使用 ADB 的事实。
-
-这些能力必须继续由运行时 catalog 声明。CLI 不通过 ADB、坐标点击或 Widget 文本猜测补齐缺失能力。
+navigation、wait、capture、结构化日志与 direct 仅在运行时 catalog/consumer host 实际注册时可用。CLI
+不通过 ADB、坐标点击或 Widget 文本猜测补齐缺失能力，也不会替 App 自动启动 direct listener 或分发
+bearer。日志是 consumer 已脱敏的 App 记录；capture 只证明 Flutter repaint boundary 的合成结果，不含
+系统权限弹窗，PlatformView 也可能缺失。
 三树与 action 的稳定命令、passthrough 边界和退出条件见
 [`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)。

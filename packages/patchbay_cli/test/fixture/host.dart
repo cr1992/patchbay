@@ -1,13 +1,58 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:patchbay/patchbay.dart';
 
 void main() {
+  final PatchbayMemoryBlobStore blobs = PatchbayMemoryBlobStore(
+    idFactory: () => 'fixture-blob',
+  );
+  PatchbayBlobMetadataWire artifact() {
+    try {
+      return blobs.metadata('fixture-blob');
+    } on PatchbayBlobFailure {
+      return blobs.put(
+        Uint8List.fromList(utf8.encode('fixture artifact\n')),
+        kind: PatchbayBlobSourceWire.logExport,
+        source: PatchbayFactSourceWire.appRecorded,
+        contentType: 'application/x-ndjson',
+        filename: 'fixture.ndjson',
+      );
+    }
+  }
+
+  const List<String> commandNames = <String>[
+    'fixture.typedFailure',
+    'fixture.failedJob',
+    'patchbay.job.get',
+    'patchbay.job.wait',
+    'ui.semantics.tree',
+    'ui.semantics.action',
+    'navigation.catalog',
+    'navigation.current',
+    'navigation.go',
+    'navigation.push',
+    'navigation.back',
+    'ui.wait',
+    'logs.query',
+    'logs.tail',
+    'logs.export',
+    'ui.capture',
+    'blob.metadata',
+    'blob.read',
+  ];
   final PatchbayServiceHost host = PatchbayServiceHost(
     applicationId: 'dev.patchbay.fixture',
     appInstanceId: 'fixture-instance',
     catalog: () async => <String, Object?>{
-      'commands': const <Object?>[],
+      'commands': <Object?>[
+        for (final String name in commandNames)
+          <String, Object?>{
+            'name': name,
+            if (name == 'fixture.failedJob') 'suggestedWaitTimeoutMs': 5000,
+          },
+      ],
       'uiTargets': const <Object?>[],
     },
     snapshot: () async => <String, Object?>{
@@ -23,6 +68,117 @@ void main() {
               'fixture.failedJob' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 jobId: 'fixture-job',
+              ).toJson(),
+              'navigation.catalog' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'outcome': 'observed',
+                  'source': 'appRecorded',
+                  'navigationRevision': 7,
+                  'destinations': <Object?>[
+                    <String, Object?>{
+                      'id': 'settings',
+                      'operations': <String>['go'],
+                      'gates': <String>[],
+                      'ambiguous': false,
+                    },
+                  ],
+                },
+              ).toJson(),
+              'navigation.current' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'outcome': 'observed',
+                  'source': 'appRecorded',
+                  'navigationRevision': 7,
+                  'destinationId': 'home',
+                },
+              ).toJson(),
+              'navigation.go' ||
+              'navigation.push' ||
+              'navigation.back' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'completed',
+                  'source': 'uiObserved',
+                  'arguments': args,
+                },
+              ).toJson(),
+              'ui.wait' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'observed',
+                  'source': 'uiObserved',
+                  ...args,
+                  'frameRevision': 9,
+                },
+              ).toJson(),
+              'logs.query' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'outcome': 'records',
+                  'source': 'appRecorded',
+                  'records': <Object?>[
+                    <String, Object?>{
+                      'cursor': 'cursor-1',
+                      'message': 'fixture log',
+                    },
+                  ],
+                  'nextCursor': 'cursor-1',
+                  'currentCursor': 'cursor-1',
+                  'truncated': false,
+                  'elapsedMs': 1,
+                },
+              ).toJson(),
+              'logs.tail' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'outcome': 'timedOut',
+                  'source': 'appRecorded',
+                  'records': <Object?>[],
+                  'truncated': false,
+                  'elapsedMs': 5,
+                },
+              ).toJson(),
+              'logs.export' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'source': 'appRecorded',
+                  'blob': artifact().toJson(),
+                  'recordCount': 1,
+                  'truncated': false,
+                },
+              ).toJson(),
+              'ui.capture' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'captured',
+                  'source': 'uiObserved',
+                  'target': 'root',
+                  'width': 1,
+                  'height': 1,
+                  'pixelRatio': 1,
+                  'warnings': <String>['flutterSubtreeOnly'],
+                  'blob': <String, Object?>{
+                    ...artifact().toJson(),
+                    if (args['pixelRatio'] == 3)
+                      'sha256': List<String>.filled(64, '0').join(),
+                  },
+                },
+              ).toJson(),
+              'blob.metadata' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: artifact().toJson(),
+              ).toJson(),
+              'blob.read' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: blobs
+                    .read(
+                      blobId: args['blobId']! as String,
+                      offset: args['offset']! as int,
+                      limit: args['limit']! as int,
+                    )
+                    .toJson(),
               ).toJson(),
               'ui.semantics.tree' => PatchbayInvocation.accepted(
                 requestId: requestId,
@@ -47,6 +203,16 @@ void main() {
                   'events': <Object?>[
                     <String, Object?>{'phase': 'running'},
                     <String, Object?>{'phase': 'failed'},
+                  ],
+                },
+              ).toJson(),
+              'patchbay.job.wait' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'terminal': true,
+                  'events': <Object?>[
+                    <String, Object?>{'sequence': 1, 'phase': 'running'},
+                    <String, Object?>{'sequence': 2, 'phase': 'failed'},
                   ],
                 },
               ).toJson(),

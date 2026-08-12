@@ -174,7 +174,7 @@ final class PatchbaySessionStore {
     _ensureDirectory();
     final target = File(_fileName(record.sessionId));
     final temporary = File(
-      '${target.path}.tmp-${pid}-${DateTime.now().microsecondsSinceEpoch}',
+      '${target.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
     );
     try {
       temporary.writeAsStringSync(jsonEncode(record.toJson()), flush: true);

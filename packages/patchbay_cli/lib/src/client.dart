@@ -10,6 +10,12 @@ final class PatchbayProtocolException implements Exception {
   final String code;
 }
 
+final class PatchbayTransportException implements Exception {
+  const PatchbayTransportException(this.code);
+
+  final String code;
+}
+
 final class PatchbayRuntimeIdentity {
   const PatchbayRuntimeIdentity({
     required this.schemaVersion,
@@ -46,7 +52,22 @@ final class PatchbayRuntimeIdentity {
   final String isolateId;
 }
 
-final class PatchbayConnection {
+abstract interface class PatchbayClient {
+  Future<Map<String, Object?>> identity();
+  Future<Map<String, Object?>> catalog();
+  Future<Map<String, Object?>> snapshot();
+  Future<Map<String, Object?>> invoke({
+    required String command,
+    required Map<String, Object?> arguments,
+    String? requestId,
+  });
+  Future<Map<String, Object?>> widgetTree();
+  Future<Map<String, Object?>> renderTree();
+  Future<Map<String, Object?>> focusTree();
+  Future<void> close();
+}
+
+final class PatchbayConnection implements PatchbayClient {
   PatchbayConnection._(
     this._service,
     this.isolateId,
@@ -134,17 +155,21 @@ final class PatchbayConnection {
     return Map<String, Object?>.from(json);
   }
 
+  @override
   Future<Map<String, Object?>> identity() =>
       _call(PatchbayServiceHost.identityMethod);
 
+  @override
   Future<Map<String, Object?>> catalog() =>
       _call(PatchbayServiceHost.catalogMethod);
 
+  @override
   Future<Map<String, Object?>> snapshot() =>
       _call(PatchbayServiceHost.snapshotMethod);
 
   /// Reads Flutter's own diagnostic extensions without translating their
   /// SDK-specific schema into the stable Patchbay protocol.
+  @override
   Future<Map<String, Object?>> widgetTree() async {
     if (await _supportsExtension(_inspectorTreeExtension)) {
       final String group =
@@ -179,16 +204,19 @@ final class PatchbayConnection {
     );
   }
 
+  @override
   Future<Map<String, Object?>> renderTree() => _textDiagnostic(
     extension: _renderDumpExtension,
     format: 'flutterRenderDumpText',
   );
 
+  @override
   Future<Map<String, Object?>> focusTree() => _textDiagnostic(
     extension: _focusDumpExtension,
     format: 'flutterFocusDumpText',
   );
 
+  @override
   Future<Map<String, Object?>> invoke({
     required String command,
     required Map<String, Object?> arguments,
@@ -273,6 +301,7 @@ final class PatchbayConnection {
     ],
   };
 
+  @override
   Future<void> close() => _service.dispose();
 
   static Uri _webSocketUri(Uri uri) {
