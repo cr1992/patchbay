@@ -10,12 +10,54 @@ final class PatchbayProtocolException implements Exception {
   final String code;
 }
 
+final class PatchbayRuntimeIdentity {
+  const PatchbayRuntimeIdentity({
+    required this.schemaVersion,
+    required this.applicationId,
+    required this.appInstanceId,
+    required this.isolateId,
+  });
+
+  factory PatchbayRuntimeIdentity.fromJson(Map<String, Object?> json) {
+    final schemaVersion = json['schemaVersion'];
+    final applicationId = json['applicationId'];
+    final appInstanceId = json['appInstanceId'];
+    final isolateId = json['isolateId'];
+    if (schemaVersion is! int ||
+        applicationId is! String ||
+        applicationId.isEmpty ||
+        appInstanceId is! String ||
+        appInstanceId.isEmpty ||
+        isolateId is! String ||
+        isolateId.isEmpty) {
+      throw const PatchbayProtocolException('identityValidationFailed');
+    }
+    return PatchbayRuntimeIdentity(
+      schemaVersion: schemaVersion,
+      applicationId: applicationId,
+      appInstanceId: appInstanceId,
+      isolateId: isolateId,
+    );
+  }
+
+  final int schemaVersion;
+  final String applicationId;
+  final String appInstanceId;
+  final String isolateId;
+}
+
 final class PatchbayConnection {
-  PatchbayConnection._(this._service, this.isolateId, this._extensionRPCs);
+  PatchbayConnection._(
+    this._service,
+    this.isolateId,
+    this._extensionRPCs,
+    this.runtimeIdentity,
+  );
 
   final VmService _service;
   final String isolateId;
   final Set<String> _extensionRPCs;
+  final PatchbayRuntimeIdentity runtimeIdentity;
 
   static const String _inspectorTreeExtension =
       'ext.flutter.inspector.getRootWidgetTree';
@@ -25,7 +67,10 @@ final class PatchbayConnection {
   static const String _renderDumpExtension = 'ext.flutter.debugDumpRenderTree';
   static const String _focusDumpExtension = 'ext.flutter.debugDumpFocusTree';
 
-  static Future<PatchbayConnection> connect(Uri serviceUri) async {
+  static Future<PatchbayConnection> connect(
+    Uri serviceUri, {
+    PatchbayRuntimeIdentity? expectedIdentity,
+  }) async {
     final VmService service = await vmServiceConnectUri(
       _webSocketUri(serviceUri).toString(),
     );
@@ -40,19 +85,29 @@ final class PatchbayConnection {
                 PatchbayServiceHost.identityMethod,
               ) ??
               false) {
-            final PatchbayConnection connection = PatchbayConnection._(
+            final Map<String, Object?> identityJson = await _callIdentity(
+              service,
+              id,
+            );
+            final PatchbayRuntimeIdentity identity =
+                PatchbayRuntimeIdentity.fromJson(identityJson);
+            if (identity.schemaVersion != PatchbayServiceHost.schemaVersion ||
+                identity.isolateId != id ||
+                (expectedIdentity != null &&
+                    (identity.schemaVersion != expectedIdentity.schemaVersion ||
+                        identity.applicationId !=
+                            expectedIdentity.applicationId ||
+                        identity.appInstanceId !=
+                            expectedIdentity.appInstanceId ||
+                        identity.isolateId != expectedIdentity.isolateId))) {
+              throw const PatchbayProtocolException('identityValidationFailed');
+            }
+            return PatchbayConnection._(
               service,
               id,
               Set<String>.of(detail.extensionRPCs ?? const <String>[]),
+              identity,
             );
-            final Map<String, Object?> identity = await connection.identity();
-            if (identity['schemaVersion'] !=
-                    PatchbayServiceHost.schemaVersion ||
-                identity['isolateId'] != id ||
-                identity['appInstanceId'] is! String) {
-              throw const PatchbayProtocolException('identityValidationFailed');
-            }
-            return connection;
           }
         }
         await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -62,6 +117,21 @@ final class PatchbayConnection {
       await service.dispose();
       rethrow;
     }
+  }
+
+  static Future<Map<String, Object?>> _callIdentity(
+    VmService service,
+    String isolateId,
+  ) async {
+    final Response response = await service.callServiceExtension(
+      PatchbayServiceHost.identityMethod,
+      isolateId: isolateId,
+    );
+    final json = response.json;
+    if (json == null) {
+      throw const PatchbayProtocolException('identityValidationFailed');
+    }
+    return Map<String, Object?>.from(json);
   }
 
   Future<Map<String, Object?>> identity() =>

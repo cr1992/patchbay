@@ -45,6 +45,27 @@ void main() {
       final Uri uri = await serviceUri.future.timeout(
         const Duration(seconds: 15),
       );
+      final Directory sessions = Directory.systemTemp.createTempSync(
+        'patchbay-cross-process-sessions-',
+      );
+      addTearDown(() => sessions.deleteSync(recursive: true));
+      final PatchbaySessionStore sessionStore = PatchbaySessionStore(
+        sessions.path,
+      );
+      sessionStore.write(
+        PatchbaySessionRecord(
+          sessionId: 'fixture-current',
+          applicationId: 'dev.patchbay.fixture',
+          appInstanceId: null,
+          isolateId: null,
+          processId: host.pid,
+          wsUri: uri.toString(),
+          buildMode: 'debug',
+          createdAt: DateTime.now().toUtc(),
+          workspacePath: Directory.current.path,
+          deviceId: 'local-vm',
+        ),
+      );
       final PatchbayConnection connection = await PatchbayConnection.connect(
         uri,
       );
@@ -74,6 +95,158 @@ void main() {
         (jsonDecode(cli.stdout.toString()) as Map<String, Object?>)['source'],
         PatchbayFactSource.appRecorded.name,
       );
+
+      final ProcessResult discoveredCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          sessions.path,
+          '--json',
+          'snapshot',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(
+        discoveredCli.exitCode,
+        0,
+        reason: discoveredCli.stderr.toString(),
+      );
+      expect(sessionStore.readAll().single.appInstanceId, 'fixture-instance');
+
+      sessionStore.write(
+        PatchbaySessionRecord(
+          sessionId: 'fixture-other-worktree',
+          applicationId: 'dev.patchbay.fixture',
+          appInstanceId: null,
+          isolateId: null,
+          processId: host.pid,
+          wsUri: uri.toString(),
+          buildMode: 'debug',
+          createdAt: DateTime.now().toUtc(),
+          workspacePath: '${Directory.current.path}/other-worktree',
+          deviceId: 'local-vm',
+        ),
+      );
+      final ProcessResult ambiguousCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          sessions.path,
+          'identity',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(ambiguousCli.exitCode, PatchbayExitCode.transport);
+      expect(ambiguousCli.stderr.toString(), contains('sessionAmbiguous'));
+      expect(ambiguousCli.stderr.toString(), contains('fixture-current'));
+      expect(ambiguousCli.stderr.toString(), isNot(contains(uri.toString())));
+
+      final ProcessResult selectedCli =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--session-dir',
+            sessions.path,
+            '--session',
+            'fixture-current',
+            '--json',
+            'identity',
+          ], workingDirectory: Directory.current.path);
+      expect(selectedCli.exitCode, 0, reason: selectedCli.stderr.toString());
+
+      final Directory emptySessions = Directory.systemTemp.createTempSync(
+        'patchbay-cross-process-empty-',
+      );
+      addTearDown(() => emptySessions.deleteSync(recursive: true));
+      final ProcessResult emptyCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          emptySessions.path,
+          'identity',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(emptyCli.exitCode, PatchbayExitCode.transport);
+      expect(emptyCli.stderr.toString(), contains('sessionDirectoryEmpty'));
+
+      final Directory staleSessions = Directory.systemTemp.createTempSync(
+        'patchbay-cross-process-stale-',
+      );
+      addTearDown(() => staleSessions.deleteSync(recursive: true));
+      final staleStore = PatchbaySessionStore(staleSessions.path);
+      staleStore.write(
+        PatchbaySessionRecord(
+          sessionId: 'stale-secret',
+          applicationId: 'dev.patchbay.fixture',
+          appInstanceId: null,
+          isolateId: null,
+          processId: 2147483647,
+          wsUri: 'ws://127.0.0.1:1/authentication-secret/ws',
+          buildMode: 'debug',
+          createdAt: DateTime.now().toUtc(),
+          workspacePath: Directory.current.path,
+          deviceId: 'local-vm',
+        ),
+      );
+      final ProcessResult staleCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          staleSessions.path,
+          'identity',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(staleCli.exitCode, PatchbayExitCode.transport);
+      expect(staleCli.stderr.toString(), contains('sessionStaleProcess'));
+      expect(
+        staleCli.stderr.toString(),
+        isNot(contains('authentication-secret')),
+      );
+      expect(staleStore.readAll(), isEmpty);
+
+      final Directory mismatchedSessions = Directory.systemTemp.createTempSync(
+        'patchbay-cross-process-mismatch-',
+      );
+      addTearDown(() => mismatchedSessions.deleteSync(recursive: true));
+      final mismatchStore = PatchbaySessionStore(mismatchedSessions.path);
+      mismatchStore.write(
+        PatchbaySessionRecord(
+          sessionId: 'before-hot-restart',
+          applicationId: 'dev.patchbay.fixture',
+          appInstanceId: 'old-instance',
+          isolateId: 'isolates/old',
+          processId: host.pid,
+          wsUri: uri.toString(),
+          buildMode: 'debug',
+          createdAt: DateTime.now().toUtc(),
+          workspacePath: Directory.current.path,
+          deviceId: 'local-vm',
+        ),
+      );
+      final ProcessResult mismatchedCli =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--session-dir',
+            mismatchedSessions.path,
+            'identity',
+          ], workingDirectory: Directory.current.path);
+      expect(mismatchedCli.exitCode, PatchbayExitCode.transport);
+      expect(
+        mismatchedCli.stderr.toString(),
+        contains('sessionIdentityMismatch'),
+      );
+      expect(mismatchStore.readAll(), isEmpty);
 
       final ProcessResult missingCommand =
           await Process.run(Platform.resolvedExecutable, <String>[

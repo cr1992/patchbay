@@ -7,6 +7,12 @@ import 'package:patchbay_cli/patchbay_cli.dart';
 Future<void> main(List<String> arguments) async {
   final ArgParser parser = ArgParser()
     ..addOption('ws-uri', help: 'VM Service http(s) or ws(s) URI.')
+    ..addOption('session', help: 'Select one discovered Patchbay session ID.')
+    ..addOption(
+      'session-dir',
+      help: 'Override the Patchbay launcher session directory.',
+      hide: true,
+    )
     ..addOption('args', help: 'JSON object passed to a domain command.')
     ..addFlag(
       'stdin',
@@ -28,9 +34,15 @@ Future<void> main(List<String> arguments) async {
     return;
   }
   final String? uriText = parsed.option('ws-uri');
-  if (uriText == null || parsed.rest.isEmpty) {
+  final String? selectedSession = parsed.option('session');
+  if (uriText != null && selectedSession != null) {
+    stderr.writeln('--ws-uri and --session are mutually exclusive');
+    exitCode = 64;
+    return;
+  }
+  if (parsed.rest.isEmpty) {
     stderr.writeln(
-      'usage: patchbay --ws-uri <uri> [--json] '
+      'usage: patchbay [--ws-uri <uri>|--session <id>] [--json] '
       '<identity|catalog|snapshot|exec|job|ui>',
     );
     exitCode = 64;
@@ -39,7 +51,26 @@ Future<void> main(List<String> arguments) async {
 
   PatchbayConnection? connection;
   try {
-    connection = await PatchbayConnection.connect(Uri.parse(uriText));
+    if (uriText != null) {
+      connection = await PatchbayConnection.connect(Uri.parse(uriText));
+    } else {
+      final sessionStore = PatchbaySessionStore(parsed.option('session-dir'));
+      final discovered = await PatchbaySessionResolver(
+        store: sessionStore,
+      ).resolve(sessionId: selectedSession);
+      try {
+        connection = await PatchbayConnection.connect(
+          Uri.parse(discovered.record.wsUri!),
+          expectedIdentity: discovered.identity,
+        );
+      } on PatchbayProtocolException {
+        sessionStore.remove(discovered.record.sessionId);
+        throw const PatchbaySessionException('sessionIdentityMismatch');
+      } on Object {
+        sessionStore.remove(discovered.record.sessionId);
+        throw const PatchbaySessionException('sessionStaleTransport');
+      }
+    }
     final Map<String, Object?> result = switch (parsed.rest) {
       ['identity'] => await connection.identity(),
       ['catalog'] => await connection.catalog(),
@@ -128,6 +159,12 @@ Future<void> main(List<String> arguments) async {
   } on PatchbayProtocolException catch (error) {
     stderr.writeln('patchbay protocol error: ${error.code}');
     exitCode = PatchbayExitCode.protocol;
+  } on PatchbaySessionException catch (error) {
+    stderr.writeln('patchbay session error: ${error.code}');
+    for (final choice in error.choices) {
+      stderr.writeln('  --session ${choice.split(' ').first}  $choice');
+    }
+    exitCode = PatchbayExitCode.transport;
   } on PatchbayJobWaitTimeout {
     stderr.writeln('patchbay job failed: waitTimeout');
     exitCode = PatchbayExitCode.typedFailure;

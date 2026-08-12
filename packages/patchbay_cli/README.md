@@ -8,7 +8,23 @@
 
 ## 当前命令
 
-当前实现显式接收 VM Service URI：
+由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：
+
+```text
+dart run bin/patchbay.dart --json identity
+dart run bin/patchbay.dart --json catalog
+dart run bin/patchbay.dart --json snapshot
+dart run bin/patchbay.dart --json exec <namespace.command>
+```
+
+多 App 或多 worktree 同时运行时不会按 PID、时间或当前目录猜测。CLI 以
+`sessionAmbiguous` fail-closed，并打印不含 URI 的 session ID；调用方须显式选择：
+
+```text
+dart run bin/patchbay.dart --session <session-id> --json identity
+```
+
+`--ws-uri` 保留为 launcher 记录丢失时的恢复出口：
 
 ```text
 dart run bin/patchbay.dart --ws-uri <uri> --json identity
@@ -39,6 +55,19 @@ catalog 解析不应复制到 consumer 工程。
 - 不写入脚本、日志、快照和提交物；
 - CLI 错误只报告错误类别，不回显完整 URI。
 
+launcher 会先以原子替换写入 provisional 记录，再在收到 `app.debugPort` 后补 URI；CLI 连接并读取
+`ext.patchbay.identity` 后才补齐 `appInstanceId` 和 `isolateId`。完整记录绑定 session schema、
+`applicationId`、`appInstanceId`、`isolateId`、launcher PID、`wsUri`、build mode、创建时间、worktree
+与设备 ID。记录默认位于当前用户的系统临时目录，可用 `PATCHBAY_SESSION_DIR` 覆盖。
+launcher 仍会把 `app.log`、`app.progress` 和 stderr 以人可读形式回显，但统一替换其中的 http/ws URI；
+`app.debugPort` 只显示“会话已发现”，永不回显 machine 事件载荷。
+
+PID 存活只表示 launcher 可能仍在，不能证明 App 实例仍相同。以下任一情况都会删除记录并返回稳定的
+session error：PID 不活、URI 不可连接、schema/identity 不匹配。hot restart 再次产生
+`app.debugPort` 时 launcher 会原子重置已补齐的 identity，CLI 必须重新实测补齐；显式 `--ws-uri` 也会
+执行同一 schema/isolate/appInstance identity 校验。launcher 退出时删除自己拥有的记录。POSIX 上目录和
+文件分别收紧到 `0700` / `0600`，普通输出、错误和选择列表都不包含 URI/token。
+
 当前命令执行路径自身不调用 ADB。不过在 Android 上，如果 URI 来自 `flutter run`，Flutter 的启动、
 安装和端口转发仍可能间接使用 ADB；因此当前实现不能宣称端到端零 ADB。独立局域网或反向 WebSocket
 传输属于后续设计，且不改变 catalog、gate 和 invocation 语义。
@@ -68,7 +97,7 @@ JSON 输出保留事实来源、rejection code、job event sequence 和 capabili
 | 退出码 | 含义 |
 |---|---|
 | `0` | 请求完成，或 App 返回了可解析的非错误结果 |
-| `3` | 连接、传输或 VM Service RPC 失败 |
+| `3` | 会话发现、连接、传输或 VM Service RPC 失败 |
 | `4` | schema/identity 不兼容，或目录中没有该命令 |
 | `5` | App adapter 或 Flutter bridge 拒绝受理 |
 | `6` | 已受理的 operation 返回 `outcome=failed`、job 失败/取消，或等待终态超时 |
@@ -84,10 +113,10 @@ Widget/Render/Focus 命令是 Flutter SDK 诊断 extension 的只读代理。输
 
 下列能力尚未实现：
 
-- 安全会话发现、identity 复核和 stale session 清理；
 - 语义导航、wait 与 Flutter capture 命令；
 - consumer 注册的结构化 App 日志 query/tail/watch/export；
-- 不依赖 VM Service 端口转发的独立调试传输。
+- 不依赖 VM Service 端口转发的独立调试传输。当前会话发现只登记 launcher 已建立的 VM Service，
+  不监听局域网端口，也不改变 Android 上 Flutter bootstrap 可能间接使用 ADB 的事实。
 
 这些能力必须继续由运行时 catalog 声明。CLI 不通过 ADB、坐标点击或 Widget 文本猜测补齐缺失能力。
 三树与 action 的稳定命令、passthrough 边界和退出条件见
