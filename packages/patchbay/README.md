@@ -126,6 +126,10 @@ Flutter host 继续合并 `patchbay_flutter` 的 4 条 UI 命令，运行时总 
 命令但未接业务 handler 会在生成/编译或专项检查阶段失败。snapshot、领域终态和 projection 的事实判断
 仍由 consumer adapter 手写，不进入生成器。
 
+契约的 `descriptorImport` 必须显式选择 consumer 已直接依赖的 descriptor export，且只接受
+`package:patchbay/patchbay.dart` 或 `package:patchbay_flutter/patchbay_flutter.dart`。生成器本身不硬编码
+Flutter；Moii App 因当前直接依赖 `patchbay_flutter` 而选择后者，纯 Dart consumer 选择 core 包。
+
 仍需人工维护的是语义投影：领域状态对应哪个稳定枚举、哪些字段必须脱敏、事实来源强度和什么才算业务
 终态。这些判断必须用穷举 switch 映射到生成 DTO，不能用 `runtimeType` / `toString()` 推导协议值。
 

@@ -74,8 +74,14 @@ final class _Options {
 }
 
 final class _Contract {
-  const _Contract(this.library, this.profiles, this.commands);
+  const _Contract(
+    this.library,
+    this.descriptorImport,
+    this.profiles,
+    this.commands,
+  );
   final String library;
+  final String descriptorImport;
   final Map<String, _Profile> profiles;
   final List<_Command> commands;
 
@@ -83,6 +89,7 @@ final class _Contract {
     _keys(json, const {
       'contractVersion',
       'library',
+      'descriptorImport',
       'profiles',
       'commands',
     }, r'$');
@@ -90,6 +97,11 @@ final class _Contract {
       throw const FormatException('unsupported command contractVersion');
     }
     final String library = _identifier(json['library'], 'library');
+    final String descriptorImport =
+        _choice(json['descriptorImport'], 'descriptorImport', const {
+          'package:patchbay/patchbay.dart',
+          'package:patchbay_flutter/patchbay_flutter.dart',
+        });
     final Map<String, dynamic> rawProfiles = _object(
       json['profiles'],
       'profiles',
@@ -126,7 +138,7 @@ final class _Contract {
         parameterTypes[parameter.name] = parameter.type;
       }
     }
-    return _Contract(library, profiles, commands);
+    return _Contract(library, descriptorImport, profiles, commands);
   }
 }
 
@@ -149,16 +161,7 @@ final class _Profile {
       'appState',
       'external',
     });
-    final facts = _strings(json['factSources'], '$path.factSources');
-    for (final fact in facts) {
-      _choice(fact, '$path.factSources', const {
-        'appRecorded',
-        'commandEcho',
-        'deviceReported',
-        'uiObserved',
-        'unknown',
-      });
-    }
+    final facts = _factSources(json['factSources'], '$path.factSources');
     return _Profile(
       mode,
       sideEffect,
@@ -210,7 +213,7 @@ final class _Command {
       'confirmationArgument',
     }, path);
     final id = _identifier(json['id'], '$path.id');
-    final name = _nonEmpty(json['name'], '$path.name');
+    final name = _commandName(json['name'], '$path.name');
     final summary = _nonEmpty(json['summary'], '$path.summary');
     final profileName = _identifier(json['profile'], '$path.profile');
     final profile = profiles[profileName];
@@ -271,7 +274,7 @@ final class _Command {
       profile: profile,
       factSources: json['factSources'] == null
           ? profile.factSources
-          : _strings(json['factSources'], '$path.factSources'),
+          : _factSources(json['factSources'], '$path.factSources'),
       parameters: parameters,
       permissions: permissions,
       cancellation: cancellation,
@@ -355,7 +358,7 @@ String _render(_Contract contract, String path) {
     ..writeln('// ignore_for_file: curly_braces_in_flow_control_structures')
     ..writeln('// Contract: $path')
     ..writeln('// Generator: packages/patchbay/tool/command_codegen.dart')
-    ..writeln("import 'package:patchbay_flutter/patchbay_flutter.dart';")
+    ..writeln("import '${contract.descriptorImport}';")
     ..writeln()
     ..writeln('enum MoiiPatchbayCommandId {');
   for (final command in commands) out.writeln('  ${command.id},');
@@ -578,6 +581,31 @@ List<dynamic> _list(Object? value, String path) {
 
 List<String> _strings(Object? value, String path) =>
     _list(value, path).map((item) => _nonEmpty(item, path)).toList();
+
+List<String> _factSources(Object? value, String path) {
+  final facts = _strings(value, path);
+  for (final fact in facts) {
+    _choice(fact, path, const {
+      'appRecorded',
+      'commandEcho',
+      'deviceReported',
+      'uiObserved',
+      'unknown',
+    });
+  }
+  return facts;
+}
+
+String _commandName(Object? value, String path) {
+  final name = _nonEmpty(value, path);
+  if (!RegExp(r'^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$').hasMatch(name)) {
+    throw FormatException(
+      '$path must be a stable dotted command name with lowercase-starting segments',
+    );
+  }
+  return name;
+}
+
 String _identifier(Object? value, String path) {
   final text = _nonEmpty(value, path);
   if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(text)) {

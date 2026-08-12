@@ -23,6 +23,8 @@ void main() {
 
       expect(await _run(contract, output, '--write'), 0);
       final String generated = output.readAsStringSync();
+      expect(generated, contains("import 'package:patchbay/patchbay.dart';"));
+      expect(generated, isNot(contains('patchbay_flutter')));
       expect(generated, contains('enum MoiiPatchbayCommandId'));
       expect(generated, contains('int get count'));
       expect(
@@ -74,11 +76,69 @@ void main() {
       64,
     );
   });
+
+  test('command fact-source override uses the closed vocabulary', () async {
+    final Map<String, Object?> contractJson = _fixtureContract();
+    final Map<String, Object?> command =
+        (contractJson['commands']! as List<Object?>).single
+            as Map<String, Object?>;
+    command['factSources'] = <String>['appRuntime'];
+    final File contract = File('${temporary.path}/commands.json')
+      ..writeAsStringSync(jsonEncode(contractJson));
+
+    expect(
+      await _run(
+        contract,
+        File('${temporary.path}/commands.g.dart'),
+        '--write',
+      ),
+      64,
+    );
+  });
+
+  test(
+    'command names require stable lowercase-starting dotted segments',
+    () async {
+      final Map<String, Object?> contractJson = _fixtureContract();
+      final Map<String, Object?> command =
+          (contractJson['commands']! as List<Object?>).single
+              as Map<String, Object?>;
+      command['name'] = 'Fixture Run';
+      final File contract = File('${temporary.path}/commands.json')
+        ..writeAsStringSync(jsonEncode(contractJson));
+
+      expect(
+        await _run(
+          contract,
+          File('${temporary.path}/commands.g.dart'),
+          '--write',
+        ),
+        64,
+      );
+    },
+  );
+
+  test('descriptor import is restricted to Patchbay exports', () async {
+    final Map<String, Object?> contractJson = _fixtureContract()
+      ..['descriptorImport'] = 'package:flutter/widgets.dart';
+    final File contract = File('${temporary.path}/commands.json')
+      ..writeAsStringSync(jsonEncode(contractJson));
+
+    expect(
+      await _run(
+        contract,
+        File('${temporary.path}/commands.g.dart'),
+        '--write',
+      ),
+      64,
+    );
+  });
 }
 
 Map<String, Object?> _fixtureContract() => <String, Object?>{
   'contractVersion': 1,
   'library': 'fixture_commands',
+  'descriptorImport': 'package:patchbay/patchbay.dart',
   'profiles': <String, Object?>{
     'job': <String, Object?>{
       'mode': 'job',
