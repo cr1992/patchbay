@@ -641,7 +641,9 @@ void main() {
         ),
       );
     },
-    timeout: const Timeout(Duration(seconds: 30)),
+    // GH 共享 runner 冷启时真实 VM Service 拉起可超 30s（main 首跑实测翻车）。
+    // 显式标注会压过 dart test --timeout 的默认值，上限必须写在这里。
+    timeout: const Timeout(Duration(seconds: 120)),
   );
 }
 
