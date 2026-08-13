@@ -293,6 +293,33 @@ void main() {
     expect(terminal.payload['errorCode'], 'device.offline');
   });
 
+  test('settled jobs are evicted while running jobs are retained', () async {
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry(retainedJobs: 3);
+    final Completer<Map<String, Object?>> pending =
+        Completer<Map<String, Object?>>();
+    final String running = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => pending.future,
+    );
+    final List<String> settled = <String>[];
+    for (var i = 0; i < 6; i += 1) {
+      settled.add(
+        jobs.start(
+          source: PatchbayFactSource.appRecorded,
+          body: () async => const <String, Object?>{'ok': true},
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    // A scripted session must not grow this ledger without bound, but the job
+    // still in flight has to stay observable.
+    expect(jobs.snapshot(running), isNotNull);
+    expect(jobs.snapshot(settled.first), isNull);
+    expect(jobs.snapshot(settled.last), isNotNull);
+    pending.complete(const <String, Object?>{'ok': true});
+  });
+
   test(
     'job wait observes changes without polling and returns generated wire',
     () async {

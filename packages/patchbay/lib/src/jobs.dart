@@ -123,7 +123,19 @@ final class PatchbayJobCancellationSignal implements Exception {
 /// In-isolate job ledger for operations whose completion cannot be represented
 /// honestly by the admission response.
 final class PatchbayJobRegistry {
-  PatchbayJobRegistry({DateTime Function()? now}) : _now = now ?? DateTime.now;
+  PatchbayJobRegistry({DateTime Function()? now, this.retainedJobs = 200})
+    : _now = now ?? DateTime.now {
+    if (retainedJobs < 1) {
+      throw ArgumentError.value(retainedJobs, 'retainedJobs');
+    }
+  }
+
+  /// How many settled jobs stay readable.
+  ///
+  /// Terminal events carry a full result payload, so a scripted session that
+  /// keeps invoking job commands would otherwise grow this ledger for the life
+  /// of the App. Running jobs are never evicted.
+  final int retainedJobs;
 
   final DateTime Function() _now;
   final Map<String, _PatchbayJobRecord> _records =
@@ -149,7 +161,19 @@ final class PatchbayJobRegistry {
       operation: operation,
     );
     unawaited(_run(record, source: source, operation: operation, body: body));
+    _evictSettled();
     return jobId;
+  }
+
+  /// Drops the oldest settled jobs once the ledger exceeds [retainedJobs].
+  /// Insertion order is job order, and a running job is always kept.
+  void _evictSettled() {
+    if (_records.length <= retainedJobs) return;
+    for (final String jobId in _records.keys.toList(growable: false)) {
+      if (_records.length <= retainedJobs) return;
+      final _PatchbayJobRecord? record = _records[jobId];
+      if (record != null && _terminal(record)) _records.remove(jobId);
+    }
   }
 
   PatchbayJobSnapshot? snapshot(String jobId) {
