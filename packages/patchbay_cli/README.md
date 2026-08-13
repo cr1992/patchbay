@@ -6,12 +6,19 @@
 协议、生命周期和传输边界见 [`../patchbay/README.md`](../patchbay/README.md)，Flutter UI 控制面见
 [`../patchbay_flutter/README.md`](../patchbay_flutter/README.md)。
 
-## 当前命令
+## 安装与运行
 
-`PatchbayFriendlyCommand` 是 CLI 里唯一的命令表：路径解析、参数构造、dispatch 与帮助全部由它派生。
-每条声明选一个 `PatchbayCommandTarget`，`runPatchbayCli` 对该 enum 做无 default 的 switch，因此新增
-命令无法只接上执行而漏掉帮助。`exec` 的协议名来自调用方参数，`identity`/`catalog`/`snapshot` 与三棵
-诊断树走 transport 方法而非 catalog 命令，这三类差异也写在声明里，由帮助按 target 分别措辞。
+当前 package 尚未发布到 pub.dev，可以从仓库 tag 安装：
+
+```console
+$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
+    --git-ref patchbay-v0.1.0 --git-path packages/patchbay_cli
+$ patchbay --help
+```
+
+在本 package 内开发时，以下文档中的 `patchbay` 都可以替换为 `dart run bin/patchbay.dart`。
+
+## 命令速查
 
 查看帮助不会发现会话、连接 App 或读取 bearer/敏感 stdin：
 
@@ -78,6 +85,16 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture t
 dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
+
+`<generation>` 来自最近一次 catalog 或 Semantics tree。目标重挂载后 generation 会变化；写操作携带
+旧值时会稳定拒绝，避免命令误打到同名的新实例。
+
+### 命令声明一致性
+
+`PatchbayFriendlyCommand` 是 CLI 里唯一的命令表：路径解析、参数构造、dispatch 与帮助全部由它派生。
+每条声明选择一个 `PatchbayCommandTarget`，`runPatchbayCli` 对该 enum 做无 default 的 switch，因此新增
+命令无法只接上执行而漏掉帮助。`exec` 的协议名来自调用方参数；identity / catalog / snapshot 与三棵
+诊断树走 transport 方法而非 catalog 命令，这些差异也写在声明里。
 
 所有命令（含 `exec`、`job`、`ui text`、`ui semantics` 与三棵诊断树）都对无关选项 fail-closed：
 传入该命令不接受的选项时以退出码 `64` 报 `--<name> is not valid for <command>`，不静默忽略。
@@ -173,7 +190,7 @@ JSON 输出保留事实来源、rejection code、job event sequence 和 capabili
 
 调用方应同时读取 JSON 信封；退出码不承载设备完成性。
 
-## 后续方向
+## 能力与边界
 
 Widget/Render/Focus 命令是 Flutter SDK 诊断 extension 的只读代理。输出带
 `schema=flutterSdkPassthrough`，字段随 Flutter SDK 变化；profile 中对应 extension 不存在时稳定返回

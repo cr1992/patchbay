@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="680" viewBox="0 0 1280 680" role="img" aria-labelledby="title desc">
+  <title id="title">Patchbay architecture</title>
+  <desc id="desc">The Patchbay CLI connects through VM Service or optional direct HTTP to a guarded service host inside a running Flutter app. The host exposes the Flutter bridge, consumer adapter, and artifact services while reusing the app's existing controllers.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0c111e"/>
+      <stop offset="1" stop-color="#11182a"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#58f3c2"/>
+      <stop offset="0.52" stop-color="#63b8ff"/>
+      <stop offset="1" stop-color="#b77cff"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#99aac8" stroke-opacity="0.045"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000714" flood-opacity="0.45"/>
+    </filter>
+    <marker id="arrowMint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0l10 5-10 5z" fill="#58f3c2"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0l10 5-10 5z" fill="#63b8ff"/>
+    </marker>
+    <clipPath id="frame"><rect width="1280" height="680" rx="26"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="680" fill="url(#bg)"/>
+    <rect width="1280" height="680" fill="url(#grid)"/>
+    <circle cx="790" cy="310" r="360" fill="#63b8ff" opacity="0.035"/>
+    <circle cx="1210" cy="600" r="250" fill="#b77cff" opacity="0.035"/>
+
+    <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+      <text x="56" y="57" fill="#f2f6ff" font-size="25" font-weight="760" letter-spacing="2">ARCHITECTURE</text>
+      <text x="306" y="56" fill="#7787a6" font-size="12" font-weight="650" letter-spacing="1.8">ONE CONTROL PLANE · TWO TRANSPORTS · EXISTING APP LOGIC</text>
+
+      <g font-size="11" font-weight="700" letter-spacing="1.4" fill="#7787a6">
+        <text x="56" y="112">CLIENT</text>
+        <text x="273" y="112">TRANSPORT</text>
+        <text x="505" y="112">PATCHBAY RUNTIME</text>
+        <text x="1022" y="112">YOUR APP</text>
+      </g>
+
+      <!-- Client -->
+      <g transform="translate(48 136)" filter="url(#shadow)">
+        <rect width="168" height="330" rx="19" fill="#0c1423" stroke="#2f3d58"/>
+        <g transform="translate(24 26)">
+          <rect width="120" height="112" rx="14" fill="#111d30" stroke="#58f3c2" stroke-opacity="0.35"/>
+          <path d="M24 35l12 10-12 10M43 57h25" fill="none" stroke="#58f3c2" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="20" y="88" fill="#edf5ff" font-size="15" font-weight="720">patchbay CLI</text>
+        </g>
+        <path d="M24 166H144" stroke="#263651"/>
+        <g transform="translate(24 192)">
+          <circle cx="10" cy="10" r="8" fill="#63b8ff" fill-opacity="0.18" stroke="#63b8ff" stroke-opacity="0.6"/>
+          <path d="M7 10h6M10 7v6" stroke="#63b8ff" stroke-width="1.4"/>
+          <text x="27" y="14" fill="#bfcae0" font-size="12" font-weight="620">scripts</text>
+          <circle cx="10" cy="54" r="8" fill="#b77cff" fill-opacity="0.16" stroke="#b77cff" stroke-opacity="0.55"/>
+          <path d="M6 54h8M6 50h8M6 58h8" stroke="#b77cff" stroke-width="1.2"/>
+          <text x="27" y="58" fill="#bfcae0" font-size="12" font-weight="620">automation</text>
+          <circle cx="10" cy="98" r="8" fill="#ffca6a" fill-opacity="0.15" stroke="#ffca6a" stroke-opacity="0.55"/>
+          <path d="M6 98l3 3 6-7" fill="none" stroke="#ffca6a" stroke-width="1.4"/>
+          <text x="27" y="102" fill="#bfcae0" font-size="12" font-weight="620">humans</text>
+        </g>
+      </g>
+
+      <!-- Transport -->
+      <g transform="translate(264 136)">
+        <rect width="184" height="148" rx="18" fill="#101a2d" stroke="#58f3c2" stroke-opacity="0.38"/>
+        <rect x="16" y="16" width="73" height="22" rx="11" fill="#58f3c2" fill-opacity="0.12"/>
+        <text x="52" y="31" text-anchor="middle" fill="#58f3c2" font-size="9" font-weight="750" letter-spacing="1">PRIMARY</text>
+        <text x="20" y="72" fill="#eef5ff" font-size="16" font-weight="720">VM Service</text>
+        <text x="20" y="97" fill="#8fa0bf" font-size="11.5">debug / profile 自带</text>
+        <text x="20" y="119" fill="#8fa0bf" font-size="11.5">与 DevTools 共用</text>
+
+        <g transform="translate(0 182)">
+          <rect width="184" height="148" rx="18" fill="#101a2d" stroke="#b77cff" stroke-opacity="0.34"/>
+          <rect x="16" y="16" width="78" height="22" rx="11" fill="#b77cff" fill-opacity="0.11"/>
+          <text x="55" y="31" text-anchor="middle" fill="#c391ff" font-size="9" font-weight="750" letter-spacing="1">OPTIONAL</text>
+          <text x="20" y="72" fill="#eef5ff" font-size="16" font-weight="720">Direct HTTP</text>
+          <text x="20" y="97" fill="#8fa0bf" font-size="11.5">显式启动 · 默认关闭</text>
+          <text x="20" y="119" fill="#8fa0bf" font-size="11.5">受信网络实验用途</text>
+        </g>
+      </g>
+
+      <!-- Runtime boundary -->
+      <g transform="translate(496 126)" filter="url(#shadow)">
+        <rect width="480" height="410" rx="23" fill="#0b1323" stroke="#405170"/>
+        <path d="M0 54H480" stroke="#293954"/>
+        <g transform="translate(18 15)">
+          <rect width="26" height="26" rx="7" fill="#12233a" stroke="#63b8ff" stroke-opacity="0.6"/>
+          <circle cx="8" cy="9" r="2.6" fill="#58f3c2"/><circle cx="18" cy="9" r="2.6" fill="#63b8ff"/>
+          <circle cx="8" cy="18" r="2.6" fill="#63b8ff"/><circle cx="18" cy="18" r="2.6" fill="#b77cff"/>
+          <path d="M8 9c6 0 4 9 10 9M18 9c-6 0-4 9-10 9" fill="none" stroke="#eff6ff" stroke-width="1"/>
+          <text x="38" y="19" fill="#eef5ff" font-size="14" font-weight="720">RUNNING FLUTTER APP</text>
+        </g>
+
+        <g transform="translate(24 76)">
+          <rect width="432" height="64" rx="15" fill="#111d31" stroke="#63b8ff" stroke-opacity="0.42"/>
+          <text x="20" y="28" fill="#eef5ff" font-size="15" font-weight="720">PatchbayServiceHost</text>
+          <text x="20" y="48" fill="#8091af" font-size="11">identity · catalog · snapshot · invoke</text>
+          <rect x="329" y="18" width="82" height="26" rx="13" fill="#63b8ff" fill-opacity="0.12"/>
+          <text x="370" y="35" text-anchor="middle" fill="#72c2ff" font-size="9" font-weight="750" letter-spacing="1">patchbay</text>
+        </g>
+
+        <path d="M240 140V166" stroke="#63b8ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+
+        <g transform="translate(24 171)">
+          <rect width="432" height="54" rx="14" fill="#172030" stroke="#ffca6a" stroke-opacity="0.42"/>
+          <circle cx="22" cy="27" r="7" fill="#ffca6a" fill-opacity="0.18" stroke="#ffca6a"/>
+          <path d="M19 27l2 2 4-5" fill="none" stroke="#ffca6a" stroke-width="1.5"/>
+          <text x="38" y="24" fill="#f1f5fd" font-size="13" font-weight="720">双层门禁</text>
+          <text x="38" y="41" fill="#8797b4" font-size="10.5">基础门 → descriptor 声明门</text>
+          <text x="410" y="32" text-anchor="end" fill="#ffca6a" font-size="9" font-weight="750" letter-spacing="1">FAIL CLOSED</text>
+        </g>
+
+        <path d="M240 225V250M240 250H76V266M240 250V266M240 250H404V266" fill="none" stroke="#405675" stroke-width="1.6"/>
+
+        <g transform="translate(24 266)">
+          <g>
+            <rect width="136" height="112" rx="14" fill="#101c2e" stroke="#58f3c2" stroke-opacity="0.36"/>
+            <text x="14" y="27" fill="#58f3c2" font-size="11" font-weight="760">FLUTTER BRIDGE</text>
+            <text x="14" y="53" fill="#c0cce0" font-size="10.5">Semantics / UI IDs</text>
+            <text x="14" y="73" fill="#c0cce0" font-size="10.5">navigation / wait</text>
+            <text x="14" y="93" fill="#c0cce0" font-size="10.5">capture</text>
+          </g>
+          <g transform="translate(148)">
+            <rect width="136" height="112" rx="14" fill="#101c2e" stroke="#63b8ff" stroke-opacity="0.36"/>
+            <text x="14" y="27" fill="#63b8ff" font-size="11" font-weight="760">APP ADAPTER</text>
+            <text x="14" y="53" fill="#c0cce0" font-size="10.5">typed snapshot</text>
+            <text x="14" y="73" fill="#c0cce0" font-size="10.5">domain commands</text>
+            <text x="14" y="93" fill="#c0cce0" font-size="10.5">job terminal facts</text>
+          </g>
+          <g transform="translate(296)">
+            <rect width="136" height="112" rx="14" fill="#101c2e" stroke="#b77cff" stroke-opacity="0.36"/>
+            <text x="14" y="27" fill="#bd88ff" font-size="11" font-weight="760">ARTIFACTS</text>
+            <text x="14" y="53" fill="#c0cce0" font-size="10.5">redacted logs</text>
+            <text x="14" y="73" fill="#c0cce0" font-size="10.5">bounded blob store</text>
+            <text x="14" y="93" fill="#c0cce0" font-size="10.5">SHA-256 / TTL</text>
+          </g>
+        </g>
+      </g>
+
+      <!-- Existing app -->
+      <g transform="translate(1024 136)" filter="url(#shadow)">
+        <rect width="208" height="400" rx="20" fill="#0c1423" stroke="#34425e"/>
+        <text x="22" y="38" fill="#f0f5ff" font-size="15" font-weight="730">Existing app logic</text>
+        <text x="22" y="58" fill="#7f90ae" font-size="10.5">Patchbay reuses, never forks</text>
+        <g transform="translate(18 85)">
+          <rect width="172" height="64" rx="13" fill="#111d30"/>
+          <circle cx="20" cy="20" r="5" fill="#58f3c2"/>
+          <text x="34" y="24" fill="#dbe5f6" font-size="11.5" font-weight="650">controllers</text>
+          <text x="20" y="46" fill="#7e90af" font-size="10">state machines · permits</text>
+          <rect y="76" width="172" height="64" rx="13" fill="#111d30"/>
+          <circle cx="20" cy="96" r="5" fill="#63b8ff"/>
+          <text x="34" y="100" fill="#dbe5f6" font-size="11.5" font-weight="650">Flutter runtime</text>
+          <text x="20" y="122" fill="#7e90af" font-size="10">widgets · router · frames</text>
+          <rect y="152" width="172" height="64" rx="13" fill="#111d30"/>
+          <circle cx="20" cy="172" r="5" fill="#b77cff"/>
+          <text x="34" y="176" fill="#dbe5f6" font-size="11.5" font-weight="650">data sources</text>
+          <text x="20" y="198" fill="#7e90af" font-size="10">SDKs · logs · devices</text>
+          <rect y="228" width="172" height="64" rx="13" fill="#111d30"/>
+          <circle cx="20" cy="248" r="5" fill="#ffca6a"/>
+          <text x="34" y="252" fill="#dbe5f6" font-size="11.5" font-weight="650">app policy</text>
+          <text x="20" y="274" fill="#7e90af" font-size="10">auth · privacy · lifecycle</text>
+        </g>
+      </g>
+
+      <!-- Flow arrows -->
+      <path d="M216 210H252" stroke="#58f3c2" stroke-width="2" marker-end="url(#arrowMint)"/>
+      <path d="M216 392H252" stroke="#b77cff" stroke-width="2"/>
+      <path d="M448 210H480V226H496" fill="none" stroke="#58f3c2" stroke-width="2" marker-end="url(#arrowMint)"/>
+      <path d="M448 392H480V254H496" fill="none" stroke="#b77cff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <path d="M976 332H1008" stroke="#63b8ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <path d="M1008 332V238M1008 332V448" fill="none" stroke="#405675" stroke-width="1.4"/>
+
+      <!-- Package legend -->
+      <g transform="translate(48 587)">
+        <text y="22" fill="#7283a2" font-size="10" font-weight="700" letter-spacing="1.4">PACKAGE MAP</text>
+        <g transform="translate(118)">
+          <rect width="200" height="42" rx="21" fill="#101b2d" stroke="#58f3c2" stroke-opacity="0.3"/>
+          <circle cx="22" cy="21" r="4" fill="#58f3c2"/>
+          <text x="36" y="26" fill="#c5d1e5" font-size="11" font-weight="700">patchbay_cli</text>
+          <g transform="translate(216)">
+            <rect width="200" height="42" rx="21" fill="#101b2d" stroke="#63b8ff" stroke-opacity="0.3"/>
+            <circle cx="22" cy="21" r="4" fill="#63b8ff"/>
+            <text x="36" y="26" fill="#c5d1e5" font-size="11" font-weight="700">patchbay</text>
+          </g>
+          <g transform="translate(432)">
+            <rect width="200" height="42" rx="21" fill="#101b2d" stroke="#b77cff" stroke-opacity="0.3"/>
+            <circle cx="22" cy="21" r="4" fill="#b77cff"/>
+            <text x="36" y="26" fill="#c5d1e5" font-size="11" font-weight="700">patchbay_flutter</text>
+          </g>
+          <g transform="translate(648)">
+            <rect width="200" height="42" rx="21" fill="#101b2d" stroke="#ffca6a" stroke-opacity="0.3"/>
+            <circle cx="22" cy="21" r="4" fill="#ffca6a"/>
+            <text x="36" y="26" fill="#c5d1e5" font-size="11" font-weight="700">patchbay_transport</text>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+  <rect x="0.5" y="0.5" width="1279" height="679" rx="25.5" fill="none" stroke="#3d4b67" stroke-opacity="0.6"/>
+</svg>

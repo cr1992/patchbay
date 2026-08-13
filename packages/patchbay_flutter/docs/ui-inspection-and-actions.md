@@ -30,7 +30,7 @@ extension 存在，因此稳定自动化不能只依赖该扩展。
 
 Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host 启动时持有一个
 `SemanticsHandle`，停止时释放；不需要在 `MaterialApp.builder` 外再包一层 Widget。可选 root bridge
-只留给根截图、帧协调等确实需要根渲染上下文的后续能力。
+只用于根截图、帧协调等确实需要根渲染上下文的能力。
 
 ## Semantics 快照
 
@@ -79,7 +79,7 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
 
 ## Action 执行
 
-第一批只支持 Flutter 已公开且参数能够稳定表达的标准 action：
+当前支持 Flutter 已公开且参数能够稳定表达的标准 action：
 
 - `tap`、`longPress`；
 - `focus`、`dismiss`、`showOnScreen`；
@@ -87,7 +87,7 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
 - `increase`、`decrease`、`expand`、`collapse`；
 - `setText`，文本只能通过显式参数传入，敏感输入必须来自 stdin。
 
-`setSelection`、剪贴板、custom action、坐标手势和 `scrollToOffset` 暂不进入第一批。它们的参数、
+`setSelection`、剪贴板、custom action、坐标手势和 `scrollToOffset` 当前不支持。它们的参数、
 隐私或跨 SDK 语义未冻结，不能用无类型 JSON 猜测补齐。
 
 Semantics action 是“沿 Flutter 已公开辅助功能 action 分派了一次”，不是业务成功：
@@ -95,7 +95,7 @@ Semantics action 是“沿 Flutter 已公开辅助功能 action 分派了一次�
 - admission accepted 不等于 callback 产生的网络、文件或设备动作完成；
 - 返回 `outcome=dispatched`、操作前后 tree revision 和 `source=uiObserved`；
 - 无法证明页面已切换时不得返回 `applied` 或 `completed`；
-- consumer 需要稳定页面终态时，使用后续 navigation destination observer 或 `ui.wait`。
+- consumer 需要稳定页面终态时，使用 navigation destination observer 或 `ui.wait`。
 
 ## 门与 action policy
 
@@ -109,12 +109,12 @@ Semantics action 是“沿 Flutter 已公开辅助功能 action 分派了一次�
 - action 触发的领域 handler 仍拥有自己的 permit、generation、权限和并发账本；
 - policy 不能把系统 UI 或外部设备结果声明成 Flutter action 的完成事实。
 
-consumer 可以用一个保守的全局 UI interaction gate 开始试点，无须逐页面登记；高风险或敏感节点应
+consumer 可以用一个保守的全局 UI interaction gate 开始接入，无须逐页面登记；高风险或敏感节点应
 通过 Semantics identifier、`PatchbayKey` declaration 或 consumer policy 细分。
 
 ## CLI 面
 
-计划中的稳定命令：
+当前稳定命令：
 
 ```text
 patchbay ui semantics tree
@@ -170,11 +170,12 @@ obscured value 不读取，每次调用必须显式给出 timeout。
 - Android、iOS、HarmonyOS/CPF 都只依赖 Flutter 公开 API，不新增原生 plugin；
 - Inspector passthrough 是否存在由运行时 catalog 决定，profile 与不同 Flutter SDK 可返回 unavailable；
 - PlatformView 只作为边界节点报告，不能遍历其原生内部树；
-- 系统权限弹窗不属于 Flutter 树，不在本批次能力声明内。
+- 系统权限弹窗不属于 Flutter 树，不在本 package 的能力范围内。
 
-## 实施批次与退出条件
+## 验收标准
 
-以下每批除自动化测试外，都必须在真实 iPhone 或 Android 的 debug/profile App 上用通用 CLI 完成闭环。
+以下清单描述能力对外发布时的验收标准，不等于当前仓库的完成度声明。除自动化测试外，还应在真实
+iPhone 或 Android 的 debug/profile App 上用通用 CLI 完成闭环。
 平台中性能力至少选一台真机；涉及平台差异或声称 Android/iOS 一致时两端都跑。只看到命令出现在 catalog、
 只连通 VM Service、或只在 widget test 中派发 action，都不算该能力完成。
 
@@ -207,4 +208,4 @@ obscured value 不读取，每次调用必须显式给出 timeout。
 - destination catalog/current/go/push/back 与 `ui.wait` 已实现；
 - observer、revision、串行化、redirect、歧义、后台化和超时语义已有 unit/widget 覆盖；
 - 不倒灌为 A/B/C 的前置条件。
-- 真机仍须至少完成一次 destination 到达与一次超时/redirect 反向路径，完成前不宣称 v0.2d 退出。
+- 真机仍须至少完成一次 destination 到达与一次超时或 redirect 反向路径，完成前不宣称该能力已验收。

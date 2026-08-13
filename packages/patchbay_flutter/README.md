@@ -1,29 +1,22 @@
 # Patchbay Flutter
 
 `patchbay_flutter` 是 Patchbay 的可选 Flutter adapter。它的目标是用最小 Widget 侵入提供稳定、
-可发现、fail-closed 的 UI 调试能力，而不是实现一套坐标驱动的黑盒自动化框架。
+可发现、fail-closed 的 UI 调试能力，而不是实现一套坐标驱动的黑盒自动化框架。本文中的
+consumer 指接入 Patchbay 的 App。
 
-通用协议和传输边界见 [`../patchbay/README.md`](../patchbay/README.md)。
+快速安装和首次连接见[仓库 README](../../README.md#快速开始)，通用协议和传输边界见
+[`../patchbay/README.md`](../patchbay/README.md)。
 
-## 当前实现
+## 当前能力
 
-当前公共 API 已提供：
-
-- `PatchbayKey.text`；
-- 弱引用 `PatchbayUiRegistry`；
-- mounted generation、重复 ID 歧义和 stale generation 拒绝；
-- `text.set` 与 `text.enter`；
-- 每操作 consumer gate、敏感输入和 side-effect descriptor；
-- `PatchbayFlutterServiceHost`，把 UI catalog/operator 与领域 host 合并到同一 service extension。
-- 无容器的规范化 Semantics 树、节点 generation、节点上限和 obscured value 脱敏；
-- consumer policy 默认拒绝的标准 Semantics action：tap、focus、scroll、setText 等；
-- App lifecycle resumed 门和 gate await 后二次节点解析。
-- composition-root `PatchbayNavigationAdapter`、destination catalog/current/go/push/back；
-- navigation revision、串行化、redirect/timeout/background/stale 类型化拒绝和 observer + 下一帧确认；
-- `ui.wait` 的 Semantics identifier mounted/unmounted/value、navigation destination、Semantics tree
-  revision 与 Patchbay-observed frame revision 条件。
-- 可选 `PatchbayRoot` 根截图与已注册 `RenderRepaintBoundary` target 截图；
-- 下一帧、lifecycle/gate 二次复核、像素/字节上限和共享 chunked blob 输出。
+| 能力面 | 公共 API 与边界 |
+|---|---|
+| **稳定 target** | `PatchbayKey.text`、弱引用 registry、mounted generation、重复 ID 歧义和 stale 拒绝 |
+| **文本操作** | `text.set` / `text.enter`、每操作 gate、敏感输入和 side-effect descriptor |
+| **Semantics** | 无容器的规范化树、节点 generation、obscured value 脱敏，以及 policy 默认拒绝的标准 action |
+| **导航与等待** | composition-root navigation adapter、revision / redirect / timeout 语义和 `ui.wait` 条件 |
+| **截图** | 可选 root / target capture、下一帧复核、像素与字节上限、chunked blob 输出 |
+| **Host 组合** | `PatchbayFlutterServiceHost` 把 UI 与领域 catalog/operator 合并到同一 service extension |
 
 日志面位于 core `patchbay`，只有 consumer 显式注入 `PatchbayArtifactService` 时才进入本 host 的
 catalog。Widget/Render/Focus 诊断树由
@@ -38,7 +31,7 @@ Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 D
 | 接入级别 | Consumer 改动 | 能力 |
 |---|---|---|
 | Host only | App 组合根启动 service host | identity、领域 catalog/snapshot/invoke；不承诺稳定 Widget 操作 |
-| Runtime observation | 只启动 Flutter host，不改 Widget 树（已实现） | Widget/Render/Semantics 摘要和标准 Semantics action |
+| Runtime observation | 只启动 Flutter host，不改 Widget 树 | Widget/Render/Semantics 摘要和标准 Semantics action |
 | Optional root bridge | App 最上层包一次 root bridge | 根截图和确实需要根渲染上下文的帧协调 |
 | Single Key | 目标 Widget 的 `key` 换成 `PatchbayKey` | 该目标 catalog 明示的操作 |
 
@@ -96,7 +89,7 @@ registry 不因为 Key 对象存在就宣称目标已挂载：
 敏感 target 必须声明 `sensitive: true`。这类输入只接受 CLI stdin，catalog 和结果只返回长度及
 redacted 标记，不回显明文。
 
-## Runtime observation（已实现）
+## Runtime observation
 
 Widget 与 Semantics 树不要求 consumer 包一层 root。Flutter host 可以通过公开 binding、Inspector 和
 Semantics API 读取当前树；Semantics action 由 consumer 在 composition root 注入一次 policy，默认拒绝。
@@ -107,7 +100,7 @@ Tab 可以直接从 Semantics 快照发现并执行原 callback，完整复用 W
 详细协议、隐私边界和分批退出条件见
 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。
 
-## Optional root bridge 与 capture（已实现）
+## Optional root bridge 与 capture
 
 需要全局 Flutter 观察时，允许 consumer 在 `MaterialApp.builder` 最上层包一次 root bridge：
 
@@ -132,7 +125,7 @@ root bridge 只负责确实需要根渲染上下文的截图与帧调度。它�
 编码前复核 resumed/target；默认限制 16 MP、8 MiB PNG、pixelRatio 不超过 3。PNG 只进入共享 blob
 store，响应返回尺寸、ratio、SHA-256、TTL 和 blobId，大字节不塞进单个 service-extension 响应。
 
-## 语义导航（已实现）
+## 语义导航
 
 导航不应通过给首页、设置按钮加 Key 后模拟点击完成。推荐在 App 组合根注入一个 consumer adapter，
 协议只暴露稳定 destination ID：
@@ -189,7 +182,7 @@ revision。请求被业务 guard 改写到其他 settled destination 时返回 `
 包括 `navigationTimeout`、`navigationLifecycleNotResumed`、`navigationRevisionStale`、
 `navigationDestinationAmbiguous`。gate 发生 await 后会重新解析 destination callback、歧义和 revision。
 
-## ui.wait（已实现）
+## ui.wait
 
 `ui.wait` 是无副作用、有明确 `timeoutMs` 的长轮询调用，不把“开始等待”包装成完成。当前条件为：
 
@@ -211,7 +204,7 @@ revision。请求被业务 guard 改写到其他 settled destination 时返回 `
 | `focus` | 唯一可聚焦目标 | 不可聚焦或歧义即拒绝 |
 | `action.invoke` | 唯一公开 Semantics/Actions 动作 | 不退化到 label、类型或坐标猜测 |
 | `scroll` | 唯一 ScrollableState | 返回操作前后 ScrollMetrics |
-| `wait`（已实现） | Semantics identifier、destination、tree/frame revision | 超时与歧义返回稳定 rejection |
+| `wait` | Semantics identifier、destination、tree/frame revision | 超时与歧义返回稳定 rejection |
 | `capture` | root 或唯一 target RenderObject | 返回 warning、blob metadata 和 sha256 |
 
 普通 `ValueKey`、Widget 文案、runtime type 和 Element 路径可以出现在只读摘要中，但不会自动成为稳定

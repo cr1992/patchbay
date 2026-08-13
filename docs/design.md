@@ -27,8 +27,8 @@ flowchart LR
 ```
 
 依赖方向是治理边界：`patchbay` 与 `patchbay_cli` 是纯 Dart，`patchbay_flutter` 只依赖
-Flutter 与 `patchbay`。consumer 的设备 SDK、路由字符串、领域词汇进不了这四个包——
-需要这些类型时，先在 consumer adapter 转成中立 DTO。
+Flutter 与 `patchbay`。接入方（consumer）的设备 SDK、路由字符串和领域词汇不进入这四个 package；
+需要这些类型时，先在接入方 adapter 中转成中立 DTO。
 
 ## 为什么需要 App 合作接入
 
@@ -37,11 +37,13 @@ Patchbay 不是 adb 那种对任意 App 生效的外部工具：它要求 App �
 
 1. **类型化**——状态和失败是结构化 DTO，不是从日志反推；
 2. **有门禁**——每条命令过声明式的门，权限、启动阶段、业务约束由 App 自己裁决；
-3. **可彻底裁除**——release 构建从编译期就不存在这套东西，而不是"藏得比较深"。
+3. **有编译期边界**——release 不构造这套调试面，而不是用运行时开关把它“藏起来”；最终产物由
+   接入方构建链继续验证。
 
 ## 六条设计立场
 
-每一条都有测试钉住；违反其中任何一条的 PR 应当被拒。
+核心协议约束由仓库测试覆盖；依赖 App 构建链或真机行为的部分，需要接入方在自己的流水线中继续验收。
+违反这些立场的改动应先修改设计，而不是静默放宽实现。
 
 ### 1. 受理 ≠ 执行
 
@@ -66,17 +68,20 @@ payload，带自己的证据等级。CLI 退出码同构：`0` 只代表"App 受
 依赖就绪、业务约束）。目录即真源：CLI 帮助、参数校验、副作用提示全部从 descriptor
 生成，不存在第二份手写命令表——这句话由测试与门禁共同强制，不是约定。
 
-### 4. release 彻底裁除
+### 4. release 必须可裁除
 
-组合根一个编译期常量决定一切：release 不注册扩展、不构造 adapter、不保留运行时重开
-入口。`PatchbayKey` 在所有构建模式保持同一种 GlobalKey 语义（release 只是不登记），
-App 行为零漂移——debug 和 release 的 widget 状态保留语义完全一致。release AOT 的
-协议符号残留有专门 guard 扫描（实测零命中）。
+组合根用编译期常量确保 release 不注册扩展、不构造 adapter、不保留运行时重开入口。
+`PatchbayKey` 在所有构建模式保持同一种 GlobalKey 语义，release 只裁掉调试声明和登记逻辑，
+避免因为 Key 类型变化造成 Widget state 漂移。
+
+通用 package 无法替任意 App 证明最终 AOT 产物。接入方必须在自己的构建链中扫描 release 产物，
+确认 host、descriptor、operator 和业务 callback 均不可达。
 
 ### 5. UI 操作低侵入、防误击
 
-不做全树扫描，不按文案、坐标或节点序号定位：只操作显式标注的 `PatchbayKey` 或带
-稳定 `Semantics.identifier` 的节点。每个目标带代际（generation）：
+只读诊断可以观察 Widget / Render / Semantics 树，但写操作不把文案、坐标、树路径或节点顺序当作
+稳定身份：只操作带代际信息的 `PatchbayKey` target 或明确选中的 Semantics 节点。每个目标带
+代际（generation）：
 
 ```mermaid
 sequenceDiagram
@@ -123,7 +128,7 @@ sequenceDiagram
 
 ## 非目标（红线）
 
-- 不做任意坐标驱动、全树扫描或跨 App 黑盒自动化；
+- 不做任意坐标驱动，也不从全树扫描结果猜测稳定写操作目标；
 - 不重造 hot reload / DevTools（DevTools 能力走转发，标 `flutterSdkPassthrough` + SDK
   漂移警告）；
 - 不支持 release 构建，不建立任何降级通道；

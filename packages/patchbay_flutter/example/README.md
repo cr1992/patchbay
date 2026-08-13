@@ -1,6 +1,6 @@
 # Patchbay Flutter minimal consumer
 
-这个 example 只验证 consumer-neutral 接入面，不依赖 Moii，也不包含 Android/iOS 平台工程：
+这个 example 只验证通用接入面，不依赖任何业务 App，也不包含 Android / iOS 平台工程：
 
 - 组合根注册一个 `PatchbayFlutterServiceHost`；
 - App identity 为 `dev.patchbay.example`；
@@ -15,6 +15,6 @@ flutter analyze
 flutter test
 ```
 
-没有平台目录意味着这里不冒充真机 App。真机传输、端口发现与产品生命周期接线由真实 consumer
-负责；本 example 只证明第二个 consumer 能用公开 API 完成 identity、catalog、Flutter observation 和
+没有平台目录意味着这里不是可直接 `flutter run` 的真机 Demo。真机传输、端口发现与产品生命周期
+接线由实际 App 负责；本 example 用于证明公开 API 可以完成 identity、catalog、Flutter observation 和
 领域 invoke 闭环。

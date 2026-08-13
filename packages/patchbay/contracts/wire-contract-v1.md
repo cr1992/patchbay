@@ -14,18 +14,24 @@ contract 只声明 wire 形状。consumer 仍需显式完成领域对象到 wire
 完成性；禁止把领域对象反射或整对象 dump 到协议面。投影层不得再拼 JSON map；它只能构造生成 DTO，
 由生成 codec 校验并输出。
 
-```text
-dart run packages/patchbay/tool/wire_codegen.dart \
-  --contract <contract.json> --output <generated.g.dart> --write
-dart run packages/patchbay/tool/wire_codegen.dart \
-  --contract <contract.json> --output <generated.g.dart> --check
+作为 Git / path 依赖使用时，通过 package executable 调用：
+
+```console
+$ dart run patchbay:wire_codegen \
+    --contract <contract.json> --output <generated.g.dart> --write
+$ dart run patchbay:wire_codegen \
+    --contract <contract.json> --output <generated.g.dart> --check
 ```
 
-仓库内两份真源（通用协议与 Moii 配网投影）统一执行：
+在本仓库根目录更新 core 生成物：
 
-```text
-just gen patchbay-wire write
-just gen patchbay-wire check
+```console
+$ dart run packages/patchbay/bin/wire_codegen.dart \
+    --contract packages/patchbay/contracts/core_wire.json \
+    --output packages/patchbay/lib/src/generated/core_wire.g.dart --write
+$ dart run packages/patchbay/bin/wire_codegen.dart \
+    --contract packages/patchbay/contracts/core_wire.json \
+    --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
 ```
 
-两份 `--check` 已进入 commit / push / CI registry，contract 或 generator 变化但未更新生成物时直接失败。
+`--check` 已进入仓库 CI；contract 或 generator 变化但未同步生成物时会失败。

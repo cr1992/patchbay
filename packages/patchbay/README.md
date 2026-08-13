@@ -1,99 +1,46 @@
-# Patchbay
+# patchbay
 
-Patchbay 是一个 consumer-neutral 的 Dart 运行时调试协议。它让本机 CLI 能够连接一个正在运行的
-Dart/Flutter App，读取运行时身份和目录、获取状态快照，并调用 consumer 明确注册的调试命令。
+`patchbay` 是 Patchbay 的纯 Dart 协议与 host package。它让本机客户端连接正在运行的 Dart / Flutter
+App，读取 runtime identity、catalog 和 snapshot，并调用 App 明确注册的调试命令。
 
-本包不认识具体 App、页面、设备 SDK 或业务领域。consumer 必须在自己的 adapter 中完成类型转换、
-运行时门、并发所有权和事实裁决。
+本 package 不认识页面、设备 SDK、路由或业务领域。使用 Patchbay 的 App（下文称“接入方”）需要在
+自己的 adapter 中完成领域类型转换、门禁判断、并发所有权、脱敏和事实裁决。
+
+完整上手流程见[仓库 README](../../README.md#快速开始)。Flutter UI 接入见
+[`patchbay_flutter`](../patchbay_flutter/README.md)，CLI 用法见
+[`patchbay_cli`](../patchbay_cli/README.md)。
 
 ## Package 边界
 
 | Package | 职责 | 依赖边界 |
 |---|---|---|
-| `patchbay` | 协议、service extension host、gate、descriptor、invocation、job | 纯 Dart，不依赖 Flutter 或 consumer |
-| `patchbay_flutter` | 可选 Flutter target registry 与 UI operator | 只依赖 Flutter 和 `patchbay` |
-| `patchbay_cli` | VM Service/direct client、通用命令行和稳定输出 | 纯 Dart，不依赖 consumer |
-| `patchbay_transport` | 显式启用的 direct HTTP/JSON host/client | 纯 Dart，不依赖 VM Service、Flutter 或 consumer |
+| `patchbay` | 协议、service extension host、门禁、命令声明、调用信封、job、日志与 blob | 纯 Dart |
+| `patchbay_flutter` | 可选 Flutter UI、Semantics、导航、等待与截图 bridge | Flutter + `patchbay` |
+| `patchbay_cli` | VM Service / direct client、会话发现、命令行和稳定输出 | 纯 Dart |
+| `patchbay_transport` | 显式启用的 direct HTTP/JSON host/client | 纯 Dart，不依赖 VM Service |
 
-consumer adapter、品牌命令别名、领域 DTO、路由映射和日志源都留在 consumer 工程。通用包不得
-依赖 consumer feature、vendor adapter、设备 SDK 或 consumer observability。
+领域 DTO、品牌命令别名、设备 SDK、路由映射和日志源都留在接入方工程。通用 package 不依赖这些类型，
+也不从自由文本、Widget 状态或命令名推导业务结论。
 
-Flutter 控制面的接入与语义导航设计见
-[`../patchbay_flutter/README.md`](../patchbay_flutter/README.md)，CLI 用法见
-[`../patchbay_cli/README.md`](../patchbay_cli/README.md)。
+## 核心能力
 
-## 当前实现
+- `PatchbayServiceHost`：注册 identity、catalog、snapshot 和 invoke 四个稳定入口；
+- `PatchbayCommandDescriptor`：声明命令参数、模式、门禁、副作用和允许的事实来源；
+- `PatchbayGateEvaluator`：按固定顺序执行基础门和命令声明门；
+- `PatchbayInvocation`：区分“受理 / 拒绝”和业务执行结果；
+- `PatchbayJobRegistry`：记录长任务、单调事件序号、取消和类型化终态；
+- `PatchbayArtifactService`：提供脱敏日志与有界 blob 下载；
+- wire DTO 与 codegen：统一字段、枚举、校验和双向 JSON codec。
 
-当前代码已经提供：
-
-- `ext.patchbay.identity`、`catalog`、`snapshot` 和 `invoke`；
-- 命令 descriptor、参数 schema、gate ID、side-effect 和敏感策略；
-- `accepted` / `rejected` invocation 信封；
-- App 内 job registry、单调事件序号、取消和终态快照；
-- Flutter 文本 target、规范化 Semantics 树与 policy-gated 标准 action；
-- consumer-neutral destination catalog/current/go/push/back 与类型化导航结果；
-- 有界 `ui.wait` 条件 DTO（Semantics、destination、tree/frame revision）；
-- consumer 注入的已脱敏结构化日志 `query` / `tail` / `export`；
-- 带 TTL、总容量、SHA-256 和 offset/limit chunk 的通用内存 blob store；
-- 可选 Flutter root/registered boundary PNG capture（由 `patchbay_flutter` 提供）；
-- VM Service client 和 Flutter Widget/Render/Focus 诊断 extension 代理；
-- 构造惰性、显式 `start` 的 direct HTTP/JSON host/client，复用同一组 transport-neutral dispatcher。
-
-下列能力仍属于设计方向，不是当前公共 API：
-
-- direct transport 的自动发现、TLS、端点 pinning 与反向连接；
-- 持续日志 watch/job；
-- 物理屏幕、系统 UI 或 PlatformView 的完整 capture。
-
-## 非目标台账
-
-设计定稿里有一节「非目标」（`git show c2320f7:docs/integration/patchbay-design.md` §1.2）。通用设计下沉到
-本包时该节被整节删除而不是下沉，其中几条后来被跨过的边界因此失去了可见记录。下表逐条恢复并标注
-当前状态；被推翻的两条在表后单独说明理由和依据。
-
-| 定稿非目标 | 当前状态 |
-|---|---|
-| 任意坐标驱动、任意 Widget 查询、跨 App 黑盒 UI 自动化；替代 Widget/集成测试或人工目检 | 仍生效；坐标驱动与跨 App 至今无入口。「任意 Widget 查询」与下面 v0.2c 一条重叠——诊断面只读，不是稳定操作面 |
-| 把 CLI 结果当成产品 UI 验收或 capability 销账的充分证据 | 仍生效；「交付阶段与退出条件」的真机门与「结果信封与事实来源」是同一口径 |
-| 重造 hot reload、runtime errors 或 DevTools 完整 Widget tree 等通用运行时调试能力 | **部分推翻**：Widget/Render/Focus 完整树已由 v0.2c 诊断代理接入 |
-| 在 App 内另起 HTTP/WebSocket 服务 | **已推翻**：direct transport 就是 App 内的 `HttpServer` |
-| 支持 release 构建，或未由 `flutter run` / `attach` 暴露 VM Service 的进程 | release 半条仍生效（见「Release 边界」）；VM Service 半条已被 direct transport 放宽 |
-| 首期提供设备写命令、长任务、事件 tail 或 raw DP | 按分期正常解除（v0.3b、v0.4），不是推翻——定稿写的就是「首期」 |
-| core 与 Flutter adapter 依赖宿主设备桥或平台 UI 自动化 runner；系统权限弹窗、通知中心、系统设置、软键盘 UI、其他 App 与原生 `PlatformView` 交互 | 仍生效；capture 对 PlatformView 与系统 UI 返回 capability warning，不冒充完整物理屏幕 |
-| 要求 consumer 每个页面加 Patchbay 容器、每个控件建 Target Widget，或维护与 Widget 树重复的集中注册表 | 仍生效；root bridge 与 `PatchbayKey` 都是可选增强 |
-| 因试点预先修改共享仓命名规范或发布流程 | 仍生效；迁往共享仓仍是 v0.5 的独立退出条件 |
-
-### 已推翻：App 内另起 HTTP 服务
-
-裁决稿是
-[`../../docs/decisions/patchbay-direct-debug-transport.md`](../../docs/decisions/patchbay-direct-debug-transport.md)。
-理由是不能把「zero-ADB」说成 VM Service 端口转发——要真正不经 VM Service，就必须有一条自己的传输，
-因此 `patchbay_transport` 的 direct host 在 App 内绑定 `HttpServer`；选短连接 HTTP 而非 WebSocket，是因为
-当前四个能力都是有界 request/response，状态面更小。
-
-同一条裁决连带放宽了定稿的另一条非目标：direct host 不读取、不代理也不暴露 VM Service URI，
-debug/profile 进程无需 `flutter run` / `attach` 暴露 VM Service 即可被连接。release 那半条不受影响。
-
-推翻带来的补偿边界写在「传输」一节：构造不监听、默认只绑 loopback、LAN 需要代码层第二次显式
-opt-in，且明文 LAN 只提供持有者认证。
-
-### 部分推翻：DevTools 完整 Widget tree
-
-追加者是分期表的 v0.2c「DevTools 诊断代理」，契约见
-[`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)
-的 C 节；**目前没有独立的 `docs/decisions/` 裁决稿**，这一条的真源只有分期表和该契约文档两处。
-
-字面上的「不重造」仍成立——代理的是 Flutter debug 构建自带的 Inspector extension，不复制 DevTools
-协议；但「DevTools 完整 Widget tree 不在范围」这一层已经不成立：Widget/Render/Focus 树现在是 Patchbay
-可达面。理由是另造一份树会产生第二份 schema。代价记在风险登记里：该面随 Flutter SDK 漂移，只标
-passthrough，稳定自动化仍只消费 Patchbay 规范化 Semantics schema。
+Flutter UI、Semantics、导航和 capture 不在本 package 内实现；它们由 `patchbay_flutter` 组合到同一个
+host catalog。direct HTTP 由 `patchbay_transport` 承载，并复用相同的上层 handler。
 
 ## 架构
 
 ```text
 CLI / automation
        │
-       │ Patchbay transport
+       │ VM Service 或 direct HTTP
        ▼
 PatchbayServiceHost
        │
@@ -103,30 +50,29 @@ PatchbayServiceHost
        └── PatchbayJobRegistry
                     │
                     ▼
-             consumer adapter
+             接入方 adapter
                     │
                     ▼
-       existing runtime / controller / ports
+       既有 runtime / controller / ports
 ```
 
-协议只传递中立 JSON。领域状态必须先由 consumer adapter 转成中立 DTO；Patchbay 不从自由文本、
-Widget 状态或命令名推导业务结论。
+adapter 复用 App 现有 controller 和状态机。Patchbay 负责协议与边界，不为 CLI 复制一套业务实现。
 
 ## Service extension
 
-`PatchbayServiceHost` 注册四个稳定入口：
+`PatchbayServiceHost` 注册四个稳定 RPC：
 
 | RPC | 含义 |
 |---|---|
-| `ext.patchbay.identity` | App、isolate、schema 与实例 nonce |
+| `ext.patchbay.identity` | App、isolate、schema 与短期实例 ID |
 | `ext.patchbay.catalog` | 当前实际注册的命令和动态 UI target |
-| `ext.patchbay.snapshot` | consumer 提供的只读运行时快照 |
+| `ext.patchbay.snapshot` | 接入方提供的只读 runtime 快照 |
 | `ext.patchbay.invoke` | 调用 catalog 中存在的命令 |
 
-所有载荷带 `schemaVersion`。`appInstanceId` 在同一个 isolate 内稳定，hot restart 后必须变化；client
-连接后必须重新校验 schema、isolate 和实例身份，不能只凭 PID 或旧 URI 判断会话仍有效。
+所有载荷带 `schemaVersion`。`appInstanceId` 在同一 isolate 内稳定，hot restart 后必须变化。客户端连接后
+会重新校验 schema、isolate 和 App 实例，不能只凭 PID 或旧 URI 判断会话仍有效。
 
-## 结果信封与事实来源
+## 受理信封与事实来源
 
 外层信封只表达 handler 是否接纳请求：
 
@@ -141,10 +87,10 @@ Widget 状态或命令名推导业务结论。
 }
 ```
 
-`accepted` 不等于业务完成、设备执行或 UI 正确。协议不得增加容易被误读的外层 `ok`、`success`、
-`executed` 字段。
+`accepted` 不等于业务完成、设备执行或 UI 正确。协议不会增加容易被误读的外层 `ok`、`success` 或
+`executed` 字段。业务结果进入 payload 或 job 终态。
 
-payload 中的观测值应使用以下来源词汇：
+观测值使用以下事实来源：
 
 | 来源 | 含义 |
 |---|---|
@@ -154,76 +100,34 @@ payload 中的观测值应使用以下来源词汇：
 | `uiObserved` | Flutter target、metrics 或 render tree 的直接观测 |
 | `unknown` | 当前证据不足 |
 
-consumer 可以增加领域内的细分字段，但不能把较弱来源升级成较强结论。
+对象上的 `source` 可由后代继承，更深层字段可以覆盖。descriptor 的 `factSources` 是可能来源的闭集，
+实际 payload 上的 `source` 才是该次结果的事实。传输层和 CLI 都不能把弱来源升级成强结论。
 
-`source` 采用层级继承：对象上的来源适用于其未另行标注的后代；更深层字段可以用自己的 `source`
-覆盖。例如整个 snapshot 可标为 `appRecorded`，其中一条状态读回再明确标为 `deviceReported`。这样每个
-叶子都有可解析来源，同时避免把每个标量包装成 `{value, source}`。descriptor 的 `factSources` 只是
-可能来源的闭集，实际 payload 上的 `source` 才是该次结果的事实。
+## 命令声明与门禁
 
-## Wire contract 与生成代码
-
-协议层的 descriptor、invocation、job、UI target 和 Semantics tree DTO，以及 Moii 试点的配网快照与终态
-证据，都从 JSON contract 生成双向 codec。生成物负责字段名、枚举、嵌套结构、未知字段拒绝、JSON 值
-校验和 `toJson` / `fromJson`；任何 consumer 不再手写协议 map。
-
-Moii consumer 的 61 条领域命令目录以 `lib/debug_console/patchbay/contracts/patchbay_commands.json` 为唯一真源；
-Flutter host 在不改该目录的前提下合并通用 UI 命令，并仅在 consumer 显式注入对应 bridge 时增加
-navigation、日志、blob 与 capture 条目；因此运行时 catalog 是实际能力，不维护固定总数。
-`just gen patchbay-commands write` 生成 command ID/string parse、descriptor、默认值已应用的类型化参数入口，
-以及权限、取消、等待和显式确认元数据；`just gen patchbay-commands check` 只读检查漂移。生成的
-`dispatch` 把每个命令暴露为 required callback，commit gate 还会比对 adapter callback，因此新增契约
-命令但未接业务 handler 会在生成/编译或专项检查阶段失败。snapshot、领域终态和 projection 的事实判断
-仍由 consumer adapter 手写，不进入生成器。
-
-命令生成器是 consumer-neutral 的：契约用 `apiPrefix` 决定生成类型与顶层符号前缀，并自行声明
-`permissions` / `cancellations` 封闭词表；通用 generator 不包含 Moii、BLE、Wi-Fi 或 call 词汇。
-`descriptorImport` 必须显式选择 consumer 已直接依赖的 descriptor export，且只接受
-`package:patchbay/patchbay.dart` 或 `package:patchbay_flutter/patchbay_flutter.dart`。生成器本身不硬编码
-Flutter；Moii App 因当前直接依赖 `patchbay_flutter` 而选择后者，纯 Dart consumer 选择 core 包。
-
-仍需人工维护的是语义投影：领域状态对应哪个稳定枚举、哪些字段必须脱敏、事实来源强度和什么才算业务
-终态。这些判断必须用穷举 switch 映射到生成 DTO，不能用 `runtimeType` / `toString()` 推导协议值。
-
-契约格式与生成命令见 [contracts/wire-contract-v1.md](contracts/wire-contract-v1.md)。仓库统一入口是
-`just gen patchbay-wire write|check`，两份零漂移检查已进入 commit、push 与 CI 门禁。
-
-## Descriptor
-
-`PatchbayCommandDescriptor` 是 CLI 帮助、参数校验和副作用提示的唯一来源，至少描述：
+`PatchbayCommandDescriptor` 是 CLI 帮助、参数校验和副作用提示的真源，至少描述：
 
 - 稳定完整命令名和摘要；
 - `readOnly`、`immediate` 或 `job` mode；
-- 参数类型、必填、默认值和枚举集合；
-- consumer gate ID 集合；
-- `none`、`appState` 或 `external` side-effect；
-- 敏感参数策略。
-- 结果中允许出现的 `factSources` 集合。
+- 参数类型、必填、默认值和枚举；
+- 接入方 gate ID；
+- `none`、`appState` 或 `external` side effect；
+- 敏感参数策略和可能出现的事实来源。
 
-consumer 可注册任意 namespace，例如 `cache.refresh` 或 `session.connect`。通用包不预留设备、配网、
-呼叫或其他业务 namespace，也不在 CLI 维护第二份命令表。
-
-## Gate
-
-每次调用必须依次通过：
-
-1. Patchbay 基础门：当前构建允许、host 启用、identity 有效；
-2. descriptor 声明的 consumer gate。
+每次调用依次通过不可省略的基础门，再通过 descriptor 声明的接入方门：
 
 ```dart
-final evaluator = PatchbayGateEvaluator(
+final gates = PatchbayGateEvaluator(
   baseGate: () => const PatchbayGateDecision.allow(),
-  consumerGate: (gateId) => evaluateConsumerGate(gateId),
+  consumerGate: (id) => evaluateConsumerGate(id),
 );
 ```
 
-基础门不替 consumer 猜登录、隐私同意、数据准备或设备 ready。descriptor 是 consumer gate 的唯一
-能力真源。未声明 gate 不会被通用层自动补上；会触发网络、文件、权限或外部设备动作的命令必须由
-consumer 显式声明对应 gate。
+基础门不会替 App 猜测登录、隐私同意、依赖就绪或设备状态。会触发网络、文件、权限或外部设备动作的
+命令，必须显式声明相应门禁。service extension 没有对称注销能力，所以状态撤回后 handler 仍需逐次
+fail-closed。
 
-service extension 没有对称注销能力，因此 consumer 状态撤回后 handler 仍必须逐次 fail-closed。
-
-## Job
+## 长任务
 
 长操作不能伪装成立即命令。`PatchbayJobRegistry` 的基本契约是：
 
@@ -231,119 +135,68 @@ service extension 没有对称注销能力，因此 consumer 状态撤回后 han
 2. job 先产生 `running` 事件，再进入单一终态；
 3. 每个事件有单调 sequence、时间、phase、source 和 payload；
 4. 取消只终止对应 job，不推导外部系统已经停止；
-5. App/isolate 消失时 client 以连接终止收尾，不伪造 App job 终态。
+5. App / isolate 消失时由客户端以连接终止收尾，不伪造 App job 终态。
 
-consumer 的异步 API 若只表示“订阅已建立/请求已发出”，job body 不能在该 Future 返回时直接记
-`completed`，必须继续观察领域状态直到真实终态。consumer 已完成脱敏与稳定分类时可用
-`PatchbayJobFailure` / `PatchbayJobCancellationSignal` 把结构化终态证据写入 job；普通异常仍只记录
-`errorType`，避免把凭据或 vendor 响应体带出进程。
+如果接入方的异步 API 只表示“请求已发出”，不能在该 Future 返回时直接标记 `completed`；必须继续观察
+领域状态，直到 App 能给出真实终态。`suggestedWaitTimeoutMs` 只建议客户端观察窗口，不改变完成语义。
 
-admission payload 可给出 consumer-neutral 的 `suggestedWaitTimeoutMs`。CLI 默认等待 60 秒；存在该提示
-时使用提示值，但提示只决定观察窗口，不改变 job 的完成语义。
+## 日志与 blob
 
-consumer 负责把生命周期撤回、generation 失效和自身 runtime 销毁映射为稳定取消原因。
+`PatchbayLogSource` 是接入方注入的查询接口，不接管或复制 App 日志管线。接入方先完成 schema-aware
+脱敏，再构造 `PatchbayRedactedLogRecord`。core 会额外拒绝常见敏感字段名和凭据形态，但这只是防御层，
+不能替代 App 自己的隐私策略。
 
-## 结构化日志与 blob
+日志 query / tail 受条数、编码字节和时间上限约束。日志 export 与 Flutter capture 复用
+`PatchbayMemoryBlobStore`；响应只返回 metadata 和 `blobId`，二进制通过 offset / limit 分块读取，并校验
+TTL、容量和 SHA-256。
 
-`PatchbayLogSource` 只是一条 consumer 注入的查询 seam。它不接管、复制或订阅 App 的日志管线；
-consumer 先执行自己的 schema-aware 脱敏，再构造 `PatchbayRedactedLogRecord`。该类型额外拒绝常见敏感
-字段名、Bearer/JWT/私钥形态，但这是防御层，不是万能脱敏器，也不能替代 consumer policy。
+## Wire contract 与生成代码
 
-`logs.query` 与 `logs.tail` 同时受条数、编码字节和时间上限约束。cursor 是 consumer 的 opaque token；
-source 必须保证同页唯一且 `nextCursor` 等于实际末条 cursor，过期 cursor 返回类型化 `staleCursor`。
-长轮询 `tail` 是单次请求：到时返回 `timedOut`，service dispose/连接终止时 cancellation signal 关闭
-consumer wait，不建立常驻 watch 或隐式后台订阅。首条记录本身超过响应上限时返回
-`logRecordTooLarge`，绝不前移 cursor。
+descriptor、invocation、job、UI target 等稳定 DTO 从 JSON contract 生成。生成物负责字段名、枚举、
+嵌套结构、未知字段拒绝和 JSON 类型校验；接入方仍需手写“领域对象 → wire DTO”的语义投影。
 
-`logs.export` 把 NDJSON 写入同一个 `PatchbayMemoryBlobStore`。capture 也复用该 store；service extension
-响应只返回 metadata/blobId，二进制由 `blob.read(blobId, offset, limit)` 分块读取。默认容量 16 MiB、
-chunk 64 KiB、TTL 5 分钟（最大 15 分钟）；过期、越界、非法 chunk、单 blob/总容量超限都有稳定拒绝码。
+仓库内生成和漂移检查：
 
-## 传输
+```console
+$ dart run packages/patchbay/bin/wire_codegen.dart \
+    --contract packages/patchbay/contracts/core_wire.json \
+    --output packages/patchbay/lib/src/generated/core_wire.g.dart --write
+$ dart run packages/patchbay/bin/wire_codegen.dart \
+    --contract packages/patchbay/contracts/core_wire.json \
+    --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
+```
 
-协议层不绑定某一种连接方式。VM Service extension 与 `patchbay_transport` 的 direct HTTP/JSON host
-复用同一组 identity、catalog、snapshot 和 invoke dispatcher；consumer 不得为 direct 通道复制命令路由。
-VM Service 模式在 Android 上仍可能由 `flutter run` 间接使用 ADB。direct 模式不依赖 VM Service 端口
-转发，但是否真正 zero-ADB 仍取决于产品如何启动 App、交付一次性 endpoint/token 及平台网络策略。
-
-direct host 构造不监听，默认只绑 loopback；LAN 必须显式选择
-`experimentalSameTrustedNetworkOnly`。LAN 是明文 HTTP，bearer 只提供持有者认证，不提供机密性、服务端
-身份认证或重放防护，因此：
-
-- 只能在允许的 debug/profile 构建中可达；
-- 必须有短期认证材料和 App 实例身份校验；
-- 不得把认证 URI 或 token 写进普通日志；
-- 不得改变上层 descriptor、invocation 和 job 语义。
-
-更完整的固定协议与安全边界见
-[`../patchbay_transport/README.md`](../patchbay_transport/README.md)。
+contract 格式与依赖方用法见 [wire-contract-v1.md](contracts/wire-contract-v1.md)。
 
 ## Release 边界
 
-consumer 必须用编译期常量让 Patchbay host、adapter 和注册调用在 release 不可达，不能只靠运行时
-flag 隐藏入口。`patchbay` 不提供 release 后门或远程重开机制。
+接入方必须用编译期常量让 host、adapter 和注册调用在 release 不可达，不能只靠运行时 flag 隐藏入口。
+`patchbay` 不提供 release 后门或远程重开机制。
 
-Flutter Key 的跨 build mode 语义由 `patchbay_flutter` 负责；core 只要求 release 中不存在 extension、
-descriptor、operator 和 consumer callback 的可达引用。
+core 无法替任意 App 证明最终 AOT 产物中不存在调试符号。接入方需要在自己的构建链中扫描和验收 release
+产物；Flutter Key 的跨 build mode 语义由 `patchbay_flutter` 负责。
 
-## Consumer 接入原则
+## 接入方职责
 
-- 复用既有 runtime/controller，不为 CLI 另建一套状态机；
-- 并发 permit、lease、generation 和取消所有权仍归 consumer；
+- 复用既有 runtime / controller，不为 CLI 另建状态机；
 - snapshot 只读现有状态，不隐式启动订阅或外部动作；
-- 敏感值在进入 Patchbay 前完成脱敏，通用层不复制 consumer 的隐私规则；
-- UI 观测、领域状态和外部设备结果分别标明来源，不能互相反推。
+- 并发 permit、lease、generation 和取消所有权仍归 App；
+- 敏感值在进入 Patchbay 前完成脱敏；
+- UI 观测、App 状态和外部设备结果分别标明来源；
+- 用真机结果验证平台行为和有副作用的领域命令。
 
-一个 consumer 的品牌入口可以转发到通用 CLI，但不得 fork parser、协议或 catalog。
+## 非目标
 
-## 交付阶段与退出条件
+- 不提供坐标驱动或跨 App 黑盒自动化；
+- 不替代 Widget test、集成测试、DevTools 或人工验收；
+- 不处理系统权限弹窗、安装卸载、shell 和其他 App；
+- 不把 CLI 输出升级为完整产品验收证据；
+- 不支持 release，也不建立隐式降级通道。
 
-阶段表是依赖闸，不是功能数量承诺。某个 consumer 可以在同一 worktree 连续实现多个批次，但不得用
-后续代码量替代前置证据；当前实现范围仍以本文开头的“当前实现”为准。
+## 验证
 
-所有新增或改变的 CLI 能力还有一道共同退出门：必须在真实 iPhone 或 Android 上完成
-`启动 App → identity/catalog → CLI 调用 → 类型化结果/job 终态 → snapshot、UI tree 或外部读回` 闭环。
-单元测试、fake、桌面 Dart VM 和仅证明 RPC 可连都不能替代真机闭环。平台中性的 Flutter/领域能力每批
-至少一台真机；涉及原生平台、权限、transport、build mode 或宣称双端一致的能力，必须覆盖每个受影响
-平台。无法安全执行解绑、写 DP 等副作用时，该项保持“未真机验证”，不能用只读邻近能力代为销账。
-
-真机证据至少记录目标 commit、设备平台与 build mode、运行时 catalog 是否含目标命令、脱敏后的输入
-类别、admission/job 事件序列、最终事实来源和可独立观察的完成证据。敏感值、VM Service 认证 URI 与
-设备凭据不得进入记录。
-
-| 阶段 | 内容 | 退出条件 |
-|---|---|---|
-| v0.1a | 显式 URI 下的 identity、catalog、snapshot 和 schema/instance 校验 | 至少一个 iOS profile 真机会话跑通 extension 纵切；未跑通不得扩展 consumer 命令目录 |
-| v0.1b | launcher machine protocol、会话文件、stale 与多会话选择 | 分片 machine 事件、原子写入、PID/wsUri/identity 三类 stale 判据和 URI 脱敏测试通过 |
-| v0.1c | 显式 direct transport 产品装配 | 默认零监听、用户确认后 start、短期 token 不进日志/URL/持久化/剪贴板、前后台与 dispose 关闭、两 transport handler parity 通过；各平台 LAN 可达性分别真机验收 |
-| v0.2a | 无容器的 Widget/Render/Semantics 只读观察 | debug/profile 读取、节点上限、脱敏、generation 与 release 裁剪通过；不注入 action policy 时只读 |
-| v0.2b | 标准 Semantics action 与单 Key 增强 | tap/scroll/focus/setText、gate await 后二次解析、敏感值、三模式 Key/State 等价性及 UI/领域门隔离通过 |
-| v0.2c | DevTools 诊断代理 | extension 运行时发现、object group 释放、passthrough schema 与 extension 不可用失败语义通过 |
-| v0.2d | 稳定导航与等待 | destination observer/revision/redirect/超时语义按需独立退出；不作为树驱动标准 action 的前置 |
-| v0.3a | consumer runtime 所有权和类型化 invocation facade | 页面与 adapter 复用同一 controller/并发账本，生命周期和迟到 continuation 回归通过 |
-| v0.3b | consumer 领域命令与 job | permit 单一所有权，失败/取消/撤回/generation 失效终态可测，并按共同真机门逐项验证本批 CLI 能力 |
-| v0.4 | 结构化事件、日志与 capture blob | wire DTO 全部生成，tail 无敏感字段，二进制不进入单个 extension 响应；consumer 接线与真机证据另批退出 |
-| v0.5 | 评估迁入共享仓 | 两个真实 consumer、连续兼容批次、consumer adapter 留在各 App，且发布维护者明确 |
-
-## 风险登记
-
-| 风险 | 必须保留的处置 |
-|---|---|
-| iOS profile 的 service extension 行为 | v0.1a 首个 spike 验证；未跑通不扩 consumer 命令集 |
-| hot restart 后 extension、isolate 与实例漂移 | 每次连接重做 schema、isolate、`appInstanceId` 校验，不复用旧 identity |
-| DevTools 与 CLI 多客户端共存 | 使用 DDS 暴露的 URI；真机纵切同时打开 DevTools 验证互不抢占 |
-| 多设备或多 worktree 会话混淆 | 会话记录携带 workspace/device/instance 身份；歧义时要求显式选择 |
-| VM Service URI 含认证信息 | 最小权限存储、普通输出脱敏、进程退出清理 |
-| 明文 LAN bearer 被监听或重放 | 只标 experimental/trusted-network，短 TTL、显式用户确认、后台即关闭；需要不受信网络时另立 TLS 与 pinning 设计 |
-| iOS Local Network 策略阻断 direct LAN | consumer 未声明 Info.plist 时明确不承诺 LAN 可达；不得以纯 Dart socket 编译通过替代真机验收 |
-| 大量 GlobalKey 影响重建 | 只标明确需要控制的目标；根观察不要求 Key；标准 harness 保留性能基线 |
-| Flutter operator 随 SDK 漂移 | 只用公开 API，catalog 取运行时能力，每次 Flutter 升级跑 operator 契约测试 |
-| capture 漏掉 PlatformView、texture 或系统 UI | 返回 capability warning，不把 Flutter PNG 宣称为完整物理屏幕 |
-| Semantics 合并、offstage 或 ID 重复 | 只接受唯一且声明支持的动作；歧义时 fail-closed，不退化到 label 或坐标 |
-| Widget Inspector schema 随 Flutter SDK 漂移 | 诊断代理标明 passthrough 与 SDK 版本；稳定自动化只消费 Patchbay 规范化 Semantics schema |
-| Semantics 快照泄露输入值 | `isObscured` 强制隐藏 value，consumer 可注入更严格脱敏；敏感 setText 只接受 stdin |
-| build mode 间 Key 种类漂移 | 所有模式保持同一种 GlobalKey 和 State 语义，release 只裁登记与 operator |
-| UI 调试门绕过领域门 | descriptor 是 consumer gate 唯一真源；可能产生领域副作用的 UI action 显式声明强门 |
-| registry、operator 或 callback 残留 release | `just check release_debug_surface`（`tools/checks/release_scan.py`）对 release 产物的 `libapp.so` 与 `classes*.dex` 做 extension/descriptor/operator/callback 引用扫描，产物缺失时明确报跳过而非通过；另需验证 root 只透传 child |
-| 命令产生外部副作用 | descriptor 明示 side-effect；真机写操作遵守 consumer 的设备占用、备份与恢复纪律 |
-| release 没有 VM Service | 明确非目标，不建立隐式降级或运行时后门 |
+```console
+$ dart pub get
+$ dart analyze --fatal-infos
+$ dart test
+```
