@@ -326,10 +326,7 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addFlag(
     'stdin',
     defaultsTo: false,
-    help:
-        'Read a sensitive JSON/text value from one no-echo stdin line. A JSON '
-        'object is merged over --args and wins on a shared key; a parameter '
-        'the catalog marks sensitive may only arrive this way.',
+    help: 'Read one no-echo stdin line; JSON merges over --args, stdin wins.',
   )
   ..addFlag(
     'wait',

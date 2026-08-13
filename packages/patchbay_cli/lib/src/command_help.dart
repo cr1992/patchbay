@@ -211,17 +211,19 @@ abstract final class PatchbayCommandHelp {
       ..writeln(command.summary)
       ..writeln(protocolLine(command));
     if (command.fencesNavigationRevision) {
-      output.writeln(
-        'Without --revision the CLI reads navigation.current first and sends '
-        'that value as the fence; the App still refuses a revision that moved '
-        'in between, and the result is marked revisionSource.',
-      );
+      output
+        ..writeln(
+          'Without --revision the CLI reads navigation.current first and',
+        )
+        ..writeln(
+          'sends that value as the fence, marking the result revisionSource.',
+        )
+        ..writeln('The App still refuses a revision that moved in between.');
     }
     if (command.waitCondition case final String condition) {
-      output.writeln(
-        'Sends condition: $condition — the value the response carries, and '
-        'accepted in place of "${command.path.last}".',
-      );
+      output
+        ..writeln('Sends condition: $condition — the value the response')
+        ..writeln('carries, also accepted in place of "${command.path.last}".');
     }
     _writeOptions(
       output,
