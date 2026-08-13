@@ -1,0 +1,74 @@
+# 公开仓 CI 门禁：三个 job 与 GitLab .gitlab-ci.yml 的三检查项一一对应
+# （dart_packages / flutter_package / codegen_drift），两边改动需同步。
+# Flutter 版本与 GitLab CI 镜像 flutter-node:3.44.9 对齐。
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.44.9'
+
+jobs:
+  dart_packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: analyze + test（三个纯 Dart 包）
+        run: |
+          for p in patchbay patchbay_cli patchbay_transport; do
+            echo "== packages/$p =="
+            (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test)
+          done
+
+  flutter_package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: analyze + test（patchbay_flutter 及 example）
+        run: |
+          cd packages/patchbay_flutter
+          flutter pub get
+          flutter analyze
+          flutter test
+          cd example
+          flutter pub get
+          flutter test
+
+  codegen_drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      # 生成物 header 记录仓根相对路径，--check 必须从仓根调用（包目录内跑会假漂移）。
+      - name: wire codegen 零漂移
+        run: |
+          (cd packages/patchbay && dart pub get)
+          dart run packages/patchbay/bin/wire_codegen.dart --contract packages/patchbay/contracts/core_wire.json --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
