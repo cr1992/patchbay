@@ -121,6 +121,21 @@ accepted 信封不能带 rejection，rejected 信封必须带 rejection 且不�
 - `none`、`appState` 或 `external` side effect；
 - 敏感参数策略和可能出现的事实来源。
 
+`sensitive: true` 的强制由 host 完成，不由接入方 handler 完成。客户端用 `inputWasStdin` 标记值来自
+无回显 stdin；host 在 dispatch 之前按 catalog 声明校验，并把这个元键从 arguments 中剥掉，因此
+`PatchbayInvocationSource` 收到的参数里永远没有它。任意 sensitive 参数带非空值却缺少该标记时，host
+以 `sensitiveInputRequiresStdin` 拒绝，`details.parameters` 列出违规参数名。手写 adapter 既不需要在
+参数白名单里豁免它，也**不得**再自行实现这条 stdin 检查——剥键之后那种检查恒为假。
+
+唯一例外是 `plane: flutterUi` 的命令：那条平面由 `patchbay_flutter` 自己的 bridge 服务，敏感性是
+目标级（`PatchbaySensitivePolicy.redacted`、obscured Semantics 节点）而不是参数级，descriptor 无法
+表达，所以元键继续交给该 bridge。领域平面的接入方不受影响。
+
+catalog 是这条策略的唯一真源。host 读不到 catalog 时 fail-closed：带参数的调用以
+`providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，不把未校验的参数交给 adapter；
+无参调用不查 catalog——没有可剥的元键，也没有任何被传输的值可能是敏感的。descriptor 声明的默认值
+不参与这条校验：标记描述的是**被传输的值**的来源，App 自带的默认值从未上过 wire。
+
 每次调用依次通过不可省略的基础门，再通过 descriptor 声明的接入方门：
 
 ```dart
