@@ -197,6 +197,7 @@ router、设备 SDK 和隐私策略仍由 App 自己拥有。
 - **[Flutter package](packages/patchbay_flutter/README.md)** — UI 观察、操作、导航与截图
 - **[CLI package](packages/patchbay_cli/README.md)** — 完整命令和连接安全
 - **[Direct transport](packages/patchbay_transport/README.md)** — HTTP 协议与 LAN 风险
+- **[变更记录](CHANGELOG.md)** — 未发布与已发布的 API、协议和安全行为变化
 
 ## License
 

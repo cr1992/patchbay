@@ -71,6 +71,86 @@ void main() {
     },
   );
 
+  testWidgets('service host preserves requestId across Flutter bridges', (
+    tester,
+  ) async {
+    final PatchbayUiRegistry registry = PatchbayUiRegistry();
+    final PatchbayKey key = PatchbayKey.text('form.code', registry: registry);
+    final TextEditingController controller = TextEditingController();
+    addTearDown(controller.dispose);
+    await _pumpTextField(tester, key: key, controller: controller);
+    final PatchbayFlutterBridge bridge = _interactiveBridge(registry);
+    addTearDown(bridge.dispose);
+    final PatchbayFlutterServiceHost host = PatchbayFlutterServiceHost(
+      applicationId: 'dev.patchbay.flutter.test',
+      bridge: bridge,
+    );
+    final int generation = bridge.catalog().single.generation;
+
+    final Map<String, Object?> textResult = await host.dispatchInvoke(
+      'ui.text.set',
+      <String, Object?>{
+        'id': 'form.code',
+        'generation': generation,
+        'text': 'caller-owned',
+      },
+      'request-text',
+    );
+    final Map<String, Object?> enterResult = await host.dispatchInvoke(
+      'ui.text.enter',
+      <String, Object?>{
+        'id': 'form.code',
+        'generation': generation,
+        'text': 'entered',
+      },
+      'request-enter',
+    );
+    var tapped = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TextButton(
+          onPressed: () => tapped = true,
+          child: const Text('Action target'),
+        ),
+      ),
+    );
+    final Future<Map<String, Object?>> treePending = host.dispatchInvoke(
+      'ui.semantics.tree',
+      const <String, Object?>{},
+      'request-tree',
+    );
+    final Map<String, Object?> treeResult = await _pumpUntilComplete(
+      tester,
+      treePending,
+    );
+    final Map<String, Object?> treePayload =
+        treeResult['payload']! as Map<String, Object?>;
+    final Map<String, Object?> actionTarget =
+        (treePayload['nodes']! as List<Object?>)
+            .cast<Map<String, Object?>>()
+            .singleWhere(
+              (Map<String, Object?> node) => node['label'] == 'Action target',
+            );
+    final Future<Map<String, Object?>> actionPending = host
+        .dispatchInvoke('ui.semantics.action', <String, Object?>{
+          'nodeId': actionTarget['nodeId'],
+          'generation': actionTarget['generation'],
+          'action': 'tap',
+        }, 'request-action');
+    final Map<String, Object?> actionResult = await _pumpUntilComplete(
+      tester,
+      actionPending,
+    );
+
+    expect(textResult['requestId'], 'request-text');
+    expect(enterResult['requestId'], 'request-enter');
+    expect(treeResult['requestId'], 'request-tree');
+    expect(actionResult['requestId'], 'request-action');
+    expect(controller.text, 'entered');
+    expect(tapped, isTrue);
+    bridge.dispose();
+  });
+
   group('Patchbay semantics tree', () {
     testWidgets('observes standard controls without PatchbayKey', (
       tester,

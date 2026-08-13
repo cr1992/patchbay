@@ -290,12 +290,14 @@ final class PatchbayFlutterBridge {
     required int generation,
     required String text,
     bool inputWasStdin = false,
+    String? requestId,
   }) => _applyText(
     id: id,
     generation: generation,
     text: text,
     inputWasStdin: inputWasStdin,
     operation: PatchbayUiOperation.textSet,
+    requestId: requestId ?? _newRequestId(),
   );
 
   Future<PatchbayInvocation> enterText({
@@ -303,12 +305,14 @@ final class PatchbayFlutterBridge {
     required int generation,
     required String text,
     bool inputWasStdin = false,
+    String? requestId,
   }) => _applyText(
     id: id,
     generation: generation,
     text: text,
     inputWasStdin: inputWasStdin,
     operation: PatchbayUiOperation.textEnter,
+    requestId: requestId ?? _newRequestId(),
   );
 
   Future<PatchbayInvocation> _applyText({
@@ -317,8 +321,8 @@ final class PatchbayFlutterBridge {
     required String text,
     required bool inputWasStdin,
     required PatchbayUiOperation operation,
+    required String requestId,
   }) async {
-    final String requestId = _newRequestId();
     _TargetResolution resolution = _registry._resolve(
       id: id,
       generation: generation,

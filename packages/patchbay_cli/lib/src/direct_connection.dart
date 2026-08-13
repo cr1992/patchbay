@@ -47,14 +47,24 @@ final class PatchbayDirectConnection implements PatchbayClient {
     required Map<String, Object?> arguments,
     String? requestId,
     Duration? deadline,
-  }) => _translate(
-    () => _client.invoke(
-      command: command,
-      arguments: arguments,
-      requestId: requestId ?? 'patchbay-cli-direct-${++_nextRequest}',
-      deadline: deadline,
-    ),
-  );
+  }) async {
+    if (requestId != null && requestId.isEmpty) {
+      throw const PatchbayProtocolException('requestIdValidationFailed');
+    }
+    final String id = requestId ?? 'patchbay-cli-direct-${++_nextRequest}';
+    final Map<String, Object?> result = await _translate(
+      () => _client.invoke(
+        command: command,
+        arguments: arguments,
+        requestId: id,
+        deadline: deadline,
+      ),
+    );
+    if (result['requestId'] != id) {
+      throw const PatchbayProtocolException('requestIdMismatch');
+    }
+    return result;
+  }
 
   @override
   Future<Map<String, Object?>> widgetTree() =>
@@ -79,6 +89,7 @@ final class PatchbayDirectConnection implements PatchbayClient {
     } on PatchbayDirectClientException catch (error) {
       if (error.code == 'identityMismatch' ||
           error.code == 'protocolError' ||
+          error.code == 'requestIdMismatch' ||
           error.code == 'responseTooLarge') {
         throw PatchbayProtocolException(error.code);
       }

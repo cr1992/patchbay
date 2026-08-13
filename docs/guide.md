@@ -101,6 +101,23 @@ PatchbayCommandDescriptor(
 - 敏感参数标 `sensitive: true`——CLI 会强制 `--stdin` 且不回显；
 - handler 复用你既有的 controller / 并发约束，**不要**为 CLI 另建一套状态机。
 
+Job registry 必须使用有限预算。默认值适合普通调试会话，也可以按 App 的资源成本调整：
+
+```dart
+final jobs = PatchbayJobRegistry(
+  maxRunningJobs: 16,
+  retainedJobs: 100,
+  cancellationTimeout: const Duration(seconds: 3),
+);
+```
+
+达到 `maxRunningJobs` 时，`start()` 会在 body 启动前抛出 `PatchbayJobCapacityExceeded`。adapter 应把它
+转换成稳定 rejection（例如 `jobCapacityExceeded`），不要排入无界队列。取消 callback 超时后任务仍是
+running；只有 controller 提供了真实终态，才能写入 completed / failed / cancelled。
+
+没有 cancellation callback 时 `cancel()` 返回 `false`。callback 只有在 controller 已确认操作停止后才可
+返回；若底层 API 只确认“取消请求已发送”，adapter 应继续观察真实终态，而不是提前释放运行名额。
+
 ### 4. UI 目标标注（可选，一行一个）
 
 ```dart

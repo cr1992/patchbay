@@ -88,6 +88,54 @@ void main() {
       },
     );
 
+    test('client rejects an empty invoke requestId before transport', () async {
+      await expectLater(
+        client.invoke(
+          command: 'probe.read',
+          arguments: const <String, Object?>{},
+          requestId: '',
+        ),
+        throwsA(
+          isA<PatchbayDirectClientException>().having(
+            (PatchbayDirectClientException error) => error.code,
+            'code',
+            'protocolError',
+          ),
+        ),
+      );
+    });
+
+    test(
+      'client rejects an invoke response with a different requestId',
+      () async {
+        client.close(force: true);
+        await host.stop();
+        host = _host(
+          identity: identity,
+          invoke: (command, arguments, requestId) async => <String, Object?>{
+            'requestId': 'provider-generated-id',
+          },
+        );
+        session = await host.start();
+        client = PatchbayDirectClient(session: session);
+
+        await expectLater(
+          client.invoke(
+            command: 'probe.read',
+            arguments: const <String, Object?>{},
+            requestId: 'caller-request-id',
+          ),
+          throwsA(
+            isA<PatchbayDirectClientException>().having(
+              (PatchbayDirectClientException error) => error.code,
+              'code',
+              'requestIdMismatch',
+            ),
+          ),
+        );
+      },
+    );
+
     test(
       'missing and incorrect bearer are typed unauthorized failures',
       () async {
@@ -399,9 +447,7 @@ void main() {
       session.endpoint.resolve('${session.endpoint.path}/snapshot'),
       identity.toJson(),
       token: session.bearerToken,
-      headers: <String, String>{
-        PatchbayDirectHost.deadlineHeader: '600000',
-      },
+      headers: <String, String>{PatchbayDirectHost.deadlineHeader: '600000'},
     );
     elapsed.stop();
     expect(response.statusCode, HttpStatus.gatewayTimeout);
@@ -477,6 +523,7 @@ PatchbayDirectHost _host({
   PatchbayDirectSnapshotSource? snapshot,
   PatchbayDirectClock? clock,
   PatchbayDirectExpiryScheduler? expiryScheduler,
+  PatchbayDirectInvocationSource? invoke,
 }) => PatchbayDirectHost(
   config: config,
   clock: clock,
@@ -488,6 +535,7 @@ PatchbayDirectHost _host({
     },
     snapshot: snapshot ?? () async => <String, Object?>{'state': 'ready'},
     invoke:
+        invoke ??
         (
           String command,
           Map<String, Object?> arguments,

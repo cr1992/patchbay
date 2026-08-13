@@ -95,6 +95,12 @@ PatchbayFactSourceWire _factSourceWire(PatchbayFactSource value) =>
     };
 
 typedef PatchbayJobBody = Future<Map<String, Object?>> Function();
+
+/// Confirms that the underlying operation has stopped after cancellation.
+///
+/// Returning after merely sending a cancellation request would let the
+/// registry publish a false terminal state. Consumers without confirmation
+/// must omit this callback and report the real terminal state from [body].
 typedef PatchbayJobCancellation = FutureOr<void> Function();
 
 /// A consumer-observed domain failure whose payload is already redacted.
@@ -120,13 +126,37 @@ final class PatchbayJobCancellationSignal implements Exception {
   final Map<String, Object?> payload;
 }
 
+/// Thrown synchronously when a registry has reached its running-job budget.
+///
+/// Consumers should translate this into a stable admission rejection instead
+/// of queueing unbounded work or presenting the operation as accepted.
+final class PatchbayJobCapacityExceeded implements Exception {
+  const PatchbayJobCapacityExceeded({required this.maxRunningJobs});
+
+  final int maxRunningJobs;
+
+  @override
+  String toString() =>
+      'PatchbayJobCapacityExceeded(maxRunningJobs: $maxRunningJobs)';
+}
+
 /// In-isolate job ledger for operations whose completion cannot be represented
 /// honestly by the admission response.
 final class PatchbayJobRegistry {
-  PatchbayJobRegistry({DateTime Function()? now, this.retainedJobs = 200})
-    : _now = now ?? DateTime.now {
+  PatchbayJobRegistry({
+    DateTime Function()? now,
+    this.retainedJobs = 200,
+    this.maxRunningJobs = 32,
+    this.cancellationTimeout = const Duration(seconds: 5),
+  }) : _now = now ?? DateTime.now {
     if (retainedJobs < 1) {
       throw ArgumentError.value(retainedJobs, 'retainedJobs');
+    }
+    if (maxRunningJobs < 1) {
+      throw ArgumentError.value(maxRunningJobs, 'maxRunningJobs');
+    }
+    if (cancellationTimeout <= Duration.zero) {
+      throw ArgumentError.value(cancellationTimeout, 'cancellationTimeout');
     }
   }
 
@@ -134,13 +164,35 @@ final class PatchbayJobRegistry {
   ///
   /// Terminal events carry a full result payload, so a scripted session that
   /// keeps invoking job commands would otherwise grow this ledger for the life
-  /// of the App. Running jobs are never evicted.
+  /// of the App. This count excludes running jobs, which have their own budget.
   final int retainedJobs;
+
+  /// Maximum number of concurrently running jobs accepted by [start].
+  ///
+  /// The value is always finite and positive. A full registry throws
+  /// [PatchbayJobCapacityExceeded] before a body is started.
+  final int maxRunningJobs;
+
+  /// Maximum time [cancel] waits for a consumer cancellation callback.
+  ///
+  /// A timeout is propagated and leaves the job running because callback
+  /// timeout is not evidence that the underlying operation stopped.
+  final Duration cancellationTimeout;
 
   final DateTime Function() _now;
   final Map<String, _PatchbayJobRecord> _records =
       <String, _PatchbayJobRecord>{};
   int _nextJob = 0;
+
+  int get runningJobs => _records.values
+      .where((_PatchbayJobRecord record) => !_terminal(record))
+      .length;
+
+  int get settledJobs => _records.values
+      .where((_PatchbayJobRecord record) => _terminal(record))
+      .length;
+
+  int get totalJobs => _records.length;
 
   String start({
     required PatchbayFactSource source,
@@ -148,6 +200,9 @@ final class PatchbayJobRegistry {
     required PatchbayJobBody body,
     PatchbayJobCancellation? cancel,
   }) {
+    if (runningJobs >= maxRunningJobs) {
+      throw PatchbayJobCapacityExceeded(maxRunningJobs: maxRunningJobs);
+    }
     final String jobId = 'patchbay-job-${++_nextJob}';
     final _PatchbayJobRecord record = _PatchbayJobRecord(
       cancel: cancel,
@@ -168,11 +223,15 @@ final class PatchbayJobRegistry {
   /// Drops the oldest settled jobs once the ledger exceeds [retainedJobs].
   /// Insertion order is job order, and a running job is always kept.
   void _evictSettled() {
-    if (_records.length <= retainedJobs) return;
+    var retained = settledJobs;
+    if (retained <= retainedJobs) return;
     for (final String jobId in _records.keys.toList(growable: false)) {
-      if (_records.length <= retainedJobs) return;
+      if (retained <= retainedJobs) return;
       final _PatchbayJobRecord? record = _records[jobId];
-      if (record != null && _terminal(record)) _records.remove(jobId);
+      if (record != null && _terminal(record)) {
+        _records.remove(jobId);
+        retained -= 1;
+      }
     }
   }
 
@@ -252,10 +311,16 @@ final class PatchbayJobRegistry {
     }
   }
 
+  /// Cancels a job only when its consumer supplied a confirming callback.
+  ///
+  /// Returns `false` for an unknown, terminal, or non-cancellable job. A
+  /// callback timeout propagates and leaves the job running.
   Future<bool> cancel(String jobId, {String reason = 'cancelled'}) async {
     final _PatchbayJobRecord? record = _records[jobId];
     if (record == null || _terminal(record)) return false;
-    await record.cancel?.call();
+    final PatchbayJobCancellation? cancellation = record.cancel;
+    if (cancellation == null) return false;
+    await Future<void>.sync(cancellation).timeout(cancellationTimeout);
     if (!_terminal(record)) {
       _append(
         record,
@@ -352,6 +417,7 @@ final class PatchbayJobRegistry {
       if (!waiter.isCompleted) waiter.complete();
     }
     record.waiters.clear();
+    if (phase != PatchbayJobPhase.running) _evictSettled();
   }
 
   static bool _terminal(_PatchbayJobRecord record) =>

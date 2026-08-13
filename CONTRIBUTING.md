@@ -12,6 +12,8 @@
 3. 生成物改动跑 `dart run packages/patchbay/bin/wire_codegen.dart … --check`
    （**必须从仓根调用**，进包目录会假漂移——header 记录的是仓根相对路径）；
 4. 新增行为必须带测试，且测试要验证过「能红」（打个定向 mutation 确认断言真的红）。
+5. 公共 API、协议字段、默认资源上限或安全行为有变化时，同步更新 README / 对应专题文档和
+   [CHANGELOG.md](CHANGELOG.md)；文档、测试与实现必须描述同一契约。
 
 ## 设计红线
 

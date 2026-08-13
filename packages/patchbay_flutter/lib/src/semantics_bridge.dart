@@ -206,11 +206,12 @@ final class PatchbaySemanticsBridge {
   Future<PatchbayInvocation> snapshot({
     int maxDepth = 64,
     int maxNodes = 1000,
+    String? requestId,
   }) async {
-    final String requestId = _newRequestId();
+    final String id = requestId ?? _newRequestId();
     if (maxDepth < 0 || maxNodes < 1 || maxNodes > 10000) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(
           code: 'invalidUiTreeLimits',
           notice:
@@ -219,12 +220,12 @@ final class PatchbaySemanticsBridge {
       );
     }
     final PatchbayGateRejection? gate = await _gates.evaluate(const <String>{});
-    if (gate != null) return _gateRejected(requestId, gate);
+    if (gate != null) return _gateRejected(id, gate);
     // A backgrounded engine produces no frames, and building the tree waits for
     // one. Without this the request would never answer at all.
     if (!_isAppResumed()) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
       );
     }
@@ -233,7 +234,7 @@ final class PatchbaySemanticsBridge {
     final SemanticsNode? root = owner?.rootSemanticsNode;
     if (owner == null || root == null) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'uiSemanticsUnavailable'),
       );
     }
@@ -244,7 +245,7 @@ final class PatchbaySemanticsBridge {
       maxNodes: maxNodes,
     );
     return PatchbayInvocation.accepted(
-      requestId: requestId,
+      requestId: id,
       payload: snapshot.toJson(_treeRevision),
     );
   }
@@ -255,22 +256,23 @@ final class PatchbaySemanticsBridge {
     required PatchbaySemanticsAction action,
     String? text,
     bool inputWasStdin = false,
+    String? requestId,
   }) async {
-    final String requestId = _newRequestId();
+    final String id = requestId ?? _newRequestId();
     final PatchbaySemanticsActionPolicy? policy = _actionPolicy;
     if (policy == null) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'uiSemanticsActionsDisabled'),
       );
     }
     final PatchbayGateRejection? baseGate = await _gates.evaluate(
       const <String>{},
     );
-    if (baseGate != null) return _gateRejected(requestId, baseGate);
+    if (baseGate != null) return _gateRejected(id, baseGate);
     if (!_isAppResumed()) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
       );
     }
@@ -280,26 +282,26 @@ final class PatchbaySemanticsBridge {
       generation: generation,
       action: action,
     );
-    if (!resolution.resolved) return _resolutionRejected(requestId, resolution);
+    if (!resolution.resolved) return _resolutionRejected(id, resolution);
 
     PatchbaySemanticsActionDecision decision = policy(
       resolution.target!,
       action,
     );
-    if (!decision.allowed) return _policyRejected(requestId, decision);
+    if (!decision.allowed) return _policyRejected(id, decision);
     final Set<String> initialGateIds = Set<String>.of(decision.gateIds);
     var sensitive = resolution.target!.obscured || decision.sensitiveInput;
     final bool initialSensitiveInput = decision.sensitiveInput;
     if (action == PatchbaySemanticsAction.setText) {
       if (text == null) {
         return PatchbayInvocation.rejected(
-          requestId: requestId,
+          requestId: id,
           rejection: const PatchbayRejection(code: 'uiSemanticsTextRequired'),
         );
       }
       if (sensitive && !inputWasStdin) {
         return PatchbayInvocation.rejected(
-          requestId: requestId,
+          requestId: id,
           rejection: const PatchbayRejection(
             code: 'sensitiveInputRequiresStdin',
           ),
@@ -307,16 +309,16 @@ final class PatchbaySemanticsBridge {
       }
     } else if (text != null) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'uiSemanticsUnexpectedText'),
       );
     }
 
     final PatchbayGateRejection? gate = await _gates.evaluate(decision.gateIds);
-    if (gate != null) return _gateRejected(requestId, gate);
+    if (gate != null) return _gateRejected(id, gate);
     if (!_isAppResumed()) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
       );
     }
@@ -328,13 +330,13 @@ final class PatchbaySemanticsBridge {
       generation: generation,
       action: action,
     );
-    if (!resolution.resolved) return _resolutionRejected(requestId, resolution);
+    if (!resolution.resolved) return _resolutionRejected(id, resolution);
     decision = policy(resolution.target!, action);
-    if (!decision.allowed) return _policyRejected(requestId, decision);
+    if (!decision.allowed) return _policyRejected(id, decision);
     if (!setEquals(initialGateIds, decision.gateIds) ||
         initialSensitiveInput != decision.sensitiveInput) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'uiSemanticsPolicyChanged'),
       );
     }
@@ -343,7 +345,7 @@ final class PatchbaySemanticsBridge {
         sensitive &&
         !inputWasStdin) {
       return PatchbayInvocation.rejected(
-        requestId: requestId,
+        requestId: id,
         rejection: const PatchbayRejection(code: 'sensitiveInputRequiresStdin'),
       );
     }
@@ -360,7 +362,7 @@ final class PatchbaySemanticsBridge {
       await SchedulerBinding.instance.endOfFrame;
       _refreshOwner();
       return PatchbayInvocation.accepted(
-        requestId: requestId,
+        requestId: id,
         payload: <String, Object?>{
           'outcome': 'dispatched',
           'source': PatchbayFactSource.uiObserved.name,
@@ -378,7 +380,7 @@ final class PatchbaySemanticsBridge {
       );
     } catch (error) {
       return PatchbayInvocation.accepted(
-        requestId: requestId,
+        requestId: id,
         payload: <String, Object?>{
           'outcome': 'failed',
           'source': PatchbayFactSource.uiObserved.name,
