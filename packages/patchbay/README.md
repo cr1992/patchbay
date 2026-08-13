@@ -76,8 +76,36 @@ adapter 复用 App 现有 controller 和状态机。Patchbay 负责协议与边�
 invocation 返回值必须是合法 wire envelope，并回显同一个 `requestId`。违反这些 provider 契约时 host
 返回 `providerProtocolViolation`，不会把无法关联或无法解析的结果继续交给客户端。
 
-Command catalog 行必须是带合法 dotted `name` 的对象，不接受字符串缩写。`requestId` 必须非空；
+Command catalog 行必须是带合法 dotted `name` 的对象，不接受字符串缩写。命令名语法是
+`^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$`：每段以小写字母开头，段内只有字母和数字，**不允许
+连字符**（`auth.switch-tenant` 非法，写成 `auth.tenant.switch`）。`requestId` 必须非空；
 accepted 信封不能带 rejection，rejected 信封必须带 rejection 且不能带 payload / jobId。
+
+catalog 违反上述约定时，**整个 catalog 调用**返回拒绝信封，而不是抛异常——异常在 VM Service 和
+direct HTTP 上都变不成回复，调用方只会看到挂起：
+
+```json
+{
+  "schemaVersion": 1,
+  "admission": "rejected",
+  "rejection": {
+    "code": "providerProtocolViolation",
+    "details": {
+      "reason": "invalidCatalogCommands",
+      "commandNamePattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)+$",
+      "violations": [
+        {"index": 1, "name": "auth.switch-tenant", "reason": "invalidCommandName"}
+      ]
+    }
+  }
+}
+```
+
+`details.reason` 另有 `commandsNotAnArray` 和 `catalogSourceFailed`（接入方回调自己抛异常，
+`details.error` 只给异常类型名，不回显消息）；逐条 `reason` 另有 `duplicateCommandName` 和
+`missingCommandName`（没有可回显的名字时只给 `index`）。命令名是协议词汇不是接入方数据，所以直接
+指名。非法名、重名、缺名一次全报，不是报完第一条就停。违规目录**不带 `commands`**：跳过坏条目只
+服务其余的，等于把接入方 bug 藏成「App 少了个能力」。
 
 ## 受理信封与事实来源
 
@@ -131,8 +159,9 @@ accepted 信封不能带 rejection，rejected 信封必须带 rejection 且不�
 目标级（`PatchbaySensitivePolicy.redacted`、obscured Semantics 节点）而不是参数级，descriptor 无法
 表达，所以元键继续交给该 bridge。领域平面的接入方不受影响。
 
-catalog 是这条策略的唯一真源。host 读不到 catalog 时 fail-closed：带参数的调用以
-`providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，不把未校验的参数交给 adapter；
+catalog 是这条策略的唯一真源。host 读不到**可用**的 catalog 时 fail-closed（读不出来和读出来不合法
+一样算）：带参数的调用以 `providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，
+`details.catalog` 原样带上目录本身的违规原因，不把未校验的参数交给 adapter；
 无参调用不查 catalog——没有可剥的元键，也没有任何被传输的值可能是敏感的。descriptor 声明的默认值
 不参与这条校验：标记描述的是**被传输的值**的来源，App 自带的默认值从未上过 wire。
 

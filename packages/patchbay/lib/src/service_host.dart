@@ -59,15 +59,8 @@ final class PatchbayServiceHost {
   /// Transport-neutral dispatch seam used by alternate, explicitly enabled
   /// hosts. VM Service registration and direct transports must call these
   /// same handlers instead of rebuilding command routing.
-  Future<Map<String, Object?>> dispatchCatalog() async {
-    final Map<String, Object?> catalog = <String, Object?>{
-      ...await _catalog(),
-      // Protocol-owned fields always win over consumer callback data.
-      'schemaVersion': schemaVersion,
-    };
-    _validateCatalog(catalog);
-    return catalog;
-  }
+  Future<Map<String, Object?>> dispatchCatalog() async =>
+      (await _readCatalog()).response;
 
   Future<Map<String, Object?>> dispatchSnapshot() async => <String, Object?>{
     ...await _snapshot(),
@@ -90,15 +83,23 @@ final class PatchbayServiceHost {
       // not start failing because a consumer catalog source is broken.
       forwarded = arguments;
     } else {
-      final _CommandPolicy policy;
-      try {
-        policy = await _commandPolicy(command);
-      } on Object {
+      final _CatalogRead catalog = await _readCatalog();
+      if (catalog.violation case final Map<String, Object?> reason) {
         // The policy is only readable from the catalog. Without it the host
         // cannot prove a sensitive value arrived from stdin, so it fails closed
-        // instead of forwarding the arguments unchecked.
-        return _invalidInvocationEnvelope(requestId, 'catalogUnavailable');
+        // instead of forwarding the arguments unchecked. The catalog's own
+        // violation travels along, so the caller is told what to fix here and
+        // does not have to go read the catalog RPC to find out.
+        return _invalidInvocationEnvelope(
+          requestId,
+          'catalogUnavailable',
+          <String, Object?>{'catalog': reason},
+        );
       }
+      final _CommandPolicy policy = _CommandPolicy.forCommand(
+        catalog.response,
+        command,
+      );
       final List<String> violations = policy.sensitiveViolations(arguments);
       if (violations.isNotEmpty) {
         return PatchbayInvocation.rejected(
@@ -224,40 +225,89 @@ final class PatchbayServiceHost {
     );
   }
 
-  /// Reads the argument policy of [command] from the catalog, which is the
-  /// single source of truth for what a command declares.
+  /// Reads the consumer catalog once and validates it as a whole.
   ///
-  /// Deriving it here is what keeps the guarantee framework-owned: a consumer
-  /// declares `sensitive: true` once in its descriptor and gets the stdin
-  /// enforcement for free, with no matching code in its invoke handler.
-  Future<_CommandPolicy> _commandPolicy(String command) async {
-    // dispatchCatalog proves every entry is an object with a unique, valid
-    // dotted name before this scan trusts the lookup.
-    final Map<String, Object?> catalog = await dispatchCatalog();
-    final Object? commands = catalog['commands'];
-    if (commands is! List<Object?>) return const _CommandPolicy.undeclared();
-    for (final Object? entry in commands) {
-      if (entry is! Map<Object?, Object?> || entry['name'] != command) continue;
-      final Object? parameters = entry['parameters'];
-      return _CommandPolicy(
-        sensitiveParameters: <String>{
-          if (parameters is List<Object?>)
-            for (final Object? parameter in parameters)
-              if (parameter is Map<Object?, Object?> &&
-                  parameter['sensitive'] == true &&
-                  parameter['name'] is String)
-                parameter['name']! as String,
-        },
-        // The Flutter UI plane is served by this repository's own bridge, whose
-        // sensitivity is per-target (`PatchbaySensitivePolicy.redacted`, an
-        // obscured Semantics node) and therefore not expressible in a parameter
-        // descriptor. That bridge still reads the provenance itself, so the meta
-        // key survives for it — and only for it.
-        retainsStdinProvenance:
-            entry['plane'] == PatchbayPlaneWire.flutterUi.name,
-      );
+  /// A catalog that violates the protocol is *answered*, never thrown. Every
+  /// transport in front of this seam — `registerExtension` and the direct HTTP
+  /// host — turns an escaping error into a dropped response, so throwing costs
+  /// the caller an unbounded wait for a reply that a precise diagnosis was
+  /// already available for. Only an envelope reaches the caller.
+  ///
+  /// A violated catalog carries no `commands` at all. Skipping the offending
+  /// entries and serving the rest would hide a consumer bug behind a catalog
+  /// that quietly lost capabilities, which is the one failure mode a debugging
+  /// protocol must never produce.
+  Future<_CatalogRead> _readCatalog() async {
+    final Map<String, Object?> declared;
+    try {
+      declared = await _catalog();
+    } on Object catch (error) {
+      // The type, never the message: a consumer error string is arbitrary App
+      // data and this envelope goes back over the wire.
+      return _CatalogRead.violated(<String, Object?>{
+        'reason': 'catalogSourceFailed',
+        'error': error.runtimeType.toString(),
+      });
     }
-    return const _CommandPolicy.undeclared();
+    final Map<String, Object?> catalog = <String, Object?>{
+      ...declared,
+      // Protocol-owned fields always win over consumer callback data.
+      'schemaVersion': schemaVersion,
+    };
+    final Map<String, Object?>? violation = _commandsViolation(
+      catalog['commands'],
+    );
+    return violation == null
+        ? _CatalogRead.valid(catalog)
+        : _CatalogRead.violated(violation);
+  }
+
+  /// The rejection `details` describing what makes [commands] unusable, or null
+  /// when the declared command list satisfies the protocol.
+  static Map<String, Object?>? _commandsViolation(Object? commands) {
+    if (commands == null) return null;
+    if (commands is! List<Object?>) {
+      return <String, Object?>{'reason': 'commandsNotAnArray'};
+    }
+    final List<Map<String, Object?>> violations = <Map<String, Object?>>[];
+    final Set<String> names = <String>{};
+    for (var index = 0; index < commands.length; index += 1) {
+      final Object? entry = commands[index];
+      final Object? rawName = entry is Map<Object?, Object?>
+          ? entry['name']
+          : null;
+      if (rawName is! String) {
+        // Nothing nameable to echo — a string abbreviation, a missing key, or a
+        // non-string name — so the entry is identified by position only.
+        violations.add(<String, Object?>{
+          'index': index,
+          'reason': 'missingCommandName',
+        });
+      } else if (!_commandName.hasMatch(rawName)) {
+        // A command name is public protocol vocabulary, not consumer data, so
+        // naming the offender is safe — and it is the whole point: the consumer
+        // that shipped `auth.switch-tenant` learned nothing from a bare throw.
+        violations.add(<String, Object?>{
+          'index': index,
+          'name': rawName,
+          'reason': 'invalidCommandName',
+        });
+      } else if (!names.add(rawName)) {
+        violations.add(<String, Object?>{
+          'index': index,
+          'name': rawName,
+          'reason': 'duplicateCommandName',
+        });
+      }
+    }
+    if (violations.isEmpty) return null;
+    // Every offender in one answer. Reporting only the first turns a rename
+    // sweep into one round trip per bad name.
+    return <String, Object?>{
+      'reason': 'invalidCatalogCommands',
+      'commandNamePattern': _commandName.pattern,
+      'violations': violations,
+    };
   }
 
   static Map<String, Object?> _withoutStdinProvenance(
@@ -280,37 +330,15 @@ final class PatchbayServiceHost {
   static bool _hasUserParameters(Map<String, String> parameters) =>
       parameters.keys.any((String key) => key != 'isolateId');
 
-  static void _validateCatalog(Map<String, Object?> catalog) {
-    final Object? commands = catalog['commands'];
-    if (commands == null) return;
-    if (commands is! List<Object?>) {
-      throw StateError('Patchbay catalog commands must be a JSON array.');
-    }
-    final Set<String> names = <String>{};
-    for (var index = 0; index < commands.length; index += 1) {
-      final Object? entry = commands[index];
-      final Object? rawName = entry is Map<Object?, Object?>
-          ? entry['name']
-          : null;
-      if (rawName is! String || !_commandName.hasMatch(rawName)) {
-        throw StateError(
-          'Patchbay catalog command at index $index has no valid dotted name.',
-        );
-      }
-      if (!names.add(rawName)) {
-        throw StateError('Patchbay catalog command is duplicated: $rawName');
-      }
-    }
-  }
-
   static Map<String, Object?> _invalidInvocationEnvelope(
     String requestId,
-    String reason,
-  ) => PatchbayInvocation.rejected(
+    String reason, [
+    Map<String, Object?> details = const <String, Object?>{},
+  ]) => PatchbayInvocation.rejected(
     requestId: requestId,
     rejection: PatchbayRejection(
       code: 'providerProtocolViolation',
-      details: <String, Object?>{'reason': reason},
+      details: <String, Object?>{'reason': reason, ...details},
     ),
   ).toJson();
 
@@ -344,12 +372,94 @@ final class PatchbayServiceHost {
   }
 }
 
+/// One catalog read: either the catalog to serve, or the whole-catalog
+/// protocol violation that makes it unusable.
+///
+/// When [violation] is set, [response] is the rejection envelope every catalog
+/// caller receives in place of the catalog — it deliberately has no `commands`
+/// key, so no caller can mistake a violated catalog for an App that declares
+/// nothing.
+final class _CatalogRead {
+  const _CatalogRead._({required this.response, required this.violation});
+
+  const _CatalogRead.valid(this.response) : violation = null;
+
+  factory _CatalogRead.violated(Map<String, Object?> violation) =>
+      _CatalogRead._(
+        response: _violationEnvelope(violation),
+        violation: violation,
+      );
+
+  final Map<String, Object?> response;
+
+  /// The rejection `details` naming what is wrong, or null for a valid catalog.
+  final Map<String, Object?>? violation;
+
+  /// Reuses the invocation vocabulary — `admission` plus a stable rejection
+  /// `code` — so a client that already classifies rejections classifies a
+  /// broken catalog without learning a second error shape.
+  static Map<String, Object?> _violationEnvelope(
+    Map<String, Object?> violation,
+  ) => <String, Object?>{
+    'schemaVersion': PatchbayServiceHost.schemaVersion,
+    'admission': PatchbayAdmissionWire.rejected.name,
+    'notice': _violationNotice,
+    'rejection': PatchbayRejection(
+      code: 'providerProtocolViolation',
+      notice: _violationNotice,
+      details: violation,
+    ).toJson(),
+  };
+
+  static const String _violationNotice =
+      'The App catalog violates the Patchbay command contract.';
+}
+
 /// The catalog-declared argument policy the host enforces before dispatch.
 final class _CommandPolicy {
   const _CommandPolicy({
     required this.sensitiveParameters,
     required this.retainsStdinProvenance,
   });
+
+  /// Reads the argument policy of [command] from [catalog], which is the single
+  /// source of truth for what a command declares.
+  ///
+  /// Deriving it here is what keeps the guarantee framework-owned: a consumer
+  /// declares `sensitive: true` once in its descriptor and gets the stdin
+  /// enforcement for free, with no matching code in its invoke handler.
+  ///
+  /// [catalog] must be a validated one: the caller proves every entry is an
+  /// object with a unique, valid dotted name before this scan trusts the lookup.
+  factory _CommandPolicy.forCommand(
+    Map<String, Object?> catalog,
+    String command,
+  ) {
+    final Object? commands = catalog['commands'];
+    if (commands is! List<Object?>) return const _CommandPolicy.undeclared();
+    for (final Object? entry in commands) {
+      if (entry is! Map<Object?, Object?> || entry['name'] != command) continue;
+      final Object? parameters = entry['parameters'];
+      return _CommandPolicy(
+        sensitiveParameters: <String>{
+          if (parameters is List<Object?>)
+            for (final Object? parameter in parameters)
+              if (parameter is Map<Object?, Object?> &&
+                  parameter['sensitive'] == true &&
+                  parameter['name'] is String)
+                parameter['name']! as String,
+        },
+        // The Flutter UI plane is served by this repository's own bridge, whose
+        // sensitivity is per-target (`PatchbaySensitivePolicy.redacted`, an
+        // obscured Semantics node) and therefore not expressible in a parameter
+        // descriptor. That bridge still reads the provenance itself, so the meta
+        // key survives for it — and only for it.
+        retainsStdinProvenance:
+            entry['plane'] == PatchbayPlaneWire.flutterUi.name,
+      );
+    }
+    return const _CommandPolicy.undeclared();
+  }
 
   /// A command the catalog does not declare. The consumer will reject it as
   /// unregistered; the meta key is still removed so an undeclared handler

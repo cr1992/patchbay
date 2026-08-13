@@ -6,6 +6,14 @@
 
 ### Changed
 
+- 命令名语法收紧为 `^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$`：每段以小写字母开头，段内只允许
+  字母和数字，**段内连字符不再合法**。canonical 命令名是这道校验的目的，不放宽。
+
+  **迁移：升级 pin 前先扫一遍自己 descriptor 的 `name`。** kebab 段名（如 `auth.switch-tenant`）
+  改写成点分段（如 `auth.tenant.switch`）。改名是破坏性的：CLI 调用、脚本和文档要同步改，旧名
+  调用会得到 `commandNotRegistered`。catalog 里只要有一条非法名，**整个目录**就不可用（见下），
+  不是只跳过那一条。
+
 - `inputWasStdin` 由框架层收编。host 在把 arguments 交给 consumer 之前按 descriptor 的
   `sensitive` 声明完成校验（任一 sensitive 参数带非空值却缺少该标记时，以
   `sensitiveInputRequiresStdin` 拒绝，`details.parameters` 列出违规参数名），随后把这个元键剥掉：
@@ -26,7 +34,18 @@
   （`PatchbayMemoryBlobStore.maxChunkBytes`）。此前 descriptor 标了默认值但 wire 必填，声明与实际
   不符。
 - `schemaVersion` 改为 host 保留字段，consumer catalog / snapshot 回调不能覆盖。
-- catalog 拒绝重复或缺少名称的 command，避免目录展示与实际 dispatch 产生歧义。
+- catalog 校验失败不再是未处理异常，改为结构化协议错误。此前非法命名 / 重名 / 缺名会让
+  `handleCatalog` 抛 `StateError`；异常在 VM Service 和 direct HTTP 上都变不成回复，调用方表现为
+  **无限挂起**，连带拖住依赖 catalog 的路径（CLI `exec` 的命令解析先读 catalog）。现在整个 catalog
+  调用返回拒绝信封：`admission: rejected` + `rejection.code = providerProtocolViolation`，
+  `details.reason` 取 `invalidCatalogCommands` / `commandsNotAnArray` / `catalogSourceFailed`。
+  `invalidCatalogCommands` 的 `details.violations` 逐条给出 `index`、`name` 和 `reason`
+  （`invalidCommandName` / `duplicateCommandName` / `missingCommandName`；没有可回显的名字时只给
+  `index`），并附 `details.commandNamePattern`；三类一次全报，不是报完第一条就停。命令名是协议
+  词汇不是接入方数据，直接指名。违规目录**不带 `commands` 字段**——静默跳过坏条目等于把接入方的
+  bug 藏成「App 少了个能力」。带参数的 `invoke` 同样 fail-closed（`providerProtocolViolation` /
+  `catalogUnavailable`），`details.catalog` 带上目录本身的违规原因。接入方 catalog 回调自己抛异常
+  时走同一条路（`reason: catalogSourceFailed`，`details.error` 只给异常类型名，不回显消息）。
 - host 严格验证 invocation wire、协议版本和 `requestId`；provider 返回非法信封时转换为
   `providerProtocolViolation`，不把不相关响应交给调用方。
 - VM Service 与 direct 两条路径都拒绝空 `requestId`；invocation 同时校验 admission、rejection、payload
