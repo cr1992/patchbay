@@ -103,6 +103,37 @@ typedef PatchbayJobBody = Future<Map<String, Object?>> Function();
 /// must omit this callback and report the real terminal state from [body].
 typedef PatchbayJobCancellation = FutureOr<void> Function();
 
+/// What a cancellation attempt actually achieved for one job.
+///
+/// A batch cancel cannot be reduced to a single boolean: jobs differ in whether
+/// their consumer confirmed that the underlying operation stopped, and only a
+/// confirmation may be published as a `cancelled` terminal state.
+enum PatchbayJobCancelOutcome {
+  /// The consumer callback confirmed the stop and the registry published the
+  /// `cancelled` terminal event.
+  cancelled,
+
+  /// The job carries no cancellation callback, so it keeps running.
+  ///
+  /// This is the batch counterpart of `cancel()` returning `false`.
+  notCancellable,
+
+  /// The callback did not answer within the registry cancellation timeout.
+  ///
+  /// The job keeps running, because an unanswered callback is not evidence
+  /// that the underlying operation stopped.
+  timedOut,
+
+  /// The callback threw, so nothing was confirmed and the job keeps running.
+  callbackFailed,
+
+  /// The job reached its own terminal state before the callback confirmed.
+  ///
+  /// The real terminal state is preserved; no `cancelled` event is written
+  /// over it.
+  alreadySettled,
+}
+
 /// A consumer-observed domain failure whose payload is already redacted.
 ///
 /// Generic exceptions are deliberately reduced to `errorType`. Consumers may
@@ -318,25 +349,86 @@ final class PatchbayJobRegistry {
   Future<bool> cancel(String jobId, {String reason = 'cancelled'}) async {
     final _PatchbayJobRecord? record = _records[jobId];
     if (record == null || _terminal(record)) return false;
-    final PatchbayJobCancellation? cancellation = record.cancel;
-    if (cancellation == null) return false;
-    await Future<void>.sync(cancellation).timeout(cancellationTimeout);
-    if (!_terminal(record)) {
-      _append(
-        record,
-        PatchbayJobPhase.cancelled,
-        source: PatchbayFactSource.appRecorded,
-        operation: record.operation,
-        reason: reason,
-      );
-    }
-    return true;
+    final PatchbayJobCancelOutcome outcome = await _confirmCancellation(
+      record,
+      reason: reason,
+      propagateCallbackErrors: true,
+    );
+    return outcome != PatchbayJobCancelOutcome.notCancellable;
   }
 
-  Future<void> cancelAll({required String reason}) async {
-    for (final String jobId in _records.keys.toList(growable: false)) {
-      await cancel(jobId, reason: reason);
+  /// Cancels every currently running job concurrently and reports each one.
+  ///
+  /// Every cancellation callback is invoked before any of them is awaited, so
+  /// a stuck consumer costs the sweep one [cancellationTimeout] instead of
+  /// delaying every job queued behind it. Timeouts and callback errors become
+  /// per-job outcomes instead of propagating, because aborting the sweep would
+  /// leave the remaining jobs neither cancelled nor reported.
+  ///
+  /// The result covers exactly the jobs that were running when the sweep
+  /// started; jobs that were already settled keep their terminal state and are
+  /// left out.
+  Future<Map<String, PatchbayJobCancelOutcome>> cancelAll({
+    required String reason,
+  }) async {
+    final List<MapEntry<String, _PatchbayJobRecord>> running = _records.entries
+        .where(
+          (MapEntry<String, _PatchbayJobRecord> entry) =>
+              !_terminal(entry.value),
+        )
+        .toList(growable: false);
+    if (running.isEmpty) return const <String, PatchbayJobCancelOutcome>{};
+    final List<Future<PatchbayJobCancelOutcome>> attempts = running
+        .map(
+          (MapEntry<String, _PatchbayJobRecord> entry) => _confirmCancellation(
+            entry.value,
+            reason: reason,
+            propagateCallbackErrors: false,
+          ),
+        )
+        .toList(growable: false);
+    final List<PatchbayJobCancelOutcome> outcomes =
+        await Future.wait<PatchbayJobCancelOutcome>(attempts);
+    return Map<String, PatchbayJobCancelOutcome>.unmodifiable(
+      <String, PatchbayJobCancelOutcome>{
+        for (var index = 0; index < running.length; index += 1)
+          running[index].key: outcomes[index],
+      },
+    );
+  }
+
+  /// Awaits one consumer cancellation callback and publishes the terminal
+  /// event only when that callback returned.
+  ///
+  /// [propagateCallbackErrors] preserves the single-job [cancel] contract,
+  /// where a timeout surfaces to the caller; the batch path maps the same
+  /// failure to an outcome instead. Either way the job stays running, because
+  /// an unconfirmed callback is not evidence that the operation stopped.
+  Future<PatchbayJobCancelOutcome> _confirmCancellation(
+    _PatchbayJobRecord record, {
+    required String reason,
+    required bool propagateCallbackErrors,
+  }) async {
+    final PatchbayJobCancellation? cancellation = record.cancel;
+    if (cancellation == null) return PatchbayJobCancelOutcome.notCancellable;
+    try {
+      await Future<void>.sync(cancellation).timeout(cancellationTimeout);
+    } on TimeoutException {
+      if (propagateCallbackErrors) rethrow;
+      return PatchbayJobCancelOutcome.timedOut;
+    } catch (_) {
+      if (propagateCallbackErrors) rethrow;
+      return PatchbayJobCancelOutcome.callbackFailed;
     }
+    if (_terminal(record)) return PatchbayJobCancelOutcome.alreadySettled;
+    _append(
+      record,
+      PatchbayJobPhase.cancelled,
+      source: PatchbayFactSource.appRecorded,
+      operation: record.operation,
+      reason: reason,
+    );
+    return PatchbayJobCancelOutcome.cancelled;
   }
 
   Future<void> _run(

@@ -118,6 +118,10 @@ running；只有 controller 提供了真实终态，才能写入 completed / fai
 没有 cancellation callback 时 `cancel()` 返回 `false`。callback 只有在 controller 已确认操作停止后才可
 返回；若底层 API 只确认“取消请求已发送”，adapter 应继续观察真实终态，而不是提前释放运行名额。
 
+会话收尾用 `cancelAll()`：所有 callback 并行发起，单个卡死的 callback 只消耗一次 `cancellationTimeout`，
+不会把整批取消堵在后面。它返回逐 job 的 `PatchbayJobCancelOutcome`，adapter 不能把这次调用当作
+“全部已停止”——`timedOut` / `callbackFailed` / `notCancellable` 的 job 仍在运行。
+
 ### 4. UI 目标标注（可选，一行一个）
 
 ```dart
