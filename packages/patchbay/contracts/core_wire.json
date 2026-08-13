@@ -435,7 +435,7 @@
       "fields": [
         {"name": "blobId", "type": "String"},
         {"name": "offset", "type": "int"},
-        {"name": "limit", "type": "int"}
+        {"name": "limit", "type": "int", "nullable": true}
       ]
     },
     {

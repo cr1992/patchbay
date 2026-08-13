@@ -2043,7 +2043,7 @@ final class PatchbayBlobReadRequestWire {
 
   final String blobId;
   final int offset;
-  final int limit;
+  final int? limit;
 
   factory PatchbayBlobReadRequestWire.fromJson(
     Map<String, Object?> json, {
@@ -2053,14 +2053,16 @@ final class PatchbayBlobReadRequestWire {
     return PatchbayBlobReadRequestWire(
       blobId: _wireString(json['blobId'], '$path.blobId'),
       offset: _wireInt(json['offset'], '$path.offset'),
-      limit: _wireInt(json['limit'], '$path.limit'),
+      limit: json['limit'] == null
+          ? null
+          : _wireInt(json['limit'], '$path.limit'),
     );
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
     'blobId': blobId,
     'offset': offset,
-    'limit': limit,
+    if (limit != null) 'limit': limit!,
   };
 }
 
