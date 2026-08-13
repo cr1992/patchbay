@@ -29,6 +29,8 @@ void main() {
     'patchbay.job.wait',
     'ui.semantics.tree',
     'ui.semantics.action',
+    'ui.text.set',
+    'ui.text.enter',
     'navigation.catalog',
     'navigation.current',
     'navigation.go',
@@ -196,6 +198,15 @@ void main() {
                   'arguments': args,
                 },
               ).toJson(),
+              'ui.text.set' || 'ui.text.enter' =>
+                PatchbayInvocation.accepted(
+                  requestId: requestId,
+                  payload: <String, Object?>{
+                    'outcome': 'dispatched',
+                    'source': 'uiObserved',
+                    'arguments': args,
+                  },
+                ).toJson(),
               'patchbay.job.get' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: const <String, Object?>{
