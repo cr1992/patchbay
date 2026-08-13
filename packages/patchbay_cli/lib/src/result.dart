@@ -10,6 +10,31 @@ abstract final class PatchbayExitCode {
   static const int usage = 64;
 }
 
+/// A CLI-level error, shaped for `--json` consumers.
+///
+/// `--json` promises that stdout is machine-readable, but every failure used to
+/// leave stdout empty and put a sentence on stderr, so a script that asked for
+/// JSON got nothing to parse exactly when something went wrong. This envelope
+/// deliberately mirrors the App's rejection envelope — a stable `code` plus
+/// free-form `details` — so one reader handles both, and it carries no human
+/// sentence: the prose stays on stderr where it always was.
+///
+/// The code names the failure class, never the transport: URIs, tokens and
+/// endpoints must not reach it, for the same reason they never reach stderr.
+final class PatchbayErrorEnvelope {
+  const PatchbayErrorEnvelope(
+    this.code, {
+    this.details = const <String, Object?>{},
+  });
+
+  final String code;
+  final Map<String, Object?> details;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'error': <String, Object?>{'code': code, 'details': details},
+  };
+}
+
 /// Classifies a decoded Patchbay response without strengthening its meaning.
 int patchbayExitCodeFor(Map<String, Object?> response) {
   if (response['admission'] == 'rejected') {

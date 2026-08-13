@@ -33,10 +33,19 @@ Future<int> runPatchbayCli(
   try {
     parsed = parser.parse(arguments);
   } on FormatException catch (failure) {
-    error.writeln(failure.message);
-    return PatchbayExitCode.usage;
+    // No ArgResults to ask yet, and a parse failure is exactly the kind of
+    // error a `--json` caller still has to be able to read.
+    return _fail(
+      out,
+      error,
+      json: _jsonRequestedIn(arguments),
+      message: failure.message,
+      envelope: _usageEnvelope(failure),
+      exitCode: PatchbayExitCode.usage,
+    );
   }
 
+  final bool json = parsed.flag('json');
   PatchbayClient? connection;
   try {
     if (_helpTopic(parsed) case final List<String> topic) {
@@ -68,49 +77,151 @@ Future<int> runPatchbayCli(
         },
         out: out,
         err: error,
-        json: parsed.flag('json'),
+        json: json,
       ).run(
         replInput ??
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
     final _Outcome outcome = await _executeOnce(connection, parsed);
-    _writeOutput(out, outcome.response, json: parsed.flag('json'));
+    _writeOutput(out, outcome.response, json: json);
     return outcome.exitCode;
   } on FormatException catch (failure) {
-    error.writeln(failure.message);
-    return PatchbayExitCode.usage;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: failure.message,
+      envelope: _usageEnvelope(failure),
+      exitCode: PatchbayExitCode.usage,
+    );
   } on PatchbayArtifactDownloadException catch (failure) {
-    error.writeln('patchbay protocol error: ${failure.code}');
-    return PatchbayExitCode.protocol;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay protocol error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.protocol,
+    );
   } on PatchbayProtocolException catch (failure) {
-    error.writeln('patchbay protocol error: ${failure.code}');
-    return PatchbayExitCode.protocol;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay protocol error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.protocol,
+    );
   } on PatchbayTransportException catch (failure) {
-    error.writeln('patchbay transport error: ${failure.code}');
-    return PatchbayExitCode.transport;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay transport error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.transport,
+    );
   } on PatchbaySessionException catch (failure) {
-    error.writeln('patchbay session error: ${failure.code}');
+    final StringBuffer message = StringBuffer(
+      'patchbay session error: ${failure.code}',
+    );
     for (final String choice in failure.choices) {
-      error.writeln('  --session ${choice.split(' ').first}  $choice');
+      message.write('\n  --session ${choice.split(' ').first}  $choice');
     }
-    return failure.code == 'sessionIdentityMismatch'
-        ? PatchbayExitCode.protocol
-        : PatchbayExitCode.transport;
-  } on PatchbayJobWaitTimeout {
-    error.writeln('patchbay job failed: waitTimeout');
-    return PatchbayExitCode.typedFailure;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: message.toString(),
+      // The labels are already URI-free — that is what makes them printable —
+      // so the JSON reader gets the same choices the operator sees.
+      envelope: PatchbayErrorEnvelope(
+        failure.code,
+        details: <String, Object?>{
+          if (failure.choices.isNotEmpty) 'sessions': failure.choices,
+        },
+      ),
+      exitCode: failure.code == 'sessionIdentityMismatch'
+          ? PatchbayExitCode.protocol
+          : PatchbayExitCode.transport,
+    );
+  } on PatchbayJobWaitTimeout catch (failure) {
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay job failed: waitTimeout',
+      envelope: PatchbayErrorEnvelope(
+        'waitTimeout',
+        details: <String, Object?>{'jobId': failure.jobId},
+      ),
+      exitCode: PatchbayExitCode.typedFailure,
+    );
   } on PatchbaySensitiveInputException catch (failure) {
-    error.writeln('patchbay sensitive input error: ${failure.code}');
-    return PatchbayExitCode.usage;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay sensitive input error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.usage,
+    );
   } on Object catch (failure) {
     // VM Service URIs and direct bearer tokens are authentication material.
     // Socket exceptions can echo endpoints, so expose only the stable type.
-    error.writeln('patchbay transport error: ${failure.runtimeType}');
-    return PatchbayExitCode.transport;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay transport error: ${failure.runtimeType}',
+      envelope: PatchbayErrorEnvelope(
+        'transportError',
+        details: <String, Object?>{'type': '${failure.runtimeType}'},
+      ),
+      exitCode: PatchbayExitCode.transport,
+    );
   } finally {
     await connection?.close();
   }
+}
+
+/// Reports one failure on both channels and returns its exit code.
+///
+/// stderr keeps the sentence it always printed. `--json` adds the machine
+/// envelope on stdout, so stdout under `--json` is exactly one JSON document —
+/// the response or the error — and never a mix of JSON and prose.
+int _fail(
+  StringSink out,
+  StringSink error, {
+  required bool json,
+  required String message,
+  required PatchbayErrorEnvelope envelope,
+  required int exitCode,
+}) {
+  error.writeln(message);
+  if (json) {
+    out.writeln(const JsonEncoder.withIndent('  ').convert(envelope.toJson()));
+  }
+  return exitCode;
+}
+
+/// Usage errors have no code of their own; the sentence is the detail.
+PatchbayErrorEnvelope _usageEnvelope(FormatException failure) =>
+    PatchbayErrorEnvelope(
+      'usageError',
+      details: <String, Object?>{'message': failure.message},
+    );
+
+/// Whether `--json` appears in raw argv, for failures that precede parsing.
+bool _jsonRequestedIn(List<String> arguments) {
+  var json = false;
+  for (final String word in arguments) {
+    if (word == '--') break;
+    if (word == '--json') json = true;
+    if (word == '--no-json') json = false;
+  }
+  return json;
 }
 
 /// Whether this invocation opens a reusable session instead of one command.
