@@ -41,7 +41,6 @@ Flutter 控制面的接入与语义导航设计见
 
 下列能力仍属于设计方向，不是当前公共 API：
 
-- 自动会话发现和 stale session 文件清理；
 - direct transport 的自动发现、TLS、端点 pinning 与反向连接；
 - 持续日志 watch/job；
 - 物理屏幕、系统 UI 或 PlatformView 的完整 capture。
