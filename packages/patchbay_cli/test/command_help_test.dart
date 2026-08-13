@@ -200,6 +200,97 @@ Availability is still decided by the running App catalog.
     }
   });
 
+  test('a catalog command name is a help topic', () {
+    final ArgParser parser = patchbayCliParser();
+    // What an operator holds is the protocol name printed in a catalog row or
+    // echoed in a response; it used to be an unknown topic.
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['navigation.go']),
+      contains('Usage: patchbay navigation go'),
+    );
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['ui.semantics.tap']),
+      contains('Usage: patchbay ui tap'),
+    );
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['patchbay.job.get']),
+      contains('Usage: patchbay job get'),
+    );
+
+    // Names that several friendly commands share resolve to the menu of them.
+    final String wait = PatchbayCommandHelp.render(parser, <String>['ui.wait']);
+    expect(wait, contains('Service command: ui.wait'));
+    for (final PatchbayFriendlyCommand command
+        in PatchbayFriendlyCommand.values.where(
+          (PatchbayFriendlyCommand command) =>
+              command.serviceCommand == 'ui.wait',
+        )) {
+      expect(wait, contains(command.path.join(' ')), reason: command.name);
+    }
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['blob.metadata']),
+      contains('Service command: blob.metadata'),
+    );
+  });
+
+  test('every declared service command answers as a help topic', () {
+    final ArgParser parser = patchbayCliParser();
+    for (final PatchbayFriendlyCommand command
+        in PatchbayFriendlyCommand.values) {
+      if (command.serviceCommand case final String name) {
+        expect(
+          () => PatchbayCommandHelp.render(parser, <String>[name]),
+          returnsNormally,
+          reason: name,
+        );
+      }
+    }
+  });
+
+  test('friendly group aliases answer instead of "unknown topic"', () {
+    final ArgParser parser = patchbayCliParser();
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['navigate']),
+      PatchbayCommandHelp.render(parser, <String>['navigation']),
+    );
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['wait']),
+      PatchbayCommandHelp.render(parser, <String>['ui', 'wait']),
+    );
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['tap']),
+      PatchbayCommandHelp.render(parser, <String>['ui', 'tap']),
+    );
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['navigate', 'go']),
+      PatchbayCommandHelp.render(parser, <String>['navigation', 'go']),
+    );
+  });
+
+  test('help prints the condition each ui wait command sends', () {
+    final ArgParser parser = patchbayCliParser();
+    final String group = PatchbayCommandHelp.render(parser, <String>[
+      'ui',
+      'wait',
+    ]);
+    for (final PatchbayFriendlyCommand command
+        in PatchbayFriendlyCommand.values) {
+      if (command.waitCondition case final String condition) {
+        expect(group, contains(condition), reason: command.name);
+        expect(
+          PatchbayCommandHelp.render(parser, command.path),
+          contains('Sends condition: $condition'),
+          reason: command.name,
+        );
+      }
+    }
+    // The mapping block belongs only where a condition exists.
+    expect(
+      PatchbayCommandHelp.render(parser, <String>['navigation']),
+      isNot(contains('condition')),
+    );
+  });
+
   test('unknown help topic is a usage error without connecting', () async {
     final ProcessResult result = await Process.run(
       Platform.resolvedExecutable,
@@ -209,5 +300,16 @@ Availability is still decided by the running App catalog.
     expect(result.exitCode, PatchbayExitCode.usage);
     expect(result.stderr, contains('unknown help topic'));
     expect(result.stderr, isNot(contains('session')));
+  });
+
+  test('an unknown protocol name is still an unknown topic', () {
+    // The catalog-name lookup must not become a wildcard: a name no
+    // declaration sends has no help to show.
+    expect(
+      () => PatchbayCommandHelp.render(patchbayCliParser(), <String>[
+        'navigation.teleport',
+      ]),
+      throwsA(isA<FormatException>()),
+    );
   });
 }

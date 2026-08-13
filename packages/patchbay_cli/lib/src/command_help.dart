@@ -6,18 +6,37 @@ import 'command_registry.dart';
 abstract final class PatchbayCommandHelp {
   static String render(ArgParser parser, List<String> topic) {
     if (topic.isEmpty) return _root(parser);
+    final List<String> path = PatchbayFriendlyCommandRegistry.canonicalPath(
+      topic,
+    );
     final List<PatchbayFriendlyCommand> matches = PatchbayFriendlyCommand.values
         .where(
-          (PatchbayFriendlyCommand command) => _startsWith(command.path, topic),
+          (PatchbayFriendlyCommand command) => _startsWith(command.path, path),
         )
         .toList(growable: false);
-    if (matches.isEmpty) {
-      throw FormatException('unknown help topic: ${topic.join(' ')}');
+    if (matches.isNotEmpty) {
+      if (matches.length == 1 && matches.single.path.length == path.length) {
+        return _command(parser, matches.single);
+      }
+      return _group(parser, path, matches);
     }
-    if (matches.length == 1 && matches.single.path.length == topic.length) {
-      return _command(parser, matches.single);
+    // What an operator has in hand is usually a catalog row or a response
+    // field — a protocol name, not the CLI's own path. Sending that to
+    // "unknown help topic" made the catalog and the help two separate maps.
+    if (topic.length == 1) {
+      final List<PatchbayFriendlyCommand> byService =
+          PatchbayFriendlyCommand.values
+              .where(
+                (PatchbayFriendlyCommand command) =>
+                    command.serviceCommand == topic.single,
+              )
+              .toList(growable: false);
+      if (byService.length == 1) return _command(parser, byService.single);
+      if (byService.length > 1) {
+        return _serviceCommand(parser, topic.single, byService);
+      }
     }
-    return _group(parser, topic, matches);
+    throw FormatException('unknown help topic: ${topic.join(' ')}');
   }
 
   /// One-line usage banner, derived from the same declarations as the help.
@@ -63,6 +82,9 @@ abstract final class PatchbayCommandHelp {
     output
       ..writeln()
       ..writeln('Run `patchbay help <group>` or `patchbay <group> --help`.')
+      ..writeln(
+        'A catalog name works as a topic too: `patchbay help navigation.go`.',
+      )
       ..writeln()
       ..writeln('Options:')
       ..writeln(parser.usage);
@@ -99,11 +121,87 @@ abstract final class PatchbayCommandHelp {
         '  ${usages[index].padRight(width)}  ${sorted[index].summary}',
       );
     }
+    _writeConditions(output, sorted);
     _writeOptions(output, parser, optionNames);
     output
       ..writeln()
       ..writeln('Availability is still decided by the running App catalog.');
     return output.toString();
+  }
+
+  /// Help for one protocol name that several CLI commands send.
+  ///
+  /// `ui.wait` and `blob.metadata` are each reachable through more than one
+  /// friendly path, so the catalog name maps to a small menu rather than to a
+  /// single command.
+  static String _serviceCommand(
+    ArgParser parser,
+    String serviceCommand,
+    List<PatchbayFriendlyCommand> commands,
+  ) {
+    final List<PatchbayFriendlyCommand> sorted = List.of(commands)
+      ..sort(
+        (PatchbayFriendlyCommand a, PatchbayFriendlyCommand b) =>
+            a.path.join(' ').compareTo(b.path.join(' ')),
+      );
+    final List<String> usages = sorted
+        .map((PatchbayFriendlyCommand command) => _usage(command))
+        .toList(growable: false);
+    final int width = usages.fold<int>(
+      0,
+      (int value, String usage) => usage.length > value ? usage.length : value,
+    );
+    final StringBuffer output = StringBuffer()
+      ..writeln('Usage: patchbay <command> [options]')
+      ..writeln()
+      ..writeln('Service command: $serviceCommand')
+      ..writeln()
+      ..writeln('CLI commands that send it:');
+    for (var index = 0; index < sorted.length; index += 1) {
+      output.writeln(
+        '  ${usages[index].padRight(width)}  ${sorted[index].summary}',
+      );
+    }
+    _writeConditions(output, sorted);
+    _writeOptions(output, parser, <String>{
+      for (final PatchbayFriendlyCommand command in sorted)
+        ...PatchbayFriendlyCommandRegistry.allowedOptions(command),
+    });
+    output
+      ..writeln()
+      ..writeln(availabilityLine(sorted.first));
+    return output.toString();
+  }
+
+  /// Prints how a `ui wait` subcommand maps onto the `condition` it sends.
+  ///
+  /// The names differ deliberately — hyphenated CLI syntax versus the wire
+  /// value — but a response only ever shows the wire value, so without this
+  /// table the operator has to guess which command produced it. Both spellings
+  /// are accepted on the command line; neither name changes.
+  static void _writeConditions(
+    StringBuffer output,
+    List<PatchbayFriendlyCommand> commands,
+  ) {
+    final List<PatchbayFriendlyCommand> conditions = commands
+        .where((PatchbayFriendlyCommand command) => command.waitCondition != null)
+        .toList(growable: false);
+    if (conditions.isEmpty) return;
+    final int width = conditions.fold<int>(
+      0,
+      (int value, PatchbayFriendlyCommand command) =>
+          command.path.join(' ').length > value
+          ? command.path.join(' ').length
+          : value,
+    );
+    output
+      ..writeln()
+      ..writeln('Payload `condition` values (accepted as the command name too):');
+    for (final PatchbayFriendlyCommand command in conditions) {
+      output.writeln(
+        '  ${command.path.join(' ').padRight(width)}  ${command.waitCondition}',
+      );
+    }
   }
 
   static String _command(ArgParser parser, PatchbayFriendlyCommand command) {
@@ -112,6 +210,12 @@ abstract final class PatchbayCommandHelp {
       ..writeln()
       ..writeln(command.summary)
       ..writeln(protocolLine(command));
+    if (command.waitCondition case final String condition) {
+      output.writeln(
+        'Sends condition: $condition — the value the response carries, and '
+        'accepted in place of "${command.path.last}".',
+      );
+    }
     _writeOptions(
       output,
       parser,

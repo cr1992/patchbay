@@ -128,36 +128,42 @@ enum PatchbayFriendlyCommand {
     <String>['ui', 'wait', 'semantics-mounted'],
     summary: 'Wait for a semantics identifier to mount.',
     usageSuffix: '<identifier>',
+    waitCondition: 'semanticsMounted',
   ),
   uiWaitSemanticsUnmounted(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-unmounted'],
     summary: 'Wait for a semantics identifier to unmount.',
     usageSuffix: '<identifier>',
+    waitCondition: 'semanticsUnmounted',
   ),
   uiWaitSemanticsValue(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-value'],
     summary: 'Wait for a semantics value.',
     usageSuffix: '<identifier> <value>',
+    waitCondition: 'semanticsValue',
   ),
   uiWaitDestination(
     'ui.wait',
     <String>['ui', 'wait', 'destination'],
     summary: 'Wait for a navigation destination.',
     usageSuffix: '<destination-id>',
+    waitCondition: 'navigationDestination',
   ),
   uiWaitTreeRevision(
     'ui.wait',
     <String>['ui', 'wait', 'tree-revision'],
     summary: 'Wait for the semantics tree revision.',
     usageSuffix: '<revision>',
+    waitCondition: 'treeRevision',
   ),
   uiWaitFrameRevision(
     'ui.wait',
     <String>['ui', 'wait', 'frame-revision'],
     summary: 'Wait for the rendered frame revision.',
     usageSuffix: '<revision>',
+    waitCondition: 'frameRevision',
   ),
   uiTextSet(
     'ui.text.set',
@@ -256,10 +262,16 @@ enum PatchbayFriendlyCommand {
     this.usageSuffix = '',
     this.artifact = PatchbayArtifactDisposition.none,
     this.target = PatchbayCommandTarget.declaredServiceCommand,
+    this.waitCondition,
   }) : assert(
          (serviceCommand != null) ==
              (target == PatchbayCommandTarget.declaredServiceCommand),
          'a declared service command belongs to exactly that target',
+       ),
+       assert(
+         (waitCondition != null) == (serviceCommand == 'ui.wait'),
+         'every ui.wait declaration names the condition it sends, and only '
+             'those declarations have one',
        );
 
   /// Stable protocol name, or `null` when the target does not declare one:
@@ -271,6 +283,15 @@ enum PatchbayFriendlyCommand {
   final String usageSuffix;
   final PatchbayArtifactDisposition artifact;
   final PatchbayCommandTarget target;
+
+  /// The `condition` value this declaration sends, for the `ui.wait` family.
+  ///
+  /// The CLI subcommand is hyphenated syntax and the condition is the wire
+  /// value; they differ on purpose, but only the wire value appears in the
+  /// response an operator is reading. Declaring it here is what lets help print
+  /// the mapping and lets the parser accept either spelling, without a second
+  /// hand-maintained list that could drift from the request actually sent.
+  final String? waitCondition;
 }
 
 final class PatchbayFriendlyInvocation {
@@ -295,6 +316,14 @@ final class PatchbayFriendlyInvocation {
   final Set<String> plaintextArgumentKeys;
 }
 
+/// One accepted spelling and the declared path it expands into.
+final class _PathAlias {
+  const _PathAlias(this.from, this.to);
+
+  final List<String> from;
+  final List<String> to;
+}
+
 abstract final class PatchbayFriendlyCommandRegistry {
   /// Resolves [words] against the declaration table.
   ///
@@ -305,10 +334,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
     ArgResults options, {
     String Function() readSensitiveInput = readSensitiveStdinLine,
   }) {
-    final PatchbayFriendlyCommand? spec = _match(words);
+    final List<String> path = canonicalPath(words);
+    final PatchbayFriendlyCommand? spec = _match(path);
     if (spec == null) return null;
     _validateOptions(spec, options);
-    final List<String> tail = words.sublist(spec.path.length);
+    final List<String> tail = path.sublist(spec.path.length);
     final String? serviceCommand;
     if (spec.target == PatchbayCommandTarget.callerServiceCommand) {
       if (tail.length != 1) {
@@ -382,19 +412,14 @@ abstract final class PatchbayFriendlyCommandRegistry {
         'revision': _requiredInt(options, 'revision'),
         'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
       }),
-      PatchbayFriendlyCommand.uiWaitSemanticsMounted => _oneTail(
-        tail,
-        (String id) => _waitArguments(
-          options,
-          condition: 'semanticsMounted',
-          semanticsIdentifier: id,
-        ),
-      ),
+      // Every arm below takes its `condition` from the declaration, so the
+      // value help prints and the value the App receives cannot disagree.
+      PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
       PatchbayFriendlyCommand.uiWaitSemanticsUnmounted => _oneTail(
         tail,
         (String id) => _waitArguments(
           options,
-          condition: 'semanticsUnmounted',
+          condition: spec.waitCondition!,
           semanticsIdentifier: id,
         ),
       ),
@@ -402,7 +427,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         (String id, String value) => _waitArguments(
           options,
-          condition: 'semanticsValue',
+          condition: spec.waitCondition!,
           semanticsIdentifier: id,
           value: value,
         ),
@@ -411,24 +436,17 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         (String destination) => _waitArguments(
           options,
-          condition: 'navigationDestination',
+          condition: spec.waitCondition!,
           destinationId: destination,
           revision: _optionalInt(options, 'revision'),
         ),
       ),
-      PatchbayFriendlyCommand.uiWaitTreeRevision => _oneTail(
-        tail,
-        (String revision) => _waitArguments(
-          options,
-          condition: 'treeRevision',
-          revision: _parseNonNegative(revision, 'revision'),
-        ),
-      ),
+      PatchbayFriendlyCommand.uiWaitTreeRevision ||
       PatchbayFriendlyCommand.uiWaitFrameRevision => _oneTail(
         tail,
         (String revision) => _waitArguments(
           options,
-          condition: 'frameRevision',
+          condition: spec.waitCondition!,
           revision: _parseNonNegative(revision, 'revision'),
         ),
       ),
@@ -460,6 +478,64 @@ abstract final class PatchbayFriendlyCommandRegistry {
       force: options.flag('force'),
       plaintextArgumentKeys: _plaintextArgumentKeys(options),
     );
+  }
+
+  /// Rewrites [words] into the declared spelling of the same command.
+  ///
+  /// Aliases only ever expand into a path that already exists: they add a way
+  /// to type a command, never a command, so no stable name changes and nothing
+  /// new becomes dispatchable. Two rewrites are enough for the deepest chain
+  /// (`wait semanticsMounted` → `ui wait semanticsMounted` → the declaration),
+  /// and no expansion produces another alias, so this terminates.
+  static List<String> canonicalPath(List<String> words) {
+    List<String> current = words;
+    for (var pass = 0; pass < 2; pass += 1) {
+      final List<String>? expanded = _expandAlias(current);
+      if (expanded == null) return current;
+      current = expanded;
+    }
+    return current;
+  }
+
+  static List<String>? _expandAlias(List<String> words) {
+    for (final _PathAlias alias in _aliases) {
+      if (!_startsWith(words, alias.from)) continue;
+      return <String>[...alias.to, ...words.sublist(alias.from.length)];
+    }
+    return null;
+  }
+
+  /// Alternate spellings accepted for a declared path.
+  ///
+  /// The `ui wait <condition>` entries are generated from the declarations
+  /// themselves: whatever condition a payload shows is therefore typeable, and
+  /// the mapping can never drift from the request the CLI actually sends. The
+  /// rest are the group names operators reach for before reading help.
+  static final List<_PathAlias> _aliases =
+      <_PathAlias>[
+        for (final PatchbayFriendlyCommand spec
+            in PatchbayFriendlyCommand.values)
+          if (spec.waitCondition case final String condition)
+            _PathAlias(<String>[
+              ...spec.path.take(spec.path.length - 1),
+              condition,
+            ], spec.path),
+        const _PathAlias(<String>['navigate'], <String>['navigation']),
+        const _PathAlias(<String>['nav'], <String>['navigation']),
+        const _PathAlias(<String>['wait'], <String>['ui', 'wait']),
+        const _PathAlias(<String>['tap'], <String>['ui', 'tap']),
+        const _PathAlias(<String>['text'], <String>['ui', 'text']),
+        const _PathAlias(<String>['semantics'], <String>['ui', 'semantics']),
+      ]..sort(
+        (_PathAlias a, _PathAlias b) => b.from.length.compareTo(a.from.length),
+      );
+
+  static bool _startsWith(List<String> words, List<String> prefix) {
+    if (words.length < prefix.length) return false;
+    for (var index = 0; index < prefix.length; index += 1) {
+      if (words[index] != prefix[index]) return false;
+    }
+    return true;
   }
 
   static PatchbayFriendlyCommand? _match(List<String> words) {

@@ -234,6 +234,65 @@ void main() {
     );
   });
 
+  test('a ui wait condition name is accepted as the command name', () {
+    for (final PatchbayFriendlyCommand spec in PatchbayFriendlyCommand.values) {
+      if (spec.waitCondition case final String condition) {
+        final List<String> tail = switch (spec) {
+          PatchbayFriendlyCommand.uiWaitSemanticsValue => <String>[
+            'field.id',
+            'ready',
+          ],
+          PatchbayFriendlyCommand.uiWaitTreeRevision ||
+          PatchbayFriendlyCommand.uiWaitFrameRevision => <String>['7'],
+          _ => <String>['screen.id'],
+        };
+        final PatchbayFriendlyInvocation byCondition = _resolve(<String>[
+          'ui',
+          'wait',
+          condition,
+          ...tail,
+        ]);
+        // Same declaration, same request: the alias is a spelling, not a
+        // second command with a life of its own.
+        expect(byCondition.spec, spec, reason: condition);
+        expect(
+          byCondition.arguments,
+          _resolve(<String>[...spec.path, ...tail]).arguments,
+          reason: condition,
+        );
+        expect(byCondition.arguments['condition'], condition);
+      }
+    }
+  });
+
+  test('group aliases expand without inventing commands', () {
+    expect(
+      _resolve(<String>['navigate', 'current']).spec,
+      PatchbayFriendlyCommand.navigationCurrent,
+    );
+    expect(
+      _resolve(<String>['wait', 'semantics-mounted', 'app.ready']).spec,
+      PatchbayFriendlyCommand.uiWaitSemanticsMounted,
+    );
+    expect(
+      _resolve(<String>['tap', 'login.submit']).spec,
+      PatchbayFriendlyCommand.uiTap,
+    );
+    // An alias word in an argument position stays an argument.
+    expect(
+      PatchbayFriendlyCommandRegistry.canonicalPath(<String>['exec', 'wait']),
+      <String>['exec', 'wait'],
+    );
+    expect(
+      PatchbayFriendlyCommandRegistry.canonicalPath(<String>[
+        'ui',
+        'tap',
+        'nav',
+      ]),
+      <String>['ui', 'tap', 'nav'],
+    );
+  });
+
   test('--generation is refused by commands that do not fence a node', () {
     expect(
       () => _resolve(<String>['--generation', '7', 'ui', 'semantics', 'tree']),
