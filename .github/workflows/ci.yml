@@ -32,9 +32,11 @@ jobs:
           cache: true
       - name: analyze + test（三个纯 Dart 包）
         run: |
+          # GH 共享 runner 比 GitLab podman runner 慢，VM Service 跨进程测试首跑会顶到
+          # dart test 默认 30s 单测超时，统一上调（GitLab 侧不需要，保持原样）。
           for p in patchbay patchbay_cli patchbay_transport; do
             echo "== packages/$p =="
-            (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test)
+            (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test --timeout=90s)
           done
 
   flutter_package:
