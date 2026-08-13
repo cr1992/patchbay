@@ -40,6 +40,13 @@ void main() {
         ),
       );
       expect(generated, contains("defaultValue: 3"));
+      // Sensitivity stays declared — the host reads it out of the catalog —
+      // but the generated validator neither exempts nor re-checks the meta
+      // key, because the host strips it before a consumer sees the arguments.
+      expect(generated, contains('sensitive: true'));
+      expect(generated, contains('!declared.containsKey(key)'));
+      expect(generated, isNot(contains('inputWasStdin')));
+      expect(generated, isNot(contains('sensitiveInputRequiresStdin')));
       expect(await _run(contract, output, '--check'), 0);
 
       output.writeAsStringSync('$generated// drift\n');
@@ -169,6 +176,11 @@ Map<String, Object?> _fixtureContract() => <String, Object?>{
       'cancellation': 'fixtureStop',
       'parameters': <Object?>[
         <String, Object?>{'name': 'count', 'type': 'integer', 'default': 3},
+        <String, Object?>{
+          'name': 'secret',
+          'type': 'string',
+          'sensitive': true,
+        },
       ],
     },
   ],
