@@ -45,6 +45,49 @@ Flutter 控制面的接入与语义导航设计见
 - 持续日志 watch/job；
 - 物理屏幕、系统 UI 或 PlatformView 的完整 capture。
 
+## 非目标台账
+
+设计定稿里有一节「非目标」（`git show c2320f7:docs/integration/patchbay-design.md` §1.2）。通用设计下沉到
+本包时该节被整节删除而不是下沉，其中几条后来被跨过的边界因此失去了可见记录。下表逐条恢复并标注
+当前状态；被推翻的两条在表后单独说明理由和依据。
+
+| 定稿非目标 | 当前状态 |
+|---|---|
+| 任意坐标驱动、任意 Widget 查询、跨 App 黑盒 UI 自动化；替代 Widget/集成测试或人工目检 | 仍生效；坐标驱动与跨 App 至今无入口。「任意 Widget 查询」与下面 v0.2c 一条重叠——诊断面只读，不是稳定操作面 |
+| 把 CLI 结果当成产品 UI 验收或 capability 销账的充分证据 | 仍生效；「交付阶段与退出条件」的真机门与「结果信封与事实来源」是同一口径 |
+| 重造 hot reload、runtime errors 或 DevTools 完整 Widget tree 等通用运行时调试能力 | **部分推翻**：Widget/Render/Focus 完整树已由 v0.2c 诊断代理接入 |
+| 在 App 内另起 HTTP/WebSocket 服务 | **已推翻**：direct transport 就是 App 内的 `HttpServer` |
+| 支持 release 构建，或未由 `flutter run` / `attach` 暴露 VM Service 的进程 | release 半条仍生效（见「Release 边界」）；VM Service 半条已被 direct transport 放宽 |
+| 首期提供设备写命令、长任务、事件 tail 或 raw DP | 按分期正常解除（v0.3b、v0.4），不是推翻——定稿写的就是「首期」 |
+| core 与 Flutter adapter 依赖宿主设备桥或平台 UI 自动化 runner；系统权限弹窗、通知中心、系统设置、软键盘 UI、其他 App 与原生 `PlatformView` 交互 | 仍生效；capture 对 PlatformView 与系统 UI 返回 capability warning，不冒充完整物理屏幕 |
+| 要求 consumer 每个页面加 Patchbay 容器、每个控件建 Target Widget，或维护与 Widget 树重复的集中注册表 | 仍生效；root bridge 与 `PatchbayKey` 都是可选增强 |
+| 因试点预先修改共享仓命名规范或发布流程 | 仍生效；迁往共享仓仍是 v0.5 的独立退出条件 |
+
+### 已推翻：App 内另起 HTTP 服务
+
+裁决稿是
+[`../../docs/decisions/patchbay-direct-debug-transport.md`](../../docs/decisions/patchbay-direct-debug-transport.md)。
+理由是不能把「zero-ADB」说成 VM Service 端口转发——要真正不经 VM Service，就必须有一条自己的传输，
+因此 `patchbay_transport` 的 direct host 在 App 内绑定 `HttpServer`；选短连接 HTTP 而非 WebSocket，是因为
+当前四个能力都是有界 request/response，状态面更小。
+
+同一条裁决连带放宽了定稿的另一条非目标：direct host 不读取、不代理也不暴露 VM Service URI，
+debug/profile 进程无需 `flutter run` / `attach` 暴露 VM Service 即可被连接。release 那半条不受影响。
+
+推翻带来的补偿边界写在「传输」一节：构造不监听、默认只绑 loopback、LAN 需要代码层第二次显式
+opt-in，且明文 LAN 只提供持有者认证。
+
+### 部分推翻：DevTools 完整 Widget tree
+
+追加者是分期表的 v0.2c「DevTools 诊断代理」，契约见
+[`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)
+的 C 节；**目前没有独立的 `docs/decisions/` 裁决稿**，这一条的真源只有分期表和该契约文档两处。
+
+字面上的「不重造」仍成立——代理的是 Flutter debug 构建自带的 Inspector extension，不复制 DevTools
+协议；但「DevTools 完整 Widget tree 不在范围」这一层已经不成立：Widget/Render/Focus 树现在是 Patchbay
+可达面。理由是另造一份树会产生第二份 schema。代价记在风险登记里：该面随 Flutter SDK 漂移，只标
+passthrough，稳定自动化仍只消费 Patchbay 规范化 Semantics schema。
+
 ## 架构
 
 ```text
@@ -301,6 +344,6 @@ descriptor、operator 和 consumer callback 的可达引用。
 | Semantics 快照泄露输入值 | `isObscured` 强制隐藏 value，consumer 可注入更严格脱敏；敏感 setText 只接受 stdin |
 | build mode 间 Key 种类漂移 | 所有模式保持同一种 GlobalKey 和 State 语义，release 只裁登记与 operator |
 | UI 调试门绕过领域门 | descriptor 是 consumer gate 唯一真源；可能产生领域副作用的 UI action 显式声明强门 |
-| registry、operator 或 callback 残留 release | AOT 做 extension/descriptor/operator/callback 引用扫描，并验证 root 只透传 child |
+| registry、operator 或 callback 残留 release | **计划中，当前无机检**：AOT 的 extension/descriptor/operator/callback 引用扫描尚未实现，`python3 -m tools.checks list` 里没有对应 guard。现存处置只有 consumer 侧编译期常量（见「Release 边界」）和 root 只透传 child 的约定，两者都不是构建产物级证据。该扫描按独立批次落地，未落地前不得把本行读成已有闸门 |
 | 命令产生外部副作用 | descriptor 明示 side-effect；真机写操作遵守 consumer 的设备占用、备份与恢复纪律 |
 | release 没有 VM Service | 明确非目标，不建立隐式降级或运行时后门 |
