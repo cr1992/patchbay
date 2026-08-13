@@ -138,6 +138,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientFocusTree =>
           'Only on the VM Service transport, and only while the Flutter SDK '
               'registers the extension.',
+        PatchbayCommandTarget.clientReplSession =>
+          'Available on any connected Patchbay transport except direct HTTP, '
+              'whose token would have to share stdin with the commands.',
       };
 
   /// What the CLI will actually call, phrased per dispatch target.
@@ -158,6 +161,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientRenderTree ||
         PatchbayCommandTarget.clientFocusTree =>
           'Flutter SDK diagnostic passthrough, not an App catalog command.',
+        PatchbayCommandTarget.clientReplSession =>
+          'Reads command lines from stdin and runs each over one connection; '
+              'every line reports its own exit code.',
       };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[

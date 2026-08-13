@@ -9,31 +9,136 @@ import 'client.dart';
 import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
+import 'repl.dart';
 import 'result.dart';
 import 'sensitive_input.dart';
 import 'session.dart';
 
-Future<int> runPatchbayCli(List<String> arguments) async {
+/// Runs one CLI invocation.
+///
+/// [connect], [replInput], [output] and [errorOutput] are test seams. They let
+/// a test observe how many times a session actually dials the App and drive a
+/// repl without a terminal; production callers pass none of them.
+Future<int> runPatchbayCli(
+  List<String> arguments, {
+  Future<PatchbayClient> Function(ArgResults options)? connect,
+  Stream<String>? replInput,
+  StringSink? output,
+  StringSink? errorOutput,
+}) async {
+  final StringSink out = output ?? stdout;
+  final StringSink error = errorOutput ?? stderr;
   final ArgParser parser = patchbayCliParser();
   final ArgResults parsed;
   try {
     parsed = parser.parse(arguments);
-  } on FormatException catch (error) {
-    stderr.writeln(error.message);
+  } on FormatException catch (failure) {
+    error.writeln(failure.message);
     return PatchbayExitCode.usage;
   }
 
   PatchbayClient? connection;
   try {
     if (_helpTopic(parsed) case final List<String> topic) {
-      stdout.write(PatchbayCommandHelp.render(parser, topic));
+      out.write(PatchbayCommandHelp.render(parser, topic));
       return PatchbayExitCode.accepted;
     }
     _validateGlobalShape(parsed);
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
     }
-    connection = await _connect(parsed);
+    final bool repl = _isRepl(parsed);
+    if (repl) {
+      // Resolve the declaration purely for its option policing: `repl` accepts
+      // no command options, and running that check here keeps it derived from
+      // the same table as every other path instead of a second hand-written
+      // list. The invocation itself is unused — repl dispatches nothing.
+      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
+      _validateReplShape(parsed);
+    }
+    connection = await (connect ?? _connect)(parsed);
+    if (repl) {
+      return await PatchbayReplSession(
+        parser: parser,
+        // One connection, every line: this closure is the only thing the loop
+        // can reach, so a later command has no way to open a second one.
+        execute: (ArgResults line) async {
+          final _Outcome outcome = await _executeOnce(connection!, line);
+          return PatchbayReplOutcome(outcome.response, outcome.exitCode);
+        },
+        out: out,
+        err: error,
+        json: parsed.flag('json'),
+      ).run(
+        replInput ??
+            stdin.transform(utf8.decoder).transform(const LineSplitter()),
+      );
+    }
+    final _Outcome outcome = await _executeOnce(connection, parsed);
+    _writeOutput(out, outcome.response, json: parsed.flag('json'));
+    return outcome.exitCode;
+  } on FormatException catch (failure) {
+    error.writeln(failure.message);
+    return PatchbayExitCode.usage;
+  } on PatchbayArtifactDownloadException catch (failure) {
+    error.writeln('patchbay protocol error: ${failure.code}');
+    return PatchbayExitCode.protocol;
+  } on PatchbayProtocolException catch (failure) {
+    error.writeln('patchbay protocol error: ${failure.code}');
+    return PatchbayExitCode.protocol;
+  } on PatchbayTransportException catch (failure) {
+    error.writeln('patchbay transport error: ${failure.code}');
+    return PatchbayExitCode.transport;
+  } on PatchbaySessionException catch (failure) {
+    error.writeln('patchbay session error: ${failure.code}');
+    for (final String choice in failure.choices) {
+      error.writeln('  --session ${choice.split(' ').first}  $choice');
+    }
+    return failure.code == 'sessionIdentityMismatch'
+        ? PatchbayExitCode.protocol
+        : PatchbayExitCode.transport;
+  } on PatchbayJobWaitTimeout {
+    error.writeln('patchbay job failed: waitTimeout');
+    return PatchbayExitCode.typedFailure;
+  } on PatchbaySensitiveInputException catch (failure) {
+    error.writeln('patchbay sensitive input error: ${failure.code}');
+    return PatchbayExitCode.usage;
+  } on Object catch (failure) {
+    // VM Service URIs and direct bearer tokens are authentication material.
+    // Socket exceptions can echo endpoints, so expose only the stable type.
+    error.writeln('patchbay transport error: ${failure.runtimeType}');
+    return PatchbayExitCode.transport;
+  } finally {
+    await connection?.close();
+  }
+}
+
+/// Whether this invocation opens a reusable session instead of one command.
+bool _isRepl(ArgResults parsed) =>
+    parsed.rest.length == 1 && parsed.rest.single == 'repl';
+
+void _validateReplShape(ArgResults parsed) {
+  // Direct mode reads its bearer token from stdin, which is the same stream
+  // the repl needs for commands. Sharing one stdin between a secret and a
+  // command stream is how a token ends up interpreted as a command, so refuse
+  // the combination instead of racing the two readers.
+  if (parsed.option('direct-endpoint') != null) {
+    throw const FormatException(
+      'repl cannot use --direct-endpoint: the bearer token and the command '
+      'stream would have to share one stdin',
+    );
+  }
+}
+
+/// Runs one resolved command and classifies its response.
+///
+/// One-shot and repl share this so a command cannot mean two different things
+/// depending on how it was launched.
+Future<_Outcome> _executeOnce(
+  PatchbayClient connection,
+  ArgResults parsed,
+) async {
+  try {
     final _Execution execution = await _execute(connection, parsed);
     Map<String, Object?> output = execution.response;
     if (execution.artifact case final _ArtifactRequest artifact) {
@@ -42,7 +147,7 @@ Future<int> runPatchbayCli(List<String> arguments) async {
             await PatchbayArtifactDownloader(
               invoke: (String command, Map<String, Object?> arguments) =>
                   _invokeAgainstCatalog(
-                    connection!,
+                    connection,
                     execution.catalog!,
                     command,
                     arguments,
@@ -58,44 +163,14 @@ Future<int> runPatchbayCli(List<String> arguments) async {
         };
       }
     }
-    _writeOutput(output, json: parsed.flag('json'));
-    return patchbayExitCodeFor(output);
-  } on FormatException catch (error) {
-    stderr.writeln(error.message);
-    return PatchbayExitCode.usage;
-  } on PatchbayArtifactRejected catch (error) {
-    _writeOutput(error.response, json: parsed.flag('json'));
-    return patchbayExitCodeFor(error.response);
-  } on PatchbayArtifactDownloadException catch (error) {
-    stderr.writeln('patchbay protocol error: ${error.code}');
-    return PatchbayExitCode.protocol;
-  } on PatchbayProtocolException catch (error) {
-    stderr.writeln('patchbay protocol error: ${error.code}');
-    return PatchbayExitCode.protocol;
-  } on PatchbayTransportException catch (error) {
-    stderr.writeln('patchbay transport error: ${error.code}');
-    return PatchbayExitCode.transport;
-  } on PatchbaySessionException catch (error) {
-    stderr.writeln('patchbay session error: ${error.code}');
-    for (final String choice in error.choices) {
-      stderr.writeln('  --session ${choice.split(' ').first}  $choice');
-    }
-    return error.code == 'sessionIdentityMismatch'
-        ? PatchbayExitCode.protocol
-        : PatchbayExitCode.transport;
-  } on PatchbayJobWaitTimeout {
-    stderr.writeln('patchbay job failed: waitTimeout');
-    return PatchbayExitCode.typedFailure;
-  } on PatchbaySensitiveInputException catch (error) {
-    stderr.writeln('patchbay sensitive input error: ${error.code}');
-    return PatchbayExitCode.usage;
-  } on Object catch (error) {
-    // VM Service URIs and direct bearer tokens are authentication material.
-    // Socket exceptions can echo endpoints, so expose only the stable type.
-    stderr.writeln('patchbay transport error: ${error.runtimeType}');
-    return PatchbayExitCode.transport;
-  } finally {
-    await connection?.close();
+    return _Outcome(output, patchbayExitCodeFor(output));
+  } on PatchbayArtifactRejected catch (rejected) {
+    // The App answered; the artifact simply is not downloadable. That is a
+    // normal typed response, not a CLI-level error.
+    return _Outcome(
+      rejected.response,
+      patchbayExitCodeFor(rejected.response),
+    );
   }
 }
 
@@ -283,6 +358,11 @@ Future<_Execution> _execute(
       return _Execution(await connection.renderTree());
     case PatchbayCommandTarget.clientFocusTree:
       return _Execution(await connection.focusTree());
+    case PatchbayCommandTarget.clientReplSession:
+      // `runPatchbayCli` routes a repl to its own loop before dispatch, and
+      // the loop refuses a nested `repl` line, so reaching here is a wiring
+      // bug rather than caller input.
+      throw StateError('repl is a session, not a dispatchable command');
     case PatchbayCommandTarget.declaredServiceCommand:
     case PatchbayCommandTarget.callerServiceCommand:
       final _Invoked result = await _invokeCataloged(
@@ -477,30 +557,16 @@ Map<String, Object?> _artifactMetadata(
   return metadata;
 }
 
-void _writeOutput(Map<String, Object?> output, {required bool json}) {
-  stdout.writeln(
+void _writeOutput(
+  StringSink out,
+  Map<String, Object?> output, {
+  required bool json,
+}) {
+  out.writeln(
     json
         ? const JsonEncoder.withIndent('  ').convert(output)
-        : _summary(output),
+        : patchbayResponseSummary(output),
   );
-}
-
-String _summary(Map<String, Object?> value) {
-  if (value['localArtifact'] case final Map<Object?, Object?> artifact) {
-    return 'artifact=${artifact['path']} length=${artifact['length']} verified=true';
-  }
-  if (value case {
-    'applicationId': final Object app,
-    'appInstanceId': final Object instance,
-  }) {
-    return '$app instance=$instance';
-  }
-  if (value['uiTargets'] case final List<Object?> targets) {
-    return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} '
-        'uiTargets=${targets.length}';
-  }
-  if (value['jobId'] case final String jobId) return 'jobId=$jobId';
-  return jsonEncode(value);
 }
 
 int _positiveOption(ArgResults options, String name) {
@@ -530,6 +596,13 @@ final class _CatalogCommand {
     }
     return null;
   }
+}
+
+final class _Outcome {
+  const _Outcome(this.response, this.exitCode);
+
+  final Map<String, Object?> response;
+  final int exitCode;
 }
 
 final class _Invoked {
