@@ -9,6 +9,8 @@ default:
 
 stages: [check]
 
+# dart_packages 内含 packages/patchbay/test/command_name_parity_test.dart ——
+# 命令名跨包一致护栏（CLI/服务方/fixture 三处钉死），从首个 consumer 仓移交而来。
 dart_packages:
   stage: check
   script:
