@@ -15,6 +15,27 @@ String defaultPatchbaySessionDirectory({Map<String, String>? environment}) {
       'patchbay-sessions-v1';
 }
 
+/// Creates [path] empty and owner-only **before** any content is written to it.
+///
+/// Session records carry the VM Service authentication URI. `writeAsStringSync`
+/// creates the file with the process umask — commonly `0644` — so a `chmod`
+/// issued *after* the write leaves a window in which the token is world-readable
+/// on a shared machine. Creating the file while it is still empty and
+/// restricting it there removes that window: by the time any secret reaches the
+/// file, the mode is already `0600`.
+///
+/// `exclusive: true` additionally refuses to write through a file another user
+/// planted at that path; the session directory lives under the world-writable
+/// system temp directory, so that is not hypothetical.
+File createRestrictedFileSync(String path) {
+  final file = File(path);
+  file.createSync(exclusive: true);
+  if (!Platform.isWindows) {
+    Process.runSync('chmod', ['600', file.path]);
+  }
+  return file;
+}
+
 final class PatchbaySessionException implements Exception {
   const PatchbaySessionException(this.code, {this.choices = const []});
 
@@ -173,12 +194,11 @@ final class PatchbaySessionStore {
     _validateSessionId(record.sessionId);
     _ensureDirectory();
     final target = File(_fileName(record.sessionId));
-    final temporary = File(
+    final temporary = createRestrictedFileSync(
       '${target.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
     );
     try {
       temporary.writeAsStringSync(jsonEncode(record.toJson()), flush: true);
-      _restrictFile(temporary);
       temporary.renameSync(target.path);
     } finally {
       if (temporary.existsSync()) temporary.deleteSync();
@@ -200,10 +220,6 @@ final class PatchbaySessionStore {
     if (!Platform.isWindows) {
       Process.runSync('chmod', ['700', directory.path]);
     }
-  }
-
-  void _restrictFile(File file) {
-    if (!Platform.isWindows) Process.runSync('chmod', ['600', file.path]);
   }
 
   void _removeFile(File file) {
