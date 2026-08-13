@@ -213,7 +213,10 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addFlag(
     'stdin',
     defaultsTo: false,
-    help: 'Read a sensitive JSON/text value from one no-echo stdin line.',
+    help:
+        'Read a sensitive JSON/text value from one no-echo stdin line. A JSON '
+        'object is merged over --args and wins on a shared key; a parameter '
+        'the catalog marks sensitive may only arrive this way.',
   )
   ..addFlag(
     'wait',
@@ -365,15 +368,19 @@ Future<_Execution> _execute(
       throw StateError('repl is a session, not a dispatchable command');
     case PatchbayCommandTarget.declaredServiceCommand:
     case PatchbayCommandTarget.callerServiceCommand:
-      final _Invoked result = await _invokeCataloged(
+      final String command = friendly.serviceCommand!;
+      final Map<String, Object?> catalog = await connection.catalog();
+      _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
+      final Map<String, Object?> response = await _invokeCataloged(
         connection,
-        friendly.serviceCommand!,
+        catalog,
+        command,
         friendly.arguments,
         wait: parsed.flag('wait'),
       );
       return _Execution(
-        result.response,
-        catalog: result.catalog,
+        response,
+        catalog: catalog,
         artifact: friendly.spec.artifact == PatchbayArtifactDisposition.none
             ? null
             : _ArtifactRequest(
@@ -385,13 +392,37 @@ Future<_Execution> _execute(
   }
 }
 
-Future<_Invoked> _invokeCataloged(
+/// Refuses to send a catalog-declared sensitive parameter through argv.
+///
+/// `--stdin` merges over `--args`, so "this request used stdin" no longer
+/// implies "every value came from stdin". Only the descriptor knows which key
+/// is sensitive, and the CLI already holds the catalog here, so the check
+/// belongs on this side of the wire: a secret must never reach argv, where the
+/// shell history records it.
+void _refuseSensitiveArgv(
+  Map<String, Object?> catalog,
+  String command,
+  Set<String> plaintextKeys,
+) {
+  if (plaintextKeys.isEmpty) return;
+  final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
+  if (descriptor == null) return;
+  for (final String name in plaintextKeys) {
+    if (!descriptor.sensitiveParameters.contains(name)) continue;
+    throw FormatException(
+      '$command declares "$name" sensitive: it must come from --stdin, '
+      'never from --args',
+    );
+  }
+}
+
+Future<Map<String, Object?>> _invokeCataloged(
   PatchbayClient connection,
+  Map<String, Object?> catalog,
   String command,
   Map<String, Object?> arguments, {
   required bool wait,
 }) async {
-  final Map<String, Object?> catalog = await connection.catalog();
   final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
   final Map<String, Object?> admission = await _invokeAgainstCatalog(
     connection,
@@ -402,7 +433,7 @@ Future<_Invoked> _invokeCataloged(
   );
   final bool serverWaitAvailable =
       _CatalogCommand.find(catalog, 'patchbay.job.wait') != null;
-  final Map<String, Object?> response = wait
+  return wait
       ? await _waitForJob(
           connection,
           catalog,
@@ -411,7 +442,6 @@ Future<_Invoked> _invokeCataloged(
           serverWaitAvailable: serverWaitAvailable,
         )
       : admission;
-  return _Invoked(response, catalog);
 }
 
 /// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
@@ -577,10 +607,33 @@ int _positiveOption(ArgResults options, String name) {
   return value;
 }
 
+/// One catalog row, read only for what the CLI itself has to decide.
+///
+/// The row stays the App's data: nothing here upgrades it into a capability
+/// claim. The parameter declarations matter because two CLI-side decisions —
+/// which value may never touch argv, and how large a `blob.read` chunk the host
+/// will accept — are the App's to make, not the CLI's to hardcode.
 final class _CatalogCommand {
-  const _CatalogCommand(this.suggestedWaitTimeout);
+  const _CatalogCommand(this.suggestedWaitTimeout, this._parameters);
 
   final Duration? suggestedWaitTimeout;
+  final List<Map<Object?, Object?>> _parameters;
+
+  Set<String> get sensitiveParameters => <String>{
+    for (final Map<Object?, Object?> parameter in _parameters)
+      if (parameter['sensitive'] == true)
+        if (parameter['name'] case final String name) name,
+  };
+
+  /// Positive integer default declared for [name], when the App declares one.
+  int? positiveIntegerDefault(String name) {
+    for (final Map<Object?, Object?> parameter in _parameters) {
+      if (parameter['name'] != name) continue;
+      final Object? value = parameter['defaultValue'];
+      return value is int && value > 0 ? value : null;
+    }
+    return null;
+  }
 
   static _CatalogCommand? find(Map<String, Object?> catalog, String command) {
     final Object? rows = catalog['commands'];
@@ -588,10 +641,16 @@ final class _CatalogCommand {
     for (final Object? row in rows) {
       if (row is! Map<Object?, Object?> || row['name'] != command) continue;
       final Object? milliseconds = row['suggestedWaitTimeoutMs'];
+      final Object? parameters = row['parameters'];
       return _CatalogCommand(
         milliseconds is int && milliseconds > 0
             ? Duration(milliseconds: milliseconds)
             : null,
+        <Map<Object?, Object?>>[
+          if (parameters is List<Object?>)
+            for (final Object? parameter in parameters)
+              if (parameter is Map<Object?, Object?>) parameter,
+        ],
       );
     }
     return null;
@@ -603,13 +662,6 @@ final class _Outcome {
 
   final Map<String, Object?> response;
   final int exitCode;
-}
-
-final class _Invoked {
-  const _Invoked(this.response, this.catalog);
-
-  final Map<String, Object?> response;
-  final Map<String, Object?> catalog;
 }
 
 final class _Execution {

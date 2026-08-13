@@ -280,6 +280,7 @@ final class PatchbayFriendlyInvocation {
     this.serviceCommand,
     this.outputPath,
     this.force = false,
+    this.plaintextArgumentKeys = const <String>{},
   });
 
   final PatchbayFriendlyCommand spec;
@@ -289,6 +290,9 @@ final class PatchbayFriendlyInvocation {
   final String? serviceCommand;
   final String? outputPath;
   final bool force;
+
+  /// Argument keys that came from `--args`, i.e. from an echoing argv.
+  final Set<String> plaintextArgumentKeys;
 }
 
 abstract final class PatchbayFriendlyCommandRegistry {
@@ -454,6 +458,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       serviceCommand: serviceCommand,
       outputPath: outputPath,
       force: options.flag('force'),
+      plaintextArgumentKeys: _plaintextArgumentKeys(options),
     );
   }
 
@@ -616,22 +621,47 @@ abstract final class PatchbayFriendlyCommandRegistry {
   };
 
   /// `--args`/`--stdin` JSON object shared by `exec` and `ui semantics tree`.
+  ///
+  /// The two merge and stdin wins on a shared key. A command usually has one
+  /// value that must not be echoed and several that are ordinary shape; making
+  /// stdin *replace* `--args` forced the whole object through the no-echo line,
+  /// where a typo in the readable half is invisible. Passing everything through
+  /// stdin still works — that is the degenerate case where `--args` is absent.
   static Map<String, Object?> _domainArguments(
     ArgResults options,
     String Function() readSensitiveInput,
   ) {
-    final bool fromStdin = options.flag('stdin');
-    final String encoded = fromStdin
-        ? readSensitiveInput()
-        : (options.option('args') ?? '{}');
+    final Map<String, Object?> fromArgs = _jsonObject(
+      options.option('args') ?? '{}',
+      '--args',
+    );
+    if (!options.flag('stdin')) return fromArgs;
+    return <String, Object?>{
+      ...fromArgs,
+      ..._jsonObject(readSensitiveInput(), 'stdin'),
+      // Fail closed on the marker itself: a stdin payload claiming
+      // `inputWasStdin: false` must not be able to unset it.
+      'inputWasStdin': true,
+    };
+  }
+
+  /// Argument keys this invocation took from argv rather than from stdin.
+  ///
+  /// The dispatcher compares them against the catalog descriptor and refuses to
+  /// send a parameter the App declares sensitive through argv, so merging
+  /// `--args` with `--stdin` cannot become a detour around the no-echo line.
+  static Set<String> _plaintextArgumentKeys(ArgResults options) {
+    final String? encoded = options.option('args');
+    if (encoded == null) return const <String>{};
+    return _jsonObject(encoded, '--args').keys.toSet();
+  }
+
+  static Map<String, Object?> _jsonObject(String encoded, String source) {
     final Object? decoded = jsonDecode(encoded);
     if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('--args/stdin must contain a JSON object');
+      throw FormatException('$source must contain a JSON object');
     }
-    return <String, Object?>{
-      ...Map<String, Object?>.from(decoded),
-      if (fromStdin) 'inputWasStdin': true,
-    };
+    return Map<String, Object?>.from(decoded);
   }
 
   /// `ui text set|enter <target-id> <generation> [text]`.

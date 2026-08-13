@@ -257,6 +257,66 @@ void main() {
     );
   });
 
+  test('--stdin merges over --args and wins on a shared key', () {
+    final PatchbayFriendlyInvocation invocation = _resolve(
+      <String>[
+        '--args',
+        '{"deviceId":"abc","retries":2}',
+        '--stdin',
+        'exec',
+        'fixture.command',
+      ],
+      stdin: () => '{"token":"s3cret","retries":9}',
+    );
+    expect(invocation.arguments, <String, Object?>{
+      'deviceId': 'abc',
+      'retries': 9,
+      'token': 's3cret',
+      'inputWasStdin': true,
+    });
+    // Only the argv half is reported as plaintext; the merged result must not
+    // make the stdin keys look like they came from the command line.
+    expect(invocation.plaintextArgumentKeys, <String>{'deviceId', 'retries'});
+  });
+
+  test('stdin alone still supplies the whole object, unchanged', () {
+    final PatchbayFriendlyInvocation invocation = _resolve(<String>[
+      '--stdin',
+      'exec',
+      'fixture.command',
+    ], stdin: () => '{"token":"s3cret"}');
+    expect(invocation.arguments, <String, Object?>{
+      'token': 's3cret',
+      'inputWasStdin': true,
+    });
+    expect(invocation.plaintextArgumentKeys, isEmpty);
+  });
+
+  test('a stdin payload cannot unset the no-echo marker', () {
+    expect(
+      _resolve(<String>[
+        '--stdin',
+        'exec',
+        'fixture.command',
+      ], stdin: () => '{"inputWasStdin":false}').arguments['inputWasStdin'],
+      true,
+    );
+  });
+
+  test('bare text and non-object JSON on stdin are still refused', () {
+    for (final String payload in <String>['not json at all', '[1]', '"text"']) {
+      expect(
+        () => _resolve(<String>[
+          '--stdin',
+          'exec',
+          'fixture.command',
+        ], stdin: () => payload),
+        throwsA(isA<FormatException>()),
+        reason: payload,
+      );
+    }
+  });
+
   test('newly declared commands fail closed on irrelevant options', () {
     expect(
       () => _resolve(<String>['--cursor', 'ignored', 'identity']),
