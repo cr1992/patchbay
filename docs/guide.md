@@ -286,6 +286,15 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
   更细粒度的判定（例如区分「失焦但仍在出帧」）是待评估的优化项，不在本版范围内，闸本身不放松；
   各桥的 resumed 要求见
   [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。
+- 移动端息屏同理（Android 真机实测）：息屏后 UI 平面以 `*LifecycleNotResumed` 快速拒绝，
+  协议面命令（`identity` / `catalog` / `logs` / `job`）短期内仍可用；息屏一段时间后系统可能
+  冻结 App 进程（实测 MIUI），此时对端停止应答，CLI 请求会长时间等待后以传输错误失败，
+  亮屏解锁即恢复。长会话调试的规避方式，按平台：
+  - **Android**：`adb shell svc power stayon usb`（USB 供电期间屏幕常亮，即开发者选项的
+    「充电时保持唤醒」），设备实验室标准做法，不改 App 行为。
+  - **iOS 真机**：没有系统级等价命令（`devicectl` / libimobiledevice 均无电源控制），设备端
+    只能手动把自动锁定设为「永不」。iOS 18 的 iPhone 镜像声称锁屏状态下可从 Mac 操作 App，
+    可能可行，**未实测**。iOS 模拟器不锁屏，不受影响。
 - 截图只证明 Flutter 合成树；系统弹窗、PlatformView 可能缺失，结果附能力警告。
 - 系统权限弹窗、装卸包、shell、进程管理：用 adb / xcrun，Patchbay 不做。
 - 直连 HTTP 明文、无 TLS，默认关闭；仅受信网络实验用途，边界见
