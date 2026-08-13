@@ -75,6 +75,33 @@ void main() {
     expect(_mode(directory.listSync().whereType<File>().single.path), '600');
   });
 
+  test('record file is owner-only before any secret reaches it', () {
+    if (Platform.isWindows) return;
+    // 上面那条只看写完之后的最终态——chmod 放在 write 之后也照样绿。真正要钉的是
+    // 「文件还没有内容的时候就已经收紧」：记录里带的是 VM Service 认证 URI，
+    // 按 umask 创建（通常 0644）再 chmod，中间那一小段窗口里它是可读的。
+    final file = createRestrictedFileSync(
+      '${directory.path}${Platform.pathSeparator}probe.tmp',
+    );
+    addTearDown(() {
+      if (file.existsSync()) file.deleteSync();
+    });
+
+    expect(file.lengthSync(), 0, reason: '断言必须发生在写入内容之前');
+    expect(_mode(file.path), '600');
+  });
+
+  test('restricted create refuses to write through a planted path', () {
+    // 会话目录默认落在世界可写的系统临时目录下，别人先把同名文件放好就能读到内容。
+    final path = '${directory.path}${Platform.pathSeparator}planted.tmp';
+    File(path).writeAsStringSync('planted by another user');
+
+    expect(
+      () => createRestrictedFileSync(path),
+      throwsA(isA<FileSystemException>()),
+    );
+  });
+
   test('unreachable URI is reported without discarding the session', () async {
     const secret = 'ws://127.0.0.1:1/secret-token/ws';
     store.write(_record('unreachable', wsUri: secret));

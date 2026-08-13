@@ -344,6 +344,6 @@ descriptor、operator 和 consumer callback 的可达引用。
 | Semantics 快照泄露输入值 | `isObscured` 强制隐藏 value，consumer 可注入更严格脱敏；敏感 setText 只接受 stdin |
 | build mode 间 Key 种类漂移 | 所有模式保持同一种 GlobalKey 和 State 语义，release 只裁登记与 operator |
 | UI 调试门绕过领域门 | descriptor 是 consumer gate 唯一真源；可能产生领域副作用的 UI action 显式声明强门 |
-| registry、operator 或 callback 残留 release | AOT 做 extension/descriptor/operator/callback 引用扫描，并验证 root 只透传 child |
+| registry、operator 或 callback 残留 release | `just check release_debug_surface`（`tools/checks/release_scan.py`）对 release 产物的 `libapp.so` 与 `classes*.dex` 做 extension/descriptor/operator/callback 引用扫描，产物缺失时明确报跳过而非通过；另需验证 root 只透传 child |
 | 命令产生外部副作用 | descriptor 明示 side-effect；真机写操作遵守 consumer 的设备占用、备份与恢复纪律 |
 | release 没有 VM Service | 明确非目标，不建立隐式降级或运行时后门 |
