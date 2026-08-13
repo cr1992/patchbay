@@ -8,14 +8,21 @@
 
 ## 当前命令
 
-帮助由 CLI parser 与 `PatchbayFriendlyCommand` 声明生成，不维护第二份手写 friendly 命令清单；
+`PatchbayFriendlyCommand` 是 CLI 里唯一的命令表：路径解析、参数构造、dispatch 与帮助全部由它派生。
+每条声明选一个 `PatchbayCommandTarget`，`runPatchbayCli` 对该 enum 做无 default 的 switch，因此新增
+命令无法只接上执行而漏掉帮助。`exec` 的协议名来自调用方参数，`identity`/`catalog`/`snapshot` 与三棵
+诊断树走 transport 方法而非 catalog 命令，这三类差异也写在声明里，由帮助按 target 分别措辞。
+
 查看帮助不会发现会话、连接 App 或读取 bearer/敏感 stdin：
 
 ```text
 dart run bin/patchbay.dart --help
 dart run bin/patchbay.dart help
 dart run bin/patchbay.dart help navigation
+dart run bin/patchbay.dart help job
+dart run bin/patchbay.dart help ui
 dart run bin/patchbay.dart logs --help
+dart run bin/patchbay.dart ui widget-tree --help
 ```
 
 由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：
@@ -71,6 +78,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture t
 dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
+
+所有命令（含 `exec`、`job`、`ui text`、`ui semantics` 与三棵诊断树）都对无关选项 fail-closed：
+传入该命令不接受的选项时以退出码 `64` 报 `--<name> is not valid for <command>`，不静默忽略。
 
 friendly command 只是稳定协议名的通用参数映射，不是另一份 capability 清单。CLI 每次执行仍读取
 App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocationDrift`，缺失命令仍保留 App 的
