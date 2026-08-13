@@ -30,7 +30,9 @@ Future<int> runPatchbayCli(List<String> arguments) async {
       return PatchbayExitCode.accepted;
     }
     _validateGlobalShape(parsed);
-    if (parsed.rest.isEmpty) throw const FormatException(_usage);
+    if (parsed.rest.isEmpty) {
+      throw FormatException(PatchbayCommandHelp.usageLine());
+    }
     connection = await _connect(parsed);
     final _Execution execution = await _execute(connection, parsed);
     Map<String, Object?> output = execution.response;
@@ -249,117 +251,54 @@ Future<PatchbayClient> _connect(ArgResults parsed) async {
   }
 }
 
+/// Dispatches one resolved declaration.
+///
+/// There is deliberately no second command table here: every path the CLI
+/// accepts comes from [PatchbayFriendlyCommand], and the switch below has no
+/// default arm, so a new declaration cannot be added without wiring dispatch
+/// and help at the same time.
 Future<_Execution> _execute(
   PatchbayClient connection,
   ArgResults parsed,
 ) async {
-  final List<String> words = parsed.rest;
-  if (words case ['identity']) {
-    return _Execution(await connection.identity());
-  }
-  if (words case ['catalog']) {
-    return _Execution(await connection.catalog());
-  }
-  if (words case ['snapshot']) {
-    return _Execution(await connection.snapshot());
-  }
-  if (words case ['ui', 'widget-tree']) {
-    return _Execution(await connection.widgetTree());
-  }
-  if (words case ['ui', 'render-tree']) {
-    return _Execution(await connection.renderTree());
-  }
-  if (words case ['ui', 'focus-tree']) {
-    return _Execution(await connection.focusTree());
-  }
-
   final PatchbayFriendlyInvocation? friendly =
-      PatchbayFriendlyCommandRegistry.resolve(words, parsed);
-  if (friendly != null) {
-    final _Invoked result = await _invokeCataloged(
-      connection,
-      friendly.spec.serviceCommand,
-      friendly.arguments,
-      wait: parsed.flag('wait'),
-    );
-    return _Execution(
-      result.response,
-      catalog: result.catalog,
-      artifact: friendly.spec.artifact == PatchbayArtifactDisposition.none
-          ? null
-          : _ArtifactRequest(
-              disposition: friendly.spec.artifact,
-              outputPath: friendly.outputPath!,
-              force: friendly.force,
-            ),
-    );
+      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
+  if (friendly == null) {
+    throw FormatException(PatchbayCommandHelp.usageLine());
   }
-
-  final (String command, Map<String, Object?> arguments) = switch (words) {
-    ['exec', final String command] => (command, _domainArguments(parsed)),
-    ['job', 'get', final String jobId] => (
-      'patchbay.job.get',
-      <String, Object?>{'jobId': jobId},
-    ),
-    ['job', 'cancel', final String jobId] => (
-      'patchbay.job.cancel',
-      <String, Object?>{'jobId': jobId},
-    ),
-    [
-      'ui',
-      'text',
-      final String operation,
-      final String id,
-      final String generation,
-      ...final List<String> text,
-    ]
-        when operation == 'set' || operation == 'enter' =>
-      (
-        'ui.text.$operation',
-        <String, Object?>{
-          'id': id,
-          'generation': _nonNegative(generation, 'generation'),
-          'text': parsed.flag('stdin')
-              ? readSensitiveStdinLine()
-              : text.join(' '),
-          'inputWasStdin': parsed.flag('stdin'),
-        },
-      ),
-    ['ui', 'semantics', 'tree'] => (
-      'ui.semantics.tree',
-      _domainArguments(parsed),
-    ),
-    [
-      'ui',
-      'semantics',
-      'action',
-      final String nodeId,
-      final String generation,
-      final String action,
-      ...final List<String> text,
-    ] =>
-      (
-        'ui.semantics.action',
-        <String, Object?>{
-          'nodeId': _nonNegative(nodeId, 'nodeId'),
-          'generation': _nonNegative(generation, 'generation'),
-          'action': action,
-          if (action == 'setText')
-            'text': parsed.flag('stdin')
-                ? readSensitiveStdinLine()
-                : text.join(' '),
-          'inputWasStdin': parsed.flag('stdin'),
-        },
-      ),
-    _ => throw const FormatException('unknown command'),
-  };
-  final _Invoked result = await _invokeCataloged(
-    connection,
-    command,
-    arguments,
-    wait: parsed.flag('wait'),
-  );
-  return _Execution(result.response, catalog: result.catalog);
+  switch (friendly.spec.target) {
+    case PatchbayCommandTarget.clientIdentity:
+      return _Execution(await connection.identity());
+    case PatchbayCommandTarget.clientCatalog:
+      return _Execution(await connection.catalog());
+    case PatchbayCommandTarget.clientSnapshot:
+      return _Execution(await connection.snapshot());
+    case PatchbayCommandTarget.clientWidgetTree:
+      return _Execution(await connection.widgetTree());
+    case PatchbayCommandTarget.clientRenderTree:
+      return _Execution(await connection.renderTree());
+    case PatchbayCommandTarget.clientFocusTree:
+      return _Execution(await connection.focusTree());
+    case PatchbayCommandTarget.declaredServiceCommand:
+    case PatchbayCommandTarget.callerServiceCommand:
+      final _Invoked result = await _invokeCataloged(
+        connection,
+        friendly.serviceCommand!,
+        friendly.arguments,
+        wait: parsed.flag('wait'),
+      );
+      return _Execution(
+        result.response,
+        catalog: result.catalog,
+        artifact: friendly.spec.artifact == PatchbayArtifactDisposition.none
+            ? null
+            : _ArtifactRequest(
+                disposition: friendly.spec.artifact,
+                outputPath: friendly.outputPath!,
+                force: friendly.force,
+              ),
+      );
+  }
 }
 
 Future<_Invoked> _invokeCataloged(
@@ -511,20 +450,6 @@ Future<Map<String, Object?>> _waitForJob(
   throw PatchbayJobWaitTimeout(jobIdValue);
 }
 
-Map<String, Object?> _domainArguments(ArgResults parsed) {
-  final String encoded = parsed.flag('stdin')
-      ? readSensitiveStdinLine()
-      : (parsed.option('args') ?? '{}');
-  final Object? decoded = jsonDecode(encoded);
-  if (decoded is! Map<String, dynamic>) {
-    throw const FormatException('--args/stdin must contain a JSON object');
-  }
-  return <String, Object?>{
-    ...Map<String, Object?>.from(decoded),
-    if (parsed.flag('stdin')) 'inputWasStdin': true,
-  };
-}
-
 Map<String, Object?> _artifactMetadata(
   Map<String, Object?> response,
   PatchbayArtifactDisposition disposition,
@@ -582,14 +507,6 @@ int _positiveOption(ArgResults options, String name) {
   return value;
 }
 
-int _nonNegative(String text, String name) {
-  final int? value = int.tryParse(text);
-  if (value == null || value < 0) {
-    throw FormatException('$name must be a non-negative integer');
-  }
-  return value;
-}
-
 final class _CatalogCommand {
   const _CatalogCommand(this.suggestedWaitTimeout);
 
@@ -637,7 +554,3 @@ final class _ArtifactRequest {
   final String outputPath;
   final bool force;
 }
-
-const String _usage =
-    'usage: patchbay [connection] [--json] '
-    '<identity|catalog|snapshot|exec|job|ui|navigation|logs|capture|blob>';

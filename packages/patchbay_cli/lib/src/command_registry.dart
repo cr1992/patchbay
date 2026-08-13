@@ -1,13 +1,89 @@
+import 'dart:convert';
+
 import 'package:args/args.dart';
+
+import 'sensitive_input.dart';
 
 enum PatchbayArtifactDisposition { none, payloadBlob, responseBlob }
 
+/// What the CLI actually calls once a declared path has been resolved.
+///
+/// Every declaration picks exactly one target and `runPatchbayCli` switches
+/// over this enum without a default arm, so a declaration can never reach the
+/// dispatcher unhandled and a target can never be left unwired. That is what
+/// removes the need for a second hand-written command table beside this one.
+enum PatchbayCommandTarget {
+  /// `ext.patchbay.invoke` with the declaration's own stable service command.
+  declaredServiceCommand,
+
+  /// `ext.patchbay.invoke` with the service command supplied by the caller.
+  ///
+  /// The generic escape hatch: the protocol name is data, not a declaration.
+  callerServiceCommand,
+
+  /// `PatchbayClient.identity` — the transport handshake, never a catalog row.
+  clientIdentity,
+
+  /// `PatchbayClient.catalog` — the capability listing itself.
+  clientCatalog,
+
+  /// `PatchbayClient.snapshot` — the transport-level state read.
+  clientSnapshot,
+
+  /// `PatchbayClient.widgetTree` — Flutter SDK diagnostic passthrough.
+  clientWidgetTree,
+
+  /// `PatchbayClient.renderTree` — Flutter SDK diagnostic passthrough.
+  clientRenderTree,
+
+  /// `PatchbayClient.focusTree` — Flutter SDK diagnostic passthrough.
+  clientFocusTree,
+}
+
 /// Mechanical mapping between CLI-friendly paths and stable protocol names.
 ///
-/// Runtime availability still comes from the service catalog and the invoke
-/// response remains authoritative. This table is syntax, not a capability
-/// inventory.
+/// This is the only command table in the CLI: parsing, dispatch and help are
+/// all derived from it. Runtime availability still comes from the service
+/// catalog and the invoke response remains authoritative. This table is
+/// syntax, not a capability inventory.
 enum PatchbayFriendlyCommand {
+  identity(
+    null,
+    <String>['identity'],
+    summary: 'Read the runtime identity handshake.',
+    target: PatchbayCommandTarget.clientIdentity,
+  ),
+  catalog(
+    null,
+    <String>['catalog'],
+    summary: 'List the commands and UI targets the App registers.',
+    target: PatchbayCommandTarget.clientCatalog,
+  ),
+  snapshot(
+    null,
+    <String>['snapshot'],
+    summary: 'Read the transport-level Patchbay snapshot.',
+    target: PatchbayCommandTarget.clientSnapshot,
+  ),
+  exec(
+    null,
+    <String>['exec'],
+    summary: 'Invoke any cataloged service command by its protocol name.',
+    usageSuffix: '<service-command>',
+    target: PatchbayCommandTarget.callerServiceCommand,
+  ),
+  jobGet(
+    'patchbay.job.get',
+    <String>['job', 'get'],
+    summary: 'Read the current snapshot of an admitted job.',
+    usageSuffix: '<job-id>',
+  ),
+  jobCancel(
+    'patchbay.job.cancel',
+    <String>['job', 'cancel'],
+    summary: 'Request cancellation of an admitted job.',
+    usageSuffix: '<job-id>',
+  ),
   navigationCatalog('navigation.catalog', <String>[
     'navigation',
     'catalog',
@@ -70,6 +146,47 @@ enum PatchbayFriendlyCommand {
     summary: 'Wait for the rendered frame revision.',
     usageSuffix: '<revision>',
   ),
+  uiTextSet(
+    'ui.text.set',
+    <String>['ui', 'text', 'set'],
+    summary: 'Replace the text of a registered input target.',
+    usageSuffix: '<target-id> <generation> [text]',
+  ),
+  uiTextEnter(
+    'ui.text.enter',
+    <String>['ui', 'text', 'enter'],
+    summary: 'Type text into a registered input target and submit it.',
+    usageSuffix: '<target-id> <generation> [text]',
+  ),
+  uiSemanticsTree('ui.semantics.tree', <String>[
+    'ui',
+    'semantics',
+    'tree',
+  ], summary: 'Read the Patchbay semantics tree.'),
+  uiSemanticsAction(
+    'ui.semantics.action',
+    <String>['ui', 'semantics', 'action'],
+    summary: 'Dispatch a semantics action against an observed node.',
+    usageSuffix: '<node-id> <generation> <action> [text]',
+  ),
+  uiWidgetTree(
+    null,
+    <String>['ui', 'widget-tree'],
+    summary: 'Read the Flutter widget tree diagnostic (SDK passthrough).',
+    target: PatchbayCommandTarget.clientWidgetTree,
+  ),
+  uiRenderTree(
+    null,
+    <String>['ui', 'render-tree'],
+    summary: 'Read the Flutter render tree diagnostic (SDK passthrough).',
+    target: PatchbayCommandTarget.clientRenderTree,
+  ),
+  uiFocusTree(
+    null,
+    <String>['ui', 'focus-tree'],
+    summary: 'Read the Flutter focus tree diagnostic (SDK passthrough).',
+    target: PatchbayCommandTarget.clientFocusTree,
+  ),
   logsQuery('logs.query', <String>[
     'logs',
     'query',
@@ -119,39 +236,99 @@ enum PatchbayFriendlyCommand {
     required this.summary,
     this.usageSuffix = '',
     this.artifact = PatchbayArtifactDisposition.none,
-  });
+    this.target = PatchbayCommandTarget.declaredServiceCommand,
+  }) : assert(
+         (serviceCommand != null) ==
+             (target == PatchbayCommandTarget.declaredServiceCommand),
+         'a declared service command belongs to exactly that target',
+       );
 
-  final String serviceCommand;
+  /// Stable protocol name, or `null` when the target does not declare one:
+  /// `exec` takes it from the caller and the client targets are transport
+  /// methods rather than catalog commands.
+  final String? serviceCommand;
   final List<String> path;
   final String summary;
   final String usageSuffix;
   final PatchbayArtifactDisposition artifact;
+  final PatchbayCommandTarget target;
 }
 
 final class PatchbayFriendlyInvocation {
   const PatchbayFriendlyInvocation({
     required this.spec,
     required this.arguments,
+    this.serviceCommand,
     this.outputPath,
     this.force = false,
   });
 
   final PatchbayFriendlyCommand spec;
   final Map<String, Object?> arguments;
+
+  /// Resolved protocol name for the invoke targets; `null` for client targets.
+  final String? serviceCommand;
   final String? outputPath;
   final bool force;
 }
 
 abstract final class PatchbayFriendlyCommandRegistry {
+  /// Resolves [words] against the declaration table.
+  ///
+  /// [readSensitiveInput] is injected so tests can exercise the `--stdin`
+  /// shapes without a TTY; production callers keep the no-echo reader.
   static PatchbayFriendlyInvocation? resolve(
     List<String> words,
-    ArgResults options,
-  ) {
+    ArgResults options, {
+    String Function() readSensitiveInput = readSensitiveStdinLine,
+  }) {
     final PatchbayFriendlyCommand? spec = _match(words);
     if (spec == null) return null;
     _validateOptions(spec, options);
     final List<String> tail = words.sublist(spec.path.length);
+    final String? serviceCommand;
+    if (spec.target == PatchbayCommandTarget.callerServiceCommand) {
+      if (tail.length != 1) {
+        throw const FormatException(
+          'exec requires one <service-command> argument',
+        );
+      }
+      serviceCommand = tail.single;
+    } else {
+      serviceCommand = spec.serviceCommand;
+    }
     final Map<String, Object?> arguments = switch (spec) {
+      PatchbayFriendlyCommand.identity ||
+      PatchbayFriendlyCommand.catalog ||
+      PatchbayFriendlyCommand.snapshot ||
+      PatchbayFriendlyCommand.uiWidgetTree ||
+      PatchbayFriendlyCommand.uiRenderTree ||
+      PatchbayFriendlyCommand.uiFocusTree => _noTail(
+        tail,
+        const <String, Object?>{},
+      ),
+      // The service command already consumed the single positional above.
+      PatchbayFriendlyCommand.exec => _domainArguments(
+        options,
+        readSensitiveInput,
+      ),
+      PatchbayFriendlyCommand.jobGet || PatchbayFriendlyCommand.jobCancel =>
+        _oneTail(tail, (String jobId) => <String, Object?>{'jobId': jobId}),
+      PatchbayFriendlyCommand.uiTextSet ||
+      PatchbayFriendlyCommand.uiTextEnter => _textArguments(
+        tail,
+        options,
+        readSensitiveInput,
+      ),
+      PatchbayFriendlyCommand.uiSemanticsTree => _noTail(
+        tail,
+        _domainArguments(options, readSensitiveInput),
+      ),
+      PatchbayFriendlyCommand.uiSemanticsAction => _semanticsActionArguments(
+        tail,
+        options,
+        readSensitiveInput,
+      ),
       PatchbayFriendlyCommand.navigationCatalog ||
       PatchbayFriendlyCommand.navigationCurrent ||
       PatchbayFriendlyCommand.logsQuery ||
@@ -247,6 +424,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     return PatchbayFriendlyInvocation(
       spec: spec,
       arguments: arguments,
+      serviceCommand: serviceCommand,
       outputPath: outputPath,
       force: options.flag('force'),
     );
@@ -307,65 +485,77 @@ abstract final class PatchbayFriendlyCommandRegistry {
   }
 
   /// CLI options accepted by [spec]. Help and validation share this mapping.
-  static Set<String> allowedOptions(PatchbayFriendlyCommand spec) =>
-      switch (spec) {
-        PatchbayFriendlyCommand.navigationCatalog ||
-        PatchbayFriendlyCommand.navigationCurrent ||
-        PatchbayFriendlyCommand.blobMetadata => const <String>{},
-        PatchbayFriendlyCommand.navigationGo ||
-        PatchbayFriendlyCommand.navigationPush ||
-        PatchbayFriendlyCommand.navigationBack => const <String>{
-          'revision',
-          'timeout-ms',
-        },
-        PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
-        PatchbayFriendlyCommand.uiWaitSemanticsUnmounted ||
-        PatchbayFriendlyCommand.uiWaitSemanticsValue ||
-        PatchbayFriendlyCommand.uiWaitTreeRevision ||
-        PatchbayFriendlyCommand.uiWaitFrameRevision => const <String>{
-          'timeout-ms',
-        },
-        PatchbayFriendlyCommand.uiWaitDestination => const <String>{
-          'revision',
-          'timeout-ms',
-        },
-        PatchbayFriendlyCommand.logsQuery => const <String>{
-          'cursor',
-          'direction',
-          'limit',
-          'levels',
-          'categories',
-          'since',
-          'until',
-        },
-        PatchbayFriendlyCommand.logsTail => const <String>{
-          'cursor',
-          'limit',
-          'levels',
-          'categories',
-          'timeout-ms',
-        },
-        PatchbayFriendlyCommand.logsExport => const <String>{
-          'cursor',
-          'direction',
-          'limit',
-          'levels',
-          'categories',
-          'since',
-          'until',
-          'ttl-ms',
-          'output',
-          'force',
-        },
-        PatchbayFriendlyCommand.captureRoot ||
-        PatchbayFriendlyCommand.captureTarget => const <String>{
-          'pixel-ratio',
-          'timeout-ms',
-          'output',
-          'force',
-        },
-        PatchbayFriendlyCommand.blobGet => const <String>{'output', 'force'},
-      };
+  static Set<String> allowedOptions(
+    PatchbayFriendlyCommand spec,
+  ) => switch (spec) {
+    PatchbayFriendlyCommand.identity ||
+    PatchbayFriendlyCommand.catalog ||
+    PatchbayFriendlyCommand.snapshot ||
+    PatchbayFriendlyCommand.jobGet ||
+    PatchbayFriendlyCommand.jobCancel ||
+    PatchbayFriendlyCommand.uiWidgetTree ||
+    PatchbayFriendlyCommand.uiRenderTree ||
+    PatchbayFriendlyCommand.uiFocusTree ||
+    PatchbayFriendlyCommand.navigationCatalog ||
+    PatchbayFriendlyCommand.navigationCurrent ||
+    PatchbayFriendlyCommand.blobMetadata => const <String>{},
+    PatchbayFriendlyCommand.exec ||
+    PatchbayFriendlyCommand.uiSemanticsTree => const <String>{'args', 'stdin'},
+    PatchbayFriendlyCommand.uiTextSet ||
+    PatchbayFriendlyCommand.uiTextEnter ||
+    PatchbayFriendlyCommand.uiSemanticsAction => const <String>{'stdin'},
+    PatchbayFriendlyCommand.navigationGo ||
+    PatchbayFriendlyCommand.navigationPush ||
+    PatchbayFriendlyCommand.navigationBack => const <String>{
+      'revision',
+      'timeout-ms',
+    },
+    PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
+    PatchbayFriendlyCommand.uiWaitSemanticsUnmounted ||
+    PatchbayFriendlyCommand.uiWaitSemanticsValue ||
+    PatchbayFriendlyCommand.uiWaitTreeRevision ||
+    PatchbayFriendlyCommand.uiWaitFrameRevision => const <String>{'timeout-ms'},
+    PatchbayFriendlyCommand.uiWaitDestination => const <String>{
+      'revision',
+      'timeout-ms',
+    },
+    PatchbayFriendlyCommand.logsQuery => const <String>{
+      'cursor',
+      'direction',
+      'limit',
+      'levels',
+      'categories',
+      'since',
+      'until',
+    },
+    PatchbayFriendlyCommand.logsTail => const <String>{
+      'cursor',
+      'limit',
+      'levels',
+      'categories',
+      'timeout-ms',
+    },
+    PatchbayFriendlyCommand.logsExport => const <String>{
+      'cursor',
+      'direction',
+      'limit',
+      'levels',
+      'categories',
+      'since',
+      'until',
+      'ttl-ms',
+      'output',
+      'force',
+    },
+    PatchbayFriendlyCommand.captureRoot ||
+    PatchbayFriendlyCommand.captureTarget => const <String>{
+      'pixel-ratio',
+      'timeout-ms',
+      'output',
+      'force',
+    },
+    PatchbayFriendlyCommand.blobGet => const <String>{'output', 'force'},
+  };
 
   static Map<String, Object?> _argumentsWithoutPositionals(
     PatchbayFriendlyCommand spec,
@@ -392,6 +582,73 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.captureRoot => _captureArguments(options),
     _ => throw StateError('unexpected no-positional command ${spec.name}'),
   };
+
+  /// `--args`/`--stdin` JSON object shared by `exec` and `ui semantics tree`.
+  static Map<String, Object?> _domainArguments(
+    ArgResults options,
+    String Function() readSensitiveInput,
+  ) {
+    final bool fromStdin = options.flag('stdin');
+    final String encoded = fromStdin
+        ? readSensitiveInput()
+        : (options.option('args') ?? '{}');
+    final Object? decoded = jsonDecode(encoded);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('--args/stdin must contain a JSON object');
+    }
+    return <String, Object?>{
+      ...Map<String, Object?>.from(decoded),
+      if (fromStdin) 'inputWasStdin': true,
+    };
+  }
+
+  /// `ui text set|enter <target-id> <generation> [text]`.
+  ///
+  /// The trailing text is variadic, so this shape cannot use the fixed-arity
+  /// helpers; `--stdin` replaces the trailing words with one no-echo line.
+  static Map<String, Object?> _textArguments(
+    List<String> tail,
+    ArgResults options,
+    String Function() readSensitiveInput,
+  ) {
+    if (tail.length < 2) {
+      throw const FormatException(
+        'command requires <target-id> <generation> [text]',
+      );
+    }
+    final bool fromStdin = options.flag('stdin');
+    return <String, Object?>{
+      'id': tail[0],
+      'generation': _parseNonNegative(tail[1], 'generation'),
+      'text': fromStdin ? readSensitiveInput() : tail.sublist(2).join(' '),
+      'inputWasStdin': fromStdin,
+    };
+  }
+
+  /// `ui semantics action <node-id> <generation> <action> [text]`.
+  ///
+  /// Only `setText` carries text, so the sensitive read stays inside that arm.
+  static Map<String, Object?> _semanticsActionArguments(
+    List<String> tail,
+    ArgResults options,
+    String Function() readSensitiveInput,
+  ) {
+    if (tail.length < 3) {
+      throw const FormatException(
+        'command requires <node-id> <generation> <action> [text]',
+      );
+    }
+    final String action = tail[2];
+    final bool fromStdin = options.flag('stdin');
+    return <String, Object?>{
+      'nodeId': _parseNonNegative(tail[0], 'nodeId'),
+      'generation': _parseNonNegative(tail[1], 'generation'),
+      'action': action,
+      if (action == 'setText')
+        'text': fromStdin ? readSensitiveInput() : tail.sublist(3).join(' '),
+      'inputWasStdin': fromStdin,
+    };
+  }
 
   static Map<String, Object?> _logArguments(ArgResults options) =>
       <String, Object?>{

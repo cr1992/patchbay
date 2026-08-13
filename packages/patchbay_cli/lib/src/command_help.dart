@@ -20,6 +20,18 @@ abstract final class PatchbayCommandHelp {
     return _group(parser, topic, matches);
   }
 
+  /// One-line usage banner, derived from the same declarations as the help.
+  static String usageLine() {
+    final List<String> groups =
+        PatchbayFriendlyCommand.values
+            .map((PatchbayFriendlyCommand command) => command.path.first)
+            .toSet()
+            .toList()
+          ..sort();
+    return 'usage: patchbay [connection] [--json] <${groups.join('|')}>; '
+        'run `patchbay --help` for the full command list';
+  }
+
   static String _root(ArgParser parser) {
     final Map<String, int> groups = <String, int>{};
     for (final PatchbayFriendlyCommand command
@@ -43,7 +55,10 @@ abstract final class PatchbayCommandHelp {
       ..writeln()
       ..writeln('Friendly command groups:');
     for (final String name in names) {
-      output.writeln('  ${name.padRight(12)} ${groups[name]} commands');
+      final int count = groups[name]!;
+      output.writeln(
+        '  ${name.padRight(12)} $count ${count == 1 ? 'command' : 'commands'}',
+      );
     }
     output
       ..writeln()
@@ -96,7 +111,7 @@ abstract final class PatchbayCommandHelp {
       ..writeln('Usage: patchbay ${_usage(command)} [options]')
       ..writeln()
       ..writeln(command.summary)
-      ..writeln('Service command: ${command.serviceCommand}');
+      ..writeln(protocolLine(command));
     _writeOptions(
       output,
       parser,
@@ -104,9 +119,46 @@ abstract final class PatchbayCommandHelp {
     );
     output
       ..writeln()
-      ..writeln('Availability is still decided by the running App catalog.');
+      ..writeln(availabilityLine(command));
     return output.toString();
   }
+
+  /// Where the command's availability is actually decided.
+  static String availabilityLine(PatchbayFriendlyCommand command) =>
+      switch (command.target) {
+        PatchbayCommandTarget.declaredServiceCommand ||
+        PatchbayCommandTarget.callerServiceCommand =>
+          'Availability is still decided by the running App catalog.',
+        PatchbayCommandTarget.clientIdentity ||
+        PatchbayCommandTarget.clientCatalog ||
+        PatchbayCommandTarget.clientSnapshot =>
+          'Available on any connected Patchbay transport.',
+        PatchbayCommandTarget.clientWidgetTree ||
+        PatchbayCommandTarget.clientRenderTree ||
+        PatchbayCommandTarget.clientFocusTree =>
+          'Only on the VM Service transport, and only while the Flutter SDK '
+              'registers the extension.',
+      };
+
+  /// What the CLI will actually call, phrased per dispatch target.
+  ///
+  /// Client targets deliberately print no extension name: those names live in
+  /// the transport and would go stale if help kept its own copy.
+  static String protocolLine(PatchbayFriendlyCommand command) =>
+      switch (command.target) {
+        PatchbayCommandTarget.declaredServiceCommand =>
+          'Service command: ${command.serviceCommand}',
+        PatchbayCommandTarget.callerServiceCommand =>
+          'Service command: the <service-command> argument',
+        PatchbayCommandTarget.clientIdentity ||
+        PatchbayCommandTarget.clientCatalog ||
+        PatchbayCommandTarget.clientSnapshot =>
+          'Served by the transport handshake, not by an App catalog command.',
+        PatchbayCommandTarget.clientWidgetTree ||
+        PatchbayCommandTarget.clientRenderTree ||
+        PatchbayCommandTarget.clientFocusTree =>
+          'Flutter SDK diagnostic passthrough, not an App catalog command.',
+      };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[
     ...command.path,
