@@ -169,6 +169,12 @@ enum PatchbayFriendlyCommand {
     summary: 'Dispatch a semantics action against an observed node.',
     usageSuffix: '<node-id> <generation> <action> [text]',
   ),
+  uiTap(
+    'ui.semantics.tap',
+    <String>['ui', 'tap'],
+    summary: 'Resolve a semantics identifier and tap it in one request.',
+    usageSuffix: '<identifier> [--generation <generation>]',
+  ),
   uiWidgetTree(
     null,
     <String>['ui', 'widget-tree'],
@@ -329,6 +335,16 @@ abstract final class PatchbayFriendlyCommandRegistry {
         options,
         readSensitiveInput,
       ),
+      // `--generation` stays optional: the App resolves and fences the target
+      // itself, so requiring a generation here would reintroduce the tree read
+      // this command exists to remove. Supplying it adds a caller-side fence.
+      PatchbayFriendlyCommand.uiTap => _oneTail(
+        tail,
+        (String identifier) => <String, Object?>{
+          'identifier': identifier,
+          'generation': ?_optionalInt(options, 'generation'),
+        },
+      ),
       PatchbayFriendlyCommand.navigationCatalog ||
       PatchbayFriendlyCommand.navigationCurrent ||
       PatchbayFriendlyCommand.logsQuery ||
@@ -459,6 +475,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'args',
       'stdin',
       'revision',
+      'generation',
       'timeout-ms',
       'cursor',
       'direction',
@@ -504,6 +521,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiTextSet ||
     PatchbayFriendlyCommand.uiTextEnter ||
     PatchbayFriendlyCommand.uiSemanticsAction => const <String>{'stdin'},
+    PatchbayFriendlyCommand.uiTap => const <String>{'generation'},
     PatchbayFriendlyCommand.navigationGo ||
     PatchbayFriendlyCommand.navigationPush ||
     PatchbayFriendlyCommand.navigationBack => const <String>{

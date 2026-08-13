@@ -147,6 +147,10 @@ ArgParser patchbayCliParser() => ArgParser()
   )
   ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
   ..addOption('revision', help: 'Observed navigation revision.')
+  ..addOption(
+    'generation',
+    help: 'Expected semantics generation; refuses a target that already moved.',
+  )
   ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
   ..addOption('cursor', help: 'Opaque structured-log cursor.')
   ..addOption(

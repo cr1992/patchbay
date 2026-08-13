@@ -41,6 +41,7 @@ void main() {
             '7',
             'tap',
           ],
+          PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.navigationGo ||
           PatchbayFriendlyCommand.navigationPush => <String>['settings'],
           PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
@@ -192,6 +193,51 @@ void main() {
         'there',
       ]).arguments['text'],
       'hello there',
+    );
+  });
+
+  test('ui tap sends one identifier and no node coordinates', () {
+    final PatchbayFriendlyInvocation tap = _resolve(<String>[
+      'ui',
+      'tap',
+      'login.submit',
+    ]);
+    expect(tap.serviceCommand, 'ui.semantics.tap');
+    // No nodeId and no generation: resolution is the App's job, which is the
+    // whole point of the command. A CLI-side default would silently reinstate
+    // the tree read.
+    expect(tap.arguments, <String, Object?>{'identifier': 'login.submit'});
+  });
+
+  test('ui tap --generation forwards the caller-side fence', () {
+    expect(
+      _resolve(<String>[
+        '--generation',
+        '7',
+        'ui',
+        'tap',
+        'login.submit',
+      ]).arguments,
+      <String, Object?>{'identifier': 'login.submit', 'generation': 7},
+    );
+    expect(
+      () => _resolve(<String>['--generation', '-1', 'ui', 'tap', 'x.y']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>['ui', 'tap']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>['ui', 'tap', 'a.b', 'c.d']),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('--generation is refused by commands that do not fence a node', () {
+    expect(
+      () => _resolve(<String>['--generation', '7', 'ui', 'semantics', 'tree']),
+      throwsA(isA<FormatException>()),
     );
   });
 

@@ -514,6 +514,41 @@ void main() {
       expect(tapPayload['outcome'], 'dispatched');
       expect((tapPayload['arguments']! as Map<String, Object?>)['nodeId'], 42);
 
+      final ProcessResult identifierTap = await _runCli(uri, <String>[
+        '--generation',
+        '7',
+        'ui',
+        'tap',
+        'fixture.tap',
+      ]);
+      expect(identifierTap.exitCode, 0, reason: identifierTap.stderr);
+      final Map<String, Object?> identifierTapArguments =
+          ((jsonDecode(identifierTap.stdout.toString())
+                      as Map<String, Object?>)['payload']!
+                  as Map<String, Object?>)['arguments']!
+              as Map<String, Object?>;
+      expect(identifierTapArguments['identifier'], 'fixture.tap');
+      expect(identifierTapArguments['generation'], 7);
+      expect(identifierTapArguments, isNot(contains('nodeId')));
+
+      // A rejection has to reach the operator with its details intact; an
+      // empty `rejected` would push them back to the two-hop tree read.
+      final ProcessResult missingIdentifier = await _runCli(uri, <String>[
+        'ui',
+        'tap',
+        'fixture.absent',
+      ]);
+      expect(missingIdentifier.exitCode, PatchbayExitCode.rejected);
+      final Map<String, Object?> tapRejection =
+          (jsonDecode(missingIdentifier.stdout.toString())
+                  as Map<String, Object?>)['rejection']!
+              as Map<String, Object?>;
+      expect(tapRejection['code'], 'uiSemanticsIdentifierNotFound');
+      expect(
+        (tapRejection['details']! as Map<String, Object?>)['mountedIdentifiers'],
+        contains('fixture.tap'),
+      );
+
       final ProcessResult unavailableFlutterTree =
           await Process.run(Platform.resolvedExecutable, <String>[
             'run',
