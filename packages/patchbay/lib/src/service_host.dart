@@ -38,6 +38,16 @@ final class PatchbayServiceHost {
   static const String snapshotMethod = 'ext.patchbay.snapshot';
   static const String invokeMethod = 'ext.patchbay.invoke';
 
+  /// Wire-level provenance flag a client attaches when it read the value from
+  /// one no-echo stdin line.
+  ///
+  /// It is protocol metadata, not a command argument. The host consumes it —
+  /// enforcing every declared `sensitive` parameter against it and then
+  /// removing it — so a hand-written consumer adapter never sees it, never has
+  /// to exempt it from an argument whitelist, and must not re-implement the
+  /// stdin check against it.
+  static const String stdinProvenanceKey = 'inputWasStdin';
+
   final String applicationId;
   final String appInstanceId;
   final PatchbayCatalogSource _catalog;
@@ -73,9 +83,40 @@ final class PatchbayServiceHost {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
     }
+    final Map<String, Object?> forwarded;
+    if (arguments.isEmpty) {
+      // No transmitted value can be sensitive and there is no meta key to
+      // remove, so the catalog is not consulted: an argument-free command must
+      // not start failing because a consumer catalog source is broken.
+      forwarded = arguments;
+    } else {
+      final _CommandPolicy policy;
+      try {
+        policy = await _commandPolicy(command);
+      } on Object {
+        // The policy is only readable from the catalog. Without it the host
+        // cannot prove a sensitive value arrived from stdin, so it fails closed
+        // instead of forwarding the arguments unchecked.
+        return _invalidInvocationEnvelope(requestId, 'catalogUnavailable');
+      }
+      final List<String> violations = policy.sensitiveViolations(arguments);
+      if (violations.isNotEmpty) {
+        return PatchbayInvocation.rejected(
+          requestId: requestId,
+          rejection: PatchbayRejection(
+            code: 'sensitiveInputRequiresStdin',
+            notice: 'Sensitive arguments are accepted only from stdin.',
+            details: <String, Object?>{'parameters': violations},
+          ),
+        ).toJson();
+      }
+      forwarded = policy.retainsStdinProvenance
+          ? arguments
+          : _withoutStdinProvenance(arguments);
+    }
     final Map<String, Object?> result = await _invoke(
       command,
-      arguments,
+      forwarded,
       requestId,
     );
     final PatchbayInvocationWire wire;
@@ -183,6 +224,48 @@ final class PatchbayServiceHost {
     );
   }
 
+  /// Reads the argument policy of [command] from the catalog, which is the
+  /// single source of truth for what a command declares.
+  ///
+  /// Deriving it here is what keeps the guarantee framework-owned: a consumer
+  /// declares `sensitive: true` once in its descriptor and gets the stdin
+  /// enforcement for free, with no matching code in its invoke handler.
+  Future<_CommandPolicy> _commandPolicy(String command) async {
+    // dispatchCatalog proves every entry is an object with a unique, valid
+    // dotted name before this scan trusts the lookup.
+    final Map<String, Object?> catalog = await dispatchCatalog();
+    final Object? commands = catalog['commands'];
+    if (commands is! List<Object?>) return const _CommandPolicy.undeclared();
+    for (final Object? entry in commands) {
+      if (entry is! Map<Object?, Object?> || entry['name'] != command) continue;
+      final Object? parameters = entry['parameters'];
+      return _CommandPolicy(
+        sensitiveParameters: <String>{
+          if (parameters is List<Object?>)
+            for (final Object? parameter in parameters)
+              if (parameter is Map<Object?, Object?> &&
+                  parameter['sensitive'] == true &&
+                  parameter['name'] is String)
+                parameter['name']! as String,
+        },
+        // The Flutter UI plane is served by this repository's own bridge, whose
+        // sensitivity is per-target (`PatchbaySensitivePolicy.redacted`, an
+        // obscured Semantics node) and therefore not expressible in a parameter
+        // descriptor. That bridge still reads the provenance itself, so the meta
+        // key survives for it — and only for it.
+        retainsStdinProvenance:
+            entry['plane'] == PatchbayPlaneWire.flutterUi.name,
+      );
+    }
+    return const _CommandPolicy.undeclared();
+  }
+
+  static Map<String, Object?> _withoutStdinProvenance(
+    Map<String, Object?> arguments,
+  ) => arguments.containsKey(stdinProvenanceKey)
+      ? (Map<String, Object?>.of(arguments)..remove(stdinProvenanceKey))
+      : arguments;
+
   static ServiceExtensionResponse _result(Map<String, Object?> value) =>
       ServiceExtensionResponse.result(jsonEncode(value));
 
@@ -258,5 +341,40 @@ final class PatchbayServiceHost {
       16,
       (_) => random.nextInt(256),
     ).map((int byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  }
+}
+
+/// The catalog-declared argument policy the host enforces before dispatch.
+final class _CommandPolicy {
+  const _CommandPolicy({
+    required this.sensitiveParameters,
+    required this.retainsStdinProvenance,
+  });
+
+  /// A command the catalog does not declare. The consumer will reject it as
+  /// unregistered; the meta key is still removed so an undeclared handler
+  /// cannot come to depend on it either.
+  const _CommandPolicy.undeclared()
+    : sensitiveParameters = const <String>{},
+      retainsStdinProvenance = false;
+
+  final Set<String> sensitiveParameters;
+  final bool retainsStdinProvenance;
+
+  /// Names of the sensitive parameters this request carries without attesting
+  /// stdin provenance, sorted so the rejection details are deterministic.
+  ///
+  /// A declared default is deliberately not counted: the flag attests where a
+  /// *transmitted* value came from, and a value the App bakes in never crossed
+  /// the wire.
+  List<String> sensitiveViolations(Map<String, Object?> arguments) {
+    if (sensitiveParameters.isEmpty) return const <String>[];
+    if (arguments[PatchbayServiceHost.stdinProvenanceKey] == true) {
+      return const <String>[];
+    }
+    return <String>[
+      for (final String name in sensitiveParameters)
+        if (arguments[name] != null) name,
+    ]..sort();
   }
 }
