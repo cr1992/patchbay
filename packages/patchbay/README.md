@@ -125,7 +125,7 @@ consumer 可以增加领域内的细分字段，但不能把较弱来源升级�
 证据，都从 JSON contract 生成双向 codec。生成物负责字段名、枚举、嵌套结构、未知字段拒绝、JSON 值
 校验和 `toJson` / `fromJson`；任何 consumer 不再手写协议 map。
 
-Moii consumer 的 61 条领域命令目录以 `lib/debug_console/contracts/patchbay_commands.json` 为唯一真源；
+Moii consumer 的 61 条领域命令目录以 `lib/debug_console/patchbay/contracts/patchbay_commands.json` 为唯一真源；
 Flutter host 在不改该目录的前提下合并通用 UI 命令，并仅在 consumer 显式注入对应 bridge 时增加
 navigation、日志、blob 与 capture 条目；因此运行时 catalog 是实际能力，不维护固定总数。
 `just gen patchbay-commands write` 生成 command ID/string parse、descriptor、默认值已应用的类型化参数入口，

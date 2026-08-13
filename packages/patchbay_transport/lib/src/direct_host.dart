@@ -24,6 +24,13 @@ final class PatchbayDirectHost {
   static const String protocolPathPrefix = '/patchbay/direct/v1';
   static const int tokenBytes = 32;
 
+  /// Per-request deadline in milliseconds, clamped to
+  /// [PatchbayDirectHostConfig.maxRequestTimeout].
+  ///
+  /// A long-poll client declares how long it is prepared to wait so the host
+  /// does not have to infer intent from command names.
+  static const String deadlineHeader = 'x-patchbay-deadline-ms';
+
   final PatchbayDirectHandlers _handlers;
   final PatchbayDirectHostConfig config;
   final PatchbayDirectClock _clock;
@@ -169,10 +176,18 @@ final class PatchbayDirectHost {
       return;
     }
     _activeRequests += 1;
+    final Future<void> processing = _processAuthorized(request);
+    // The slot is released when the handler actually settles, not when this
+    // request gives up waiting for it. A wedged handler therefore keeps
+    // occupying capacity instead of letting later requests pile up behind it.
+    unawaited(
+      processing
+          .then<void>((_) {}, onError: (Object _, StackTrace _) {})
+          .whenComplete(() => _activeRequests -= 1),
+    );
     try {
-      await _processAuthorized(request).timeout(config.requestTimeout);
+      await processing.timeout(_deadlineFor(request));
     } on TimeoutException {
-      _beginGracefulStop(PatchbayDirectStopReason.requestTimeout);
       await _sendErrorIfOpen(
         request.response,
         HttpStatus.gatewayTimeout,
@@ -184,9 +199,19 @@ final class PatchbayDirectHost {
         HttpStatus.internalServerError,
         PatchbayDirectErrorCode.internalError,
       );
-    } finally {
-      _activeRequests -= 1;
     }
+  }
+
+  /// Resolves the budget for one request, clamped to the configured ceiling.
+  Duration _deadlineFor(HttpRequest request) {
+    final String? raw = request.headers.value(deadlineHeader);
+    if (raw == null) return config.requestTimeout;
+    final int? milliseconds = int.tryParse(raw);
+    if (milliseconds == null || milliseconds <= 0) return config.requestTimeout;
+    final Duration requested = Duration(milliseconds: milliseconds);
+    return requested > config.maxRequestTimeout
+        ? config.maxRequestTimeout
+        : requested;
   }
 
   Future<void> _processAuthorized(HttpRequest request) async {

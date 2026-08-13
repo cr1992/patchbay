@@ -375,6 +375,7 @@ Future<_Invoked> _invokeCataloged(
     catalog,
     command,
     arguments,
+    deadline: _declaredWait(arguments),
   );
   final bool serverWaitAvailable =
       _CatalogCommand.find(catalog, 'patchbay.job.wait') != null;
@@ -390,16 +391,29 @@ Future<_Invoked> _invokeCataloged(
   return _Invoked(response, catalog);
 }
 
+/// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
+/// `patchbay.job.wait`) declares that budget in `timeoutMs`. The transport must
+/// be told, or a short default transport deadline would abandon — and on the
+/// direct transport previously tear down — a request the App is still serving.
+Duration? _declaredWait(Map<String, Object?> arguments) {
+  final Object? declared = arguments['timeoutMs'];
+  return declared is int && declared > 0
+      ? Duration(milliseconds: declared)
+      : null;
+}
+
 Future<Map<String, Object?>> _invokeAgainstCatalog(
   PatchbayClient connection,
   Map<String, Object?> catalog,
   String command,
-  Map<String, Object?> arguments,
-) async {
+  Map<String, Object?> arguments, {
+  Duration? deadline,
+}) async {
   final bool cataloged = _CatalogCommand.find(catalog, command) != null;
   final Map<String, Object?> response = await connection.invoke(
     command: command,
     arguments: arguments,
+    deadline: deadline,
   );
   if (!cataloged && !_isCommandNotRegistered(response)) {
     throw const PatchbayProtocolException('catalogInvocationDrift');
@@ -465,6 +479,7 @@ Future<Map<String, Object?>> _waitForJob(
         'afterSequence': afterSequence,
         'timeoutMs': requestTimeoutMs,
       },
+      deadline: Duration(milliseconds: requestTimeoutMs),
     );
     if (response['admission'] == 'rejected') return response;
     final Object? payload = response['payload'];

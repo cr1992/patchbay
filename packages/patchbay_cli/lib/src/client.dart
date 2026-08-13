@@ -56,10 +56,13 @@ abstract interface class PatchbayClient {
   Future<Map<String, Object?>> identity();
   Future<Map<String, Object?>> catalog();
   Future<Map<String, Object?>> snapshot();
+  /// [deadline] is how long the caller intends to wait for a long-poll command.
+  /// Transports that cannot be torn down by one slow request may ignore it.
   Future<Map<String, Object?>> invoke({
     required String command,
     required Map<String, Object?> arguments,
     String? requestId,
+    Duration? deadline,
   });
   Future<Map<String, Object?>> widgetTree();
   Future<Map<String, Object?>> renderTree();
@@ -221,6 +224,9 @@ final class PatchbayConnection implements PatchbayClient {
     required String command,
     required Map<String, Object?> arguments,
     String? requestId,
+    // The VM Service connection has no per-request teardown to protect against,
+    // so a declared wait budget changes nothing here.
+    Duration? deadline,
   }) => _call(
     PatchbayServiceHost.invokeMethod,
     arguments: <String, Object?>{

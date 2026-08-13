@@ -69,6 +69,7 @@ final class PatchbayDirectHostConfig {
     this.lanExposure = PatchbayLanExposure.disabled,
     this.tokenTtl = const Duration(minutes: 10),
     this.requestTimeout = const Duration(seconds: 10),
+    this.maxRequestTimeout = const Duration(seconds: 150),
     this.maxRequestBodyBytes = 64 * 1024,
     this.maxResponseBodyBytes = 1024 * 1024,
     this.maxConcurrentRequests = 1,
@@ -95,6 +96,12 @@ final class PatchbayDirectHostConfig {
         PatchbayDirectConfigurationError.invalidRequestTimeout,
       );
     }
+    if (maxRequestTimeout < requestTimeout ||
+        maxRequestTimeout > const Duration(minutes: 5)) {
+      throw const PatchbayDirectConfigurationException(
+        PatchbayDirectConfigurationError.invalidRequestTimeout,
+      );
+    }
     if (maxRequestBodyBytes < 1 || maxRequestBodyBytes > 1024 * 1024) {
       throw const PatchbayDirectConfigurationException(
         PatchbayDirectConfigurationError.invalidRequestLimit,
@@ -116,7 +123,18 @@ final class PatchbayDirectHostConfig {
   final int port;
   final PatchbayLanExposure lanExposure;
   final Duration tokenTtl;
+
+  /// Budget for a request that declares no deadline of its own.
   final Duration requestTimeout;
+
+  /// Ceiling for a client-declared deadline.
+  ///
+  /// Long-poll operations (job wait, UI wait, log tail) are legitimately slower
+  /// than [requestTimeout]. Without a separate ceiling the only safe default
+  /// would be a flat timeout long enough for the slowest operation, which would
+  /// also let an ordinary wedged request hold the single request slot for that
+  /// same duration.
+  final Duration maxRequestTimeout;
   final int maxRequestBodyBytes;
   final int maxResponseBodyBytes;
 
@@ -158,13 +176,19 @@ enum PatchbayDirectErrorCode {
   internalError,
 }
 
+/// Why the host stopped listening.
+///
+/// A single request exceeding its deadline is deliberately absent: that fails
+/// the one request and leaves the host serving. A handler that never settles
+/// keeps holding its request slot, so the host degrades to `busy` and is then
+/// bounded by [PatchbayDirectHostConfig.tokenTtl] rather than by tearing the
+/// listener down under a client that is merely waiting.
 enum PatchbayDirectStopReason {
   requested,
   tokenExpired,
   backgrounded,
   identityChanged,
   identityDrift,
-  requestTimeout,
 }
 
 /// Secret-bearing startup result. Its [toString] is intentionally redacted.

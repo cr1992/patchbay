@@ -221,8 +221,8 @@ void main() {
       final mismatchStore = PatchbaySessionStore(mismatchedSessions.path);
       mismatchStore.write(
         PatchbaySessionRecord(
-          sessionId: 'before-hot-restart',
-          applicationId: 'dev.patchbay.fixture',
+          sessionId: 'foreign-application',
+          applicationId: 'dev.patchbay.other',
           appInstanceId: 'old-instance',
           isolateId: 'isolates/old',
           processId: host.pid,
@@ -247,6 +247,38 @@ void main() {
         contains('sessionIdentityMismatch'),
       );
       expect(mismatchStore.readAll(), isEmpty);
+
+      // Same application, stale instance and isolate: a hot restart must be
+      // re-pinned against the live runtime, not discarded.
+      final Directory restartedSessions = Directory.systemTemp.createTempSync(
+        'patchbay-cross-process-restart-',
+      );
+      addTearDown(() => restartedSessions.deleteSync(recursive: true));
+      final restartStore = PatchbaySessionStore(restartedSessions.path);
+      restartStore.write(
+        PatchbaySessionRecord(
+          sessionId: 'before-hot-restart',
+          applicationId: 'dev.patchbay.fixture',
+          appInstanceId: 'old-instance',
+          isolateId: 'isolates/old',
+          processId: host.pid,
+          wsUri: uri.toString(),
+          buildMode: 'debug',
+          createdAt: DateTime.now().toUtc(),
+          workspacePath: Directory.current.path,
+          deviceId: 'local-vm',
+        ),
+      );
+      final ProcessResult restartedCli =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--session-dir',
+            restartedSessions.path,
+            'identity',
+          ], workingDirectory: Directory.current.path);
+      expect(restartedCli.exitCode, PatchbayExitCode.accepted);
+      expect(restartStore.readAll().single.appInstanceId, isNot('old-instance'));
 
       final ProcessResult missingCommand =
           await Process.run(Platform.resolvedExecutable, <String>[

@@ -220,6 +220,14 @@ final class PatchbaySemanticsBridge {
     }
     final PatchbayGateRejection? gate = await _gates.evaluate(const <String>{});
     if (gate != null) return _gateRejected(requestId, gate);
+    // A backgrounded engine produces no frames, and building the tree waits for
+    // one. Without this the request would never answer at all.
+    if (!_isAppResumed()) {
+      return PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
+      );
+    }
 
     final SemanticsOwner? owner = await _ensureOwner();
     final SemanticsNode? root = owner?.rootSemanticsNode;
@@ -422,7 +430,9 @@ final class PatchbaySemanticsBridge {
     );
   }
 
-  Future<SemanticsOwner?> _ensureOwner() async {
+  Future<SemanticsOwner?> _ensureOwner({
+    Duration frameTimeout = const Duration(seconds: 2),
+  }) async {
     if (_disposed) return null;
     _semanticsHandle ??= SemanticsBinding.instance.ensureSemantics();
     SemanticsOwner? owner;
@@ -430,7 +440,14 @@ final class PatchbaySemanticsBridge {
     // the owner and the next populate its root, depending on call timing.
     for (var attempt = 0; attempt < 3; attempt += 1) {
       SchedulerBinding.instance.scheduleFrame();
-      await SchedulerBinding.instance.endOfFrame;
+      try {
+        await SchedulerBinding.instance.endOfFrame.timeout(frameTimeout);
+      } on TimeoutException {
+        // The engine can stop presenting between the lifecycle check and here.
+        // Report what already exists rather than waiting for a frame that is
+        // not coming; the caller turns a null owner into a typed rejection.
+        return _refreshOwner();
+      }
       owner = _refreshOwner();
       if (owner?.rootSemanticsNode != null) return owner;
     }

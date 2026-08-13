@@ -37,16 +37,21 @@ final class PatchbayDirectClient {
   Future<Map<String, Object?>> snapshot() =>
       _call('snapshot', _expectedIdentity.toJson());
 
+  /// [deadline] declares how long the caller is prepared to wait for a
+  /// long-poll command. The host clamps it to its own ceiling; the socket wait
+  /// is extended to match so the client does not abandon a request the host is
+  /// still legitimately serving.
   Future<Map<String, Object?>> invoke({
     required String command,
     required Map<String, Object?> arguments,
     required String requestId,
+    Duration? deadline,
   }) => _call('invoke', <String, Object?>{
     ..._expectedIdentity.toJson(),
     'command': command,
     'arguments': arguments,
     'requestId': requestId,
-  });
+  }, deadline: deadline);
 
   void close({bool force = false}) {
     if (_closed) return;
@@ -56,12 +61,18 @@ final class PatchbayDirectClient {
 
   Future<Map<String, Object?>> _call(
     String operation,
-    Map<String, Object?> body,
-  ) async {
+    Map<String, Object?> body, {
+    Duration? deadline,
+  }) async {
     if (_closed) throw const PatchbayDirectClientException('clientClosed');
     final Uri uri = _endpoint.replace(
       path: '${PatchbayDirectHost.protocolPathPrefix}/$operation',
     );
+    // The response cannot arrive before the server-side wait elapses, so the
+    // socket budget has to cover it plus ordinary round-trip overhead.
+    final Duration wait = deadline == null || deadline <= timeout
+        ? timeout
+        : deadline + timeout;
     try {
       final HttpClientRequest request = await _httpClient
           .postUrl(uri)
@@ -71,11 +82,15 @@ final class PatchbayDirectClient {
         HttpHeaders.authorizationHeader,
         'Bearer $_bearerToken',
       );
+      if (deadline != null) {
+        request.headers.set(
+          PatchbayDirectHost.deadlineHeader,
+          '${deadline.inMilliseconds}',
+        );
+      }
       request.add(utf8.encode(jsonEncode(body)));
-      final HttpClientResponse response = await request.close().timeout(
-        timeout,
-      );
-      final List<int> bytes = await _readBounded(response).timeout(timeout);
+      final HttpClientResponse response = await request.close().timeout(wait);
+      final List<int> bytes = await _readBounded(response).timeout(wait);
       final Object? decoded = jsonDecode(utf8.decode(bytes));
       if (decoded is! Map<String, dynamic>) {
         throw const PatchbayDirectClientException('protocolError');

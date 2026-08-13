@@ -75,7 +75,7 @@ void main() {
     expect(_mode(directory.listSync().whereType<File>().single.path), '600');
   });
 
-  test('unreachable URI is stale and never appears in typed error', () async {
+  test('unreachable URI is reported without discarding the session', () async {
     const secret = 'ws://127.0.0.1:1/secret-token/ws';
     store.write(_record('unreachable', wsUri: secret));
 
@@ -90,29 +90,52 @@ void main() {
       failure = error;
     }
 
-    expect(failure, _sessionError('sessionStaleTransport'));
+    expect(failure, _sessionError('sessionUnreachable'));
     expect(failure.toString(), isNot(contains('secret-token')));
-    expect(store.readAll(), isEmpty);
+    // A momentarily unreachable App is not a dead session: the launcher writes
+    // the record once per run, so discarding it here would be unrecoverable.
+    expect(store.readAll(), hasLength(1));
   });
 
-  test('identity mismatch makes a live PID and reachable URI stale', () async {
-    store.write(
-      _record(
-        'old',
-        appInstanceId: 'before-restart',
-        isolateId: 'isolates/new',
-      ),
-    );
+  test('a foreign application on the same URI is discarded', () async {
+    store.write(_record('old', appInstanceId: 'before-restart'));
 
     await expectLater(
       PatchbaySessionResolver(
         store: store,
         pidProbe: (_) => true,
-        identityProbe: (_) async => _identity('after-restart'),
+        identityProbe: (_) async => const PatchbayRuntimeIdentity(
+          schemaVersion: 1,
+          applicationId: 'dev.patchbay.other',
+          appInstanceId: 'after-restart',
+          isolateId: 'isolates/new',
+        ),
       ).resolve(),
       throwsA(_sessionError('sessionIdentityMismatch')),
     );
     expect(store.readAll(), isEmpty);
+  });
+
+  test('hot restart re-pins the record instead of discarding it', () async {
+    store.write(
+      _record(
+        'old',
+        appInstanceId: 'before-restart',
+        isolateId: 'isolates/old',
+      ),
+    );
+
+    final PatchbayDiscoveredSession resolved = await PatchbaySessionResolver(
+      store: store,
+      pidProbe: (_) => true,
+      identityProbe: (_) async => _identity('after-restart'),
+    ).resolve();
+
+    // Same app, same live process, new instance: pressing `r` must not cost
+    // the CLI its session.
+    expect(resolved.identity.appInstanceId, 'after-restart');
+    expect(store.readAll().single.appInstanceId, 'after-restart');
+    expect(store.readAll().single.isolateId, 'isolates/new');
   });
 
   test(

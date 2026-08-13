@@ -293,19 +293,29 @@ final class PatchbaySessionResolver {
         lastStaleCode = 'sessionIdentityMismatch';
         continue;
       } on Object {
-        store.remove(record.sessionId);
-        lastStaleCode = 'sessionStaleTransport';
+        // The process is alive and the record is well-formed; this probe simply
+        // did not get an answer. Deleting here would turn a locked screen or a
+        // busy VM into a permanently lost session, because the launcher only
+        // writes the record once per `flutter run`.
+        lastStaleCode = 'sessionUnreachable';
         continue;
       }
       if (identity.schemaVersion != PatchbayServiceHost.schemaVersion ||
-          identity.applicationId != record.applicationId ||
-          (record.appInstanceId != null &&
-              identity.appInstanceId != record.appInstanceId) ||
-          (record.isolateId != null &&
-              identity.isolateId != record.isolateId)) {
+          identity.applicationId != record.applicationId) {
         store.remove(record.sessionId);
         lastStaleCode = 'sessionIdentityMismatch';
         continue;
+      }
+      // A live process serving the same application over the same URI, with a
+      // new instance or isolate, is a hot restart — not a foreign app. The
+      // record is re-pinned to the new runtime instead of being discarded,
+      // because `app.debugPort` is emitted once per run and would never
+      // re-create it.
+      if ((record.appInstanceId != null &&
+              identity.appInstanceId != record.appInstanceId) ||
+          (record.isolateId != null &&
+              identity.isolateId != record.isolateId)) {
+        lastStaleCode = 'sessionRuntimeRestarted';
       }
       final completed = record.completedWith(identity);
       store.write(completed);

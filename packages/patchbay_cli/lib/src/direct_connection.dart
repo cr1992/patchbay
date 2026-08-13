@@ -46,11 +46,13 @@ final class PatchbayDirectConnection implements PatchbayClient {
     required String command,
     required Map<String, Object?> arguments,
     String? requestId,
+    Duration? deadline,
   }) => _translate(
     () => _client.invoke(
       command: command,
       arguments: arguments,
       requestId: requestId ?? 'patchbay-cli-direct-${++_nextRequest}',
+      deadline: deadline,
     ),
   );
 

@@ -303,15 +303,16 @@ void main() {
     await host.stop();
   });
 
-  test('handler timeout is typed and closes the host', () async {
+  test('handler timeout is typed and keeps the host serving', () async {
     final Completer<Map<String, Object?>> never =
         Completer<Map<String, Object?>>();
+    var pending = true;
     final PatchbayDirectHost host = _host(
       identity: identity,
       config: PatchbayDirectHostConfig(
         requestTimeout: const Duration(milliseconds: 100),
       ),
-      snapshot: () => never.future,
+      snapshot: () => pending ? never.future : Future.value(_snapshotBody),
     );
     final PatchbayDirectSession session = await host.start();
     final _WireResponse response = await _post(
@@ -321,8 +322,91 @@ void main() {
     );
     expect(response.statusCode, HttpStatus.gatewayTimeout);
     expect(response.errorCode, PatchbayDirectErrorCode.timeout.name);
-    await _eventually(() => !host.isRunning);
-    expect(host.stopReason, PatchbayDirectStopReason.requestTimeout);
+    // One slow request must not take the listener down with it: the CLI's own
+    // long-poll would otherwise kill the transport it is polling over.
+    expect(host.isRunning, isTrue);
+    expect(host.stopReason, isNull);
+
+    // The wedged handler still owns the only request slot until it settles.
+    final _WireResponse busy = await _post(
+      session.endpoint.resolve('${session.endpoint.path}/snapshot'),
+      identity.toJson(),
+      token: session.bearerToken,
+    );
+    expect(busy.statusCode, HttpStatus.tooManyRequests);
+    expect(busy.errorCode, PatchbayDirectErrorCode.busy.name);
+
+    pending = false;
+    never.complete(_snapshotBody);
+    final _WireResponse recovered = await _eventuallyOk(
+      () => _post(
+        session.endpoint.resolve('${session.endpoint.path}/snapshot'),
+        identity.toJson(),
+        token: session.bearerToken,
+      ),
+    );
+    expect(recovered.statusCode, HttpStatus.ok);
+    await host.stop();
+  });
+
+  test('client deadline header extends the budget up to the ceiling', () async {
+    final PatchbayDirectHost host = _host(
+      identity: identity,
+      config: PatchbayDirectHostConfig(
+        requestTimeout: const Duration(milliseconds: 100),
+        maxRequestTimeout: const Duration(seconds: 30),
+      ),
+      snapshot: () => Future<Map<String, Object?>>.delayed(
+        const Duration(milliseconds: 400),
+        () => _snapshotBody,
+      ),
+    );
+    final PatchbayDirectSession session = await host.start();
+
+    // Without a declared deadline the same handler is cut off at 100ms.
+    final _WireResponse tooSlow = await _post(
+      session.endpoint.resolve('${session.endpoint.path}/snapshot'),
+      identity.toJson(),
+      token: session.bearerToken,
+    );
+    expect(tooSlow.statusCode, HttpStatus.gatewayTimeout);
+
+    // That handler keeps the slot until it settles, so retry until it frees.
+    final _WireResponse waited = await _eventuallyOk(
+      () => _post(
+        session.endpoint.resolve('${session.endpoint.path}/snapshot'),
+        identity.toJson(),
+        token: session.bearerToken,
+        headers: <String, String>{PatchbayDirectHost.deadlineHeader: '5000'},
+      ),
+    );
+    expect(waited.statusCode, HttpStatus.ok);
+    await host.stop();
+  });
+
+  test('declared deadline cannot exceed the configured ceiling', () async {
+    final PatchbayDirectHost host = _host(
+      identity: identity,
+      config: PatchbayDirectHostConfig(
+        requestTimeout: const Duration(milliseconds: 50),
+        maxRequestTimeout: const Duration(milliseconds: 200),
+      ),
+      snapshot: () => Completer<Map<String, Object?>>().future,
+    );
+    final PatchbayDirectSession session = await host.start();
+    final Stopwatch elapsed = Stopwatch()..start();
+    final _WireResponse response = await _post(
+      session.endpoint.resolve('${session.endpoint.path}/snapshot'),
+      identity.toJson(),
+      token: session.bearerToken,
+      headers: <String, String>{
+        PatchbayDirectHost.deadlineHeader: '600000',
+      },
+    );
+    elapsed.stop();
+    expect(response.statusCode, HttpStatus.gatewayTimeout);
+    expect(elapsed.elapsed, lessThan(const Duration(seconds: 10)));
+    await host.stop();
   });
 
   test('identity drift returns typed error then closes host', () async {
@@ -491,6 +575,21 @@ Future<void> _eventually(bool Function() predicate) async {
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
   fail('condition was not reached');
+}
+
+const Map<String, Object?> _snapshotBody = <String, Object?>{'ok': true};
+
+/// Retries until the host reports something other than `busy`, so a released
+/// request slot can be observed without depending on scheduler timing.
+Future<_WireResponse> _eventuallyOk(
+  Future<_WireResponse> Function() attempt,
+) async {
+  for (int i = 0; i < 50; i += 1) {
+    final _WireResponse response = await attempt();
+    if (response.statusCode != HttpStatus.tooManyRequests) return response;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail('request slot was never released');
 }
 
 final class _WireResponse {
