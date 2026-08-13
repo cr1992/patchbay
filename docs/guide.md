@@ -162,6 +162,7 @@ $ patchbay --wait exec <ns.command>         # job 命令等终态
 $ patchbay job get|cancel <job-id>
 $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
+$ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
 $ patchbay ui widget-tree|render-tree|focus-tree
 $ patchbay --output out.png capture root
 $ patchbay ui wait <condition> …
@@ -172,7 +173,30 @@ $ patchbay help <topic>                     # 帮助由声明生成
 `<gen>` 是 catalog 返回的 UI target generation。控件重新挂载后 generation 会变化；写操作必须携带
 最近观察到的值，否则会以 `uiGenerationStale` 拒绝。
 
+`ui tap <identifier>` 面向带稳定 Semantics identifier 的可点控件：不用先读树抄 nodeId，解析与代际
+校验都在 App 侧完成。`--generation` 可选，传了是你自己的前置围栏；不传时围栏由桥在过门前 pin 的
+generation 提供。同 identifier 挂载多个实例、identifier 不存在、代际过期都是带 details 的稳定拒绝。
+
 敏感值一律 `--stdin` 传入，输出只保留 redacted 元数据。
+
+### 连续执行（repl）
+
+每条命令单独起进程要重新发现会话并重连，一条 1–3 秒。需要连着跑多条时用 repl：
+
+```console
+$ patchbay --json repl <<'EOF'
+ui wait semantics-mounted app.settings
+ui tap app.settings.save
+ui semantics tree
+EOF
+```
+
+repl 只做「连一次、连续执行」，命令语法与一次性调用完全相同；它不是宏系统，不做脚本录制、回放
+或变量。每行结果自带 `exitCode`，进程退出码只描述会话本身（干净跑完 `0`，被错误终止则是该错误的
+类别）。被拒绝或失败的行不终止会话，连接类错误终止——CLI 不会替你悄悄换一条连接。
+
+连接类参数、`--json` 与 `--stdin` 在 repl 内逐行 fail-closed；敏感输入请用一次性调用。direct HTTP
+不支持 repl（bearer token 会与命令流抢同一个 stdin）。
 
 ### 退出码
 

@@ -17,6 +17,16 @@
 
 ### Added
 
+- `ui.semantics.tap`：按稳定 Semantics identifier 一步完成解析、代际校验与派发，取代
+  `ui.semantics.tree` + `ui.semantics.action` 两跳；CLI 侧为 `patchbay ui tap <identifier>`，
+  `--generation` 可选。解析出的 generation 在过门前 pin 住，门后二次解析必须命中同一 generation；
+  未命中、多义与代际过期都是带 details 的稳定拒绝。与 `ui.semantics.action` 共用 action policy，
+  没有 consumer policy 时不进 catalog、不可派发。
+- `patchbay repl`：一次连接内从 stdin 逐行执行 typed 命令，语法与一次性调用相同。每行结果自带
+  `exitCode`，会话退出码只描述会话本身。连接类参数、`--json` 与 `--stdin` 在会话内逐行 fail-closed；
+  direct HTTP 传输不支持 repl（bearer token 会与命令流共用 stdin）。
+- `runPatchbayCli` 增加 `connect` / `replInput` / `output` / `errorOutput` 测试接缝参数；新增公共
+  `PatchbayReplSession`、`tokenizePatchbayReplLine` 与 `patchbayResponseSummary`。
 - `PatchbayJobRegistry.maxRunningJobs`，默认 `32`；达到上限时同步抛出
   `PatchbayJobCapacityExceeded`，任务 body 不会启动。
 - `PatchbayJobRegistry.cancellationTimeout`，默认 `5s`；取消回调超时会保留 running 状态，

@@ -63,6 +63,8 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui text set <target-id> <genera
 dart run bin/patchbay.dart --ws-uri <uri> --json ui text enter <target-id> <generation> <text>
 dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics action <node-id> <generation> <action>
+dart run bin/patchbay.dart --ws-uri <uri> --json ui tap <identifier>
+dart run bin/patchbay.dart --ws-uri <uri> --json --generation <generation> ui tap <identifier>
 dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
@@ -88,6 +90,33 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 
 `<generation>` 来自最近一次 catalog 或 Semantics tree。目标重挂载后 generation 会变化；写操作携带
 旧值时会稳定拒绝，避免命令误打到同名的新实例。
+
+`ui tap <identifier>` 是 `ui semantics tree` + `ui semantics action` 的一步替代：解析、代际校验和派发
+都在 App 侧一次完成，CLI 不构造 nodeId，也不给 generation 补默认值。`--generation` 可选，传了就是
+调用方自己的前置围栏；不传时围栏由 bridge 在过门前 pin 住的 generation 提供。未命中、多义和代际
+过期都是带 details 的稳定拒绝（分别给出已挂载 identifier 清单、候选列表、expected/current），不会用
+空拒绝把调用方推回全树 dump。
+
+### repl 会话
+
+```text
+dart run bin/patchbay.dart --ws-uri <uri> --json repl <<'EOF'
+identity
+ui semantics tree
+ui tap login.submit
+EOF
+```
+
+repl 建一次连接，然后逐行执行 typed 命令，语法与一次性调用完全相同。每行输出自带 `exitCode`
+（`--json` 下是一行一个 JSON 信封，否则是 `[n] exit=<code> <摘要>`）：进程退出码承载不了逐条结果，
+会话码只描述会话本身——干净跑完是 `0`，被错误终止则是该错误的类别。
+
+被拒绝或类型化失败的行不终止会话；transport / protocol / session 错误终止，因为它们说明复用的连接或
+对端已经不是操作者选定的那个，CLI 不会悄悄重连。
+
+以下在 repl 内 fail-closed，不静默忽略：连接类参数与 `--json`（属于会话，逐行给出只能靠重连兑现）、
+`--stdin`（命令流已占住 stdin，没有剩余的 no-echo 通道）、嵌套 `repl`。direct 模式整体不进 repl：
+bearer token 会与命令流抢同一个 stdin。空行与 `#` 开头的行跳过，`exit` / `quit` 或 stdin 关闭结束会话。
 
 ### 命令声明一致性
 
