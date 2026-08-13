@@ -1,0 +1,37 @@
+# Patchbay 独立仓 CI：四包 analyze + test + 生成物零漂移。
+# runner 与镜像沿用 cloud/mobile 组现行约定（同 moii_app / sproboagent）。
+
+default:
+  tags:
+    - podman-par
+  image: registry.gitlab.hirobot.in:9090/cloud/sproboagent/ci/flutter-node:3.44.9-node24-r1
+  interruptible: true
+
+stages: [check]
+
+dart_packages:
+  stage: check
+  script:
+    - |
+      for p in patchbay patchbay_cli patchbay_transport; do
+        echo "== packages/$p =="
+        (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test)
+      done
+
+flutter_package:
+  stage: check
+  script:
+    - cd packages/patchbay_flutter
+    - flutter pub get
+    - flutter analyze
+    - flutter test
+    - cd example
+    - flutter pub get
+    - flutter test
+
+# 生成物 header 记录仓根相对路径，--check 必须从仓根调用（包目录内跑会假漂移）。
+codegen_drift:
+  stage: check
+  script:
+    - (cd packages/patchbay && dart pub get)
+    - dart run packages/patchbay/bin/wire_codegen.dart --contract packages/patchbay/contracts/core_wire.json --output packages/patchbay/lib/src/generated/core_wire.g.dart --check

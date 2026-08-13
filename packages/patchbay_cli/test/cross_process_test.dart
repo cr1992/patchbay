@@ -356,7 +356,7 @@ void main() {
         'ui',
         'wait',
         'semantics-mounted',
-        'moii.settings.screen',
+        'example.settings.screen',
       ]);
       expect(uiWait.exitCode, 0, reason: uiWait.stderr);
       expect(
