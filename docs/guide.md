@@ -133,9 +133,20 @@ ID 是 wire 契约：点分、小写、语义化（`<区>.<屏>.<控件>`），�
 
 ### 5. 会话自动发现（可选）
 
-自动发现不是 `flutter run` 自带行为。需要由你的启动器包住 `flutter run --machine`，再用
-`patchbay_cli` 提供的 machine frame parser 与 session writer 写入会话记录（含 `appInstanceId`）。
-完成这层接入后 CLI 才能无参连接；没有启动器时始终使用 `--ws-uri`。
+自动发现不是 `flutter run` 自带行为，需要一层启动器把 VM Service URI 写成会话记录。推荐让
+`flutter run` 自己把 URI 落盘，启动器只监视这个文件：
+
+```console
+$ flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+```
+
+读到 URI 后用 `patchbay_cli` 的 session writer（`PatchbaySessionStore` + `PatchbaySessionRecord`）
+写记录，`appInstanceId` 由 CLI 首次连上后补齐。这条路径不接管 `flutter run` 的 stdio：`r` / `R` /
+`q` 与热重载输出照旧，启动器解析出问题也只影响发现，不会连交互一起毁掉。
+
+包住 `flutter run --machine` 再解析 machine frame 仍然可行（它额外提供 `app.debugPort` 等事件），
+但那要求启动器接管 stdio 并自行转发按键，实测更脆，已不再是推荐路径。没有启动器时始终使用
+`--ws-uri`。
 
 ## CLI 手册
 
@@ -165,6 +176,7 @@ $ patchbay ui semantics tree|action …
 $ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
 $ patchbay ui widget-tree|render-tree|focus-tree
 $ patchbay --output out.png capture root
+$ patchbay navigation go <dest>             # 不带 --revision 时自动先读当前 revision
 $ patchbay ui wait <condition> …
 $ patchbay logs query|tail|export …
 $ patchbay help <topic>                     # 帮助由声明生成
@@ -173,11 +185,47 @@ $ patchbay help <topic>                     # 帮助由声明生成
 `<gen>` 是 catalog 返回的 UI target generation。控件重新挂载后 generation 会变化；写操作必须携带
 最近观察到的值，否则会以 `uiGenerationStale` 拒绝。
 
+`patchbay help` 的 topic 除了 CLI 路径（`ui wait`），还接受 catalog 里的协议名——手上拿着
+`navigation.go` 或响应里的 `ui.semantics.tap` 就能直接查，不必先反推 CLI 路径。多个 CLI 命令共用
+一个协议名（`ui.wait`、`blob.metadata`）时列出它们。`navigate` / `nav` / `wait` / `tap` / `text` /
+`semantics` 是既有路径的别名拼写，不是新命令。
+
+### navigation 的 revision 围栏
+
+`navigation go|push|back` 省略 `--revision` 时，CLI 先调 `navigation.current` 读当前 revision 再
+派发，结果带 `revisionSource: navigation.current` 标记。围栏本身没变：revision 照样随请求发出，
+读到与派发之间导航动过照样被 App 拒绝。需要用自己亲眼观察到的 revision 当围栏时显式传
+`--revision`，此时不会多一次读取，也不会有该标记。
+
+### ui wait 的 condition 名
+
+`ui wait <子命令>` 是带连字符的 CLI 语法，响应 payload 里的 `condition` 是 wire 值，两者刻意不同名：
+
+| 子命令 | payload `condition` |
+|---|---|
+| `ui wait semantics-mounted` | `semanticsMounted` |
+| `ui wait semantics-unmounted` | `semanticsUnmounted` |
+| `ui wait semantics-value` | `semanticsValue` |
+| `ui wait destination` | `navigationDestination` |
+| `ui wait tree-revision` | `treeRevision` |
+| `ui wait frame-revision` | `frameRevision` |
+
+两种拼写都能直接键入（`ui wait semanticsMounted app.ready` 与 `ui wait semantics-mounted app.ready`
+等价），映射表也在 `patchbay help ui wait` 里。命令名与 condition 名都不会改——它们是 wire 契约。
+
 `ui tap <identifier>` 面向带稳定 Semantics identifier 的可点控件：不用先读树抄 nodeId，解析与代际
 校验都在 App 侧完成。`--generation` 可选，传了是你自己的前置围栏；不传时围栏由桥在过门前 pin 的
 generation 提供。同 identifier 挂载多个实例、identifier 不存在、代际过期都是带 details 的稳定拒绝。
 
-敏感值一律 `--stdin` 传入，输出只保留 redacted 元数据。
+### 参数与敏感值
+
+`--args` 传普通结构化参数，`--stdin` 从一行 no-echo stdin 读入。两者可以同时用：stdin 的 JSON
+object 与 `--args` 合并，同名键以 stdin 为准。所以「可读的那半写在命令行、只有密文走 no-echo」是
+标准用法，不必把整个 object 塞进 stdin；只给 stdin 不给 `--args` 仍然合法，那是合并的退化情形。
+stdin 内容不是 JSON object（裸文本、数组）仍然报错。
+
+descriptor 标了 `sensitive: true` 的参数只能走 stdin：它出现在 `--args` 里时 CLI 直接以用法错误拒发，
+不会等到 App 再拒，错误信息只点名参数、不回显值。输出仍只保留 redacted 元数据。
 
 ### 连续执行（repl）
 
@@ -215,9 +263,29 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
 
 `--json` 稳定 JSON（可存档比对）；默认人读摘要；`logs tail` 为 NDJSON 流。
 
+带 `--json` 时 stdout 只会有一个 JSON 文档：要么是响应信封，要么是错误信封
+
+```json
+{"error": {"code": "sessionAmbiguous", "details": {"sessions": ["…"]}}}
+```
+
+字段与 App 的 rejection 信封同形（稳定 `code` + 自由 `details`），一个解析器读两种。用法错误的
+`code` 是 `usageError`，具体句子在 `details.message`；session、protocol、transport 类错误用它们自己
+的稳定 code。人读的那句话仍然只走 stderr，不会混进 stdout。不带 `--json` 时行为完全不变。
+
+`--wait` 的终态结果里，**顶层 `jobId` 是稳定取值位置**——它就是这条命令受理的那个 job。
+`payload.jobId` 是 App job snapshot 自带的字段，两处都保留，脚本读顶层那个。
+
 ## 边界
 
 - 只支持 debug / profile。接入方必须用编译期分支让 release 不构造 Patchbay；仓库不提供运行时后门。
+- UI 平面要求 App 处于 `resumed`。桌面端（macOS 等）窗口一旦失焦就是 `inactive`，此时
+  `ui.semantics.*`、`ui.capture`、`ui.wait` 与 `navigation.go|push|back` 都会以
+  `*LifecycleNotResumed` 拒绝。这是 fail-closed 设计——未 resumed 的引擎不出帧，请求只会永远等下去，
+  拒绝比挂起诚实。无头自动化必须让目标窗口保持聚焦（别在跑用例时切到别的窗口）。
+  更细粒度的判定（例如区分「失焦但仍在出帧」）是待评估的优化项，不在本版范围内，闸本身不放松；
+  各桥的 resumed 要求见
+  [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。
 - 截图只证明 Flutter 合成树；系统弹窗、PlatformView 可能缺失，结果附能力警告。
 - 系统权限弹窗、装卸包、shell、进程管理：用 adb / xcrun，Patchbay 不做。
 - 直连 HTTP 明文、无 TLS，默认关闭；仅受信网络实验用途，边界见
