@@ -632,6 +632,14 @@ bool _isCommandNotRegistered(Map<String, Object?> response) {
       rejection['code'] == 'commandNotRegistered';
 }
 
+/// Waits for an admitted job and returns its terminal response.
+///
+/// The admission envelope carries `jobId` at the top level while a job snapshot
+/// carries its own inside `payload`, so `--wait` used to answer with the id in
+/// a different place than the request that started it. Both stay — the payload
+/// one is the App's snapshot field — but the top level is restated here so one
+/// path reads the same in both outputs: **top-level `jobId` is the stable place
+/// to read the id of the job this command admitted.**
 Future<Map<String, Object?>> _waitForJob(
   PatchbayClient connection,
   Map<String, Object?> catalog,
@@ -663,6 +671,8 @@ Future<Map<String, Object?>> _waitForJob(
     );
     return <String, Object?>{
       ...response,
+      // The admitted job id, restated at the top level. See `_waitForJob`.
+      'jobId': jobIdValue,
       'waitMode': 'legacyPolling',
       'waitNotice':
           'host did not catalog patchbay.job.wait; CLI polled patchbay.job.get',
@@ -704,6 +714,7 @@ Future<Map<String, Object?>> _waitForJob(
     if (result.snapshot.terminal) {
       return <String, Object?>{
         ...response,
+        'jobId': jobIdValue,
         'payload': <String, Object?>{
           ...result.snapshot.toJson(),
           'waitOutcome': result.outcome.toJson(),

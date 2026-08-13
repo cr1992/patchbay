@@ -88,6 +88,18 @@ String patchbayResponseSummary(Map<String, Object?> value) {
     return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} '
         'uiTargets=${targets.length}';
   }
+  // A terminal job answers with both an id and an outcome; summarising it as
+  // just the id would hide the half the operator was waiting for.
+  if (value['payload'] case final Map<Object?, Object?> payload
+      when payload['terminal'] == true) {
+    final Object? events = payload['events'];
+    final Object? last = events is List<Object?> && events.isNotEmpty
+        ? events.last
+        : null;
+    final Object? phase = last is Map<Object?, Object?> ? last['phase'] : null;
+    final Object? jobId = value['jobId'] ?? payload['jobId'];
+    return 'jobId=$jobId terminal=true${phase == null ? '' : ' phase=$phase'}';
+  }
   if (value['jobId'] case final String jobId) return 'jobId=$jobId';
   return jsonEncode(value);
 }
