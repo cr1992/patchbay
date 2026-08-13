@@ -109,19 +109,22 @@ enum PatchbayFriendlyCommand {
     'navigation.go',
     <String>['navigation', 'go'],
     summary: 'Replace navigation state with a destination.',
-    usageSuffix: '<destination-id> --revision <revision>',
+    usageSuffix: '<destination-id> [--revision <revision>]',
+    fencesNavigationRevision: true,
   ),
   navigationPush(
     'navigation.push',
     <String>['navigation', 'push'],
     summary: 'Push a cataloged destination.',
-    usageSuffix: '<destination-id> --revision <revision>',
+    usageSuffix: '<destination-id> [--revision <revision>]',
+    fencesNavigationRevision: true,
   ),
   navigationBack(
     'navigation.back',
     <String>['navigation', 'back'],
     summary: 'Navigate back from an observed revision.',
-    usageSuffix: '--revision <revision>',
+    usageSuffix: '[--revision <revision>]',
+    fencesNavigationRevision: true,
   ),
   uiWaitSemanticsMounted(
     'ui.wait',
@@ -263,6 +266,7 @@ enum PatchbayFriendlyCommand {
     this.artifact = PatchbayArtifactDisposition.none,
     this.target = PatchbayCommandTarget.declaredServiceCommand,
     this.waitCondition,
+    this.fencesNavigationRevision = false,
   }) : assert(
          (serviceCommand != null) ==
              (target == PatchbayCommandTarget.declaredServiceCommand),
@@ -292,6 +296,14 @@ enum PatchbayFriendlyCommand {
   /// the mapping and lets the parser accept either spelling, without a second
   /// hand-maintained list that could drift from the request actually sent.
   final String? waitCondition;
+
+  /// Whether the request carries an observed navigation revision as a fence.
+  ///
+  /// When the caller omits `--revision` the CLI reads it from
+  /// `navigation.current` and sends that value; the fence itself is unchanged,
+  /// so a tree that moved in between is still refused by the App. The flag only
+  /// says "this command needs the number", never "this command may skip it".
+  final bool fencesNavigationRevision;
 }
 
 final class PatchbayFriendlyInvocation {
@@ -302,6 +314,7 @@ final class PatchbayFriendlyInvocation {
     this.outputPath,
     this.force = false,
     this.plaintextArgumentKeys = const <String>{},
+    this.resolvesRevision = false,
   });
 
   final PatchbayFriendlyCommand spec;
@@ -314,6 +327,13 @@ final class PatchbayFriendlyInvocation {
 
   /// Argument keys that came from `--args`, i.e. from an echoing argv.
   final Set<String> plaintextArgumentKeys;
+
+  /// Whether the dispatcher still has to read the navigation revision fence.
+  ///
+  /// True only when the command needs one and the caller supplied none; an
+  /// explicit `--revision` is already in [arguments] and is never second-
+  /// guessed.
+  final bool resolvesRevision;
 }
 
 /// One accepted spelling and the declared path it expands into.
@@ -399,17 +419,20 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         _argumentsWithoutPositionals(spec, options),
       ),
+      // `revision` is left out when the caller omitted it: the dispatcher fills
+      // it in from `navigation.current` before the request goes out, so the
+      // fence still travels — it is just no longer a manual round trip.
       PatchbayFriendlyCommand.navigationGo ||
       PatchbayFriendlyCommand.navigationPush => _oneTail(
         tail,
         (String destination) => <String, Object?>{
           'destinationId': destination,
-          'revision': _requiredInt(options, 'revision'),
+          'revision': ?_optionalInt(options, 'revision'),
           'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
         },
       ),
       PatchbayFriendlyCommand.navigationBack => _noTail(tail, <String, Object?>{
-        'revision': _requiredInt(options, 'revision'),
+        'revision': ?_optionalInt(options, 'revision'),
         'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
       }),
       // Every arm below takes its `condition` from the declaration, so the
@@ -477,6 +500,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
       outputPath: outputPath,
       force: options.flag('force'),
       plaintextArgumentKeys: _plaintextArgumentKeys(options),
+      resolvesRevision:
+          spec.fencesNavigationRevision && options.option('revision') == null,
     );
   }
 
@@ -852,12 +877,6 @@ abstract final class PatchbayFriendlyCommandRegistry {
       throw const FormatException('command requires two positional arguments');
     }
     return build(tail[0], tail[1]);
-  }
-
-  static int _requiredInt(ArgResults options, String name) {
-    final int? result = _optionalInt(options, name);
-    if (result == null) throw FormatException('--$name is required');
-    return result;
   }
 
   static int? _optionalInt(ArgResults options, String name) {

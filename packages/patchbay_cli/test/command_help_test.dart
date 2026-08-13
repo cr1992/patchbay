@@ -15,11 +15,11 @@ void main() {
       '''Usage: patchbay navigation <command> [options]
 
 Commands:
-  navigation back --revision <revision>                   Navigate back from an observed revision.
-  navigation catalog                                      List destinations exposed by the running App.
-  navigation current                                      Read the current destination and revision.
-  navigation go <destination-id> --revision <revision>    Replace navigation state with a destination.
-  navigation push <destination-id> --revision <revision>  Push a cataloged destination.
+  navigation back [--revision <revision>]                   Navigate back from an observed revision.
+  navigation catalog                                        List destinations exposed by the running App.
+  navigation current                                        Read the current destination and revision.
+  navigation go <destination-id> [--revision <revision>]    Replace navigation state with a destination.
+  navigation push <destination-id> [--revision <revision>]  Push a cataloged destination.
 
 Options:
   --revision         Observed navigation revision.

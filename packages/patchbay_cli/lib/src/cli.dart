@@ -482,15 +482,34 @@ Future<_Execution> _execute(
       final String command = friendly.serviceCommand!;
       final Map<String, Object?> catalog = await connection.catalog();
       _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
+      Map<String, Object?> arguments = friendly.arguments;
+      if (friendly.resolvesRevision) {
+        final Map<String, Object?> current = await _invokeAgainstCatalog(
+          connection,
+          catalog,
+          'navigation.current',
+          const <String, Object?>{},
+        );
+        // A refused read is reported as itself, marked with where it came
+        // from: pretending the navigation command was refused would hide which
+        // gate actually spoke.
+        if (current['admission'] == 'rejected') {
+          return _Execution(_withRevisionSource(current), catalog: catalog);
+        }
+        arguments = <String, Object?>{
+          ...arguments,
+          'revision': _navigationRevision(current),
+        };
+      }
       final Map<String, Object?> response = await _invokeCataloged(
         connection,
         catalog,
         command,
-        friendly.arguments,
+        arguments,
         wait: parsed.flag('wait'),
       );
       return _Execution(
-        response,
+        friendly.resolvesRevision ? _withRevisionSource(response) : response,
         catalog: catalog,
         artifact: friendly.spec.artifact == PatchbayArtifactDisposition.none
             ? null
@@ -501,6 +520,27 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+/// Marks a response whose revision fence the CLI read instead of the caller.
+///
+/// The marker is the only trace the convenience leaves in the output: a reader
+/// can tell an operator-observed revision from one the CLI fetched a moment
+/// before dispatching, which is exactly the difference that matters when a
+/// navigation raced the command.
+Map<String, Object?> _withRevisionSource(Map<String, Object?> response) =>
+    <String, Object?>{...response, 'revisionSource': 'navigation.current'};
+
+/// The revision an App reports as current, or a protocol error.
+int _navigationRevision(Map<String, Object?> response) {
+  final Object? payload = response['payload'];
+  final Object? revision = payload is Map<Object?, Object?>
+      ? payload['navigationRevision']
+      : null;
+  if (revision is! int || revision < 0) {
+    throw const PatchbayProtocolException('navigationRevisionContractViolated');
+  }
+  return revision;
 }
 
 /// Refuses to send a catalog-declared sensitive parameter through argv.
