@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
@@ -256,6 +257,7 @@ Future<_Outcome> _executeOnce(
       if (patchbayExitCodeFor(output) == PatchbayExitCode.accepted) {
         final PatchbayDownloadedArtifact downloaded =
             await PatchbayArtifactDownloader(
+              chunkBytes: _blobChunkBytes(execution.catalog!),
               invoke: (String command, Map<String, Object?> arguments) =>
                   _invokeAgainstCatalog(
                     connection,
@@ -520,6 +522,21 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+/// The `blob.read` chunk size this host will actually accept.
+///
+/// The descriptor declares the host's ceiling as the `limit` default and the
+/// host refuses anything above it, so the CLI asks for no more than the App
+/// offers. Taking the smaller of the two keeps a host that raises its ceiling
+/// from silently enlarging every CLI request as well.
+int _blobChunkBytes(Map<String, Object?> catalog) {
+  final int? declared = _CatalogCommand.find(
+    catalog,
+    'blob.read',
+  )?.positiveIntegerDefault('limit');
+  if (declared == null) return PatchbayArtifactDownloader.defaultChunkBytes;
+  return min(declared, PatchbayArtifactDownloader.defaultChunkBytes);
 }
 
 /// Marks a response whose revision fence the CLI read instead of the caller.
