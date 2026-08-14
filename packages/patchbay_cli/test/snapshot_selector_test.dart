@@ -340,6 +340,36 @@ void main() {
       },
     );
 
+    test('a snapshot source slower than the budget exits rejected', () async {
+      // The condition holds on the first probe, but reading it overran the
+      // budget. Exit 0 here would tell a script the field reached its value in
+      // time when it did not — which is the whole point of declaring one.
+      final _Result result = await _run(
+        <String>[
+          '--json',
+          '--timeout-ms',
+          '10',
+          'snapshot',
+          'wait',
+          'call.session.active',
+          '--until',
+          'equals',
+          'true',
+        ],
+        source: () async {
+          await Future<void>.delayed(const Duration(milliseconds: 60));
+          return _deviceSnapshot;
+        },
+      );
+
+      expect(result.exitCode, PatchbayExitCode.rejected);
+      expect(
+        (result.response!['rejection']! as Map<String, Object?>)['code'],
+        'snapshotWaitTimeout',
+      );
+      expect(_details(result.response!)['polls'], 1);
+    });
+
     test('a path that never appears times out, it does not answer', () async {
       final _Result result = await _run(<String>[
         '--json',

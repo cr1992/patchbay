@@ -499,6 +499,12 @@ path=call.session.active found=true value=true wait=observed
 `--transport-timeout-ms`**：声明的等待会自动加进 CLI 的 RPC 预算，与 `--wait` 的做法一致——一次
 有意的等待不是"对端不应答"。
 
+**预算是对答案的硬顶，不是探测的时间表。** 条件成立、但拿到它的那次读取已经越过预算时，答复仍是
+`snapshotWaitTimeout`——超预算才拿到的成功，调用方已经不在等它了。墙上时间还可能再多出**一次快照
+读取**的长度：consumer 的回调一旦在飞就没法中止。因此 App 侧 snapshot 回调本身慢过预算时，拒绝里的
+`elapsedMs` 会明显大于 `timeoutMs`，那正是「慢的是快照源本身」的读法——该改的是那个回调，不是加大
+预算。
+
 App 的 snapshot 回调自己抛错时，答复是 `providerProtocolViolation` +
 `details.reason: snapshotSourceFailed`，只带**异常类型**不带消息：那串消息是 consumer 的自由文本，
 不该跟着协议信封出去。等待中途抛错直接以它收尾，不重试——读不出来的源不是等待能观察到的状态。

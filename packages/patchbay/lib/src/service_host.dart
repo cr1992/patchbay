@@ -133,6 +133,14 @@ final class PatchbayServiceHost {
   /// source that fails mid-wait ends the wait with its own envelope rather than
   /// being retried: the caller asked about App state, and a source that cannot
   /// be read is not a state the wait can ever observe.
+  ///
+  /// The declared budget is a **hard cap on the answer**, not a schedule for
+  /// the probes: an observation that arrives past the deadline is reported as
+  /// `snapshotWaitTimeout` even when the condition held. The wall clock can
+  /// still overshoot it by up to one snapshot-source read, because a consumer
+  /// callback already in flight cannot be abandoned — `elapsedMs` in the
+  /// rejection is what tells the operator that the source itself is the slow
+  /// part.
   Future<Map<String, Object?>> _awaitSnapshot(
     PatchbaySnapshotRequest request,
   ) async {
@@ -146,6 +154,14 @@ final class PatchbayServiceHost {
       if (read.violated) return read.response;
       polls += 1;
       last = PatchbaySnapshotSelection.resolve(read.response, request.path);
+      // The budget caps the whole request, not merely the gaps between probes.
+      // A consumer snapshot source slow enough to overrun it on its own would
+      // otherwise let an observation come back *after* the deadline and still
+      // report `observed` — a success the caller already stopped waiting for,
+      // and on the CLI side exit 0 where the operator declared exit 5 was the
+      // answer. Checked before the condition precisely because the case worth
+      // catching is the one where the condition does hold, only too late.
+      if (elapsed.elapsed > timeout) break;
       if (last.satisfies(condition, request.value)) {
         return <String, Object?>{
           'schemaVersion': schemaVersion,

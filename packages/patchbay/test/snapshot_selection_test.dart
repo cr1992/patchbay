@@ -351,6 +351,48 @@ void main() {
     );
 
     test(
+      'a source slower than the budget times out, it does not answer late',
+      () async {
+        // The condition holds on the very first probe — but reading it took six
+        // times the declared budget. The budget is a hard cap on the whole
+        // request, not merely on the gaps between probes: answering `observed`
+        // here hands back a success the caller already stopped waiting for, and
+        // on the CLI side it is the difference between exit 0 and exit 5.
+        final Map<String, Object?> response =
+            await hostServing(() async {
+              await Future<void>.delayed(const Duration(milliseconds: 60));
+              return deviceSnapshot;
+            }).dispatchSnapshot(<String, Object?>{
+              'path': 'call.session.active',
+              'until': 'equals',
+              'value': true,
+              'timeoutMs': 10,
+            });
+
+        expect(response['admission'], 'rejected');
+        expect(rejectionOf(response)['code'], 'snapshotWaitTimeout');
+        expect(response.containsKey('wait'), isFalse);
+        expect(response.containsKey('selection'), isFalse);
+        final Map<String, Object?> details = detailsOf(response);
+        expect(details['timeoutMs'], 10);
+        expect(details['elapsedMs'], greaterThanOrEqualTo(60));
+        expect(
+          details['polls'],
+          1,
+          reason: 'an overrun must not buy another probe',
+        );
+        // The last resolution still travels: "the field was already what you
+        // asked for, the read was just too slow" is what separates a slow
+        // snapshot source from a condition that is never going to hold.
+        expect(details['observed'], <String, Object?>{
+          'path': 'call.session.active',
+          'found': true,
+          'value': true,
+        });
+      },
+    );
+
+    test(
       'a condition that never holds is rejected with what it did see',
       () async {
         final Map<String, Object?> response = await hostWith(deviceSnapshot)
