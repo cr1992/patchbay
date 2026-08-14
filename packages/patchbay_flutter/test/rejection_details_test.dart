@@ -200,14 +200,12 @@ void main() {
 
   group('形状规则由 reason 承载', () {
     test('semanticsValue 缺 value 时键差集为空，reason 说出规则', () async {
-      final Map<String, Object?> details = await _details(
-        'ui.wait',
-        const <String, Object?>{
-          'condition': 'semanticsValue',
-          'timeoutMs': 1000,
-          'semanticsIdentifier': 'app.counter',
-        },
-      );
+      final Map<String, Object?> details =
+          await _details('ui.wait', const <String, Object?>{
+            'condition': 'semanticsValue',
+            'timeoutMs': 1000,
+            'semanticsIdentifier': 'app.counter',
+          });
 
       expect(details.containsKey('missing'), isFalse);
       expect(details.containsKey('unexpected'), isFalse);
@@ -228,14 +226,12 @@ void main() {
       // 报文里只走协议词汇：字段名、路径、规则。`ArgumentError.toString()`
       // 会把越界的值一起带上（这里是 999999999ms 渲染成的 Duration），所以那条
       // 路径只报被拒的字段名，句子逐字钉死。
-      final Map<String, Object?> details = await _details(
-        'ui.wait',
-        const <String, Object?>{
-          'condition': 'semanticsMounted',
-          'timeoutMs': 999999999,
-          'semanticsIdentifier': 'app.ready',
-        },
-      );
+      final Map<String, Object?> details =
+          await _details('ui.wait', const <String, Object?>{
+            'condition': 'semanticsMounted',
+            'timeoutMs': 999999999,
+            'semanticsIdentifier': 'app.ready',
+          });
 
       expect(details['reason'], 'timeout is out of the accepted range');
       expect(details['reason'], isNot(contains('277777')));

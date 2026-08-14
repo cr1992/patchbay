@@ -34,12 +34,15 @@ final class _SlowClient implements PatchbayClient {
   Future<Map<String, Object?>> identity() => _never();
 
   @override
-  Future<Map<String, Object?>> catalog() async =>
-      <String, Object?>{'commands': commands, 'uiTargets': const <Object?>[]};
+  Future<Map<String, Object?>> catalog() async => <String, Object?>{
+    'commands': commands,
+    'uiTargets': const <Object?>[],
+  };
 
   @override
-  Future<Map<String, Object?>> snapshot() async =>
-      <String, Object?>{'source': 'appRecorded'};
+  Future<Map<String, Object?>> snapshot() async => <String, Object?>{
+    'source': 'appRecorded',
+  };
 
   @override
   Future<Map<String, Object?>> invoke({
@@ -83,8 +86,7 @@ final class _Run {
       (jsonDecode(out) as Map<String, Object?>)['error']!
           as Map<String, Object?>;
 
-  Map<String, Object?> get details =>
-      error['details']! as Map<String, Object?>;
+  Map<String, Object?> get details => error['details']! as Map<String, Object?>;
 }
 
 Future<_Run> _run(List<String> arguments, PatchbayClient client) async {
@@ -215,10 +217,7 @@ void main() {
       // is allowed to outlast it.
       final _SlowClient client = _SlowClient(
         commands: <Map<String, Object?>>[
-          <String, Object?>{
-            'name': 'app.job',
-            'suggestedWaitTimeoutMs': 400,
-          },
+          <String, Object?>{'name': 'app.job', 'suggestedWaitTimeoutMs': 400},
           <String, Object?>{'name': 'patchbay.job.wait'},
         ],
         invokeDelay: (String command) => command == 'patchbay.job.wait'

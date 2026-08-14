@@ -108,21 +108,21 @@ void main() {
     final Map<String, Object?> catalog =
         details['catalog']! as Map<String, Object?>;
     expect(catalog['reason'], 'invalidCatalogCommands');
-    expect(
-      jsonEncode(catalog['violations']),
-      contains('auth.switch-tenant'),
-    );
+    expect(jsonEncode(catalog['violations']), contains('auth.switch-tenant'));
   });
 
-  test('falls back to the catalog read when invoke does not repeat it', () async {
-    final Map<String, Object?> error = await _runExec(
-      _ViolatedCatalogClient(repeatsViolationInInvoke: false),
-    );
+  test(
+    'falls back to the catalog read when invoke does not repeat it',
+    () async {
+      final Map<String, Object?> error = await _runExec(
+        _ViolatedCatalogClient(repeatsViolationInInvoke: false),
+      );
 
-    final Map<String, Object?> details =
-        error['details']! as Map<String, Object?>;
-    final Map<String, Object?> catalog =
-        details['catalog']! as Map<String, Object?>;
-    expect(catalog['reason'], 'invalidCatalogCommands');
-  });
+      final Map<String, Object?> details =
+          error['details']! as Map<String, Object?>;
+      final Map<String, Object?> catalog =
+          details['catalog']! as Map<String, Object?>;
+      expect(catalog['reason'], 'invalidCatalogCommands');
+    },
+  );
 }
