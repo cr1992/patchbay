@@ -111,8 +111,10 @@ void main() {
     });
 
     test('a record whose process is gone fails and names the fix', () async {
-      // PID 1 is never this test's App; the resolver reads it as gone.
-      store.write(_record('worktree-a', processId: 1));
+      // Past the maximum PID, so no process can hold it — unlike a plausible
+      // free PID, which another process may claim, or PID 1, which exists and
+      // is signalable when the tests run as root inside a container.
+      store.write(_record('worktree-a', processId: 2147483647));
 
       final _Run result = await run(<String>['--json', 'doctor']);
 
