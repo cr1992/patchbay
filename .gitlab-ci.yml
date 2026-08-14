@@ -38,9 +38,12 @@ flutter_package:
     - flutter pub get
     - flutter test
 
-# 生成物 header 记录仓根相对路径，--check 必须从仓根调用（包目录内跑会假漂移）。
+# 两个生成器都在这里查零漂移。
+# wire：生成物 header 记录仓根相对路径，--check 必须从仓根调用（包目录内跑会假漂移）。
+# command：header 记录的是相对生成物自身的路径，从哪个目录调用都一致，不必迁就 cwd。
 codegen_drift:
   stage: check
   script:
     - (cd packages/patchbay && dart pub get)
     - dart run packages/patchbay/bin/wire_codegen.dart --contract packages/patchbay/contracts/core_wire.json --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
+    - dart run packages/patchbay/bin/command_codegen.dart --contract packages/patchbay/contracts/example_commands.json --output packages/patchbay/contracts/example_commands.g.dart --check

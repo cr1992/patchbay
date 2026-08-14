@@ -46,7 +46,10 @@
   **它自己拨号**：拨不通正是它被问的那个问题，所以连接失败在它这里是一条 finding 而不是命令终止；
   前一项失败时后面标 `skipped`，会话目录判定失败时连拨都不拨。lifecycle 一项发一条只读 UI 探针
   （`ui.semantics.tree`，`maxDepth 0 / maxNodes 1`），未 resumed 时报出 `lifecycleState` 并给
-  Android / iOS / 桌面三条解法。
+  Android / iOS / 桌面三条解法。iOS 那条把「屏幕黑着」和「App 掉到后台」分开写：前者只能手动唤醒
+  （没有系统级电源命令），后者在已配对且已解锁的设备上用
+  `xcrun devicectl device process launch --device <udid> <bundle-id>` 就能拉回前台（真机实测）。
+  repl 的 lifecycle 横幅与[使用指南](docs/guide.md#边界)同源同文。
 
   **退出码不另立**：取第一处 failed 检查项的类别（会话 / 连接 `3`、catalog `4`、lifecycle `5`），
   即「换成普通命令撞上这一项时会拿到的那个码」；只有 warning（会话不唯一、门未开、App 没注册任何
@@ -99,6 +102,19 @@
   （GitLab 与 GitHub Actions 两边同步）。此前排版没有门禁，main 自身也不统一——87 个 Dart 文件里有
   17 个不合仓库 pin 的 dart_style（Dart 3.12.2）。同批已按该基准机械重排全仓，仅换行/缩进/尾逗号，
   无语义改动。门禁从仓根跑一次即覆盖四包与 example，`flutter_package` 内不重复。
+
+- **`command_codegen` 进 `codegen_drift` 门禁。** 此前只有 `wire_codegen` 有零漂移检查，
+  `command_codegen` 只被单测按临时 fixture 跑过——而它恰恰是接入方直接消费的那个生成器，
+  输出漂移在本仓无人察觉，要等接入方升级 pin、重新生成、diff 炸开才暴露。现在仓内带一份样例
+  contract 与其生成物（`packages/patchbay/contracts/example_commands.{json,g.dart}`），
+  GitLab 与 GitHub 两边的 codegen job 都对它跑 `--check`，`dart test` 里也有同一条断言。
+  样例本身是中性词表，不描述任何接入方的业务；它同时充当 command contract 唯一的可跑示例。
+
+  **这条 `--check` 没有 cwd 约束**：`command_codegen` 生成物 header 记录的路径改为相对生成物
+  自身，而不是调用者当时敲的那个字符串，所以从仓根还是包目录调用都得到同一份输出。
+  `wire_codegen` 的老约束（必须从仓根调用，否则假漂移）未改动，两者的差异在 CI 注释、
+  [协作约定](CONTRIBUTING.md)与[发版清单](docs/release-checklist.md)里写明。
+
 - 周期性 Android emulator 冒烟（`.github/workflows/android-emulator-smoke.yml`，每周一 + 手动触发）：
   在真实 Android 上装起 example 并跑通 `identity` → `catalog` → `snapshot` / `ui semantics tree`
   的 CLI 往返。既有门禁全跑在 Ubuntu 上，覆盖不到「App 真的装进设备、VM Service 真的可连」这段；
@@ -122,6 +138,10 @@
   偏差，此时 App 侧每个请求都正常应答，因此既不是拒绝（`5`）也不是类型化失败（`6`）。manifest 读
   不了或不合法时 fail-closed 退到 `64`，稳定 code `manifestInvalid` / `manifestUnreadable`，
   `details.field` 指到具体位置（形如 `$.targets[2].kind`）；文件内容本身不进信封。
+
+  **读文件在拨号之前。** manifest 是本地输入，写错与设备连不连得上无关，所以离线机器上写 manifest
+  照样拿到文件本身的错，不会被 `sessionDirectoryEmpty` 之类的会话错盖过——那句话是真的，但说的
+  不是作者此刻能改的那件事。repl 内不受影响：那条连接已经建好，这一行没有拨号可言。
 
   schema 与边界见[使用指南](docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件
   [`docs/examples/ui-targets-manifest.json`](docs/examples/ui-targets-manifest.json)。
@@ -153,6 +173,12 @@
   `Resolving dependencies…` 打在 **stdout** 上，破坏「`--json` 时 stdout 只有一个 JSON 文档」
   的约定，下游解析器会失败——需要工作树即时生效又要读 `--json` 时，用 AOT 产物或仓内
   `dart run`，不要用 path 模式。
+
+- **退出码一节写明判定口径（`docs/guide.md` 退出码）。** 原来只有一句「脚本应同时读 JSON 信封」，
+  没点出最容易把失败读成成功的那个写法：`patchbay --json … | jq …` 之后的 `$?` 是 `jq` 的码，
+  patchbay 判红也照样是 `0`。现在明确：脚本与 agent 判定结果读 `--json` 的结构化字段或 patchbay
+  自己的退出码；确实要在管道里拿真码，用 `set -o pipefail`（或 bash 的 `${PIPESTATUS[0]}`），
+  否则先把输出接到变量再解析。
 
 ### Fixed
 
