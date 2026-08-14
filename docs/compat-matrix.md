@@ -12,8 +12,7 @@
 
 字段来源：
 
-- **commit SHA**：`git rev-parse patchbay-v0.1.0`，与 `git log --oneline` 中
-  `7c82c68 chore(repo): 独立仓模板——README 三件套、MIT、CI 与 bin 入口` 一致。
+- **commit SHA**：`git rev-parse <tag>`。
 - **wire schemaVersion**：`packages/patchbay/lib/src/service_host.dart:34` 与
   `packages/patchbay/lib/src/invocation.dart:58` 的 `static const int schemaVersion = 1;`。
   两处需保持同值，drift 会被 `packages/patchbay_transport` 与 `packages/patchbay_cli` 的握手校验
@@ -25,8 +24,8 @@
   与根 `README.md` 第 26–27 行项目状态声明一致。两个 Flutter 数字不是同一件事：CI 验证版本是
   当前门禁实际跑过的版本，最低支持版本是文档承诺的下限，二者之间未逐版本回归，出现兼容问题以
   CI 验证版本为准。
-- **已知 consumer**：仅 `moii_app` 一条，来自任务交接口径，patchbay 仓本身不持有 consumer 侧
-  pin 配置，无法在本仓验证；新增或变更 consumer 记录前应先向对应 consumer 仓核实。
+- **已知 consumer**：patchbay 仓不持有 consumer 侧 pin 配置，无法在本仓验证；新增或变更
+  consumer 记录前先向对应 consumer 仓核实。
 
 ## 维护规则
 
