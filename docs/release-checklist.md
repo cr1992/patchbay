@@ -58,25 +58,25 @@ $ git rev-parse patchbay-vX.Y.Z
 
 ## 4. 双端推送核对
 
-GitHub 与 GitLab 两个远端必须在同一 tag 上指向同一 commit（仓库当前 remote 配置）：
+GitHub 与内网主仓两个远端必须在同一 tag 上指向同一 commit：
 
-- [ ] `github`（`git@github.com:cr1992/patchbay.git`）与 `origin`（
-      `git@gitlab.hirobot.in:cloud/mobile/patchbay.git`）在该 tag 上的 commit SHA 一致
+- [ ] `git remote -v` 列出的两个 remote（`github` 与 `origin`）在该 tag 上的 commit SHA 一致
 
 验证命令：
 
 ```console
-$ git ls-remote --tags git@github.com:cr1992/patchbay.git patchbay-vX.Y.Z
-$ git ls-remote --tags git@gitlab.hirobot.in:cloud/mobile/patchbay.git patchbay-vX.Y.Z
+$ git remote -v
+$ git ls-remote --tags github patchbay-vX.Y.Z
+$ git ls-remote --tags origin patchbay-vX.Y.Z
 ```
 
 ## 5. consumer 换 pin
 
 - [ ] consumer 仓按新 tag 更新引用
 
-moii 侧口径（**交接口径，未在本仓验证，以 moii 仓 justfile/文档为准**）：pubspec SHA 四包同步改、
-`PATCHBAY_PINS` 同步更新、双 lock（`pubspec.lock` 等）一并提交。具体命令与文件位置本仓不持有真源，
-执行前查 moii 仓当前的 justfile 与相关文档确认。
+接入方侧口径（**未在本仓验证，以该仓自身文档为准**）：pubspec SHA 四包同步改、`PATCHBAY_PINS`
+同步更新、双 lock（`pubspec.lock` 等）一并提交。具体命令与文件位置本仓不持有真源，执行前查
+接入方仓当前的构建脚本与相关文档确认。
 
 ## 6. 真机验收
 
