@@ -46,12 +46,21 @@ final class PatchbayDirectClient {
     required Map<String, Object?> arguments,
     required String requestId,
     Duration? deadline,
-  }) => _call('invoke', <String, Object?>{
-    ..._expectedIdentity.toJson(),
-    'command': command,
-    'arguments': arguments,
-    'requestId': requestId,
-  }, deadline: deadline);
+  }) async {
+    if (requestId.isEmpty) {
+      throw const PatchbayDirectClientException('protocolError');
+    }
+    final Map<String, Object?> result = await _call('invoke', <String, Object?>{
+      ..._expectedIdentity.toJson(),
+      'command': command,
+      'arguments': arguments,
+      'requestId': requestId,
+    }, deadline: deadline);
+    if (result['requestId'] != requestId) {
+      throw const PatchbayDirectClientException('requestIdMismatch');
+    }
+    return result;
+  }
 
   void close({bool force = false}) {
     if (_closed) return;

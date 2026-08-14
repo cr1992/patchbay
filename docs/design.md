@@ -65,8 +65,9 @@ payload，带自己的证据等级。CLI 退出码同构：`0` 只代表"App 受
 ### 3. 门是声明的，不是散落的
 
 不可省略的基础门之外，每条命令的 descriptor 声明它需要的 consumer 门（启动阶段、
-依赖就绪、业务约束）。目录即真源：CLI 帮助、参数校验、副作用提示全部从 descriptor
-生成，不存在第二份手写命令表——这句话由测试与门禁共同强制，不是约定。
+依赖就绪、业务约束）。目录是跨进程真源：CLI 帮助和副作用提示从 descriptor 读取；host 强制 command
+name 唯一、invocation wire 合法且 `requestId` 一致。领域 adapter 必须使用生成 decoder 或等价 validator
+执行参数、敏感输入和声明门校验，不能把 descriptor 只当展示数据。
 
 ### 4. release 必须可裁除
 
@@ -103,6 +104,11 @@ sequenceDiagram
 配网、连接这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实
 来源，取消 / 超时 / 代际失效都有类型化终态。等待是服务端长轮询（客户端声明预算，
 服务端夹紧到上限），不是客户端刷屏轮询。
+
+Job ledger 使用两个独立的有限预算：`maxRunningJobs` 限制正在执行的任务，`retainedJobs` 限制可回读的
+已结束任务。取消 callback 也有等待上限；超时只表示取消未被确认，不能据此写入 cancelled 终态。
+没有 callback 同样不能写 cancelled；callback 返回是 consumer 对“底层操作已停止”的证明，不只是取消
+请求已经发出。
 
 ```mermaid
 sequenceDiagram

@@ -269,16 +269,22 @@ void main() {
           deviceId: 'local-vm',
         ),
       );
-      final ProcessResult restartedCli =
-          await Process.run(Platform.resolvedExecutable, <String>[
-            'run',
-            'bin/patchbay.dart',
-            '--session-dir',
-            restartedSessions.path,
-            'identity',
-          ], workingDirectory: Directory.current.path);
+      final ProcessResult restartedCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          restartedSessions.path,
+          'identity',
+        ],
+        workingDirectory: Directory.current.path,
+      );
       expect(restartedCli.exitCode, PatchbayExitCode.accepted);
-      expect(restartStore.readAll().single.appInstanceId, isNot('old-instance'));
+      expect(
+        restartStore.readAll().single.appInstanceId,
+        isNot('old-instance'),
+      );
 
       final ProcessResult missingCommand =
           await Process.run(Platform.resolvedExecutable, <String>[
@@ -532,10 +538,25 @@ void main() {
         command: 'device.list',
         arguments: const <String, Object?>{},
       );
+      expect(invocation['requestId'], startsWith('patchbay-cli-vm-'));
       expect(invocation['admission'], 'rejected');
       expect(
         (invocation['rejection']! as Map<String, Object?>)['code'],
         'commandNotRegistered',
+      );
+      await expectLater(
+        connection.invoke(
+          command: 'device.list',
+          arguments: const <String, Object?>{},
+          requestId: '',
+        ),
+        throwsA(
+          isA<PatchbayProtocolException>().having(
+            (PatchbayProtocolException error) => error.code,
+            'code',
+            'requestIdValidationFailed',
+          ),
+        ),
       );
     },
     timeout: const Timeout(Duration(seconds: 30)),

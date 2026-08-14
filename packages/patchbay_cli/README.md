@@ -165,6 +165,9 @@ terminal echo，读取后恢复；无法关闭回显时以 `terminalEchoControlF
 - `job get` 读取当前快照；
 - `job cancel` 请求取消，但取消结果仍以 App 返回的 job 状态为准。
 
+CLI 为每次 invoke 生成并发送 `requestId`，VM Service 与 direct 两条路径都要求响应回显相同值；不一致
+按协议错误退出，避免并发或迟到响应被归到错误命令。显式空 `requestId` 同样 fail-closed。
+
 `--wait` 默认最多等待 60 秒；descriptor/admission 带 `suggestedWaitTimeoutMs` 时采用 consumer 提示的观察窗口。
 例如 BLE 配网提示 150 秒，以覆盖其 120 秒激活终态。超时表示 App 已受理但在观察窗口内没有终态，
 归为类型化操作失败（退出码 `6`），不是连接失败。

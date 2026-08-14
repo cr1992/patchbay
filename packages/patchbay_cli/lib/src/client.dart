@@ -56,6 +56,7 @@ abstract interface class PatchbayClient {
   Future<Map<String, Object?>> identity();
   Future<Map<String, Object?>> catalog();
   Future<Map<String, Object?>> snapshot();
+
   /// [deadline] is how long the caller intends to wait for a long-poll command.
   /// Transports that cannot be torn down by one slow request may ignore it.
   Future<Map<String, Object?>> invoke({
@@ -82,6 +83,7 @@ final class PatchbayConnection implements PatchbayClient {
   final String isolateId;
   final Set<String> _extensionRPCs;
   final PatchbayRuntimeIdentity runtimeIdentity;
+  int _nextRequest = 0;
 
   static const String _inspectorTreeExtension =
       'ext.flutter.inspector.getRootWidgetTree';
@@ -227,14 +229,24 @@ final class PatchbayConnection implements PatchbayClient {
     // The VM Service connection has no per-request teardown to protect against,
     // so a declared wait budget changes nothing here.
     Duration? deadline,
-  }) => _call(
-    PatchbayServiceHost.invokeMethod,
-    arguments: <String, Object?>{
-      'command': command,
-      'args': jsonEncode(arguments),
-      'requestId': ?requestId,
-    },
-  );
+  }) async {
+    if (requestId != null && requestId.isEmpty) {
+      throw const PatchbayProtocolException('requestIdValidationFailed');
+    }
+    final String id = requestId ?? 'patchbay-cli-vm-${++_nextRequest}';
+    final Map<String, Object?> result = await _call(
+      PatchbayServiceHost.invokeMethod,
+      arguments: <String, Object?>{
+        'command': command,
+        'args': jsonEncode(arguments),
+        'requestId': id,
+      },
+    );
+    if (result['requestId'] != id) {
+      throw const PatchbayProtocolException('requestIdMismatch');
+    }
+    return result;
+  }
 
   Future<Map<String, Object?>> _call(
     String method, {

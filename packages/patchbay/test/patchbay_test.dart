@@ -76,6 +76,154 @@ void main() {
     );
   });
 
+  test('service host owns schemaVersion in catalog and snapshot', () async {
+    final PatchbayServiceHost host = PatchbayServiceHost(
+      applicationId: 'dev.patchbay.test',
+      registrar: (_, _) {},
+      catalog: () async => <String, Object?>{
+        'schemaVersion': 999,
+        'commands': const <Object?>[],
+      },
+      snapshot: () async => <String, Object?>{'schemaVersion': 999},
+      invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'notRegistered'),
+      ).toJson(),
+    );
+
+    expect(
+      await host.dispatchCatalog(),
+      containsPair('schemaVersion', PatchbayServiceHost.schemaVersion),
+    );
+    expect(
+      await host.dispatchSnapshot(),
+      containsPair('schemaVersion', PatchbayServiceHost.schemaVersion),
+    );
+  });
+
+  test('service host rejects duplicate command names in catalog', () async {
+    final PatchbayServiceHost host = PatchbayServiceHost(
+      applicationId: 'dev.patchbay.test',
+      registrar: (_, _) {},
+      catalog: () async => <String, Object?>{
+        'commands': const <Object?>[
+          <String, Object?>{'name': 'device.select'},
+          <String, Object?>{'name': 'device.select'},
+        ],
+      },
+      snapshot: () async => const <String, Object?>{},
+      invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
+        requestId: requestId,
+        rejection: const PatchbayRejection(code: 'notRegistered'),
+      ).toJson(),
+    );
+
+    await expectLater(host.dispatchCatalog(), throwsStateError);
+  });
+
+  test(
+    'service host rejects non-descriptor and invalid command names',
+    () async {
+      for (final Object? command in <Object?>[
+        'device.select',
+        const <String, Object?>{'name': ' device.select '},
+        const <String, Object?>{'name': 'Device.select'},
+      ]) {
+        final PatchbayServiceHost host = PatchbayServiceHost(
+          applicationId: 'dev.patchbay.test',
+          registrar: (_, _) {},
+          catalog: () async => <String, Object?>{
+            'commands': <Object?>[command],
+          },
+          snapshot: () async => const <String, Object?>{},
+          invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
+            requestId: requestId,
+            rejection: const PatchbayRejection(code: 'notRegistered'),
+          ).toJson(),
+        );
+
+        await expectLater(host.dispatchCatalog(), throwsStateError);
+      }
+    },
+  );
+
+  test('service host replaces invalid provider invocation envelopes', () async {
+    final PatchbayServiceHost host = PatchbayServiceHost(
+      applicationId: 'dev.patchbay.test',
+      registrar: (_, _) {},
+      catalog: () async => const <String, Object?>{},
+      snapshot: () async => const <String, Object?>{},
+      invoke: (_, _, _) async => PatchbayInvocation.accepted(
+        requestId: 'provider-generated-id',
+      ).toJson(),
+    );
+
+    final Map<String, Object?> result = await host.dispatchInvoke(
+      'device.select',
+      const <String, Object?>{},
+      'caller-request-id',
+    );
+
+    expect(result['requestId'], 'caller-request-id');
+    expect(result['admission'], 'rejected');
+    expect(
+      (result['rejection']! as Map<String, Object?>)['code'],
+      'providerProtocolViolation',
+    );
+    expect(
+      ((result['rejection']! as Map<String, Object?>)['details']!
+          as Map<String, Object?>)['reason'],
+      'requestIdMismatch',
+    );
+  });
+
+  test(
+    'service host rejects empty request IDs before provider dispatch',
+    () async {
+      var providerCalled = false;
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'dev.patchbay.test',
+        registrar: (_, _) {},
+        catalog: () async => const <String, Object?>{},
+        snapshot: () async => const <String, Object?>{},
+        invoke: (_, _, requestId) async {
+          providerCalled = true;
+          return PatchbayInvocation.accepted(requestId: requestId).toJson();
+        },
+      );
+
+      await expectLater(
+        host.dispatchInvoke('device.select', const <String, Object?>{}, ''),
+        throwsArgumentError,
+      );
+      expect(providerCalled, isFalse);
+    },
+  );
+
+  test('service host rejects semantically contradictory envelopes', () async {
+    final PatchbayServiceHost host = PatchbayServiceHost(
+      applicationId: 'dev.patchbay.test',
+      registrar: (_, _) {},
+      catalog: () async => const <String, Object?>{},
+      snapshot: () async => const <String, Object?>{},
+      invoke: (_, _, requestId) async => <String, Object?>{
+        ...PatchbayInvocation.accepted(requestId: requestId).toJson(),
+        'rejection': const <String, Object?>{'code': 'contradiction'},
+      },
+    );
+
+    final Map<String, Object?> result = await host.dispatchInvoke(
+      'device.select',
+      const <String, Object?>{},
+      'caller-request-id',
+    );
+    expect(
+      ((result['rejection']! as Map<String, Object?>)['details']!
+          as Map<String, Object?>)['reason'],
+      'acceptedWithRejection',
+    );
+  });
+
   group('Patchbay invocation envelope', () {
     test('expresses admission without completion-like outer fields', () {
       final Map<String, Object?> json = PatchbayInvocation.accepted(
@@ -316,8 +464,90 @@ void main() {
     // still in flight has to stay observable.
     expect(jobs.snapshot(running), isNotNull);
     expect(jobs.snapshot(settled.first), isNull);
+    expect(jobs.snapshot(settled[2]), isNull);
+    expect(jobs.snapshot(settled[3]), isNotNull);
     expect(jobs.snapshot(settled.last), isNotNull);
+    expect(jobs.runningJobs, 1);
+    expect(jobs.settledJobs, 3);
+    expect(jobs.totalJobs, 4);
     pending.complete(const <String, Object?>{'ok': true});
+  });
+
+  test('job registry enforces a configurable running-job budget', () async {
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry(maxRunningJobs: 2);
+    final Completer<Map<String, Object?>> first =
+        Completer<Map<String, Object?>>();
+    final Completer<Map<String, Object?>> second =
+        Completer<Map<String, Object?>>();
+    jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => first.future,
+    );
+    jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => second.future,
+    );
+
+    expect(
+      () => jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () async => const <String, Object?>{},
+      ),
+      throwsA(
+        isA<PatchbayJobCapacityExceeded>().having(
+          (PatchbayJobCapacityExceeded error) => error.maxRunningJobs,
+          'maxRunningJobs',
+          2,
+        ),
+      ),
+    );
+    expect(jobs.runningJobs, 2);
+
+    first.complete(const <String, Object?>{});
+    await Future<void>.delayed(Duration.zero);
+    final String replacement = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () async => const <String, Object?>{},
+    );
+    expect(replacement, isNotEmpty);
+    second.complete(const <String, Object?>{});
+  });
+
+  test('job cancellation timeout leaves completion state unclaimed', () async {
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry(
+      cancellationTimeout: const Duration(milliseconds: 1),
+    );
+    final Completer<Map<String, Object?>> body =
+        Completer<Map<String, Object?>>();
+    final Completer<void> cancellation = Completer<void>();
+    final String jobId = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => body.future,
+      cancel: () => cancellation.future,
+    );
+
+    await expectLater(jobs.cancel(jobId), throwsA(isA<TimeoutException>()));
+    expect(jobs.snapshot(jobId)?.terminal, isFalse);
+    expect(jobs.runningJobs, 1);
+
+    cancellation.complete();
+    body.complete(const <String, Object?>{});
+  });
+
+  test('job without cancellation capability stays running', () async {
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+    final Completer<Map<String, Object?>> body =
+        Completer<Map<String, Object?>>();
+    final String jobId = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => body.future,
+    );
+
+    expect(await jobs.cancel(jobId), isFalse);
+    expect(jobs.snapshot(jobId)?.terminal, isFalse);
+    expect(jobs.runningJobs, 1);
+
+    body.complete(const <String, Object?>{});
   });
 
   test(

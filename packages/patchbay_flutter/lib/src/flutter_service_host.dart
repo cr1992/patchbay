@@ -101,6 +101,7 @@ final class PatchbayFlutterServiceHost {
              return (await bridge.semantics.snapshot(
                maxDepth: maxDepth as int? ?? 64,
                maxNodes: maxNodes as int? ?? 1000,
+               requestId: requestId,
              )).toJson();
            }
            if (command == 'ui.semantics.action') {
@@ -134,6 +135,7 @@ final class PatchbayFlutterServiceHost {
                action: action,
                text: text as String?,
                inputWasStdin: arguments['inputWasStdin'] == true,
+               requestId: requestId,
              )).toJson();
            }
            if (command == 'ui.wait') {
@@ -237,12 +239,14 @@ final class PatchbayFlutterServiceHost {
                generation: generation,
                text: text,
                inputWasStdin: stdin,
+               requestId: requestId,
              ),
              'ui.text.enter' => await bridge.enterText(
                id: id,
                generation: generation,
                text: text,
                inputWasStdin: stdin,
+               requestId: requestId,
              ),
              _ => throw StateError('unreachable UI command $command'),
            };

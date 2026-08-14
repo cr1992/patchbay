@@ -57,6 +57,8 @@ Android、iOS 与 HarmonyOS 都只消费本包的 `dart:io` socket；package 本
 
 `invoke` 仅增加 `command`、`arguments` 和 `requestId`。command 是否存在、参数 schema、gate、并发所有权
 和事实强度继续由注入 handler 负责；transport 不从字符串推导命令，也不把 `accepted` 升级为执行成功。
+Direct client 会验证 handler result 回显同一个 `requestId`；不一致返回 `requestIdMismatch`，不会作为
+业务结果交给调用方。空 `requestId` 在发送前以 `protocolError` 拒绝。
 
 成功响应固定包含 schema、复核后的完整 identity 与 handler result。错误响应只含稳定 code：
 `protocolError`、`unauthorized`、`expired`、`busy`、`bodyTooLarge`、`responseTooLarge`、`originDenied`、

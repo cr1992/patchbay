@@ -76,6 +76,10 @@ registry 不因为 Key 对象存在就宣称目标已挂载：
 因此页面退出后，针对旧实例的迟到命令会以 `uiTargetNotFound`、`uiTargetUnmounted` 或
 `uiGenerationStale` 拒绝，不会写入后来出现的同名控件。
 
+通过 `PatchbayFlutterServiceHost` 调用时，text 与 Semantics operator 会沿用 transport 传入的
+`requestId`；bridge 只在被直接调用且调用方未提供 ID 时生成本地 ID。这样日志、CLI 输出和 invocation
+信封可以稳定关联到同一次请求。
+
 ## 文本语义
 
 当前支持两种不同语义：

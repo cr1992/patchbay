@@ -72,6 +72,13 @@ adapter 复用 App 现有 controller 和状态机。Patchbay 负责协议与边�
 所有载荷带 `schemaVersion`。`appInstanceId` 在同一 isolate 内稳定，hot restart 后必须变化。客户端连接后
 会重新校验 schema、isolate 和 App 实例，不能只凭 PID 或旧 URI 判断会话仍有效。
 
+`schemaVersion` 由 host 拥有，接入方回调不能覆盖。catalog 中 command name 必须非空且全局唯一；
+invocation 返回值必须是合法 wire envelope，并回显同一个 `requestId`。违反这些 provider 契约时 host
+返回 `providerProtocolViolation`，不会把无法关联或无法解析的结果继续交给客户端。
+
+Command catalog 行必须是带合法 dotted `name` 的对象，不接受字符串缩写。`requestId` 必须非空；
+accepted 信封不能带 rejection，rejected 信封必须带 rejection 且不能带 payload / jobId。
+
 ## 受理信封与事实来源
 
 外层信封只表达 handler 是否接纳请求：
@@ -136,6 +143,18 @@ fail-closed。
 3. 每个事件有单调 sequence、时间、phase、source 和 payload；
 4. 取消只终止对应 job，不推导外部系统已经停止；
 5. App / isolate 消失时由客户端以连接终止收尾，不伪造 App job 终态。
+
+Registry 默认最多同时运行 32 个 job，并保留最近 200 个已结束 job；两项都可在构造时调整，但必须是
+有限正整数。达到运行上限时 `start()` 在启动 body 之前抛出 `PatchbayJobCapacityExceeded`，接入方应
+转换成稳定 admission rejection。取消回调默认最多等待 5 秒；超时后 job 保持 running，因为“取消请求
+超时”不能证明底层操作已经停止。
+
+未提供 cancellation callback 时，`cancel()` 返回 `false` 并保持 running。callback 正常返回代表接入方
+确认底层操作已经停止；如果 controller 的 API 只表示“取消请求已发送”，adapter 必须继续等待真实取消
+终态，不能立即返回 callback。
+
+因此 registry 中可观察记录的理论上限是 `maxRunningJobs + retainedJobs`。`runningJobs`、
+`settledJobs` 和 `totalJobs` 可用于接入方健康检查，但不是业务完成性的替代证据。
 
 如果接入方的异步 API 只表示“请求已发出”，不能在该 Future 返回时直接标记 `completed`；必须继续观察
 领域状态，直到 App 能给出真实终态。`suggestedWaitTimeoutMs` 只建议客户端观察窗口，不改变完成语义。
