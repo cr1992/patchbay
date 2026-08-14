@@ -11,6 +11,7 @@ import 'client.dart';
 import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
+import 'doctor.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -73,6 +74,28 @@ Future<int> runPatchbayCli(
       );
       return PatchbayExitCode.accepted;
     }
+    // Doctor owns its own dial for the same reason: a failed connection is its
+    // subject matter, not its failure mode, so it must not be routed through
+    // the dispatcher's dial-then-execute path — that path is the one whose
+    // errors doctor exists to explain.
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localDiagnostics) {
+      // Resolved only for its shape policing: doctor takes no arguments and no
+      // command options, and that rule stays derived from the same table as
+      // every other command instead of being re-stated here.
+      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
+      final PatchbayDoctorReport report = await runPatchbayDoctor(
+        options: parsed,
+        connect: connect ?? _connect,
+        rpcTimeout: _rpcTimeout(parsed),
+      );
+      out.writeln(
+        json
+            ? const JsonEncoder.withIndent('  ').convert(report.toJson())
+            : report.render().trimRight(),
+      );
+      return report.exitCode;
+    }
     final bool repl = _isRepl(parsed);
     if (repl) {
       // Resolve the declaration purely for its option policing: `repl` accepts
@@ -87,10 +110,22 @@ Future<int> runPatchbayCli(
     // the discovery handshake is a round trip like any other.
     final Duration rpcTimeout = _rpcTimeout(parsed);
     connection = PatchbayTimeoutClient(
-      await _dial(connect ?? _connect, parsed, rpcTimeout),
+      await dialPatchbayUnderBudget(
+        () => (connect ?? _connect)(parsed),
+        rpcTimeout: rpcTimeout,
+      ),
       rpcTimeout: rpcTimeout,
     );
     if (repl) {
+      // A session is opened once and then typed into, so the one moment it is
+      // cheap to check the lifecycle is here: an operator who starts a session
+      // against a screen-off device would otherwise learn it one refused
+      // command at a time. The banner goes to stderr because `--json` promises
+      // stdout carries only command results.
+      if (await patchbayLifecyclePreflightBanner(connection)
+          case final String banner) {
+        error.writeln(banner);
+      }
       return await PatchbayReplSession(
         parser: parser,
         // One connection, every line: this closure is the only thing the loop
@@ -232,50 +267,7 @@ Future<int> runPatchbayCli(
       exitCode: PatchbayExitCode.transport,
     );
   } finally {
-    await _closeQuietly(connection);
-  }
-}
-
-/// Opens the connection under the RPC budget, leaving nothing behind if the
-/// budget runs out first.
-///
-/// A dial the CLI stopped waiting for may still succeed a moment later. Nobody
-/// will ever read from it, so it is closed rather than left open against an App
-/// nobody is talking to. This is the half that can be cleaned up; the half that
-/// cannot — a WebSocket handshake still stuck inside the transport — is why
-/// `bin/patchbay.dart` ends the process on the command's result instead of
-/// waiting for the event loop to drain.
-Future<PatchbayClient> _dial(
-  Future<PatchbayClient> Function(ArgResults) connect,
-  ArgResults parsed,
-  Duration rpcTimeout,
-) async {
-  final Future<PatchbayClient> dialing = connect(parsed);
-  try {
-    return await awaitPatchbayRpc(dialing, rpcTimeout: rpcTimeout);
-  } on PatchbayTransportException {
-    unawaited(
-      dialing
-          .then((PatchbayClient abandoned) => abandoned.close())
-          // A dial that fails after being abandoned has no one left to tell.
-          .catchError((Object _) {}),
-    );
-    rethrow;
-  }
-}
-
-/// Releases the connection without letting teardown become the thing that hangs.
-///
-/// The command has already produced its result. A peer that stopped answering
-/// must not get a second chance to hold the CLI open while the transport says
-/// goodbye, and a failed goodbye cannot be allowed to replace an outcome that
-/// was already decided and written.
-Future<void> _closeQuietly(PatchbayClient? connection) async {
-  if (connection == null) return;
-  try {
-    await connection.close().timeout(const Duration(seconds: 2));
-  } on Object {
-    // Nothing about this changes what the command answered.
+    await closePatchbayQuietly(connection);
   }
 }
 
@@ -755,6 +747,10 @@ Future<_Execution> _execute(
       // Answered before the dial, and refused inside a repl, so this arm is
       // unreachable for the same reason the one above is.
       throw StateError('session-directory commands run without a connection');
+    case PatchbayCommandTarget.localDiagnostics:
+      // Answered before the dial as well: doctor dials for itself so that a
+      // failed dial becomes a finding instead of ending the command.
+      throw StateError('doctor owns its own connection');
     case PatchbayCommandTarget.declaredServiceCommand:
     case PatchbayCommandTarget.callerServiceCommand:
       final String command = friendly.serviceCommand!;
