@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+诊断完备性批次：等待 App 的路径全部有超时预算并可诊断，拒绝信封不再有空 `details`。
+
 ### Changed
 
 - CLI `--transport-timeout-ms` 从「仅 direct 传输的 socket 预算、其他路径静默忽略」改为**两条传输
@@ -15,6 +17,52 @@
 
   **迁移：** 依赖旧的 60 秒 direct 预算、或依赖「VM Service 路径永不超时」的脚本，需要显式传
   `--transport-timeout-ms`。direct 传输原先的 `timeout` 错误码统一成 `appUnresponsive`（见下）。
+
+### Fixed
+
+- **CLI 等待 App 应答的路径原先没有超时预算**（VM Service 路径完全没有，direct 只有自己那份）。
+  Android 真机实测：息屏后系统冻结 App 进程，对端停止应答，CLI 要等底层 socket 自己死掉（>120 秒）
+  才以裸 `HttpException` 收场，看上去与「卡住」无法区分。现在每次 RPC 往返都有预算（见上），
+  耗尽时以退出码 `3` 和稳定 code `appUnresponsive` 失败，并附一句处置提示（冻结 / 息屏 / 挂起 →
+  亮屏解锁或检查进程；`--json` 时在 `details.hint`）。direct 传输自己的 `timeout` 码归一到同一个
+  `appUnresponsive`，脚本对「对端不应答」只需认一个码。
+- CLI `catalogInvocationDrift` 不再吞掉 host 已经给出的目录违规原因。host 目录违规时会在 invoke
+  应答的 `rejection.details.catalog` 里说明哪条命令名非法或重名，CLI 原先只抛一个裸码，操作者还得
+  再跑一次 `patchbay catalog` 才能知道刚才那次应答已经说过的话。现在原样透传到错误信封的
+  `details.catalog`，并附 `details.command` / `rejection` / `reason`；invoke 未重复时回退到 catalog
+  读到的那份。
+- `invalidUiArguments` 不再是裸码。九处 UI 参数校验路径的 `details` 现在指名：`missing`（声明为
+  必填却缺席）、`unexpected`（命令未声明的键，只在真正执行白名单的调用点计算）、`invalid`（类型或
+  枚举取值不符），全部从 host 已经在发布的 descriptor 推导，不是另抄一份命令形状。`ui.wait` 的
+  条件相关形状规则（`semanticsValue` 要有 `value`、revision 等待不许带 identifier）不是任何单个键
+  能表达的，额外由 `details.reason` 承载。**只走参数名等协议词汇，调用方的值不进信封。**
+- 同一类的三个越界拒绝也补上 details：`invalidCaptureArguments`、`invalidNavigationArguments` 与
+  `invalidUiTreeLimits` 现在以 `details.invalid` 指名越界的是哪个参数，前两个还附上被越过的上界
+  （`maxTimeoutMs` / `maxPixelRatio`）。此前一个合理但超限的数字被拒时，调用方既不知道是哪个参数
+  也不知道界在哪。
+- `uiLifecycleNotResumed` / `uiWaitLifecycleNotResumed` / `navigationLifecycleNotResumed` /
+  `captureLifecycleNotResumed` 带上 `details.lifecycleState`。此前四个码都不带 details，操作者只知道
+  闸关了，分不清设备睡了、窗口只是失焦、还是 App 正在退出——而三种的处置完全不同。
+
+### Added
+
+- `PatchbayLifecycleStateReader` 与 `patchbayLifecycleReaderFor` / `patchbayLifecycleDetails`：
+  生命周期状态的**诊断接缝**，判定权仍在 `isAppResumed`。`PatchbayFlutterBridge` 及四个桥新增可选
+  `lifecycleState` 参数；不传时 reader 跟随判定接缝——默认判定读 binding，被覆写的判定如实报
+  `unknown`，避免出现「拒绝说没 resumed、details 说 resumed」的自相矛盾信封。既有接入方不受影响。
+- `patchbay_cli` 导出 `patchbayDefaultRpcTimeout` / `patchbayRpcBudget` / `awaitPatchbayRpc` /
+  `PatchbayTimeoutClient` / `patchbayAppUnresponsiveCode` / `patchbayAppUnresponsiveHint`；
+  `PatchbayProtocolException` 增加 `details`，由错误信封原样输出。
+
+## 0.2.0 - 2026-08-14
+
+四包同步定版（tag `patchbay-v0.2.0`）。含协议正确性批次、repl 会话与 `ui tap` 直达、
+Job 资源控制、`inputWasStdin` 框架层收编、CLI 契约六项与 catalog 校验失败结构化上报；
+双 consumer 验证（moii Android 真机 + hirobot macOS/iOS E2E）。升级前必读本节各迁移说明
+（命令名 kebab 禁用、手写 adapter 两步迁移）。
+
+### Changed
+
 - 命令名语法收紧为 `^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$`：每段以小写字母开头，段内只允许
   字母和数字，**段内连字符不再合法**。canonical 命令名是这道校验的目的，不放宽。
 
@@ -54,29 +102,6 @@
 
 ### Fixed
 
-- **CLI 等待 App 应答的路径原先没有超时预算**（VM Service 路径完全没有，direct 只有自己那份）。
-  Android 真机实测：息屏后系统冻结 App 进程，对端停止应答，CLI 要等底层 socket 自己死掉（>120 秒）
-  才以裸 `HttpException` 收场，看上去与「卡住」无法区分。现在每次 RPC 往返都有预算（见上），
-  耗尽时以退出码 `3` 和稳定 code `appUnresponsive` 失败，并附一句处置提示（冻结 / 息屏 / 挂起 →
-  亮屏解锁或检查进程；`--json` 时在 `details.hint`）。direct 传输自己的 `timeout` 码归一到同一个
-  `appUnresponsive`，脚本对「对端不应答」只需认一个码。
-- CLI `catalogInvocationDrift` 不再吞掉 host 已经给出的目录违规原因。host 目录违规时会在 invoke
-  应答的 `rejection.details.catalog` 里说明哪条命令名非法或重名，CLI 原先只抛一个裸码，操作者还得
-  再跑一次 `patchbay catalog` 才能知道刚才那次应答已经说过的话。现在原样透传到错误信封的
-  `details.catalog`，并附 `details.command` / `rejection` / `reason`；invoke 未重复时回退到 catalog
-  读到的那份。
-- `invalidUiArguments` 不再是裸码。九处 UI 参数校验路径的 `details` 现在指名：`missing`（声明为
-  必填却缺席）、`unexpected`（命令未声明的键，只在真正执行白名单的调用点计算）、`invalid`（类型或
-  枚举取值不符），全部从 host 已经在发布的 descriptor 推导，不是另抄一份命令形状。`ui.wait` 的
-  条件相关形状规则（`semanticsValue` 要有 `value`、revision 等待不许带 identifier）不是任何单个键
-  能表达的，额外由 `details.reason` 承载。**只走参数名等协议词汇，调用方的值不进信封。**
-- 同一类的三个越界拒绝也补上 details：`invalidCaptureArguments`、`invalidNavigationArguments` 与
-  `invalidUiTreeLimits` 现在以 `details.invalid` 指名越界的是哪个参数，前两个还附上被越过的上界
-  （`maxTimeoutMs` / `maxPixelRatio`）。此前一个合理但超限的数字被拒时，调用方既不知道是哪个参数
-  也不知道界在哪。
-- `uiLifecycleNotResumed` / `uiWaitLifecycleNotResumed` / `navigationLifecycleNotResumed` /
-  `captureLifecycleNotResumed` 带上 `details.lifecycleState`。此前四个码都不带 details，操作者只知道
-  闸关了，分不清设备睡了、窗口只是失焦、还是 App 正在退出——而三种的处置完全不同。
 - CLI `--wait` 的终态结果在响应顶层回填 `jobId`，与受理信封口径一致；`payload.jobId` 保留为 App
   job snapshot 字段。人读摘要对终态 job 输出 `jobId=… terminal=true phase=…`，不再吞掉 outcome。
 - CLI 下载 artifact 时不再写死 64 KiB 分块：host 把 `maxChunkBytes` 调小于该值时，原先每个
@@ -108,13 +133,6 @@
 
 ### Added
 
-- `PatchbayLifecycleStateReader` 与 `patchbayLifecycleReaderFor` / `patchbayLifecycleDetails`：
-  生命周期状态的**诊断接缝**，判定权仍在 `isAppResumed`。`PatchbayFlutterBridge` 及四个桥新增可选
-  `lifecycleState` 参数；不传时 reader 跟随判定接缝——默认判定读 binding，被覆写的判定如实报
-  `unknown`，避免出现「拒绝说没 resumed、details 说 resumed」的自相矛盾信封。既有接入方不受影响。
-- `patchbay_cli` 导出 `patchbayDefaultRpcTimeout` / `patchbayRpcBudget` / `awaitPatchbayRpc` /
-  `PatchbayTimeoutClient` / `patchbayAppUnresponsiveCode` / `patchbayAppUnresponsiveHint`；
-  `PatchbayProtocolException` 增加 `details`，由错误信封原样输出。
 - `ui.semantics.tap`：按稳定 Semantics identifier 一步完成解析、代际校验与派发，取代
   `ui.semantics.tree` + `ui.semantics.action` 两跳；CLI 侧为 `patchbay ui tap <identifier>`，
   `--generation` 可选。解析出的 generation 在过门前 pin 住，门后二次解析必须命中同一 generation；
