@@ -232,10 +232,29 @@ Future<PatchbayDoctorReport> runPatchbayDoctor({
   required Future<PatchbayClient> Function(ArgResults options) connect,
   required Duration rpcTimeout,
 }) async {
-  final List<PatchbayDoctorFinding> findings = <PatchbayDoctorFinding>[
-    patchbaySessionDirectoryFinding(options),
-  ];
+  final PatchbayDoctorFinding session = patchbaySessionDirectoryFinding(
+    options,
+  );
+  final List<PatchbayDoctorFinding> findings = <PatchbayDoctorFinding>[session];
   final List<PatchbayDoctorWarning> warnings = <PatchbayDoctorWarning>[];
+
+  // A session check that failed has already established there is nothing to
+  // dial. Dialling anyway would spend the RPC budget re-deriving what the
+  // directory said, and would report it a second time in weaker words.
+  if (session.verdict == PatchbayCheckVerdict.failed) {
+    return PatchbayDoctorReport(
+      findings: <PatchbayDoctorFinding>[
+        session,
+        _skipped(
+          PatchbayDoctorCheck.connection,
+          'no session resolves, so there is nothing to dial',
+        ),
+        _skipped(PatchbayDoctorCheck.catalog, _noConnection),
+        _skipped(PatchbayDoctorCheck.lifecycle, _noConnection),
+      ],
+      warnings: warnings,
+    );
+  }
 
   PatchbayClient? connection;
   try {
@@ -253,14 +272,8 @@ Future<PatchbayDoctorReport> runPatchbayDoctor({
       patchbayFailureFinding(PatchbayDoctorCheck.connection, failure),
     );
     findings.addAll(<PatchbayDoctorFinding>[
-      _skipped(
-        PatchbayDoctorCheck.catalog,
-        'there is no connection to read it',
-      ),
-      _skipped(
-        PatchbayDoctorCheck.lifecycle,
-        'there is no connection to probe it',
-      ),
+      _skipped(PatchbayDoctorCheck.catalog, _noConnection),
+      _skipped(PatchbayDoctorCheck.lifecycle, _noConnection),
     ]);
     // The one warning that must survive a failed connection: an operator whose
     // App stopped answering is one keystroke away from force-stopping it, and
@@ -661,23 +674,17 @@ String? patchbayLifecycleBanner(PatchbayDoctorFinding finding) {
   ].join('\n');
 }
 
-/// Probes the lifecycle for a session that is about to start, quietly.
+/// The banner for one command response, or `null` for anything else.
 ///
-/// Any failure produces no banner at all. The preflight is a courtesy ahead of
-/// the first command, and the first command reports its own errors with far
-/// more context than a banner could; turning a probe failure into a second,
-/// earlier error message would only make the session harder to read.
-Future<String?> patchbayLifecyclePreflightBanner(
-  PatchbayClient connection,
-) async {
-  try {
-    return patchbayLifecycleBanner(
-      await probePatchbayLifecycle(connection, await connection.catalog()),
-    );
-  } on Object {
-    return null;
-  }
-}
+/// This is how a session warns without sending anything: the lifecycle is read
+/// out of a refusal the App produced anyway, rather than out of a probe of the
+/// CLI's own. That distinction is not stylistic — the only read-only command
+/// gated on the lifecycle builds the semantics tree, which calls
+/// `ensureSemantics()` and schedules frames. Doctor may do that because an
+/// operator asked it to and its help says so; a session that merely opened may
+/// not change the App it is about to observe.
+String? patchbayLifecycleBannerFor(Map<String, Object?> response) =>
+    patchbayLifecycleBanner(patchbayLifecycleFinding(response));
 
 /// Reads the snapshot and reports any live business session it declares.
 Future<List<PatchbayDoctorWarning>> _readSnapshotWarnings(
@@ -700,7 +707,12 @@ Future<List<PatchbayDoctorWarning>> _readSnapshotWarnings(
   return patchbayActiveSessionWarnings(snapshot);
 }
 
-/// How deep into a snapshot the active-session scan looks.
+/// How many nested keys below the snapshot root the scan will walk.
+///
+/// Bounded because the snapshot is consumer data of unknown shape and this is
+/// a diagnosis: a scan that could recurse without limit would turn "tell me
+/// what is wrong" into another thing that hangs. Five levels reaches
+/// `domain.a.b.c.d.active` and stops.
 const int _activeScanDepth = 5;
 
 /// How many active paths one report names before it stops listing them.
@@ -837,6 +849,9 @@ String _failureCode(Object failure) => switch (failure) {
   PatchbaySessionException(:final String code) => code,
   _ => '${failure.runtimeType}',
 };
+
+/// Why the checks downstream of a connection did not run.
+const String _noConnection = 'there is no connection to reach the App with';
 
 PatchbayDoctorFinding _skipped(PatchbayDoctorCheck check, String reason) =>
     PatchbayDoctorFinding(

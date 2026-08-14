@@ -117,15 +117,6 @@ Future<int> runPatchbayCli(
       rpcTimeout: rpcTimeout,
     );
     if (repl) {
-      // A session is opened once and then typed into, so the one moment it is
-      // cheap to check the lifecycle is here: an operator who starts a session
-      // against a screen-off device would otherwise learn it one refused
-      // command at a time. The banner goes to stderr because `--json` promises
-      // stdout carries only command results.
-      if (await patchbayLifecyclePreflightBanner(connection)
-          case final String banner) {
-        error.writeln(banner);
-      }
       return await PatchbayReplSession(
         parser: parser,
         // One connection, every line: this closure is the only thing the loop
