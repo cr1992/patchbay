@@ -216,6 +216,19 @@ final class PatchbayReplSession {
         'the connection is already chosen; run them as a one-shot instead',
       );
     }
+    // Doctor is about how a connection gets established, and it answers with a
+    // verdict rather than an admission envelope — so a repl line could neither
+    // exercise the dial it is about nor carry its result through the per-line
+    // exit code every other line uses. The session prints its own lifecycle
+    // preflight when it opens; the rest is a one-shot.
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localDiagnostics) {
+      throw const FormatException(
+        'doctor is unavailable inside a repl session: it diagnoses how a '
+        'connection is established, and this session already holds one; run '
+        'it as a one-shot instead',
+      );
+    }
   }
 
   void _writeResult(
