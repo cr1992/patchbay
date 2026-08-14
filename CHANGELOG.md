@@ -91,6 +91,10 @@
   不了或不合法时 fail-closed 退到 `64`，稳定 code `manifestInvalid` / `manifestUnreadable`，
   `details.field` 指到具体位置（形如 `$.targets[2].kind`）；文件内容本身不进信封。
 
+  **读文件在拨号之前。** manifest 是本地输入，写错与设备连不连得上无关，所以离线机器上写 manifest
+  照样拿到文件本身的错，不会被 `sessionDirectoryEmpty` 之类的会话错盖过——那句话是真的，但说的
+  不是作者此刻能改的那件事。repl 内不受影响：那条连接已经建好，这一行没有拨号可言。
+
   schema 与边界见[使用指南](docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件
   [`docs/examples/ui-targets-manifest.json`](docs/examples/ui-targets-manifest.json)。
 
