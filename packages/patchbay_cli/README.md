@@ -1,32 +1,39 @@
 # Patchbay CLI
 
-`patchbay_cli` 是 Patchbay 的 consumer-neutral 命令行客户端。它连接运行中的 Dart/Flutter App，
-根据 App 实际返回的 catalog 调用命令，不依赖 consumer 代码，也不维护业务命令副本。
+English | [简体中文](README.zh-CN.md)
 
-协议、生命周期和传输边界见 [`../patchbay/README.md`](../patchbay/README.md)，Flutter UI 控制面见
-[`../patchbay_flutter/README.md`](../patchbay_flutter/README.md)。
+`patchbay_cli` is Patchbay's consumer-neutral command line client. It connects to a running
+Dart/Flutter app and invokes commands based on the catalog that app actually returns — with no
+dependency on consumer code and no local copy of the domain commands.
 
-## 安装与运行
+For the protocol, lifecycle, and transport boundaries see
+[`../patchbay/README.md`](../patchbay/README.md); for the Flutter UI control plane see
+[`../patchbay_flutter/README.md`](../patchbay_flutter/README.md).
 
-当前 package 尚未发布到 pub.dev，可以从仓库 tag 安装：
+## Install and Run
+
+These packages are not published to pub.dev yet; you can install from a repository tag:
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
     --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
-$ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
+$ export PATH="$PATH":"$HOME/.pub-cache/bin"   # it installs here, but that is not on PATH by default
 $ patchbay --help
 ```
 
-三种安装形态的取舍（含 `0.3.0` 起的预编译二进制、启动耗时对比，以及「在接入方仓目录里
-`dart run patchbay_cli:patchbay` 会解析到该仓 pin 的版本」这个坑）见
-[使用指南的安装节](../../docs/guide.md#安装)。改 CLI 本身时，`dart run tool/build_cli.dart`
-把当前工作树编成 AOT 可执行文件，产物落在 `build/`。
+For the trade-offs between the three installation forms — including the prebuilt binaries from
+`0.3.0` onward, a startup-time comparison, and the trap that running
+`dart run patchbay_cli:patchbay` inside a consumer's repository directory resolves to the version
+that repo pins — see [the installation section of the usage guide](../../docs/guide.md#安装)
+(currently in Chinese). When changing the CLI itself, `dart run tool/build_cli.dart` compiles the
+current working tree into an AOT executable, with the output landing in `build/`.
 
-以下示例统一写 `dart run bin/patchbay.dart`（包内开发姿势）；全局安装后可等价替换为 `patchbay`。
+The examples below consistently write `dart run bin/patchbay.dart` (the in-package development
+form); after a global install, substitute `patchbay` for it.
 
-## 命令速查
+## Command Reference
 
-查看帮助不会发现会话、连接 App 或读取 bearer/敏感 stdin：
+Viewing help does not discover sessions, connect to the app, or read a bearer / sensitive stdin:
 
 ```text
 dart run bin/patchbay.dart --help
@@ -36,17 +43,19 @@ dart run bin/patchbay.dart help job
 dart run bin/patchbay.dart help ui
 dart run bin/patchbay.dart logs --help
 dart run bin/patchbay.dart ui widget-tree --help
-dart run bin/patchbay.dart help navigation.go     # catalog 里的协议名也是 topic
-dart run bin/patchbay.dart help ui.wait           # 多个命令共用一个协议名时列出它们
-dart run bin/patchbay.dart help navigate          # 别名拼写，展开到既有路径
+dart run bin/patchbay.dart help navigation.go     # protocol names from the catalog are topics too
+dart run bin/patchbay.dart help ui.wait           # lists every command sharing one protocol name
+dart run bin/patchbay.dart help navigate          # alias spelling, expands to the existing path
 ```
 
-help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（`navigation.go`、
-`ui.semantics.tap`）、以及别名（`navigate` / `nav` / `wait` / `tap` / `text` / `semantics`，以及
-`ui wait <condition>` 形式的 condition 名）。别名只是既有声明的另一种拼写，不新增命令，也不改任何
-稳定名；没有任何声明发送的协议名仍是 `unknown help topic`。
+A help topic accepts three spellings: the CLI path (`ui wait`), the catalog protocol name
+(`navigation.go`, `ui.semantics.tap`), and aliases (`navigate` / `nav` / `wait` / `tap` / `text` /
+`semantics`, plus condition names in the `ui wait <condition>` form). Aliases are just another
+spelling of an existing declaration — they add no commands and change no stable name; a protocol
+name that no declaration ships is still an `unknown help topic`.
 
-由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：
+Once the app is launched by the `flutter run --machine` launcher, the CLI discovers the unique
+current session from the user's temp directory by default:
 
 ```text
 dart run bin/patchbay.dart --json identity
@@ -55,26 +64,30 @@ dart run bin/patchbay.dart --json snapshot
 dart run bin/patchbay.dart --json exec <namespace.command>
 ```
 
-上面任何一步不通时先跑体检——它自己拨号，因此拨不通是它的一条 finding，而不是命令终止：
+When any of the steps above does not work, run the health check first — it dials out itself, so a
+failed connection is one of its findings rather than the end of the command:
 
 ```text
-dart run bin/patchbay.dart doctor          # 会话 / 连接 / catalog / lifecycle 逐项
+dart run bin/patchbay.dart doctor          # session / connection / catalog / lifecycle, item by item
 dart run bin/patchbay.dart --json doctor
 ```
 
-四项按依赖顺序查，每项给「现象 → 可能原因 → 建议动作」，前一项失败时后面标 `skipped`；退出码取
-第一处 failed 的类别（会话 / 连接 `3`、catalog `4`、lifecycle `5`），只有 warning 时是 `0`。它还会
-读一次 snapshot，扫到为 `true` 的布尔 `active` 就打出路径并劝阻 `force-stop` / `kill`——设备上可能
-有正在进行的业务会话。完整语义见 [`../../docs/guide.md`](../../docs/guide.md)。
+The four items are checked in dependency order, each giving "symptom → possible cause → suggested
+action", and once one fails the rest are marked `skipped`. The exit code takes the category of the
+first failure (session / connection `3`, catalog `4`, lifecycle `5`); with warnings only it is `0`.
+It also reads a snapshot once, and on finding any boolean `active` set to `true` it prints the path
+and advises against `force-stop` / `kill` — there may be a live business session on the device. For
+the full semantics see [`../../docs/guide.md`](../../docs/guide.md) (currently in Chinese).
 
-多 App 或多 worktree 同时运行时不会按 PID、时间或当前目录猜测。CLI 以
-`sessionAmbiguous` fail-closed，并打印不含 URI 的 session ID；调用方须显式选择：
+With several apps or worktrees running at once, it does not guess by PID, timestamp, or current
+directory. The CLI fails closed with `sessionAmbiguous` and prints the session IDs without URIs;
+the caller must choose explicitly:
 
 ```text
 dart run bin/patchbay.dart --session <session-id> --json identity
 ```
 
-`--ws-uri` 保留为 launcher 记录丢失时的恢复出口：
+`--ws-uri` remains the recovery path for when the launcher record is lost:
 
 ```text
 dart run bin/patchbay.dart --ws-uri <uri> --json identity
@@ -116,38 +129,50 @@ dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
 
-`<generation>` 来自最近一次 catalog 或 Semantics tree。目标重挂载后 generation 会变化；写操作携带
-旧值时会稳定拒绝，避免命令误打到同名的新实例。
+`<generation>` comes from the most recent catalog or Semantics tree. It changes when a target
+remounts; a write carrying a stale value is rejected stably, so a command cannot land on a new
+instance that happens to share the name.
 
-`navigation go|push|back` 省略 `--revision` 时，CLI 先调 `navigation.current` 读当前 revision 再派发，
-结果带 `revisionSource: navigation.current`。围栏不变：revision 照样随请求发出，读到与派发之间导航
-动过照样被 App 以稳定拒绝挡下。显式 `--revision` 保持原行为——不多读一次，也不带该标记。
+When `--revision` is omitted from `navigation go|push|back`, the CLI first calls
+`navigation.current` to read the current revision, then dispatches, and the result carries
+`revisionSource: navigation.current`. The fence is unchanged: the revision still goes out with the
+request, and if navigation moved between the read and the dispatch, the app still blocks it with a
+stable rejection. An explicit `--revision` keeps the original behavior — no extra read, and no such
+marker.
 
-`ui wait <子命令>` 与 payload 里的 `condition` 刻意不同名（`semantics-mounted` ↔ `semanticsMounted`、
-`destination` ↔ `navigationDestination`）。两种拼写都可直接键入，映射表在 `patchbay help ui wait`；
-两边的名字都不会改，它们是 wire 契约。
+The `ui wait <subcommand>` names deliberately differ from the `condition` in the payload
+(`semantics-mounted` ↔ `semanticsMounted`, `destination` ↔ `navigationDestination`). Both spellings
+can be typed directly, and the mapping table is in `patchbay help ui wait`; neither set of names
+will change, because they are wire contracts.
 
-`ui tap <identifier>` 是 `ui semantics tree` + `ui semantics action` 的一步替代：解析、代际校验和派发
-都在 App 侧一次完成，CLI 不构造 nodeId，也不给 generation 补默认值。`--generation` 可选，传了就是
-调用方自己的前置围栏；不传时围栏由 bridge 在过门前 pin 住的 generation 提供。未命中、多义和代际
-过期都是带 details 的稳定拒绝（分别给出已挂载 identifier 清单、候选列表、expected/current），不会用
-空拒绝把调用方推回全树 dump。
+`ui tap <identifier>` is a one-step replacement for `ui semantics tree` + `ui semantics action`:
+resolution, generation checking, and dispatch all happen in one pass on the app side, so the CLI
+neither constructs a nodeId nor supplies a default generation. `--generation` is optional; passing
+it makes it the caller's own up-front fence, and omitting it leaves the fence to the generation the
+bridge pins before the gates. Misses, ambiguity, and stale generations are all stable rejections
+with details (respectively: the list of mounted identifiers, the candidate list, and
+expected/current), so an empty rejection never pushes the caller back to a whole-tree dump.
 
-### UI 目标声明对账
+### UI Target Declaration Reconciliation
 
-`ui verify-manifest <file>` 读一份接入方维护的 JSON manifest，与 catalog 的 `uiTargets` 对账，报
-`declaredNotMounted` / `mountedNotDeclared` / `propertyMismatch` 三类偏差。比对完全在 CLI 侧完成：
-不新增 wire 命令，只用 catalog；manifest 里出现 `destination` 时额外读一次 `navigation.current`
-做范围过滤。schema、字段语义、`destination` 过滤口径与「未挂载 ≠ 丢失」的边界见
-[使用指南](../../docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件在
-[`docs/examples/ui-targets-manifest.json`](../../docs/examples/ui-targets-manifest.json)。
+`ui verify-manifest <file>` reads a JSON manifest maintained by the consumer and reconciles it
+against the catalog's `uiTargets`, reporting three classes of discrepancy: `declaredNotMounted`,
+`mountedNotDeclared`, and `propertyMismatch`. The comparison happens entirely on the CLI side: it
+adds no wire command and uses only the catalog; when a `destination` appears in the manifest, it
+additionally reads `navigation.current` once for scope filtering. For the schema, field semantics,
+`destination` filtering rules, and the "not mounted ≠ missing" boundary, see the
+[usage guide](../../docs/guide.md#ui-目标声明对账ui-verify-manifest) (currently in Chinese); the
+example file is at
+[`docs/examples/ui-targets-manifest.json`](../../docs/examples/ui-targets-manifest.json).
 
-全部相符退出 `0`，报告里有任一类偏差退出 `7`——App 侧一切正常应答，所以它既不是拒绝（`5`）也不是
-类型化失败（`6`）。manifest 读不了或不合法时 fail-closed 退出 `64`，`--json` 给 `manifestInvalid` /
-`manifestUnreadable` 和指到具体位置的 `details.field`。人读输出直接列出偏差条目；repl 内每行只占
-一行，给的是计数。
+Full agreement exits `0`; any class of discrepancy in the report exits `7` — the app side answered
+everything normally, so it is neither a rejection (`5`) nor a typed failure (`6`). An unreadable or
+invalid manifest fails closed with exit code `64`, and `--json` gives `manifestInvalid` /
+`manifestUnreadable` plus a `details.field` pointing at the exact location. Human-readable output
+lists the discrepancy entries directly; inside `repl` each line takes only one line and reports
+counts.
 
-### repl 会话
+### repl Sessions
 
 ```text
 dart run bin/patchbay.dart --ws-uri <uri> --json repl <<'EOF'
@@ -157,69 +182,94 @@ ui tap login.submit
 EOF
 ```
 
-repl 建一次连接，然后逐行执行 typed 命令，语法与一次性调用完全相同。每行输出自带 `exitCode`
-（`--json` 下是一行一个 JSON 信封，否则是 `[n] exit=<code> <摘要>`）：进程退出码承载不了逐条结果，
-会话码只描述会话本身——干净跑完是 `0`，被错误终止则是该错误的类别。
+`repl` opens one connection and then executes typed commands line by line, with exactly the same
+syntax as one-shot invocations. Each line's output carries its own `exitCode` (under `--json`, one
+JSON envelope per line; otherwise `[n] exit=<code> <summary>`): a process exit code cannot carry
+per-line results, so the session code describes only the session itself — `0` for a clean run, or
+the category of the error that terminated it.
 
-被拒绝或类型化失败的行不终止会话；transport / protocol / session 错误终止，因为它们说明复用的连接或
-对端已经不是操作者选定的那个，CLI 不会悄悄重连。
+A rejected or typed-failure line does not end the session; transport / protocol / session errors
+do, because they mean the reused connection or the peer is no longer the one the operator selected,
+and the CLI will not silently reconnect.
 
-以下在 repl 内 fail-closed，不静默忽略：连接类参数与 `--json`（属于会话，逐行给出只能靠重连兑现）、
-`--stdin`（命令流已占住 stdin，没有剩余的 no-echo 通道）、嵌套 `repl`。direct 模式整体不进 repl：
-bearer token 会与命令流抢同一个 stdin。空行与 `#` 开头的行跳过，`exit` / `quit` 或 stdin 关闭结束会话。
+The following fail closed inside `repl` rather than being silently ignored: connection options and
+`--json` (they belong to the session, and honoring them per line would require reconnecting),
+`--stdin` (the command stream already occupies stdin, leaving no no-echo channel), and a nested
+`repl`. Direct mode does not enter `repl` at all: the bearer token would compete with the command
+stream for the same stdin. Blank lines and lines starting with `#` are skipped, and `exit` / `quit`
+or closing stdin ends the session.
 
-### 命令声明一致性
+### Command Declaration Consistency
 
-`PatchbayFriendlyCommand` 是 CLI 里唯一的命令表：路径解析、参数构造、dispatch 与帮助全部由它派生。
-每条声明选择一个 `PatchbayCommandTarget`，`runPatchbayCli` 对该 enum 做无 default 的 switch，因此新增
-命令无法只接上执行而漏掉帮助。`exec` 的协议名来自调用方参数；identity / catalog / snapshot 与三棵
-诊断树走 transport 方法而非 catalog 命令，这些差异也写在声明里。
+`PatchbayFriendlyCommand` is the CLI's single command table: path resolution, argument
+construction, dispatch, and help are all derived from it. Each declaration picks one
+`PatchbayCommandTarget`, and `runPatchbayCli` switches over that enum with no default, so a new
+command cannot be wired for execution while missing its help. `exec`'s protocol name comes from the
+caller's argument; identity / catalog / snapshot and the three diagnostic trees go through
+transport methods rather than catalog commands, and those differences are written into the
+declarations too.
 
-所有命令（含 `exec`、`job`、`ui text`、`ui semantics` 与三棵诊断树）都对无关选项 fail-closed：
-传入该命令不接受的选项时以退出码 `64` 报 `--<name> is not valid for <command>`，不静默忽略。
+Every command (including `exec`, `job`, `ui text`, `ui semantics`, and the three diagnostic trees)
+fails closed on irrelevant options: passing an option that command does not accept reports
+`--<name> is not valid for <command>` with exit code `64` instead of ignoring it silently.
 
-friendly command 只是稳定协议名的通用参数映射，不是另一份 capability 清单。CLI 每次执行仍读取
-App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocationDrift`（`details` 带上 host 自己
-给出的目录违规原因，不必再跑一次 `catalog` 才知道哪条命令名非法），缺失命令仍保留 App 的
-`commandNotRegistered` rejection 和退出码 `4`。CLI 从不按命令数量推断能力。完整命令名仍是协议身份，
-任意 consumer 命令继续使用 `exec <namespace.command>`。
+A friendly command is only a generic argument mapping onto a stable protocol name — not a second
+capability list. The CLI still reads the app's current catalog on every execution; when the catalog
+and the invoke result contradict each other it returns `catalogInvocationDrift` (with `details`
+carrying the host's own catalog violation reason, so you need not run `catalog` again just to learn
+which command name was invalid), and a missing command still preserves the app's
+`commandNotRegistered` rejection and exit code `4`. The CLI never infers capabilities from the
+number of commands. The full command name remains the protocol identity, and arbitrary consumer
+commands continue to use `exec <namespace.command>`.
 
-每一次 RPC 往返都有预算，默认 30 秒，由 `--transport-timeout-ms` 调整，两条传输都适用；耗尽时以
-退出码 `3` 和稳定 code `appUnresponsive` 失败并附处置提示。`--timeout-ms` 是发给 App 的业务等待预算，
-声明了它的请求会把本次 RPC 预算放宽成「声明的等待 + 一次往返」，不会被默认预算腰斩。
+Every RPC round trip has a budget, 30 seconds by default, adjustable with
+`--transport-timeout-ms` and applying to both transports; on exhaustion it fails with exit code `3`
+and the stable code `appUnresponsive` plus a remediation hint. `--timeout-ms` is the business wait
+budget sent to the app, and a request that declares it widens this RPC's budget to "the declared
+wait plus one round trip" so it is not cut short by the default.
 
-日志过滤支持 `--cursor`、`--direction`、`--limit`、逗号分隔的 `--levels`/`--categories` 以及
-ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio` 和 `--timeout-ms`。所有 artifact 下载先写同目录
-临时文件，分块校验 blob metadata、offset、base64、总长度与 SHA-256，全部通过后才 rename；已有输出
-默认拒绝，只有显式 `--force` 才替换。过期、拒绝、错序、哈希错误和中断不会留下完整输出名的残文件。
+Log filtering supports `--cursor`, `--direction`, `--limit`, comma-separated `--levels`/
+`--categories`, and ISO-8601 `--since`/`--until`. Capture supports `--pixel-ratio` and
+`--timeout-ms`. Every artifact download first writes a temp file in the same directory and
+validates blob metadata, offsets, base64, total length, and SHA-256 chunk by chunk, renaming only
+after everything passes; an existing output is refused by default and replaced only with an
+explicit `--force`. Expiry, rejection, out-of-order chunks, hash errors, and interruptions never
+leave a partial file under the final output name.
 
-## 连接边界
+## Connection Boundary
 
-`--ws-uri` 可能含 VM Service 认证信息：
+`--ws-uri` may contain VM Service authentication material:
 
-- 只从可信 launcher 输出或当前调试会话取得；
-- 不写入脚本、日志、快照和提交物；
-- CLI 错误只报告错误类别，不回显完整 URI。
+- take it only from trusted launcher output or the current debug session;
+- never write it into scripts, logs, snapshots, or anything you commit;
+- CLI errors report only the error category, never echoing the full URI.
 
-launcher 会先以原子替换写入 provisional 记录，再在收到 `app.debugPort` 后补 URI；CLI 连接并读取
-`ext.patchbay.identity` 后才补齐 `appInstanceId` 和 `isolateId`。完整记录绑定 session schema、
-`applicationId`、`appInstanceId`、`isolateId`、launcher PID、`wsUri`、build mode、创建时间、worktree
-与设备 ID。记录默认位于当前用户的系统临时目录，可用 `PATCHBAY_SESSION_DIR` 覆盖。
-launcher 仍会把 `app.log`、`app.progress` 和 stderr 以人可读形式回显，但统一替换其中的 http/ws URI；
-`app.debugPort` 只显示“会话已发现”，永不回显 machine 事件载荷。
+The launcher first writes a provisional record via atomic replace, then fills in the URI once it
+receives `app.debugPort`; only after the CLI connects and reads `ext.patchbay.identity` are
+`appInstanceId` and `isolateId` filled in. A complete record binds the session schema,
+`applicationId`, `appInstanceId`, `isolateId`, launcher PID, `wsUri`, build mode, creation time,
+worktree, and device ID. Records live in the current user's system temp directory by default, and
+`PATCHBAY_SESSION_DIR` can override that. The launcher still echoes `app.log`, `app.progress`, and
+stderr in human-readable form, but uniformly replaces any http/ws URI within them; `app.debugPort`
+only prints "session discovered" and never echoes the machine event payload.
 
-PID 存活只表示 launcher 可能仍在，不能证明 App 实例仍相同。以下任一情况都会删除记录并返回稳定的
-session error：PID 不活、URI 不可连接、schema/identity 不匹配。hot restart 再次产生
-`app.debugPort` 时 launcher 会原子重置已补齐的 identity，CLI 必须重新实测补齐；显式 `--ws-uri` 也会
-执行同一 schema/isolate/appInstance identity 校验。launcher 退出时删除自己拥有的记录。POSIX 上目录和
-文件分别收紧到 `0700` / `0600`，普通输出、错误和选择列表都不包含 URI/token。
+A live PID only means the launcher may still be running — it does not prove the app instance is
+still the same one. Any of the following deletes the record and returns a stable session error: a
+dead PID, an unreachable URI, or a schema/identity mismatch. When a hot restart produces
+`app.debugPort` again, the launcher atomically resets the identity it had filled in and the CLI
+must re-measure it; an explicit `--ws-uri` runs the same schema/isolate/appInstance identity check.
+The launcher deletes the records it owns on exit. On POSIX the directory and files are tightened to
+`0700` and `0600` respectively, and ordinary output, errors, and selection lists never contain a
+URI or token.
 
-当前命令执行路径自身不调用 ADB。不过在 Android 上，如果 URI 来自 `flutter run`，Flutter 的启动、
-安装和端口转发仍可能间接使用 ADB；因此 VM Service 路径不能宣称端到端零 ADB。
+The current command execution path does not itself call ADB. On Android, however, if the URI came
+from `flutter run`, Flutter's own launch, install, and port forwarding may still use ADB
+indirectly — so the VM Service path cannot claim to be end-to-end ADB-free.
 
-CLI 也可连接 consumer 显式启动的 `patchbay_transport` direct host。direct host 不做发现，调用方必须从
-可信的带外渠道取得 endpoint、runtime identity 和短期 bearer；token 只能从 no-echo stdin 读取，CLI
-不提供 token argv/env/query 入口：
+The CLI can also connect to a `patchbay_transport` direct host that the consumer started
+explicitly. A direct host performs no discovery, so the caller must obtain the endpoint, runtime
+identity, and short-lived bearer through a trusted out-of-band channel; the token can only be read
+from no-echo stdin, as the CLI provides no argv/env/query entry point for it:
 
 ```text
 dart run bin/patchbay.dart \
@@ -228,86 +278,112 @@ dart run bin/patchbay.dart \
   --direct-application-id dev.example.app \
   --direct-app-instance-id <instance-id> \
   --json identity
-# CLI 在这里从当前 TTY 读取一行且不回显
+# here the CLI reads one line from the current TTY without echoing it
 ```
 
-上例是交互 TTY 形状；不要把 bearer 字面量写进 shell history。CLI 读取 bearer 时会自动关闭 echo。direct
-LAN 是实验性的明文 HTTP：bearer 提供认证但不提供机密性，不能防止同网段被动监听和重放，不能称为
-secure channel。应只在可信隔离网络和短 TTL 下显式启用；Flutter SDK 的 widget/render/focus diagnostic
-extensions 仍只存在于 VM Service 路径。
+The example above is the interactive TTY shape; do not put a bearer literal into shell history. The
+CLI turns echo off automatically while reading a bearer. Direct LAN is experimental plaintext HTTP:
+the bearer provides authentication but not confidentiality, cannot prevent passive listening or
+replay on the same network segment, and must not be called a secure channel. Enable it explicitly
+only on a trusted, isolated network with a short TTL. The Flutter SDK's widget/render/focus
+diagnostic extensions still exist only on the VM Service path.
 
-## 输入与结果
+## Input and Results
 
-普通结构化参数通过 `--args` 传 JSON object，`--stdin` 从一行 no-echo stdin 读入。两者可以同时使用：
-stdin 的 JSON object 与 `--args` 合并，同名键以 stdin 为准，因此可读参数留在命令行、只有密文走
-no-echo 通道。只用 `--stdin` 不用 `--args` 仍然合法（合并的退化情形），stdin 内容不是 JSON object
-时照旧报错。
+Ordinary structured arguments are passed as a JSON object via `--args`, and `--stdin` reads one
+no-echo line from stdin. The two can be used together: the JSON object from stdin is merged with
+`--args`, with stdin winning on shared keys, so readable arguments stay on the command line and
+only secrets go through the no-echo channel. Using `--stdin` without `--args` is still valid (the
+degenerate case of that merge), and stdin content that is not a JSON object still errors as before.
 
-descriptor 标记为敏感的参数只能来自 stdin：出现在 `--args` 里时 CLI 以退出码 `64` 拒发，不上线，
-错误信息只点名参数不回显值。输出只保留 redacted 元数据。stdin 接管真实 TTY 时 CLI 会临时关闭
-terminal echo，读取后恢复；无法关闭回显时以 `terminalEchoControlFailed` fail-closed。管道输入不修改
-终端模式。
+Parameters a descriptor marks as sensitive can only come from stdin: if one appears in `--args`,
+the CLI refuses to send with exit code `64`, nothing goes on the wire, and the error names only the
+parameter without echoing its value. Output retains only redacted metadata. When stdin takes over a
+real TTY, the CLI temporarily turns off terminal echo and restores it afterwards; if echo cannot be
+turned off, it fails closed with `terminalEchoControlFailed`. Piped input does not modify terminal
+modes.
 
-`admission=accepted` 只表示 App 已受理请求，不代表副作用已完成。长任务会返回 `jobId`：
+`admission=accepted` only means the app has accepted the request, not that the side effect is
+complete. Long-running work returns a `jobId`:
 
-- `--wait` 持续读取到终态；
-- `job get` 读取当前快照；
-- `job cancel` 请求取消，但取消结果仍以 App 返回的 job 状态为准。
+- `--wait` keeps reading until a terminal state;
+- `job get` reads the current snapshot;
+- `job cancel` requests cancellation, but the cancellation outcome is still whatever job state the
+  app returns.
 
-`jobId` 的稳定取值位置是**响应顶层**：受理信封与 `--wait` 终态结果都在顶层给出这条命令受理的那个
-job。`payload.jobId` 是 App job snapshot 自带的字段，两处都保留，脚本读顶层那个。
+The stable location for `jobId` is the **top level of the response**: both the admission envelope
+and the `--wait` terminal result give the job admitted for that command at the top level.
+`payload.jobId` is a field the app's own job snapshot carries; both are preserved, and scripts
+should read the top-level one.
 
-CLI 为每次 invoke 生成并发送 `requestId`，VM Service 与 direct 两条路径都要求响应回显相同值；不一致
-按协议错误退出，避免并发或迟到响应被归到错误命令。显式空 `requestId` 同样 fail-closed。
+The CLI generates and sends a `requestId` for every invoke, and both the VM Service and direct
+paths require the response to echo the same value; a mismatch exits as a protocol error, so a
+concurrent or late response cannot be attributed to the wrong command. An explicitly empty
+`requestId` also fails closed.
 
-`--wait` 默认最多等待 60 秒；descriptor/admission 带 `suggestedWaitTimeoutMs` 时采用 consumer 提示的观察窗口。
-例如 BLE 配网提示 150 秒，以覆盖其 120 秒激活终态。超时表示 App 已受理但在观察窗口内没有终态，
-归为类型化操作失败（退出码 `6`），不是连接失败。
+`--wait` waits at most 60 seconds by default; when the descriptor/admission carries
+`suggestedWaitTimeoutMs`, the consumer's suggested observation window is used instead. BLE pairing,
+for example, suggests 150 seconds to cover its 120-second activation terminal state. A timeout
+means the app accepted the request but produced no terminal state within the observation window,
+and is classified as a typed operation failure (exit code `6`), not a connection failure.
 
-host catalog 有 `patchbay.job.wait` 时，CLI 以 `afterSequence` 做 bounded long-poll，并在结果标记
-`waitMode=serverLongPoll`。旧 host 没有该命令时保留 `patchbay.job.get` 兼容轮询，结果明确标记
-`waitMode=legacyPolling` 和 `waitNotice`，不冒充服务端等待。`logs tail` 的 `outcome=timedOut` 是一次成功的
-长轮询观察结果，退出码仍为 `0`，不会误报 transport error。
+When the host catalog has `patchbay.job.wait`, the CLI does a bounded long poll with
+`afterSequence` and marks the result `waitMode=serverLongPoll`. Against an older host without that
+command, it falls back to compatibility polling on `patchbay.job.get`, with the result explicitly
+marked `waitMode=legacyPolling` plus a `waitNotice` — it does not pose as a server-side wait. An
+`outcome=timedOut` from `logs tail` is a successful long-poll observation and still exits `0`,
+rather than being misreported as a transport error.
 
-JSON 输出保留事实来源、rejection code、job event sequence 和 capability warning。CLI 不把这些字段
-升级解释为设备执行成功、像素正确或系统 UI 已操作。
+JSON output preserves fact sources, rejection codes, job event sequences, and capability warnings.
+The CLI does not reinterpret these fields as proof that the device executed successfully, that
+pixels are correct, or that system UI was operated.
 
-带 `--json` 时 stdout 只有一个 JSON 文档：响应信封，或错误信封
+With `--json`, stdout contains exactly one JSON document: the response envelope, or an error
+envelope
 
 ```json
 {"error": {"code": "sessionAmbiguous", "details": {"sessions": ["…"]}}}
 ```
 
-形状与 App 的 rejection 信封一致（稳定 `code` + 自由 `details`）。用法错误的 `code` 是 `usageError`，
-句子在 `details.message`；session / protocol / transport / 敏感输入 / `waitTimeout` 用各自的稳定 code，
-兜底错误只暴露异常类型名，不回显 URI 或 token。人读文本仍只走 stderr。不带 `--json` 时行为不变。
+whose shape matches the app's rejection envelope (a stable `code` plus free-form `details`). The
+`code` for a usage error is `usageError`, with the sentence in `details.message`; session /
+protocol / transport / sensitive-input / `waitTimeout` errors use their own stable codes, and the
+fallback error exposes only the exception type name, never echoing a URI or token. Human-readable
+text still goes only to stderr. Without `--json`, behavior is unchanged.
 
-artifact 下载的分块大小取自 catalog 中 `blob.read` 的 `limit` 默认值（与 CLI 默认 64 KiB 取小），
-不写死：consumer 调小 `maxChunkBytes` 时下载照常，不会被 `blobInvalidChunkLimit` 拒死。
+The chunk size for artifact downloads is taken from the default `limit` of `blob.read` in the
+catalog (capped by the CLI default of 64 KiB) rather than hard-coded: when a consumer lowers
+`maxChunkBytes`, downloads still work instead of being killed by `blobInvalidChunkLimit`.
 
-## 退出码
+## Exit Codes
 
-| 退出码 | 含义 |
+| Exit code | Meaning |
 |---|---|
-| `0` | 请求完成，或 App 返回了可解析的非错误结果 |
-| `3` | 会话发现、连接、传输或 VM Service RPC 失败 |
-| `4` | schema/identity 不兼容，或目录中没有该命令 |
-| `5` | App adapter 或 Flutter bridge 拒绝受理 |
-| `6` | 已受理的 operation 返回 `outcome=failed`、job 失败/取消，或等待终态超时 |
-| `7` | 本地对账（`ui verify-manifest`）完成，报告里有偏差；App 侧请求全部正常应答 |
-| `64` | 命令格式、参数或本地输入不合法（含拒读的 manifest 文件） |
+| `0` | The request completed, or the app returned a parseable non-error result |
+| `3` | Session discovery, connection, transport, or VM Service RPC failed |
+| `4` | Incompatible schema/identity, or the command is absent from the catalog |
+| `5` | The app adapter or Flutter bridge refused admission |
+| `6` | An admitted operation returned `outcome=failed`, a job failed or was cancelled, or waiting for a terminal state timed out |
+| `7` | Local reconciliation (`ui verify-manifest`) completed and the report contains discrepancies; every request to the app was answered normally |
+| `64` | The command form, arguments, or local input were invalid (including a manifest file that could not be read) |
 
-调用方应同时读取 JSON 信封；退出码不承载设备完成性。
+Callers should read the JSON envelope as well; exit codes do not carry device-level completion.
 
-## 能力与边界
+## Capabilities and Boundaries
 
-Widget/Render/Focus 命令是 Flutter SDK 诊断 extension 的只读代理。输出带
-`schema=flutterSdkPassthrough`，字段随 Flutter SDK 变化；profile 中对应 extension 不存在时稳定返回
-`flutterDiagnosticUnavailable`。稳定自动化应消费 `ui semantics tree` 的 Patchbay schema。
+The Widget/Render/Focus commands are read-only proxies onto the Flutter SDK's diagnostic
+extensions. Their output carries `schema=flutterSdkPassthrough` and its fields change with the
+Flutter SDK; when the corresponding extension is absent in profile, they return
+`flutterDiagnosticUnavailable` stably. Stable automation should consume the Patchbay schema of
+`ui semantics tree`.
 
-navigation、wait、capture、结构化日志与 direct 仅在运行时 catalog/consumer host 实际注册时可用。CLI
-不通过 ADB、坐标点击或 Widget 文本猜测补齐缺失能力，也不会替 App 自动启动 direct listener 或分发
-bearer。日志是 consumer 已脱敏的 App 记录；capture 只证明 Flutter repaint boundary 的合成结果，不含
-系统权限弹窗，PlatformView 也可能缺失。
-三树与 action 的稳定命令、passthrough 边界和退出条件见
-[`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)。
+Navigation, wait, capture, structured logs, and direct are available only when actually registered
+by the runtime catalog / consumer host. The CLI does not paper over missing capabilities via ADB,
+coordinate taps, or guessing from widget text, and it will not start a direct listener or
+distribute a bearer on the app's behalf. Logs are app records the consumer has already redacted;
+capture proves only the composited result of Flutter repaint boundaries, excludes system permission
+dialogs, and may be missing PlatformViews.
+For the stable commands, passthrough boundaries, and exit conditions of the three trees and
+actions, see
+[`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)
+(currently in Chinese).

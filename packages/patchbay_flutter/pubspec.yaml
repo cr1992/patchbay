@@ -1,5 +1,6 @@
 name: patchbay_flutter
-description: Optional low-intrusion Flutter UI bridge for Patchbay.
+description: 'Optional low-intrusion Flutter bridge for Patchbay: stable UI targets, Semantics observation and actions, navigation, waits and capture.'
+repository: https://github.com/cr1992/patchbay
 version: 0.2.1
 publish_to: none
 

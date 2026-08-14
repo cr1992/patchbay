@@ -1,5 +1,6 @@
 name: patchbay_cli
-description: Consumer-neutral CLI client for Patchbay VM Service extensions.
+description: 'Command line client for Patchbay: connect to a running Flutter app over VM Service or direct HTTP, invoke commands, drive UI, pull logs and screenshots.'
+repository: https://github.com/cr1992/patchbay
 version: 0.2.1
 publish_to: none
 

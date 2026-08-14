@@ -1,5 +1,6 @@
 name: patchbay
-description: Consumer-neutral protocol and admission primitives for Flutter runtime debugging.
+description: 'Typed control channel into a running Dart or Flutter app: protocol, gated command admission, fact-sourced state, jobs and blobs.'
+repository: https://github.com/cr1992/patchbay
 version: 0.2.1
 publish_to: none
 
