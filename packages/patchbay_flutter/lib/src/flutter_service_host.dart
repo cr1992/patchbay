@@ -60,8 +60,14 @@ final class PatchbayFlutterServiceHost {
              final PatchbayCaptureRequestWire request;
              try {
                request = PatchbayCaptureRequestWire.fromJson(arguments);
-             } on Object {
-               return _invalidUiArguments(requestId);
+             } on Object catch (failure) {
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+                 reason: _decodeFailureReason(failure),
+               );
              }
              return (await capture.capture(
                request,
@@ -94,10 +100,9 @@ final class PatchbayFlutterServiceHost {
              final Object? maxNodes = arguments['maxNodes'];
              if (maxDepth != null && maxDepth is! int ||
                  maxNodes != null && maxNodes is! int) {
-               return PatchbayInvocation.rejected(
-                 requestId: requestId,
-                 rejection: const PatchbayRejection(code: 'invalidUiArguments'),
-               ).toJson();
+               // `--args` reaches this command wholesale, so an undeclared key
+               // is not this rejection's business; only the two it reads are.
+               return _invalidUiArguments(requestId, command, arguments);
              }
              return (await bridge.semantics.snapshot(
                maxDepth: maxDepth as int? ?? 64,
@@ -125,10 +130,7 @@ final class PatchbayFlutterServiceHost {
                  generation is! int ||
                  action == null ||
                  text != null && text is! String) {
-               return PatchbayInvocation.rejected(
-                 requestId: requestId,
-                 rejection: const PatchbayRejection(code: 'invalidUiArguments'),
-               ).toJson();
+               return _invalidUiArguments(requestId, command, arguments);
              }
              return (await bridge.semantics.invoke(
                nodeId: nodeId,
@@ -153,10 +155,14 @@ final class PatchbayFlutterServiceHost {
              if (identifier is! String ||
                  generation != null && generation is! int ||
                  arguments.keys.any(
-                   (String key) =>
-                       key != 'identifier' && key != 'generation',
+                   (String key) => key != 'identifier' && key != 'generation',
                  )) {
-               return _invalidUiArguments(requestId);
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+               );
              }
              return (await bridge.semantics.tapIdentifier(
                identifier: identifier,
@@ -170,8 +176,19 @@ final class PatchbayFlutterServiceHost {
                request = PatchbayUiWaitRequest.fromWire(
                  PatchbayUiWaitRequestWire.fromJson(arguments),
                );
-             } on Object {
-               return _invalidUiArguments(requestId);
+             } on Object catch (failure) {
+               // Most `ui.wait` failures are shape rules rather than key
+               // errors — `semanticsValue` needs a companion `value`, revision
+               // waits refuse an identifier — so the declared-key diff alone
+               // would report nothing at all. The decoder already phrases that
+               // rule; carry its sentence.
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+                 reason: _decodeFailureReason(failure),
+               );
              }
              return (await bridge.wait.wait(
                request,
@@ -189,11 +206,25 @@ final class PatchbayFlutterServiceHost {
                ).toJson();
              }
              if (command == 'navigation.catalog') {
-               if (arguments.isNotEmpty) return _invalidUiArguments(requestId);
+               if (arguments.isNotEmpty) {
+                 return _invalidUiArguments(
+                   requestId,
+                   command,
+                   arguments,
+                   strictKeys: true,
+                 );
+               }
                return (await navigation.catalog(requestId: requestId)).toJson();
              }
              if (command == 'navigation.current') {
-               if (arguments.isNotEmpty) return _invalidUiArguments(requestId);
+               if (arguments.isNotEmpty) {
+                 return _invalidUiArguments(
+                   requestId,
+                   command,
+                   arguments,
+                   strictKeys: true,
+                 );
+               }
                return (await navigation.current(requestId: requestId)).toJson();
              }
              final Object? revision = arguments['revision'];
@@ -206,14 +237,26 @@ final class PatchbayFlutterServiceHost {
                        key != 'revision' &&
                        key != 'timeoutMs',
                  )) {
-               return _invalidUiArguments(requestId);
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+               );
              }
              final Duration timeout = Duration(
                milliseconds: timeoutMs as int? ?? 5000,
              );
              if (command == 'navigation.back') {
                if (arguments.containsKey('destinationId')) {
-                 return _invalidUiArguments(requestId);
+                 // The shared check above accepts the key for `go` / `push`;
+                 // `back` does not declare it, which is what the details say.
+                 return _invalidUiArguments(
+                   requestId,
+                   command,
+                   arguments,
+                   strictKeys: true,
+                 );
                }
                return (await navigation.back(
                  revision: revision,
@@ -223,7 +266,12 @@ final class PatchbayFlutterServiceHost {
              }
              final Object? destinationId = arguments['destinationId'];
              if (destinationId is! String) {
-               return _invalidUiArguments(requestId);
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+               );
              }
              if (command == 'navigation.go') {
                return (await navigation.go(
@@ -250,13 +298,12 @@ final class PatchbayFlutterServiceHost {
            final Object? generation = arguments['generation'];
            final Object? text = arguments['text'];
            if (id is! String || generation is! int || text is! String) {
-             return PatchbayInvocation.rejected(
-               requestId: requestId,
-               rejection: const PatchbayRejection(
-                 code: 'invalidUiArguments',
-                 notice: 'id, generation and text are required.',
-               ),
-             ).toJson();
+             return _invalidUiArguments(
+               requestId,
+               command,
+               arguments,
+               notice: 'id, generation and text are required.',
+             );
            }
            final bool stdin = arguments['inputWasStdin'] == true;
            final PatchbayInvocation result = switch (command) {
@@ -300,11 +347,86 @@ final class PatchbayFlutterServiceHost {
 
   void register() => _host.register();
 
-  static Map<String, Object?> _invalidUiArguments(String requestId) =>
-      PatchbayInvocation.rejected(
-        requestId: requestId,
-        rejection: const PatchbayRejection(code: 'invalidUiArguments'),
-      ).toJson();
+  /// `invalidUiArguments`, naming what is actually wrong with the request.
+  ///
+  /// A bare `invalidUiArguments` says only that *something* about the arguments
+  /// is unacceptable, which leaves the caller to bisect their own request key by
+  /// key. `details` names it instead: `missing` for a declared parameter the
+  /// request left out, `unexpected` for a key the command does not declare,
+  /// `invalid` for a declared key whose value has the wrong type or an
+  /// undeclared enum value, and `reason` for a shape rule no single key can
+  /// express (`ui.wait` conditions require different companions).
+  ///
+  /// Only parameter *names* travel. They are protocol vocabulary published in
+  /// the catalog; the values are caller data and may be sensitive, so they stay
+  /// out of the envelope exactly as they do everywhere else.
+  ///
+  /// [strictKeys] says whether this call site actually refuses undeclared keys.
+  /// The sites that do not — `exec`-style commands that forward `--args`
+  /// wholesale — must not have unrelated keys listed as if they were the reason.
+  static Map<String, Object?> _invalidUiArguments(
+    String requestId,
+    String command,
+    Map<String, Object?> arguments, {
+    bool strictKeys = false,
+    String? reason,
+    String? notice,
+  }) {
+    final _UiArgumentShape? shape = _uiArgumentShapes[command];
+    final List<String> missing = shape?.missing(arguments) ?? const <String>[];
+    final List<String> unexpected = strictKeys
+        ? shape?.unexpected(arguments) ?? const <String>[]
+        : const <String>[];
+    final List<String> invalid = shape?.invalid(arguments) ?? const <String>[];
+    return PatchbayInvocation.rejected(
+      requestId: requestId,
+      rejection: PatchbayRejection(
+        code: 'invalidUiArguments',
+        notice: notice,
+        details: <String, Object?>{
+          'command': command,
+          if (missing.isNotEmpty) 'missing': missing,
+          if (unexpected.isNotEmpty) 'unexpected': unexpected,
+          if (invalid.isNotEmpty) 'invalid': invalid,
+          'reason': ?reason,
+        },
+      ),
+    ).toJson();
+  }
+
+  /// A rejection reason that names the rule without echoing a value.
+  ///
+  /// The wire decoders and `PatchbayUiWaitRequest` already phrase their own
+  /// failures in protocol vocabulary — field paths, expected types, which
+  /// companion a condition needs — so their `FormatException` message is exactly
+  /// the sentence the caller needs. Anything else is reported as its type only:
+  /// an `ArgumentError.toString()` embeds the offending value, and no caller
+  /// value belongs in a response envelope.
+  static String _decodeFailureReason(Object failure) => switch (failure) {
+    FormatException(:final String message) => message,
+    ArgumentError(:final Object? name) when name is String =>
+      '$name is out of the accepted range',
+    _ => failure.runtimeType.toString(),
+  };
+
+  /// Declared argument shape per UI command, read from the descriptors this
+  /// host publishes.
+  ///
+  /// Deriving the rejection details from the same list the catalog serves is
+  /// what stops "which key is missing" from becoming a second, hand-maintained
+  /// copy of every command shape — one that would drift away from the
+  /// declaration the caller actually reads.
+  static final Map<String, _UiArgumentShape> _uiArgumentShapes =
+      <String, _UiArgumentShape>{
+        for (final PatchbayCommandDescriptor descriptor
+            in _uiCommandDescriptors(
+              semanticsActionsEnabled: true,
+              navigationEnabled: true,
+              captureEnabled: true,
+              captureGates: const <String>{},
+            ))
+          descriptor.name: _UiArgumentShape(descriptor.parameters),
+      };
 
   static List<PatchbayCommandDescriptor> _uiCommandDescriptors({
     required bool semanticsActionsEnabled,
@@ -583,4 +705,59 @@ final class PatchbayFlutterServiceHost {
       ),
     ],
   ];
+}
+
+/// One command's declared parameters, reduced to what a rejection has to name.
+///
+/// It answers three questions and nothing more: which declared parameters this
+/// request left out, which keys it carries that were never declared, and which
+/// declared keys hold a value of the wrong shape. Every answer is a list of
+/// names, sorted so two identical failures produce two identical envelopes.
+final class _UiArgumentShape {
+  _UiArgumentShape(List<PatchbayParameterDescriptor> parameters)
+    : _parameters = <String, PatchbayParameterDescriptor>{
+        for (final PatchbayParameterDescriptor parameter in parameters)
+          parameter.name: parameter,
+      };
+
+  final Map<String, PatchbayParameterDescriptor> _parameters;
+
+  /// Declared-required parameters this request omits.
+  ///
+  /// A key present with a `null` value counts as omitted: JSON has no way to
+  /// say "explicitly absent", and every decoder here treats null as missing.
+  List<String> missing(Map<String, Object?> arguments) => <String>[
+    for (final PatchbayParameterDescriptor parameter in _parameters.values)
+      if (parameter.required && arguments[parameter.name] == null)
+        parameter.name,
+  ]..sort();
+
+  /// Keys this command does not declare at all.
+  List<String> unexpected(Map<String, Object?> arguments) => <String>[
+    for (final String key in arguments.keys)
+      if (!_parameters.containsKey(key)) key,
+  ]..sort();
+
+  /// Declared keys whose value does not match the declaration.
+  List<String> invalid(Map<String, Object?> arguments) => <String>[
+    for (final MapEntry<String, PatchbayParameterDescriptor> entry
+        in _parameters.entries)
+      if (arguments[entry.key] case final Object value
+          when !_matches(entry.value, value))
+        entry.key,
+  ]..sort();
+
+  static bool _matches(PatchbayParameterDescriptor parameter, Object value) =>
+      switch (parameter.type) {
+        PatchbayParameterType.string => value is String,
+        PatchbayParameterType.integer => value is int,
+        PatchbayParameterType.number => value is num,
+        PatchbayParameterType.boolean => value is bool,
+        // An enumeration is a string drawn from a published set, so an
+        // unlisted word is as wrong as a number would be.
+        PatchbayParameterType.enumeration =>
+          value is String && parameter.allowedValues.contains(value),
+        // `json` declares no shape, so nothing about a value can contradict it.
+        PatchbayParameterType.json => true,
+      };
 }
