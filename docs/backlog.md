@@ -17,8 +17,9 @@
 |---|---|---|
 | 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 呼叫线真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | **design-gate** |
 | 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 呼叫线：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | |
-| 调试台「保持亮屏」开关（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，opt-in） | iOS 真机无系统级 stay-awake 命令，app 侧是唯一自动化手段；Android 可 `adb shell svc power stayon usb` 兜底 | |
+| 屏幕唤醒三件套：① CLI 会话建立时 lifecycle 预检横幅（非 resumed 即打显眼警告 + 分平台解法命令）② `patchbay doctor` 体检命令（连接/lifecycle/catalog/会话逐项查、红项给解法）③ 会话活跃期间 app 自动 keep-screen-on（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，会话静默自动释放，debug-only） | 真机调试息屏即 UI 面全拒（实测），iOS 无系统级 stay-awake；③ 默认自动还是手动为 **design-gate**（自动会使息屏行为本身的测试失真，需留关闭出口） | ③ design-gate |
 | 会话粘性：`sessions list/prune`、`session use` | 双设备并连时每条命令显式敲长 `--session` | |
+| `ui wait` 增 identifier-appears 条件（`--assert-appears <identifier> --timeout`）：等待某标注目标挂载 | 呼叫页真机验证：动作后确认页面切换只能反复拉整树轮询 | |
 | 领域条件等待与字段选择：`snapshot --path`、`wait --until` | 客户端轮询应变服务端长轮询 | |
 | 统一 CommandRegistry：descriptor+decoder+gate+handler+validator 过同一 dispatcher | 第二 consumer 手写 adapter 的元键坑已实证核心不机检 descriptor 语义的风险 | |
 | 协议演进套件：serverVersion / feature capabilities / catalog digest / 兼容 golden | 多 consumer 生态前的地基 | |
