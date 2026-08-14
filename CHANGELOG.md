@@ -69,7 +69,7 @@
 
 四包同步定版（tag `patchbay-v0.2.0`）。含协议正确性批次、repl 会话与 `ui tap` 直达、
 Job 资源控制、`inputWasStdin` 框架层收编、CLI 契约六项与 catalog 校验失败结构化上报；
-双 consumer 验证（moii Android 真机 + hirobot macOS/iOS E2E）。升级前必读本节各迁移说明
+双 consumer 验证（Android 真机 + macOS/iOS E2E）。升级前必读本节各迁移说明
 （命令名 kebab 禁用、手写 adapter 两步迁移）。
 
 ### Changed

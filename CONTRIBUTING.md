@@ -3,7 +3,7 @@
 本仓有两个远端，**同步方向是单向的**，请勿双头推：
 
 - GitHub `cr1992/patchbay` —— 协作与 PR 入口（你在这里干活）；
-- GitLab `cloud/mobile/patchbay` —— 主仓，只由 maintainer（cr1992）从 GitHub 合并后回推并打 tag。
+- GitLab `cloud/mobile/patchbay` —— 主仓，只接受 maintainer（cr1992）从 GitHub 回推，流程见[发版](#发版)。
 
 ## 提交改动
 
@@ -14,6 +14,8 @@
 4. 新增行为必须带测试，且测试要验证过「能红」（打个定向 mutation 确认断言真的红）。
 5. 公共 API、协议字段、默认资源上限或安全行为有变化时，同步更新 README / 对应专题文档和
    [CHANGELOG.md](CHANGELOG.md)；文档、测试与实现必须描述同一契约。
+6. 本仓公开：文档与注释不记录内网域名、内部项目与业务线名。需要指代时写「内网主仓」
+   「接入方」；内网地址走 CI 变量或 remote 名，不写字面值。
 
 ## 设计红线
 

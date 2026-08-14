@@ -128,8 +128,7 @@ catalog 是这条策略的唯一真源，host 读不到 catalog 时 fail-closed�
    或 `if (!args.fromStdin) reject(...)`）——**不删必炸**：host 剥键后该判断恒为假，所有合法的
    敏感调用都会被 App 侧误拒。
 
-用 codegen 生成 typed 命令 API 的接入方，升级 pin 后重新生成即可：生成的 validator 已经不再豁免、
-也不再校验这个键。停留在旧 pin 的接入方不受影响——旧 host 与旧生成代码在旧语义下自洽。
+用 codegen 生成 typed 命令 API 的接入方，升级 pin 后重新生成即可。
 
 Job registry 必须使用有限预算。默认值适合普通调试会话，也可以按 App 的资源成本调整：
 
@@ -179,7 +178,7 @@ $ flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
 `q` 与热重载输出照旧，启动器解析出问题也只影响发现，不会连交互一起毁掉。
 
 包住 `flutter run --machine` 再解析 machine frame 仍然可行（它额外提供 `app.debugPort` 等事件），
-但那要求启动器接管 stdio 并自行转发按键，实测更脆，已不再是推荐路径。没有启动器时始终使用
+但那要求启动器接管 stdio 并自行转发按键，实测更脆，不是推荐路径。没有启动器时始终使用
 `--ws-uri`。
 
 ## CLI 手册
@@ -269,8 +268,7 @@ CLI 对**每一次** RPC 往返（含发现握手）都有预算，默认 30 秒
 （冻结对端的 WebSocket 握手无法从调用方取消）不会把 CLI 按在那里等操作系统回收。
 
 对端**已死**（进程没了、端口无人监听）与**冻结**不同：内核立刻拒绝连接，CLI 在毫秒级以
-`transportError` 失败，不等预算。把最清楚的失败拖成最不清楚的那一种没有意义，所以这条区分是有意
-保留的。
+`transportError` 失败，不等预算。把最清楚的失败拖成最不清楚的那一种没有意义，这条区分是有意的。
 
 `--timeout-ms` 是**另一个量**，不要混用：它是请求 App 自己等多久（`ui wait`、`logs tail`、
 `navigation go|push|back`、`capture`），会随请求发到 App 侧。声明了等待预算的请求，其 RPC 预算自动

@@ -23,7 +23,7 @@ Patchbay 是一条伸进 Flutter runtime 的类型化控制通道：从终端连
 adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iOS 来说，它补上了
 系统工具无法提供的 App 内部调试面。
 
-> **项目状态：** `v0.1.0`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
+> **项目状态：** `v0.2.0`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
 > Flutter `>=3.38.0`。仅面向 debug / profile，不支持 release。
 
 ## 适合解决什么问题
@@ -35,8 +35,7 @@ adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iO
 | 操作 Flutter Semantics 或稳定 UI ID | 处理系统权限弹窗和其他 App |
 | 获取 App 侧脱敏日志与 Flutter 截图 | 获取完整物理屏幕或原生 `PlatformView` 内部状态 |
 
-Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架。两者分别负责 App 内部和系统外部，
-组合使用才是完整的调试工具链。
+Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架；两者组合使用才是完整的调试工具链。
 
 ## 快速开始
 

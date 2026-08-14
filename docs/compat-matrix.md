@@ -8,25 +8,25 @@
 
 | patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） | Flutter（文档最低支持） | 已知 consumer |
 |---|---|---|---|---|---|
-| `patchbay-v0.1.0` | `7c82c68d9dfed4b2a546e81de68b9e0101be4878` | 1 | 3.44.9 | `>=3.38.0` | `moii_app`（pin `v0.1.0`；**交接口径，未在本仓验证，以 moii 仓 pubspec / `PATCHBAY_PINS` 为准**） |
+| `patchbay-v0.2.0` | `4d92ea9d7b0bd19f6ba81880cd411af6659eedd6` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2（1 已收口 / 1 在途） |
+| `patchbay-v0.1.0` | `7c82c68d9dfed4b2a546e81de68b9e0101be4878` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×1（已升级在途） |
 
 字段来源：
 
-- **commit SHA**：`git rev-parse patchbay-v0.1.0`，与 `git log --oneline` 中
-  `7c82c68 chore(repo): 独立仓模板——README 三件套、MIT、CI 与 bin 入口` 一致。
+- **commit SHA**：`git rev-parse <tag>`。
 - **wire schemaVersion**：`packages/patchbay/lib/src/service_host.dart:34` 与
   `packages/patchbay/lib/src/invocation.dart:58` 的 `static const int schemaVersion = 1;`。
   两处需保持同值，drift 会被 `packages/patchbay_transport` 与 `packages/patchbay_cli` 的握手校验
   在运行时拒绝（如 `packages/patchbay_cli/lib/src/client.dart:250` 的
   `schemaVersionMismatch`），不是仅文档层面的约定。
-- **Flutter（CI 验证）**：`.gitlab-ci.yml` 第 7 行 CI 镜像 tag
-  `registry.gitlab.hirobot.in:9090/cloud/sproboagent/ci/flutter-node:3.44.9-node24-r1`。
+- **Flutter（CI 验证）**：`.github/workflows/ci.yml` 的 `FLUTTER_VERSION`；GitLab 侧 CI 镜像
+  与之对齐。
 - **Flutter（文档最低支持）**：`docs/guide.md` 第 9 行「使用 UI 能力时需要 Flutter `>=3.38.0`」，
   与根 `README.md` 第 26–27 行项目状态声明一致。两个 Flutter 数字不是同一件事：CI 验证版本是
   当前门禁实际跑过的版本，最低支持版本是文档承诺的下限，二者之间未逐版本回归，出现兼容问题以
   CI 验证版本为准。
-- **已知 consumer**：仅 `moii_app` 一条，来自任务交接口径，patchbay 仓本身不持有 consumer 侧
-  pin 配置，无法在本仓验证；新增或变更 consumer 记录前应先向对应 consumer 仓核实。
+- **已知 consumer**：patchbay 仓不持有 consumer 侧 pin 配置，无法在本仓验证；新增或变更
+  consumer 记录前先向对应 consumer 仓核实。
 
 ## 维护规则
 

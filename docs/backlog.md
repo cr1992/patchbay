@@ -15,8 +15,8 @@
 
 | 条目 | 动机 / 出处 | 备注 |
 |---|---|---|
-| 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 呼叫线真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | **design-gate** |
-| 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 呼叫线：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | |
+| 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 接入方真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | **design-gate** |
+| 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 接入方：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | |
 | 屏幕唤醒三件套：① CLI 会话建立时 lifecycle 预检横幅（非 resumed 即打显眼警告 + 分平台解法命令）② `patchbay doctor` 体检命令（连接/lifecycle/catalog/会话逐项查、红项给解法）③ 会话活跃期间 app 自动 keep-screen-on（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，会话静默自动释放，debug-only） | 真机调试息屏即 UI 面全拒（实测），iOS 无系统级 stay-awake；③ 默认自动还是手动为 **design-gate**（自动会使息屏行为本身的测试失真，需留关闭出口） | ③ design-gate |
 | 会话粘性：`sessions list/prune`、`session use` | 双设备并连时每条命令显式敲长 `--session` | |
 | `ui wait` 增 identifier-appears 条件（`--assert-appears <identifier> --timeout`）：等待某标注目标挂载 | 接入方真机验证反馈：动作后确认页面切换只能反复拉整树轮询 | |
@@ -26,15 +26,15 @@
 | 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe`/`doctor` | dogfood | |
 | DevTools 借用三批：inspect 开关 → perf VM RPC → net 画像 | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
 | snapshot revision / diff | dogfood（低优先级） | |
-| UI 目标声明对账 `ui verify-manifest <file>`：consumer 交 expected-targets manifest（id/kind/sensitive/所在屏），CLI 对比 catalog uiTargets + semantics 树，报「声明未挂载 / 挂载未声明 / 属性漂移」三类偏差；可选按 destination 逐屏巡检覆盖非常驻控件 | hirobot 提案（由「标注能否契约生成」review 引出：正向生成不成立，反向机械对账成立）；纯 CLI 侧、wire 零改动；hirobot 自荐首个试点 consumer（已有 ID 台账） | |
+| UI 目标声明对账 `ui verify-manifest <file>`：consumer 交 expected-targets manifest（id/kind/sensitive/所在屏），CLI 对比 catalog uiTargets + semantics 树，报「声明未挂载 / 挂载未声明 / 属性漂移」三类偏差；可选按 destination 逐屏巡检覆盖非常驻控件 | 第二接入方提案（由「标注能否契约生成」review 引出：正向生成不成立，反向机械对账成立）；纯 CLI 侧、wire 零改动；该接入方自荐首个试点（已有 ID 台账） | |
 
 ## 文档债（快赢，可随任意批次走）
 
 | 条目 | 动机 / 出处 |
 |---|---|
-| guide「UI 目标标注」节补**标注收敛最佳实践**：有组件库的接入方应把 PatchbayKey/Semantics 收口进自家组件层（组件加 semanticsId 参数 + ID 常量台账），call site 直贴是无组件库时的姿势 | 仓主 review 第二 consumer 接入时指出散落扩散性差；hirobot MR !35 有参考实现（8 行→1 参数）可引用 |
-| 架构总览一页：四包关系图 + 一条请求的完整生命周期（CLI→transport→host→bridge→consumer→回程），新 feature 阶段开工前画 | 新接入方现靠 guide+源码拼；hirobot 全程接入是现成素材 |
-| `PatchbayKey` 语义进 patchbay_flutter README/docs：**构造即注册、弱引用出册、仅同时挂载判歧义**；显式写明 **build() 内裸构造会重挂载丢状态**（应在 State 缓存实例）——接入方靠逆向源码才发现的陷阱 | hirobot consumer 实践反馈 |
+| guide「UI 目标标注」节补**标注收敛最佳实践**：有组件库的接入方应把 PatchbayKey/Semantics 收口进自家组件层（组件加 semanticsId 参数 + ID 常量台账），call site 直贴是无组件库时的姿势 | 仓主 review 第二 consumer 接入时指出散落扩散性差；第二接入方仓有参考实现（8 行→1 参数）可引用 |
+| 架构总览一页：四包关系图 + 一条请求的完整生命周期（CLI→transport→host→bridge→consumer→回程），新 feature 阶段开工前画 | 新接入方现靠 guide+源码拼；第二接入方全程接入是现成素材 |
+| `PatchbayKey` 语义进 patchbay_flutter README/docs：**构造即注册、弱引用出册、仅同时挂载判歧义**；显式写明 **build() 内裸构造会重挂载丢状态**（应在 State 缓存实例）——接入方靠逆向源码才发现的陷阱 | 第二接入方实践反馈 |
 
 ## design-gate（需仓主裁决后动工）
 

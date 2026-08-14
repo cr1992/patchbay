@@ -1,8 +1,7 @@
 # 发版检查清单
 
-> 依据 [CONTRIBUTING.md](../CONTRIBUTING.md)、[.gitlab-ci.yml](../.gitlab-ci.yml) 与 GitHub Actions
-> 门禁整理。只由 maintainer（cr1992）执行：GitHub 合并 → 回推 GitLab → 打 tag → 下游按 pin 升级。
-> 本清单是发版动作的核对表，不改变 CONTRIBUTING.md 定义的权责边界。
+> 只由 maintainer 执行：GitHub 合并 → 回推 GitLab → 打 tag → 下游按 pin 升级。
+> 本清单是发版动作的核对表，不改变 [CONTRIBUTING.md](../CONTRIBUTING.md) 定义的权责边界。
 
 ## 1. 门禁全绿
 
@@ -13,8 +12,8 @@ GitLab CI（`.gitlab-ci.yml`，`stages: [check]`）三个 job：
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` +
       `flutter test` 通过
 - [ ] `codegen_drift` —— `wire_codegen.dart --check` 无生成物漂移
-- [ ] GitHub Actions 门禁绿（对齐 GitLab 三检查项；工作流链接待补——当前分支基线
-      `main@9014725` 不含 `.github/workflows`，以合入时的实际链接为准）
+- [ ] GitHub Actions 门禁绿（[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)，
+      三个 job 与上面一一对应）
 
 验证命令（需从仓根调用，`codegen_drift` 尤其如此——生成物 header 记录的是仓根相对路径，
 进包目录跑会假漂移）：
@@ -33,8 +32,7 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
 ## 2. 版本与 CHANGELOG 对账
 
 - [ ] 四包 `pubspec.yaml` 的 `version` 字段一致，且与拟打的 tag 号（去掉 `patchbay-v` 前缀）一致
-- [ ] CHANGELOG 对账 —— **待补**：本仓当前无 `CHANGELOG.md`，是否建立/在何处维护未见文档定义，
-      发版前由 maintainer 决定
+- [ ] [CHANGELOG.md](../CHANGELOG.md) 的 `Unreleased` 内容已归入拟发布的版本段落
 
 验证命令：
 
@@ -60,25 +58,25 @@ $ git rev-parse patchbay-vX.Y.Z
 
 ## 4. 双端推送核对
 
-GitHub 与 GitLab 两个远端必须在同一 tag 上指向同一 commit（仓库当前 remote 配置）：
+GitHub 与内网主仓两个远端必须在同一 tag 上指向同一 commit：
 
-- [ ] `github`（`git@github.com:cr1992/patchbay.git`）与 `origin`（
-      `git@gitlab.hirobot.in:cloud/mobile/patchbay.git`）在该 tag 上的 commit SHA 一致
+- [ ] `git remote -v` 列出的两个 remote（`github` 与 `origin`）在该 tag 上的 commit SHA 一致
 
 验证命令：
 
 ```console
-$ git ls-remote --tags git@github.com:cr1992/patchbay.git patchbay-vX.Y.Z
-$ git ls-remote --tags git@gitlab.hirobot.in:cloud/mobile/patchbay.git patchbay-vX.Y.Z
+$ git remote -v
+$ git ls-remote --tags github patchbay-vX.Y.Z
+$ git ls-remote --tags origin patchbay-vX.Y.Z
 ```
 
 ## 5. consumer 换 pin
 
 - [ ] consumer 仓按新 tag 更新引用
 
-moii 侧口径（**交接口径，未在本仓验证，以 moii 仓 justfile/文档为准**）：pubspec SHA 四包同步改、
-`PATCHBAY_PINS` 同步更新、双 lock（`pubspec.lock` 等）一并提交。具体命令与文件位置本仓不持有真源，
-执行前查 moii 仓当前的 justfile 与相关文档确认。
+接入方侧口径（**未在本仓验证，以该仓自身文档为准**）：pubspec SHA 四包同步改、`PATCHBAY_PINS`
+同步更新、双 lock（`pubspec.lock` 等）一并提交。具体命令与文件位置本仓不持有真源，执行前查
+接入方仓当前的构建脚本与相关文档确认。
 
 ## 6. 真机验收
 
@@ -86,8 +84,3 @@ moii 侧口径（**交接口径，未在本仓验证，以 moii 仓 justfile/文
       **不代表**验收通过
 - [ ] 参考 [使用指南「边界」](guide.md#边界)：CLI 结果是调试证据，不是产品验收证据——不证明像素
       正确或设备物理行为，真机验收需另行确认
-
----
-
-清单基于仓内 `CONTRIBUTING.md` / `.gitlab-ci.yml` / `docs/guide.md` 与本地 git remote 配置推导；
-标「待补」的项尚无仓内文档可确认，执行前需人工补齐或向 maintainer 确认。
