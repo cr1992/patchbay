@@ -43,6 +43,7 @@ void main() {
           ],
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
+          PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
           PatchbayFriendlyCommand.navigationGo ||
           PatchbayFriendlyCommand.navigationPush => <String>['settings'],
           PatchbayFriendlyCommand.uiWaitSemanticsMounted ||

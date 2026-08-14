@@ -16,6 +16,7 @@ import 'result.dart';
 import 'rpc_timeout.dart';
 import 'sensitive_input.dart';
 import 'session.dart';
+import 'ui_manifest.dart';
 
 /// Runs one CLI invocation.
 ///
@@ -107,7 +108,7 @@ Future<int> runPatchbayCli(
       );
     }
     final _Outcome outcome = await _executeOnce(connection, parsed);
-    _writeOutput(out, outcome.response, json: json);
+    _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
     return outcome.exitCode;
   } on FormatException catch (failure) {
     return _fail(
@@ -194,6 +195,18 @@ Future<int> runPatchbayCli(
         details: <String, Object?>{'jobId': failure.jobId},
       ),
       exitCode: PatchbayExitCode.typedFailure,
+    );
+  } on PatchbayUiManifestException catch (failure) {
+    // Caller input the CLI refused to read, so it is a usage error like any
+    // other bad argument — but a file has more than one way to be wrong, and
+    // the envelope has to say which one rather than leave the author bisecting.
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: failure.sentence,
+      envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
+      exitCode: PatchbayExitCode.usage,
     );
   } on PatchbaySensitiveInputException catch (failure) {
     return _fail(
@@ -355,7 +368,13 @@ Future<_Outcome> _executeOnce(
         };
       }
     }
-    return _Outcome(output, patchbayExitCodeFor(output));
+    // A locally computed verdict classifies itself; everything that came off
+    // the wire is classified by what the App answered.
+    return _Outcome(
+      output,
+      execution.exitCode ?? patchbayExitCodeFor(output),
+      summary: execution.summary,
+    );
   } on PatchbayArtifactRejected catch (rejected) {
     // The App answered; the artifact simply is not downloadable. That is a
     // normal typed response, not a CLI-level error.
@@ -690,6 +709,43 @@ Future<_Execution> _execute(
       return _Execution(await connection.renderTree());
     case PatchbayCommandTarget.clientFocusTree:
       return _Execution(await connection.focusTree());
+    case PatchbayCommandTarget.localManifestVerification:
+      final PatchbayUiManifest manifest = _readUiManifest(
+        friendly.manifestPath!,
+      );
+      final Map<String, Object?> catalog = await connection.catalog();
+      String? destination;
+      if (manifest.usesDestinations) {
+        final Map<String, Object?> current = await _invokeAgainstCatalog(
+          connection,
+          catalog,
+          'navigation.current',
+          const <String, Object?>{},
+        );
+        // Without the current destination the scoped half of the manifest
+        // cannot be reconciled at all, so the refusal is reported as itself
+        // rather than resolved into a verdict about a screen nobody named.
+        if (current['admission'] == 'rejected') {
+          return _Execution(
+            _withSource(current, 'destinationSource'),
+            catalog: catalog,
+          );
+        }
+        destination = _navigationDestination(current);
+      }
+      final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
+        manifest: manifest,
+        runtime: decodePatchbayCatalogUiTargets(catalog),
+        currentDestination: destination,
+      );
+      return _Execution(
+        report.toJson(),
+        catalog: catalog,
+        exitCode: report.hasDeviation
+            ? PatchbayExitCode.verificationDeviation
+            : PatchbayExitCode.accepted,
+        summary: report.humanReport,
+      );
     case PatchbayCommandTarget.clientReplSession:
       // `runPatchbayCli` routes a repl to its own loop before dispatch, and
       // the loop refuses a nested `repl` line, so reaching here is a wiring
@@ -766,7 +822,10 @@ int _blobChunkBytes(Map<String, Object?> catalog) {
 /// before dispatching, which is exactly the difference that matters when a
 /// navigation raced the command.
 Map<String, Object?> _withRevisionSource(Map<String, Object?> response) =>
-    <String, Object?>{...response, 'revisionSource': 'navigation.current'};
+    _withSource(response, 'revisionSource');
+
+Map<String, Object?> _withSource(Map<String, Object?> response, String field) =>
+    <String, Object?>{...response, field: 'navigation.current'};
 
 /// The revision an App reports as current, or a protocol error.
 int _navigationRevision(Map<String, Object?> response) {
@@ -778,6 +837,56 @@ int _navigationRevision(Map<String, Object?> response) {
     throw const PatchbayProtocolException('navigationRevisionContractViolated');
   }
   return revision;
+}
+
+/// The destination an App reports as current, which may legitimately be none.
+///
+/// `destinationId` is declared nullable on the wire — an App between screens
+/// has no settled destination — so `null` is an answer, not a violation. Only a
+/// value of the wrong type is one.
+String? _navigationDestination(Map<String, Object?> response) {
+  final Object? payload = response['payload'];
+  if (payload is! Map<Object?, Object?>) {
+    throw const PatchbayProtocolException(
+      'navigationDestinationContractViolated',
+    );
+  }
+  final Object? destination = payload['destinationId'];
+  if (destination != null && destination is! String) {
+    throw const PatchbayProtocolException(
+      'navigationDestinationContractViolated',
+    );
+  }
+  return destination as String?;
+}
+
+/// Reads the manifest file the caller named.
+///
+/// The path is argv, so it may be echoed back; the operating system's reason
+/// travels with it because "which file, and why not" is the whole content of
+/// this failure. No part of the file itself does.
+PatchbayUiManifest _readUiManifest(String path) {
+  final String source;
+  try {
+    source = File(path).readAsStringSync();
+  } on FileSystemException catch (failure) {
+    throw PatchbayUiManifestException(
+      'manifestUnreadable',
+      details: <String, Object?>{
+        'path': path,
+        'reason': ?failure.osError?.message,
+      },
+    );
+  } on Object catch (failure) {
+    throw PatchbayUiManifestException(
+      'manifestUnreadable',
+      details: <String, Object?>{
+        'path': path,
+        'reason': '${failure.runtimeType}',
+      },
+    );
+  }
+  return PatchbayUiManifest.parse(source);
 }
 
 /// Refuses to send a catalog-declared sensitive parameter through argv.
@@ -1029,11 +1138,12 @@ void _writeOutput(
   StringSink out,
   Map<String, Object?> output, {
   required bool json,
+  String? summary,
 }) {
   out.writeln(
     json
         ? const JsonEncoder.withIndent('  ').convert(output)
-        : patchbayResponseSummary(output),
+        : summary ?? patchbayResponseSummary(output),
   );
 }
 
@@ -1096,10 +1206,14 @@ final class _CatalogCommand {
 }
 
 final class _Outcome {
-  const _Outcome(this.response, this.exitCode);
+  const _Outcome(this.response, this.exitCode, {this.summary});
 
   final Map<String, Object?> response;
   final int exitCode;
+
+  /// Human rendering for the one-shot path, when one line cannot carry the
+  /// result. `null` keeps the shared per-response summary.
+  final String? summary;
 }
 
 /// A session-directory answer, in both the shapes the CLI prints.
@@ -1115,11 +1229,22 @@ final class _LocalOutcome {
 }
 
 final class _Execution {
-  const _Execution(this.response, {this.catalog, this.artifact});
+  const _Execution(
+    this.response, {
+    this.catalog,
+    this.artifact,
+    this.exitCode,
+    this.summary,
+  });
 
   final Map<String, Object?> response;
   final Map<String, Object?>? catalog;
   final _ArtifactRequest? artifact;
+
+  /// Set only when the CLI itself decided the outcome, so the classification of
+  /// an App response stays in one place.
+  final int? exitCode;
+  final String? summary;
 }
 
 final class _ArtifactRequest {
