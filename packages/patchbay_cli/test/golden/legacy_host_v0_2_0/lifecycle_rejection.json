@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "requestId": "legacy-request",
+  "admission": "rejected",
+  "notice": null,
+  "jobId": null,
+  "rejection": {
+    "code": "uiLifecycleNotResumed"
+  }
+}

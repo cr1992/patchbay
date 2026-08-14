@@ -1,0 +1,533 @@
+{
+  "schemaVersion": 1,
+  "strictlyDecodedByShippedClients": [
+    "PatchbayBlobChunkWire",
+    "PatchbayBlobMetadataWire",
+    "PatchbayJobWaitResultWire",
+    "PatchbayUiTargetDescriptorWire",
+    "PatchbayUiTargetKindWire"
+  ],
+  "types": {
+    "PatchbayCommandModeWire": {
+      "kind": "enum",
+      "values": [
+        "readOnly",
+        "immediate",
+        "job"
+      ]
+    },
+    "PatchbayParameterTypeWire": {
+      "kind": "enum",
+      "values": [
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "enumeration",
+        "json"
+      ]
+    },
+    "PatchbayPlaneWire": {
+      "kind": "enum",
+      "values": [
+        "domain",
+        "flutterUi"
+      ]
+    },
+    "PatchbaySideEffectWire": {
+      "kind": "enum",
+      "values": [
+        "none",
+        "appState",
+        "external"
+      ]
+    },
+    "PatchbayFactSourceWire": {
+      "kind": "enum",
+      "values": [
+        "appRecorded",
+        "commandEcho",
+        "deviceReported",
+        "uiObserved",
+        "unknown"
+      ]
+    },
+    "PatchbayAdmissionWire": {
+      "kind": "enum",
+      "values": [
+        "accepted",
+        "rejected"
+      ]
+    },
+    "PatchbayJobPhaseWire": {
+      "kind": "enum",
+      "values": [
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "PatchbayJobWaitOutcomeWire": {
+      "kind": "enum",
+      "values": [
+        "changed",
+        "timedOut"
+      ]
+    },
+    "PatchbayUiTargetKindWire": {
+      "kind": "enum",
+      "values": [
+        "text",
+        "capture"
+      ]
+    },
+    "PatchbaySensitivePolicyWire": {
+      "kind": "enum",
+      "values": [
+        "public",
+        "redacted"
+      ]
+    },
+    "PatchbayNavigationOperationWire": {
+      "kind": "enum",
+      "values": [
+        "go",
+        "push",
+        "back"
+      ]
+    },
+    "PatchbayUiWaitConditionWire": {
+      "kind": "enum",
+      "values": [
+        "semanticsMounted",
+        "semanticsUnmounted",
+        "semanticsValue",
+        "navigationDestination",
+        "treeRevision",
+        "frameRevision"
+      ]
+    },
+    "PatchbayLogLevelWire": {
+      "kind": "enum",
+      "values": [
+        "trace",
+        "debug",
+        "info",
+        "warning",
+        "error",
+        "fatal"
+      ]
+    },
+    "PatchbayLogDirectionWire": {
+      "kind": "enum",
+      "values": [
+        "forward",
+        "backward"
+      ]
+    },
+    "PatchbayLogBatchOutcomeWire": {
+      "kind": "enum",
+      "values": [
+        "records",
+        "staleCursor",
+        "timedOut",
+        "cancelled"
+      ]
+    },
+    "PatchbayLogTruncationWire": {
+      "kind": "enum",
+      "values": [
+        "entryLimit",
+        "byteLimit",
+        "sourceLimit"
+      ]
+    },
+    "PatchbayLogRedactionWire": {
+      "kind": "enum",
+      "values": [
+        "consumerRedacted"
+      ]
+    },
+    "PatchbayBlobSourceWire": {
+      "kind": "enum",
+      "values": [
+        "logExport",
+        "flutterCapture"
+      ]
+    },
+    "PatchbayCaptureTargetWire": {
+      "kind": "enum",
+      "values": [
+        "root",
+        "registeredTarget"
+      ]
+    },
+    "PatchbayCaptureWarningWire": {
+      "kind": "enum",
+      "values": [
+        "flutterSubtreeOnly",
+        "platformViewsMayBeMissing",
+        "systemUiNotIncluded"
+      ]
+    },
+    "PatchbayParameterDescriptorWire": {
+      "kind": "object",
+      "fields": [
+        "name",
+        "type",
+        "required",
+        "sensitive",
+        "default",
+        "allowedValues",
+        "summary"
+      ]
+    },
+    "PatchbayIdentityWire": {
+      "kind": "object",
+      "fields": [
+        "schemaVersion",
+        "serverVersion",
+        "features",
+        "applicationId",
+        "appInstanceId",
+        "isolateId"
+      ]
+    },
+    "PatchbayCatalogDigestWire": {
+      "kind": "object",
+      "fields": [
+        "algorithm",
+        "covers",
+        "value"
+      ]
+    },
+    "PatchbayCommandDescriptorWire": {
+      "kind": "object",
+      "fields": [
+        "name",
+        "summary",
+        "plane",
+        "mode",
+        "sideEffect",
+        "factSources",
+        "gates",
+        "parameters"
+      ]
+    },
+    "PatchbayRejectionWire": {
+      "kind": "object",
+      "fields": [
+        "code",
+        "notice",
+        "details"
+      ]
+    },
+    "PatchbayInvocationWire": {
+      "kind": "object",
+      "fields": [
+        "schemaVersion",
+        "requestId",
+        "admission",
+        "payload",
+        "notice",
+        "jobId",
+        "rejection"
+      ]
+    },
+    "PatchbayJobEventWire": {
+      "kind": "object",
+      "fields": [
+        "sequence",
+        "at",
+        "phase",
+        "source",
+        "operation",
+        "payload",
+        "reason"
+      ]
+    },
+    "PatchbayJobSnapshotWire": {
+      "kind": "object",
+      "fields": [
+        "jobId",
+        "terminal",
+        "events"
+      ]
+    },
+    "PatchbayJobWaitResultWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "snapshot"
+      ]
+    },
+    "PatchbayUiTargetDescriptorWire": {
+      "kind": "object",
+      "fields": [
+        "id",
+        "generation",
+        "kind",
+        "mounted",
+        "ambiguous",
+        "operations",
+        "operationGates",
+        "sensitivePolicy",
+        "sideEffect",
+        "factSources"
+      ]
+    },
+    "PatchbaySemanticsRectWire": {
+      "kind": "object",
+      "fields": [
+        "left",
+        "top",
+        "width",
+        "height"
+      ]
+    },
+    "PatchbaySemanticsNodeWire": {
+      "kind": "object",
+      "fields": [
+        "nodeId",
+        "generation",
+        "parentNodeId",
+        "depth",
+        "identifier",
+        "label",
+        "value",
+        "valueRedacted",
+        "hint",
+        "tooltip",
+        "flags",
+        "actions",
+        "invisible",
+        "userActionsBlocked",
+        "rect",
+        "rectCoordinateSpace",
+        "transformToParent",
+        "scrollPosition",
+        "scrollExtentMin",
+        "scrollExtentMax",
+        "platformViewId",
+        "children"
+      ]
+    },
+    "PatchbaySemanticsSnapshotWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "treeRevision",
+        "rootNodeId",
+        "truncated",
+        "nodeCount",
+        "nodes"
+      ]
+    },
+    "PatchbayDestinationDescriptorWire": {
+      "kind": "object",
+      "fields": [
+        "id",
+        "summary",
+        "operations",
+        "gates",
+        "ambiguous"
+      ]
+    },
+    "PatchbayNavigationCatalogWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "navigationRevision",
+        "destinations"
+      ]
+    },
+    "PatchbayNavigationCurrentWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "navigationRevision",
+        "destinationId"
+      ]
+    },
+    "PatchbayNavigationResultWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "operation",
+        "requestedDestinationId",
+        "destinationId",
+        "beforeNavigationRevision",
+        "afterNavigationRevision",
+        "frameRevision"
+      ]
+    },
+    "PatchbayUiWaitRequestWire": {
+      "kind": "object",
+      "fields": [
+        "condition",
+        "timeoutMs",
+        "semanticsIdentifier",
+        "value",
+        "destinationId",
+        "revision"
+      ]
+    },
+    "PatchbayUiWaitResultWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "condition",
+        "elapsedMs",
+        "semanticsIdentifier",
+        "nodeId",
+        "generation",
+        "value",
+        "destinationId",
+        "navigationRevision",
+        "treeRevision",
+        "frameRevision"
+      ]
+    },
+    "PatchbayLogRecordWire": {
+      "kind": "object",
+      "fields": [
+        "cursor",
+        "at",
+        "level",
+        "category",
+        "message",
+        "fields",
+        "redaction",
+        "source"
+      ]
+    },
+    "PatchbayLogQueryRequestWire": {
+      "kind": "object",
+      "fields": [
+        "cursor",
+        "direction",
+        "limit",
+        "levels",
+        "categories",
+        "since",
+        "until"
+      ]
+    },
+    "PatchbayLogTailRequestWire": {
+      "kind": "object",
+      "fields": [
+        "cursor",
+        "limit",
+        "timeoutMs",
+        "levels",
+        "categories"
+      ]
+    },
+    "PatchbayLogExportRequestWire": {
+      "kind": "object",
+      "fields": [
+        "cursor",
+        "direction",
+        "limit",
+        "levels",
+        "categories",
+        "since",
+        "until",
+        "ttlMs"
+      ]
+    },
+    "PatchbayLogBatchWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "records",
+        "nextCursor",
+        "currentCursor",
+        "truncated",
+        "truncation",
+        "elapsedMs"
+      ]
+    },
+    "PatchbayBlobMetadataWire": {
+      "kind": "object",
+      "fields": [
+        "blobId",
+        "source",
+        "kind",
+        "contentType",
+        "length",
+        "sha256",
+        "createdAt",
+        "expiresAt",
+        "filename",
+        "properties"
+      ]
+    },
+    "PatchbayBlobMetadataRequestWire": {
+      "kind": "object",
+      "fields": [
+        "blobId"
+      ]
+    },
+    "PatchbayBlobReadRequestWire": {
+      "kind": "object",
+      "fields": [
+        "blobId",
+        "offset",
+        "limit"
+      ]
+    },
+    "PatchbayBlobChunkWire": {
+      "kind": "object",
+      "fields": [
+        "metadata",
+        "offset",
+        "length",
+        "nextOffset",
+        "eof",
+        "dataBase64"
+      ]
+    },
+    "PatchbayLogExportResultWire": {
+      "kind": "object",
+      "fields": [
+        "source",
+        "blob",
+        "recordCount",
+        "truncated",
+        "truncation"
+      ]
+    },
+    "PatchbayCaptureRequestWire": {
+      "kind": "object",
+      "fields": [
+        "targetId",
+        "generation",
+        "pixelRatio",
+        "timeoutMs"
+      ]
+    },
+    "PatchbayCaptureResultWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "target",
+        "targetId",
+        "generation",
+        "width",
+        "height",
+        "pixelRatio",
+        "warnings",
+        "blob"
+      ]
+    }
+  }
+}
