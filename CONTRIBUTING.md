@@ -3,7 +3,7 @@
 本仓有两个远端，**同步方向是单向的**，请勿双头推：
 
 - GitHub `cr1992/patchbay` —— 协作与 PR 入口（你在这里干活）；
-- GitLab `cloud/mobile/patchbay` —— 主仓，只由 maintainer（cr1992）从 GitHub 合并后回推并打 tag。
+- GitLab `cloud/mobile/patchbay` —— 主仓，只接受 maintainer（cr1992）从 GitHub 回推，流程见[发版](#发版)。
 
 ## 提交改动
 

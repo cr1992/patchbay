@@ -1,7 +1,7 @@
 # 发版检查清单
 
 > 依据 [CONTRIBUTING.md](../CONTRIBUTING.md)、[.gitlab-ci.yml](../.gitlab-ci.yml) 与 GitHub Actions
-> 门禁整理。只由 maintainer（cr1992）执行：GitHub 合并 → 回推 GitLab → 打 tag → 下游按 pin 升级。
+> 门禁整理。只由 maintainer 执行：GitHub 合并 → 回推 GitLab → 打 tag → 下游按 pin 升级。
 > 本清单是发版动作的核对表，不改变 CONTRIBUTING.md 定义的权责边界。
 
 ## 1. 门禁全绿
