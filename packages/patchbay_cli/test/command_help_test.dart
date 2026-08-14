@@ -85,6 +85,7 @@ Availability is still decided by the running App catalog.
         'snapshot',
         'exec',
         'repl',
+        'doctor',
         'job',
         'session',
         'sessions',
