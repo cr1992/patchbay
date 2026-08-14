@@ -140,4 +140,5 @@ sequenceDiagram
 - 不支持 release 构建，不建立任何降级通道；
 - 系统权限弹窗、装卸包、进程管理不做——那是 adb / xcrun 的地盘。
 
-红线的放宽会改变协议行为或安全边界，必须记入 [CHANGELOG](../CHANGELOG.md)，不静默改写。
+放弃的特性进本节；红线的放宽会改变协议行为或安全边界，记入 [CHANGELOG](../CHANGELOG.md)。
+两者都不静默改写。
