@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
@@ -33,10 +34,19 @@ Future<int> runPatchbayCli(
   try {
     parsed = parser.parse(arguments);
   } on FormatException catch (failure) {
-    error.writeln(failure.message);
-    return PatchbayExitCode.usage;
+    // No ArgResults to ask yet, and a parse failure is exactly the kind of
+    // error a `--json` caller still has to be able to read.
+    return _fail(
+      out,
+      error,
+      json: _jsonRequestedIn(arguments),
+      message: failure.message,
+      envelope: _usageEnvelope(failure),
+      exitCode: PatchbayExitCode.usage,
+    );
   }
 
+  final bool json = parsed.flag('json');
   PatchbayClient? connection;
   try {
     if (_helpTopic(parsed) case final List<String> topic) {
@@ -68,49 +78,151 @@ Future<int> runPatchbayCli(
         },
         out: out,
         err: error,
-        json: parsed.flag('json'),
+        json: json,
       ).run(
         replInput ??
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
     final _Outcome outcome = await _executeOnce(connection, parsed);
-    _writeOutput(out, outcome.response, json: parsed.flag('json'));
+    _writeOutput(out, outcome.response, json: json);
     return outcome.exitCode;
   } on FormatException catch (failure) {
-    error.writeln(failure.message);
-    return PatchbayExitCode.usage;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: failure.message,
+      envelope: _usageEnvelope(failure),
+      exitCode: PatchbayExitCode.usage,
+    );
   } on PatchbayArtifactDownloadException catch (failure) {
-    error.writeln('patchbay protocol error: ${failure.code}');
-    return PatchbayExitCode.protocol;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay protocol error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.protocol,
+    );
   } on PatchbayProtocolException catch (failure) {
-    error.writeln('patchbay protocol error: ${failure.code}');
-    return PatchbayExitCode.protocol;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay protocol error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.protocol,
+    );
   } on PatchbayTransportException catch (failure) {
-    error.writeln('patchbay transport error: ${failure.code}');
-    return PatchbayExitCode.transport;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay transport error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.transport,
+    );
   } on PatchbaySessionException catch (failure) {
-    error.writeln('patchbay session error: ${failure.code}');
+    final StringBuffer message = StringBuffer(
+      'patchbay session error: ${failure.code}',
+    );
     for (final String choice in failure.choices) {
-      error.writeln('  --session ${choice.split(' ').first}  $choice');
+      message.write('\n  --session ${choice.split(' ').first}  $choice');
     }
-    return failure.code == 'sessionIdentityMismatch'
-        ? PatchbayExitCode.protocol
-        : PatchbayExitCode.transport;
-  } on PatchbayJobWaitTimeout {
-    error.writeln('patchbay job failed: waitTimeout');
-    return PatchbayExitCode.typedFailure;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: message.toString(),
+      // The labels are already URI-free — that is what makes them printable —
+      // so the JSON reader gets the same choices the operator sees.
+      envelope: PatchbayErrorEnvelope(
+        failure.code,
+        details: <String, Object?>{
+          if (failure.choices.isNotEmpty) 'sessions': failure.choices,
+        },
+      ),
+      exitCode: failure.code == 'sessionIdentityMismatch'
+          ? PatchbayExitCode.protocol
+          : PatchbayExitCode.transport,
+    );
+  } on PatchbayJobWaitTimeout catch (failure) {
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay job failed: waitTimeout',
+      envelope: PatchbayErrorEnvelope(
+        'waitTimeout',
+        details: <String, Object?>{'jobId': failure.jobId},
+      ),
+      exitCode: PatchbayExitCode.typedFailure,
+    );
   } on PatchbaySensitiveInputException catch (failure) {
-    error.writeln('patchbay sensitive input error: ${failure.code}');
-    return PatchbayExitCode.usage;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay sensitive input error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code),
+      exitCode: PatchbayExitCode.usage,
+    );
   } on Object catch (failure) {
     // VM Service URIs and direct bearer tokens are authentication material.
     // Socket exceptions can echo endpoints, so expose only the stable type.
-    error.writeln('patchbay transport error: ${failure.runtimeType}');
-    return PatchbayExitCode.transport;
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay transport error: ${failure.runtimeType}',
+      envelope: PatchbayErrorEnvelope(
+        'transportError',
+        details: <String, Object?>{'type': '${failure.runtimeType}'},
+      ),
+      exitCode: PatchbayExitCode.transport,
+    );
   } finally {
     await connection?.close();
   }
+}
+
+/// Reports one failure on both channels and returns its exit code.
+///
+/// stderr keeps the sentence it always printed. `--json` adds the machine
+/// envelope on stdout, so stdout under `--json` is exactly one JSON document —
+/// the response or the error — and never a mix of JSON and prose.
+int _fail(
+  StringSink out,
+  StringSink error, {
+  required bool json,
+  required String message,
+  required PatchbayErrorEnvelope envelope,
+  required int exitCode,
+}) {
+  error.writeln(message);
+  if (json) {
+    out.writeln(const JsonEncoder.withIndent('  ').convert(envelope.toJson()));
+  }
+  return exitCode;
+}
+
+/// Usage errors have no code of their own; the sentence is the detail.
+PatchbayErrorEnvelope _usageEnvelope(FormatException failure) =>
+    PatchbayErrorEnvelope(
+      'usageError',
+      details: <String, Object?>{'message': failure.message},
+    );
+
+/// Whether `--json` appears in raw argv, for failures that precede parsing.
+bool _jsonRequestedIn(List<String> arguments) {
+  var json = false;
+  for (final String word in arguments) {
+    if (word == '--') break;
+    if (word == '--json') json = true;
+    if (word == '--no-json') json = false;
+  }
+  return json;
 }
 
 /// Whether this invocation opens a reusable session instead of one command.
@@ -145,6 +257,7 @@ Future<_Outcome> _executeOnce(
       if (patchbayExitCodeFor(output) == PatchbayExitCode.accepted) {
         final PatchbayDownloadedArtifact downloaded =
             await PatchbayArtifactDownloader(
+              chunkBytes: _blobChunkBytes(execution.catalog!),
               invoke: (String command, Map<String, Object?> arguments) =>
                   _invokeAgainstCatalog(
                     connection,
@@ -213,7 +326,7 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addFlag(
     'stdin',
     defaultsTo: false,
-    help: 'Read a sensitive JSON/text value from one no-echo stdin line.',
+    help: 'Read one no-echo stdin line; JSON merges over --args, stdin wins.',
   )
   ..addFlag(
     'wait',
@@ -365,15 +478,38 @@ Future<_Execution> _execute(
       throw StateError('repl is a session, not a dispatchable command');
     case PatchbayCommandTarget.declaredServiceCommand:
     case PatchbayCommandTarget.callerServiceCommand:
-      final _Invoked result = await _invokeCataloged(
+      final String command = friendly.serviceCommand!;
+      final Map<String, Object?> catalog = await connection.catalog();
+      _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
+      Map<String, Object?> arguments = friendly.arguments;
+      if (friendly.resolvesRevision) {
+        final Map<String, Object?> current = await _invokeAgainstCatalog(
+          connection,
+          catalog,
+          'navigation.current',
+          const <String, Object?>{},
+        );
+        // A refused read is reported as itself, marked with where it came
+        // from: pretending the navigation command was refused would hide which
+        // gate actually spoke.
+        if (current['admission'] == 'rejected') {
+          return _Execution(_withRevisionSource(current), catalog: catalog);
+        }
+        arguments = <String, Object?>{
+          ...arguments,
+          'revision': _navigationRevision(current),
+        };
+      }
+      final Map<String, Object?> response = await _invokeCataloged(
         connection,
-        friendly.serviceCommand!,
-        friendly.arguments,
+        catalog,
+        command,
+        arguments,
         wait: parsed.flag('wait'),
       );
       return _Execution(
-        result.response,
-        catalog: result.catalog,
+        friendly.resolvesRevision ? _withRevisionSource(response) : response,
+        catalog: catalog,
         artifact: friendly.spec.artifact == PatchbayArtifactDisposition.none
             ? null
             : _ArtifactRequest(
@@ -385,13 +521,73 @@ Future<_Execution> _execute(
   }
 }
 
-Future<_Invoked> _invokeCataloged(
+/// The `blob.read` chunk size this host will actually accept.
+///
+/// The descriptor declares the host's ceiling as the `limit` default and the
+/// host refuses anything above it, so the CLI asks for no more than the App
+/// offers. Taking the smaller of the two keeps a host that raises its ceiling
+/// from silently enlarging every CLI request as well.
+int _blobChunkBytes(Map<String, Object?> catalog) {
+  final int? declared = _CatalogCommand.find(
+    catalog,
+    'blob.read',
+  )?.positiveIntegerDefault('limit');
+  if (declared == null) return PatchbayArtifactDownloader.defaultChunkBytes;
+  return min(declared, PatchbayArtifactDownloader.defaultChunkBytes);
+}
+
+/// Marks a response whose revision fence the CLI read instead of the caller.
+///
+/// The marker is the only trace the convenience leaves in the output: a reader
+/// can tell an operator-observed revision from one the CLI fetched a moment
+/// before dispatching, which is exactly the difference that matters when a
+/// navigation raced the command.
+Map<String, Object?> _withRevisionSource(Map<String, Object?> response) =>
+    <String, Object?>{...response, 'revisionSource': 'navigation.current'};
+
+/// The revision an App reports as current, or a protocol error.
+int _navigationRevision(Map<String, Object?> response) {
+  final Object? payload = response['payload'];
+  final Object? revision = payload is Map<Object?, Object?>
+      ? payload['navigationRevision']
+      : null;
+  if (revision is! int || revision < 0) {
+    throw const PatchbayProtocolException('navigationRevisionContractViolated');
+  }
+  return revision;
+}
+
+/// Refuses to send a catalog-declared sensitive parameter through argv.
+///
+/// `--stdin` merges over `--args`, so "this request used stdin" no longer
+/// implies "every value came from stdin". Only the descriptor knows which key
+/// is sensitive, and the CLI already holds the catalog here, so the check
+/// belongs on this side of the wire: a secret must never reach argv, where the
+/// shell history records it.
+void _refuseSensitiveArgv(
+  Map<String, Object?> catalog,
+  String command,
+  Set<String> plaintextKeys,
+) {
+  if (plaintextKeys.isEmpty) return;
+  final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
+  if (descriptor == null) return;
+  for (final String name in plaintextKeys) {
+    if (!descriptor.sensitiveParameters.contains(name)) continue;
+    throw FormatException(
+      '$command declares "$name" sensitive: it must come from --stdin, '
+      'never from --args',
+    );
+  }
+}
+
+Future<Map<String, Object?>> _invokeCataloged(
   PatchbayClient connection,
+  Map<String, Object?> catalog,
   String command,
   Map<String, Object?> arguments, {
   required bool wait,
 }) async {
-  final Map<String, Object?> catalog = await connection.catalog();
   final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
   final Map<String, Object?> admission = await _invokeAgainstCatalog(
     connection,
@@ -402,7 +598,7 @@ Future<_Invoked> _invokeCataloged(
   );
   final bool serverWaitAvailable =
       _CatalogCommand.find(catalog, 'patchbay.job.wait') != null;
-  final Map<String, Object?> response = wait
+  return wait
       ? await _waitForJob(
           connection,
           catalog,
@@ -411,7 +607,6 @@ Future<_Invoked> _invokeCataloged(
           serverWaitAvailable: serverWaitAvailable,
         )
       : admission;
-  return _Invoked(response, catalog);
 }
 
 /// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
@@ -451,6 +646,14 @@ bool _isCommandNotRegistered(Map<String, Object?> response) {
       rejection['code'] == 'commandNotRegistered';
 }
 
+/// Waits for an admitted job and returns its terminal response.
+///
+/// The admission envelope carries `jobId` at the top level while a job snapshot
+/// carries its own inside `payload`, so `--wait` used to answer with the id in
+/// a different place than the request that started it. Both stay — the payload
+/// one is the App's snapshot field — but the top level is restated here so one
+/// path reads the same in both outputs: **top-level `jobId` is the stable place
+/// to read the id of the job this command admitted.**
 Future<Map<String, Object?>> _waitForJob(
   PatchbayClient connection,
   Map<String, Object?> catalog,
@@ -482,6 +685,8 @@ Future<Map<String, Object?>> _waitForJob(
     );
     return <String, Object?>{
       ...response,
+      // The admitted job id, restated at the top level. See `_waitForJob`.
+      'jobId': jobIdValue,
       'waitMode': 'legacyPolling',
       'waitNotice':
           'host did not catalog patchbay.job.wait; CLI polled patchbay.job.get',
@@ -523,6 +728,7 @@ Future<Map<String, Object?>> _waitForJob(
     if (result.snapshot.terminal) {
       return <String, Object?>{
         ...response,
+        'jobId': jobIdValue,
         'payload': <String, Object?>{
           ...result.snapshot.toJson(),
           'waitOutcome': result.outcome.toJson(),
@@ -577,10 +783,33 @@ int _positiveOption(ArgResults options, String name) {
   return value;
 }
 
+/// One catalog row, read only for what the CLI itself has to decide.
+///
+/// The row stays the App's data: nothing here upgrades it into a capability
+/// claim. The parameter declarations matter because two CLI-side decisions —
+/// which value may never touch argv, and how large a `blob.read` chunk the host
+/// will accept — are the App's to make, not the CLI's to hardcode.
 final class _CatalogCommand {
-  const _CatalogCommand(this.suggestedWaitTimeout);
+  const _CatalogCommand(this.suggestedWaitTimeout, this._parameters);
 
   final Duration? suggestedWaitTimeout;
+  final List<Map<Object?, Object?>> _parameters;
+
+  Set<String> get sensitiveParameters => <String>{
+    for (final Map<Object?, Object?> parameter in _parameters)
+      if (parameter['sensitive'] == true)
+        if (parameter['name'] case final String name) name,
+  };
+
+  /// Positive integer default declared for [name], when the App declares one.
+  int? positiveIntegerDefault(String name) {
+    for (final Map<Object?, Object?> parameter in _parameters) {
+      if (parameter['name'] != name) continue;
+      final Object? value = parameter['defaultValue'];
+      return value is int && value > 0 ? value : null;
+    }
+    return null;
+  }
 
   static _CatalogCommand? find(Map<String, Object?> catalog, String command) {
     final Object? rows = catalog['commands'];
@@ -588,10 +817,16 @@ final class _CatalogCommand {
     for (final Object? row in rows) {
       if (row is! Map<Object?, Object?> || row['name'] != command) continue;
       final Object? milliseconds = row['suggestedWaitTimeoutMs'];
+      final Object? parameters = row['parameters'];
       return _CatalogCommand(
         milliseconds is int && milliseconds > 0
             ? Duration(milliseconds: milliseconds)
             : null,
+        <Map<Object?, Object?>>[
+          if (parameters is List<Object?>)
+            for (final Object? parameter in parameters)
+              if (parameter is Map<Object?, Object?>) parameter,
+        ],
       );
     }
     return null;
@@ -603,13 +838,6 @@ final class _Outcome {
 
   final Map<String, Object?> response;
   final int exitCode;
-}
-
-final class _Invoked {
-  const _Invoked(this.response, this.catalog);
-
-  final Map<String, Object?> response;
-  final Map<String, Object?> catalog;
 }
 
 final class _Execution {

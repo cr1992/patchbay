@@ -322,10 +322,18 @@ void main() {
             'fixture.failedJob',
           ], workingDirectory: Directory.current.path);
       expect(failedJob.exitCode, PatchbayExitCode.typedFailure);
+      final Map<String, Object?> failedJobOutput =
+          jsonDecode(failedJob.stdout.toString()) as Map<String, Object?>;
+      expect(failedJobOutput['waitMode'], 'serverLongPoll');
+      // One place to read the id in both outputs: the admission envelope put
+      // `jobId` at the top level, and so does the terminal `--wait` result. The
+      // fixture's snapshot deliberately carries a different id, which is what
+      // proves the top-level value is the admitted job rather than an echo of
+      // whatever the host's snapshot happened to name.
+      expect(failedJobOutput['jobId'], 'fixture-job');
       expect(
-        (jsonDecode(failedJob.stdout.toString())
-            as Map<String, Object?>)['waitMode'],
-        'serverLongPoll',
+        (failedJobOutput['payload']! as Map<String, Object?>)['jobId'],
+        'job-1',
       );
 
       final ProcessResult navigationCatalog = await _runCli(uri, <String>[

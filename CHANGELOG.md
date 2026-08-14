@@ -6,6 +6,21 @@
 
 ### Changed
 
+- CLI `--stdin` 与 `--args` 由「整体替换」改为「合并，stdin 覆盖同名键」。原先「stdin 提供全量
+  参数」的用法成为 `--args` 缺席时的退化情形，行为不变；stdin 内容仍必须是 JSON object。
+  同时新增 fail-closed：catalog 声明 `sensitive: true` 的参数若出现在 `--args`，CLI 直接以退出码
+  `64` 拒发，不再依赖 App 侧兜底，错误信息不回显值。
+- CLI `--json` 时一切错误也输出到 stdout 的稳定 JSON 错误信封
+  `{"error":{"code":...,"details":{...}}}`，字段与 rejection 信封同形；人读文本仍只走 stderr。
+  无 `--json` 行为不变。
+- CLI `navigation go|push|back` 省略 `--revision` 时自动先读 `navigation.current` 再派发，结果带
+  `revisionSource`。revision 围栏本身不变，读到与派发之间导航动过仍被 App 拒绝；显式
+  `--revision` 行为不变。
+- CLI `patchbay help <topic>` 接受 catalog 协议名（`navigation.go`、`ui.semantics.tap`、`ui.wait`）
+  与别名拼写（`navigate` / `nav` / `wait` / `tap` / `text` / `semantics`、`ui wait <condition>`）。
+  别名只增加拼写，不新增命令，也不改任何既有命令名或 condition 名。
+- `PatchbayArtifactDownloader.chunkBytes` 由静态常量改为实例字段（常量更名
+  `defaultChunkBytes`）；CLI 按 catalog 中 `blob.read` 的 `limit` 默认值与之取小。
 - `inputWasStdin` 由框架层收编。host 在把 arguments 交给 consumer 之前按 descriptor 的
   `sensitive` 声明完成校验（任一 sensitive 参数带非空值却缺少该标记时，以
   `sensitiveInputRequiresStdin` 拒绝，`details.parameters` 列出违规参数名），随后把这个元键剥掉：
@@ -22,6 +37,10 @@
 
 ### Fixed
 
+- CLI `--wait` 的终态结果在响应顶层回填 `jobId`，与受理信封口径一致；`payload.jobId` 保留为 App
+  job snapshot 字段。人读摘要对终态 job 输出 `jobId=… terminal=true phase=…`，不再吞掉 outcome。
+- CLI 下载 artifact 时不再写死 64 KiB 分块：host 把 `maxChunkBytes` 调小于该值时，原先每个
+  `blob.read` 都会被 `blobInvalidChunkLimit` 拒绝，下载完全不可用。
 - `blob.read` 的 `limit` 与 descriptor 对齐：wire 允许缺省，host 补上 catalog 声明的同一个默认值
   （`PatchbayMemoryBlobStore.maxChunkBytes`）。此前 descriptor 标了默认值但 wire 必填，声明与实际
   不符。

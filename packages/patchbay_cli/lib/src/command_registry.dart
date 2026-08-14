@@ -109,55 +109,64 @@ enum PatchbayFriendlyCommand {
     'navigation.go',
     <String>['navigation', 'go'],
     summary: 'Replace navigation state with a destination.',
-    usageSuffix: '<destination-id> --revision <revision>',
+    usageSuffix: '<destination-id> [--revision <revision>]',
+    fencesNavigationRevision: true,
   ),
   navigationPush(
     'navigation.push',
     <String>['navigation', 'push'],
     summary: 'Push a cataloged destination.',
-    usageSuffix: '<destination-id> --revision <revision>',
+    usageSuffix: '<destination-id> [--revision <revision>]',
+    fencesNavigationRevision: true,
   ),
   navigationBack(
     'navigation.back',
     <String>['navigation', 'back'],
     summary: 'Navigate back from an observed revision.',
-    usageSuffix: '--revision <revision>',
+    usageSuffix: '[--revision <revision>]',
+    fencesNavigationRevision: true,
   ),
   uiWaitSemanticsMounted(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-mounted'],
     summary: 'Wait for a semantics identifier to mount.',
     usageSuffix: '<identifier>',
+    waitCondition: 'semanticsMounted',
   ),
   uiWaitSemanticsUnmounted(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-unmounted'],
     summary: 'Wait for a semantics identifier to unmount.',
     usageSuffix: '<identifier>',
+    waitCondition: 'semanticsUnmounted',
   ),
   uiWaitSemanticsValue(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-value'],
     summary: 'Wait for a semantics value.',
     usageSuffix: '<identifier> <value>',
+    waitCondition: 'semanticsValue',
   ),
   uiWaitDestination(
     'ui.wait',
     <String>['ui', 'wait', 'destination'],
     summary: 'Wait for a navigation destination.',
     usageSuffix: '<destination-id>',
+    waitCondition: 'navigationDestination',
   ),
   uiWaitTreeRevision(
     'ui.wait',
     <String>['ui', 'wait', 'tree-revision'],
     summary: 'Wait for the semantics tree revision.',
     usageSuffix: '<revision>',
+    waitCondition: 'treeRevision',
   ),
   uiWaitFrameRevision(
     'ui.wait',
     <String>['ui', 'wait', 'frame-revision'],
     summary: 'Wait for the rendered frame revision.',
     usageSuffix: '<revision>',
+    waitCondition: 'frameRevision',
   ),
   uiTextSet(
     'ui.text.set',
@@ -256,10 +265,17 @@ enum PatchbayFriendlyCommand {
     this.usageSuffix = '',
     this.artifact = PatchbayArtifactDisposition.none,
     this.target = PatchbayCommandTarget.declaredServiceCommand,
+    this.waitCondition,
+    this.fencesNavigationRevision = false,
   }) : assert(
          (serviceCommand != null) ==
              (target == PatchbayCommandTarget.declaredServiceCommand),
          'a declared service command belongs to exactly that target',
+       ),
+       assert(
+         (waitCondition != null) == (serviceCommand == 'ui.wait'),
+         'every ui.wait declaration names the condition it sends, and only '
+             'those declarations have one',
        );
 
   /// Stable protocol name, or `null` when the target does not declare one:
@@ -271,6 +287,23 @@ enum PatchbayFriendlyCommand {
   final String usageSuffix;
   final PatchbayArtifactDisposition artifact;
   final PatchbayCommandTarget target;
+
+  /// The `condition` value this declaration sends, for the `ui.wait` family.
+  ///
+  /// The CLI subcommand is hyphenated syntax and the condition is the wire
+  /// value; they differ on purpose, but only the wire value appears in the
+  /// response an operator is reading. Declaring it here is what lets help print
+  /// the mapping and lets the parser accept either spelling, without a second
+  /// hand-maintained list that could drift from the request actually sent.
+  final String? waitCondition;
+
+  /// Whether the request carries an observed navigation revision as a fence.
+  ///
+  /// When the caller omits `--revision` the CLI reads it from
+  /// `navigation.current` and sends that value; the fence itself is unchanged,
+  /// so a tree that moved in between is still refused by the App. The flag only
+  /// says "this command needs the number", never "this command may skip it".
+  final bool fencesNavigationRevision;
 }
 
 final class PatchbayFriendlyInvocation {
@@ -280,6 +313,8 @@ final class PatchbayFriendlyInvocation {
     this.serviceCommand,
     this.outputPath,
     this.force = false,
+    this.plaintextArgumentKeys = const <String>{},
+    this.resolvesRevision = false,
   });
 
   final PatchbayFriendlyCommand spec;
@@ -289,6 +324,24 @@ final class PatchbayFriendlyInvocation {
   final String? serviceCommand;
   final String? outputPath;
   final bool force;
+
+  /// Argument keys that came from `--args`, i.e. from an echoing argv.
+  final Set<String> plaintextArgumentKeys;
+
+  /// Whether the dispatcher still has to read the navigation revision fence.
+  ///
+  /// True only when the command needs one and the caller supplied none; an
+  /// explicit `--revision` is already in [arguments] and is never second-
+  /// guessed.
+  final bool resolvesRevision;
+}
+
+/// One accepted spelling and the declared path it expands into.
+final class _PathAlias {
+  const _PathAlias(this.from, this.to);
+
+  final List<String> from;
+  final List<String> to;
 }
 
 abstract final class PatchbayFriendlyCommandRegistry {
@@ -301,10 +354,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
     ArgResults options, {
     String Function() readSensitiveInput = readSensitiveStdinLine,
   }) {
-    final PatchbayFriendlyCommand? spec = _match(words);
+    final List<String> path = canonicalPath(words);
+    final PatchbayFriendlyCommand? spec = _match(path);
     if (spec == null) return null;
     _validateOptions(spec, options);
-    final List<String> tail = words.sublist(spec.path.length);
+    final List<String> tail = path.sublist(spec.path.length);
     final String? serviceCommand;
     if (spec.target == PatchbayCommandTarget.callerServiceCommand) {
       if (tail.length != 1) {
@@ -365,32 +419,30 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         _argumentsWithoutPositionals(spec, options),
       ),
+      // `revision` is left out when the caller omitted it: the dispatcher fills
+      // it in from `navigation.current` before the request goes out, so the
+      // fence still travels — it is just no longer a manual round trip.
       PatchbayFriendlyCommand.navigationGo ||
       PatchbayFriendlyCommand.navigationPush => _oneTail(
         tail,
         (String destination) => <String, Object?>{
           'destinationId': destination,
-          'revision': _requiredInt(options, 'revision'),
+          'revision': ?_optionalInt(options, 'revision'),
           'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
         },
       ),
       PatchbayFriendlyCommand.navigationBack => _noTail(tail, <String, Object?>{
-        'revision': _requiredInt(options, 'revision'),
+        'revision': ?_optionalInt(options, 'revision'),
         'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
       }),
-      PatchbayFriendlyCommand.uiWaitSemanticsMounted => _oneTail(
-        tail,
-        (String id) => _waitArguments(
-          options,
-          condition: 'semanticsMounted',
-          semanticsIdentifier: id,
-        ),
-      ),
+      // Every arm below takes its `condition` from the declaration, so the
+      // value help prints and the value the App receives cannot disagree.
+      PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
       PatchbayFriendlyCommand.uiWaitSemanticsUnmounted => _oneTail(
         tail,
         (String id) => _waitArguments(
           options,
-          condition: 'semanticsUnmounted',
+          condition: spec.waitCondition!,
           semanticsIdentifier: id,
         ),
       ),
@@ -398,7 +450,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         (String id, String value) => _waitArguments(
           options,
-          condition: 'semanticsValue',
+          condition: spec.waitCondition!,
           semanticsIdentifier: id,
           value: value,
         ),
@@ -407,24 +459,17 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         (String destination) => _waitArguments(
           options,
-          condition: 'navigationDestination',
+          condition: spec.waitCondition!,
           destinationId: destination,
           revision: _optionalInt(options, 'revision'),
         ),
       ),
-      PatchbayFriendlyCommand.uiWaitTreeRevision => _oneTail(
-        tail,
-        (String revision) => _waitArguments(
-          options,
-          condition: 'treeRevision',
-          revision: _parseNonNegative(revision, 'revision'),
-        ),
-      ),
+      PatchbayFriendlyCommand.uiWaitTreeRevision ||
       PatchbayFriendlyCommand.uiWaitFrameRevision => _oneTail(
         tail,
         (String revision) => _waitArguments(
           options,
-          condition: 'frameRevision',
+          condition: spec.waitCondition!,
           revision: _parseNonNegative(revision, 'revision'),
         ),
       ),
@@ -454,7 +499,68 @@ abstract final class PatchbayFriendlyCommandRegistry {
       serviceCommand: serviceCommand,
       outputPath: outputPath,
       force: options.flag('force'),
+      plaintextArgumentKeys: _plaintextArgumentKeys(options),
+      resolvesRevision:
+          spec.fencesNavigationRevision && options.option('revision') == null,
     );
+  }
+
+  /// Rewrites [words] into the declared spelling of the same command.
+  ///
+  /// Aliases only ever expand into a path that already exists: they add a way
+  /// to type a command, never a command, so no stable name changes and nothing
+  /// new becomes dispatchable. Two rewrites are enough for the deepest chain
+  /// (`wait semanticsMounted` → `ui wait semanticsMounted` → the declaration),
+  /// and no expansion produces another alias, so this terminates.
+  static List<String> canonicalPath(List<String> words) {
+    List<String> current = words;
+    for (var pass = 0; pass < 2; pass += 1) {
+      final List<String>? expanded = _expandAlias(current);
+      if (expanded == null) return current;
+      current = expanded;
+    }
+    return current;
+  }
+
+  static List<String>? _expandAlias(List<String> words) {
+    for (final _PathAlias alias in _aliases) {
+      if (!_startsWith(words, alias.from)) continue;
+      return <String>[...alias.to, ...words.sublist(alias.from.length)];
+    }
+    return null;
+  }
+
+  /// Alternate spellings accepted for a declared path.
+  ///
+  /// The `ui wait <condition>` entries are generated from the declarations
+  /// themselves: whatever condition a payload shows is therefore typeable, and
+  /// the mapping can never drift from the request the CLI actually sends. The
+  /// rest are the group names operators reach for before reading help.
+  static final List<_PathAlias> _aliases =
+      <_PathAlias>[
+        for (final PatchbayFriendlyCommand spec
+            in PatchbayFriendlyCommand.values)
+          if (spec.waitCondition case final String condition)
+            _PathAlias(<String>[
+              ...spec.path.take(spec.path.length - 1),
+              condition,
+            ], spec.path),
+        const _PathAlias(<String>['navigate'], <String>['navigation']),
+        const _PathAlias(<String>['nav'], <String>['navigation']),
+        const _PathAlias(<String>['wait'], <String>['ui', 'wait']),
+        const _PathAlias(<String>['tap'], <String>['ui', 'tap']),
+        const _PathAlias(<String>['text'], <String>['ui', 'text']),
+        const _PathAlias(<String>['semantics'], <String>['ui', 'semantics']),
+      ]..sort(
+        (_PathAlias a, _PathAlias b) => b.from.length.compareTo(a.from.length),
+      );
+
+  static bool _startsWith(List<String> words, List<String> prefix) {
+    if (words.length < prefix.length) return false;
+    for (var index = 0; index < prefix.length; index += 1) {
+      if (words[index] != prefix[index]) return false;
+    }
+    return true;
   }
 
   static PatchbayFriendlyCommand? _match(List<String> words) {
@@ -616,22 +722,47 @@ abstract final class PatchbayFriendlyCommandRegistry {
   };
 
   /// `--args`/`--stdin` JSON object shared by `exec` and `ui semantics tree`.
+  ///
+  /// The two merge and stdin wins on a shared key. A command usually has one
+  /// value that must not be echoed and several that are ordinary shape; making
+  /// stdin *replace* `--args` forced the whole object through the no-echo line,
+  /// where a typo in the readable half is invisible. Passing everything through
+  /// stdin still works — that is the degenerate case where `--args` is absent.
   static Map<String, Object?> _domainArguments(
     ArgResults options,
     String Function() readSensitiveInput,
   ) {
-    final bool fromStdin = options.flag('stdin');
-    final String encoded = fromStdin
-        ? readSensitiveInput()
-        : (options.option('args') ?? '{}');
+    final Map<String, Object?> fromArgs = _jsonObject(
+      options.option('args') ?? '{}',
+      '--args',
+    );
+    if (!options.flag('stdin')) return fromArgs;
+    return <String, Object?>{
+      ...fromArgs,
+      ..._jsonObject(readSensitiveInput(), 'stdin'),
+      // Fail closed on the marker itself: a stdin payload claiming
+      // `inputWasStdin: false` must not be able to unset it.
+      'inputWasStdin': true,
+    };
+  }
+
+  /// Argument keys this invocation took from argv rather than from stdin.
+  ///
+  /// The dispatcher compares them against the catalog descriptor and refuses to
+  /// send a parameter the App declares sensitive through argv, so merging
+  /// `--args` with `--stdin` cannot become a detour around the no-echo line.
+  static Set<String> _plaintextArgumentKeys(ArgResults options) {
+    final String? encoded = options.option('args');
+    if (encoded == null) return const <String>{};
+    return _jsonObject(encoded, '--args').keys.toSet();
+  }
+
+  static Map<String, Object?> _jsonObject(String encoded, String source) {
     final Object? decoded = jsonDecode(encoded);
     if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('--args/stdin must contain a JSON object');
+      throw FormatException('$source must contain a JSON object');
     }
-    return <String, Object?>{
-      ...Map<String, Object?>.from(decoded),
-      if (fromStdin) 'inputWasStdin': true,
-    };
+    return Map<String, Object?>.from(decoded);
   }
 
   /// `ui text set|enter <target-id> <generation> [text]`.
@@ -746,12 +877,6 @@ abstract final class PatchbayFriendlyCommandRegistry {
       throw const FormatException('command requires two positional arguments');
     }
     return build(tail[0], tail[1]);
-  }
-
-  static int _requiredInt(ArgResults options, String name) {
-    final int? result = _optionalInt(options, name);
-    if (result == null) throw FormatException('--$name is required');
-    return result;
   }
 
   static int? _optionalInt(ArgResults options, String name) {

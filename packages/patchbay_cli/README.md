@@ -30,7 +30,15 @@ dart run bin/patchbay.dart help job
 dart run bin/patchbay.dart help ui
 dart run bin/patchbay.dart logs --help
 dart run bin/patchbay.dart ui widget-tree --help
+dart run bin/patchbay.dart help navigation.go     # catalog 里的协议名也是 topic
+dart run bin/patchbay.dart help ui.wait           # 多个命令共用一个协议名时列出它们
+dart run bin/patchbay.dart help navigate          # 别名拼写，展开到既有路径
 ```
+
+help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（`navigation.go`、
+`ui.semantics.tap`）、以及别名（`navigate` / `nav` / `wait` / `tap` / `text` / `semantics`，以及
+`ui wait <condition>` 形式的 condition 名）。别名只是既有声明的另一种拼写，不新增命令，也不改任何
+稳定名；没有任何声明发送的协议名仍是 `unknown help topic`。
 
 由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：
 
@@ -70,6 +78,7 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation current
+dart run bin/patchbay.dart --ws-uri <uri> --json navigation go settings
 dart run bin/patchbay.dart --ws-uri <uri> --json --revision 4 navigation go settings
 dart run bin/patchbay.dart --ws-uri <uri> --json --revision 5 navigation push details
 dart run bin/patchbay.dart --ws-uri <uri> --json --revision 6 navigation back
@@ -90,6 +99,14 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 
 `<generation>` 来自最近一次 catalog 或 Semantics tree。目标重挂载后 generation 会变化；写操作携带
 旧值时会稳定拒绝，避免命令误打到同名的新实例。
+
+`navigation go|push|back` 省略 `--revision` 时，CLI 先调 `navigation.current` 读当前 revision 再派发，
+结果带 `revisionSource: navigation.current`。围栏不变：revision 照样随请求发出，读到与派发之间导航
+动过照样被 App 以稳定拒绝挡下。显式 `--revision` 保持原行为——不多读一次，也不带该标记。
+
+`ui wait <子命令>` 与 payload 里的 `condition` 刻意不同名（`semantics-mounted` ↔ `semanticsMounted`、
+`destination` ↔ `navigationDestination`）。两种拼写都可直接键入，映射表在 `patchbay help ui wait`；
+两边的名字都不会改，它们是 wire 契约。
 
 `ui tap <identifier>` 是 `ui semantics tree` + `ui semantics action` 的一步替代：解析、代际校验和派发
 都在 App 侧一次完成，CLI 不构造 nodeId，也不给 generation 补默认值。`--generation` 可选，传了就是
@@ -183,8 +200,13 @@ extensions 仍只存在于 VM Service 路径。
 
 ## 输入与结果
 
-普通结构化参数通过 `--args` 传 JSON object。descriptor 标记为敏感的参数必须把完整 JSON object 从
-stdin 传入，并显式使用 `--stdin`；输出只保留 redacted 元数据。stdin 接管真实 TTY 时 CLI 会临时关闭
+普通结构化参数通过 `--args` 传 JSON object，`--stdin` 从一行 no-echo stdin 读入。两者可以同时使用：
+stdin 的 JSON object 与 `--args` 合并，同名键以 stdin 为准，因此可读参数留在命令行、只有密文走
+no-echo 通道。只用 `--stdin` 不用 `--args` 仍然合法（合并的退化情形），stdin 内容不是 JSON object
+时照旧报错。
+
+descriptor 标记为敏感的参数只能来自 stdin：出现在 `--args` 里时 CLI 以退出码 `64` 拒发，不上线，
+错误信息只点名参数不回显值。输出只保留 redacted 元数据。stdin 接管真实 TTY 时 CLI 会临时关闭
 terminal echo，读取后恢复；无法关闭回显时以 `terminalEchoControlFailed` fail-closed。管道输入不修改
 终端模式。
 
@@ -193,6 +215,9 @@ terminal echo，读取后恢复；无法关闭回显时以 `terminalEchoControlF
 - `--wait` 持续读取到终态；
 - `job get` 读取当前快照；
 - `job cancel` 请求取消，但取消结果仍以 App 返回的 job 状态为准。
+
+`jobId` 的稳定取值位置是**响应顶层**：受理信封与 `--wait` 终态结果都在顶层给出这条命令受理的那个
+job。`payload.jobId` 是 App job snapshot 自带的字段，两处都保留，脚本读顶层那个。
 
 CLI 为每次 invoke 生成并发送 `requestId`，VM Service 与 direct 两条路径都要求响应回显相同值；不一致
 按协议错误退出，避免并发或迟到响应被归到错误命令。显式空 `requestId` 同样 fail-closed。
@@ -208,6 +233,19 @@ host catalog 有 `patchbay.job.wait` 时，CLI 以 `afterSequence` 做 bounded l
 
 JSON 输出保留事实来源、rejection code、job event sequence 和 capability warning。CLI 不把这些字段
 升级解释为设备执行成功、像素正确或系统 UI 已操作。
+
+带 `--json` 时 stdout 只有一个 JSON 文档：响应信封，或错误信封
+
+```json
+{"error": {"code": "sessionAmbiguous", "details": {"sessions": ["…"]}}}
+```
+
+形状与 App 的 rejection 信封一致（稳定 `code` + 自由 `details`）。用法错误的 `code` 是 `usageError`，
+句子在 `details.message`；session / protocol / transport / 敏感输入 / `waitTimeout` 用各自的稳定 code，
+兜底错误只暴露异常类型名，不回显 URI 或 token。人读文本仍只走 stderr。不带 `--json` 时行为不变。
+
+artifact 下载的分块大小取自 catalog 中 `blob.read` 的 `limit` 默认值（与 CLI 默认 64 KiB 取小），
+不写死：consumer 调小 `maxChunkBytes` 时下载照常，不会被 `blobInvalidChunkLimit` 拒死。
 
 ## 退出码
 
