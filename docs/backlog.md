@@ -15,8 +15,8 @@
 
 | 条目 | 动机 / 出处 | 备注 |
 |---|---|---|
-| 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 呼叫线真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | **design-gate** |
-| 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 呼叫线：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | |
+| 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 接入方真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | **design-gate** |
+| 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 接入方：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | |
 | 调试台「保持亮屏」开关（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，opt-in） | iOS 真机无系统级 stay-awake 命令，app 侧是唯一自动化手段；Android 可 `adb shell svc power stayon usb` 兜底 | |
 | 会话粘性：`sessions list/prune`、`session use` | 双设备并连时每条命令显式敲长 `--session` | |
 | 领域条件等待与字段选择：`snapshot --path`、`wait --until` | 客户端轮询应变服务端长轮询 | |
