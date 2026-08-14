@@ -23,8 +23,9 @@ Patchbay 是一条伸进 Flutter runtime 的类型化控制通道：从终端连
 adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iOS 来说，它补上了
 系统工具无法提供的 App 内部调试面。
 
-> **项目状态：** `v0.2.0`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
-> Flutter `>=3.38.0`。仅面向 debug / profile，不支持 release。
+> **项目状态：** `v0.2.1`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
+> Flutter `>=3.38.0`。控制面仅在 debug / profile 启用；package 可以参与 release 编译，但接入方
+> 必须在组合根通过编译期分支让 host 与 adapter 保持不可达。
 
 ## 适合解决什么问题
 
@@ -51,7 +52,7 @@ dependencies:
   patchbay_flutter:
     git:
       url: https://github.com/cr1992/patchbay.git
-      ref: patchbay-v0.2.0
+      ref: patchbay-v0.2.1
       path: packages/patchbay_flutter
 ```
 
@@ -61,7 +62,7 @@ dependencies:
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
+    --git-ref patchbay-v0.2.1 --git-path packages/patchbay_cli
 $ patchbay --help
 ```
 
@@ -97,13 +98,17 @@ void main() {
 这段最小接入已能提供 identity、catalog、空 snapshot、Semantics 只读观察和 `ui.wait`。
 Semantics action 默认拒绝；领域命令、截图、日志和导航都需要 App 显式注入对应能力。
 
-需要稳定文本目标时，只替换现有 Key：
+需要稳定文本目标时，用 `PatchbayKey` 替换现有 Key。它是 `GlobalKey`，必须像普通
+`GlobalKey` 一样缓存，不能在 `build()` 中每次重新构造：
 
 ```dart
-TextField(
-  key: PatchbayKey.text('login.phone'),
+late final PatchbayKey phoneKey = PatchbayKey.text('login.phone');
+
+@override
+Widget build(BuildContext context) => TextField(
+  key: phoneKey,
   controller: phoneController,
-)
+);
 ```
 
 ### 4. 连接运行中的 App
@@ -122,8 +127,9 @@ VM Service URI 通常包含认证信息，不要把它写入脚本、日志或�
 `patchbay sessions list` 看有哪些会话、`patchbay session use <session-id>` 固定一个，之后的命令
 不必再逐条敲 `--session`，详见[会话选择](docs/guide.md#会话选择)。
 
-catalog 中的 UI target 会返回当前 `generation`。写操作必须携带这个值，防止迟到的命令打到
-重挂载后的同名控件：
+catalog 中的 UI target 会返回当前 `generation`。声明了调用方代际围栏的写操作（如文本输入）
+必须携带这个值，防止迟到的命令打到重挂载后的同名控件；`ui tap` 可以省略 generation，host 会在
+解析 identifier 后钉住本次操作的代际：
 
 ```console
 $ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '13800000000'

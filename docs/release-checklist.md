@@ -32,6 +32,7 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
 ## 2. 版本与 CHANGELOG 对账
 
 - [ ] 四包 `pubspec.yaml` 的 `version` 字段一致，且与拟打的 tag 号（去掉 `patchbay-v` 前缀）一致
+- [ ] README 的项目状态、Flutter Git ref 与 CLI `--git-ref` 均与四包版本一致
 - [ ] [CHANGELOG.md](../CHANGELOG.md) 的 `Unreleased` 内容已归入拟发布的版本段落
 
 验证命令：
@@ -42,6 +43,7 @@ $ grep -m1 '^version:' \
     packages/patchbay_cli/pubspec.yaml \
     packages/patchbay_flutter/pubspec.yaml \
     packages/patchbay_transport/pubspec.yaml
+$ (cd packages/patchbay && dart test test/release_version_parity_test.dart)
 ```
 
 ## 3. 打 tag（`patchbay-vX.Y.Z`）
