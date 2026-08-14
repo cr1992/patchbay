@@ -25,6 +25,14 @@
 | 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe`/`doctor` | dogfood | |
 | DevTools 借用三批：inspect 开关 → perf VM RPC → net 画像 | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
 | snapshot revision / diff | dogfood（低优先级） | |
+| UI 目标声明对账 `ui verify-manifest <file>`：consumer 交 expected-targets manifest（id/kind/sensitive/所在屏），CLI 对比 catalog uiTargets + semantics 树，报「声明未挂载 / 挂载未声明 / 属性漂移」三类偏差；可选按 destination 逐屏巡检覆盖非常驻控件 | hirobot 提案（由「标注能否契约生成」review 引出：正向生成不成立，反向机械对账成立）；纯 CLI 侧、wire 零改动；hirobot 自荐首个试点 consumer（已有 ID 台账） | |
+
+## 文档债（快赢，可随任意批次走）
+
+| 条目 | 动机 / 出处 |
+|---|---|
+| guide「UI 目标标注」节补**标注收敛最佳实践**：有组件库的接入方应把 PatchbayKey/Semantics 收口进自家组件层（组件加 semanticsId 参数 + ID 常量台账），call site 直贴是无组件库时的姿势 | 蔡锐 review hirobot 接入指出散落扩散性差；hirobot MR !35 有参考实现（8 行→1 参数）可引用 |
+| `PatchbayKey` 语义进 patchbay_flutter README/docs：**构造即注册、弱引用出册、仅同时挂载判歧义**；显式写明 **build() 内裸构造会重挂载丢状态**（应在 State 缓存实例）——接入方靠逆向源码才发现的陷阱 | hirobot consumer 实践反馈 |
 
 ## design-gate（需仓主裁决后动工）
 
