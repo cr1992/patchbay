@@ -1,0 +1,1138 @@
+import 'dart:io';
+
+import 'package:test/test.dart';
+
+import '../tool/release_prep.dart';
+
+void main() {
+  group('pubspec 读写', () {
+    test('读版本号并原地改写，且幂等', () {
+      const String pubspec = '''
+name: patchbay
+description: d
+version: 0.2.1
+publish_to: none
+
+environment:
+  sdk: '>=3.11.0 <4.0.0'
+''';
+      expect(readPubspecVersion(pubspec), '0.2.1');
+      final String bumped = applyPubspecVersion(pubspec, '0.3.0');
+      expect(readPubspecVersion(bumped), '0.3.0');
+      expect(applyPubspecVersion(bumped, '0.3.0'), bumped);
+      // 只动 version 行，其余原样。
+      expect(bumped.replaceAll('0.3.0', '0.2.1'), pubspec);
+    });
+
+    test('缺 version 字段时抛，不静默补写', () {
+      expect(
+        () => applyPubspecVersion('name: patchbay\n', '0.3.0'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('publish_to / description / repository 按顶层标量读出', () {
+      const String pubspec = '''
+name: patchbay
+description: Consumer-neutral primitives.
+version: 0.3.0
+repository: https://example.invalid/repo
+''';
+      expect(readPubspecField(pubspec, 'publish_to'), isNull);
+      expect(
+        readPubspecField(pubspec, 'description'),
+        'Consumer-neutral primitives.',
+      );
+      expect(
+        readPubspecField(pubspec, 'repository'),
+        'https://example.invalid/repo',
+      );
+    });
+
+    test('path 依赖能认出来，hosted 约束不会误报', () {
+      const String withPath = '''
+name: patchbay_cli
+dependencies:
+  args: ^2.7.0
+  patchbay:
+    path: ../patchbay
+  patchbay_transport:
+    path: ../patchbay_transport
+''';
+      expect(readPathDependencies(withPath), <String>{
+        'patchbay',
+        'patchbay_transport',
+      });
+      expect(readInternalConstraints(withPath), isEmpty);
+
+      const String hosted = '''
+name: patchbay_cli
+dependencies:
+  args: ^2.7.0
+  patchbay: ^0.3.0
+  patchbay_transport: ^0.3.0
+''';
+      expect(readPathDependencies(hosted), isEmpty);
+      expect(readInternalDependencies(hosted), <String>{
+        'patchbay',
+        'patchbay_transport',
+      });
+      // 第三方依赖不进随版约束表。
+      expect(readInternalConstraints(hosted), <String, String>{
+        'patchbay': '^0.3.0',
+        'patchbay_transport': '^0.3.0',
+      });
+    });
+
+    test('environment 的 flutter 约束不被 dependencies 里的 flutter 块顶掉', () {
+      const String pubspec = '''
+name: patchbay_flutter
+environment:
+  sdk: '>=3.11.0 <4.0.0'
+  flutter: '>=3.38.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+''';
+      expect(readFlutterConstraint(pubspec), '>=3.38.0');
+    });
+  });
+
+  group('caret 约束', () {
+    test('0.x 走 minor 边界，1.x 走 major 边界', () {
+      final Version zeroThreeOne = Version.tryParse('0.3.1')!;
+      expect(caretAdmits('^0.3.0', zeroThreeOne), isTrue);
+      expect(caretAdmits('^0.3.0', Version.tryParse('0.4.0')!), isFalse);
+      expect(caretAdmits('^0.2.0', zeroThreeOne), isFalse);
+      expect(caretAdmits('^1.2.0', Version.tryParse('1.9.9')!), isTrue);
+      expect(caretAdmits('^1.2.0', Version.tryParse('2.0.0')!), isFalse);
+    });
+
+    test('不是 caret 形式就交人工，不猜', () {
+      expect(caretAdmits('>=0.3.0 <0.4.0', Version.tryParse('0.3.0')!), isNull);
+      expect(caretAdmits('any', Version.tryParse('0.3.0')!), isNull);
+    });
+
+    test('只接受 X.Y.Z', () {
+      expect(Version.tryParse('0.3'), isNull);
+      expect(Version.tryParse('v0.3.0'), isNull);
+      expect(Version.tryParse('0.3.0-beta'), isNull);
+      expect(Version.tryParse('0.3.0').toString(), '0.3.0');
+    });
+
+    test('约束不接纳目标版本才改写，接纳则原样（0.3.1 不动 ^0.3.0）', () {
+      const String pubspec = '''
+name: patchbay_cli
+dependencies:
+  args: ^2.7.0
+  patchbay: ^0.2.0
+  patchbay_transport: ^0.2.0
+''';
+      final String bumped = applyInternalConstraints(pubspec, '0.3.0');
+      expect(readInternalConstraints(bumped), <String, String>{
+        'patchbay': '^0.3.0',
+        'patchbay_transport': '^0.3.0',
+      });
+      // 第三方依赖零漂移。
+      expect(bumped, contains('  args: ^2.7.0'));
+      expect(applyInternalConstraints(bumped, '0.3.0'), bumped);
+      expect(applyInternalConstraints(bumped, '0.3.1'), bumped);
+      expect(
+        readInternalConstraints(applyInternalConstraints(bumped, '0.4.0')),
+        <String, String>{'patchbay': '^0.4.0', 'patchbay_transport': '^0.4.0'},
+      );
+    });
+  });
+
+  group('本地 overrides', () {
+    test('渲染与回读对得上，条目按字母序', () {
+      final String rendered = renderOverrides(<String, String>{
+        'patchbay_transport': '../patchbay_transport',
+        'patchbay': '../patchbay',
+      });
+      expect(
+        rendered.indexOf('patchbay:'),
+        lessThan(rendered.indexOf('patchbay_transport:')),
+      );
+      expect(readPathOverrides(rendered), <String, String>{
+        'patchbay': '../patchbay',
+        'patchbay_transport': '../patchbay_transport',
+      });
+      expect(readPathOverrides(null), isEmpty);
+    });
+
+    test('还是 path 依赖时不要求 overrides——那时本来就解析到工作树', () {
+      expect(expectedOverrides(_inputs()), isEmpty);
+    });
+
+    test('改成 hosted 约束后，三处都要 override（含 example 的传递依赖）', () {
+      expect(expectedOverrides(_inputs(publishable: true)), <String, Object>{
+        'packages/patchbay_cli/pubspec_overrides.yaml': <String, String>{
+          'patchbay': '../patchbay',
+          'patchbay_transport': '../patchbay_transport',
+        },
+        'packages/patchbay_flutter/pubspec_overrides.yaml': <String, String>{
+          'patchbay': '../patchbay',
+        },
+        // example 只 path 依赖 patchbay_flutter，patchbay 是隔一层的 hosted 依赖。
+        'packages/patchbay_flutter/example/pubspec_overrides.yaml':
+            <String, String>{'patchbay': '../../patchbay'},
+      });
+    });
+  });
+
+  group('发布顺序', () {
+    test('按依赖拓扑排序，同层字母序', () {
+      final List<String> order = publishOrder(<String, Set<String>>{
+        'patchbay': <String>{},
+        'patchbay_transport': <String>{},
+        'patchbay_cli': <String>{'patchbay', 'patchbay_transport'},
+        'patchbay_flutter': <String>{'patchbay'},
+      });
+      expect(order, <String>[
+        'patchbay',
+        'patchbay_transport',
+        'patchbay_cli',
+        'patchbay_flutter',
+      ]);
+    });
+
+    test('依赖方向变了顺序跟着变——顺序是推出来的不是写死的', () {
+      final List<String> order = publishOrder(<String, Set<String>>{
+        'patchbay': <String>{'patchbay_transport'},
+        'patchbay_transport': <String>{},
+      });
+      expect(order, <String>['patchbay_transport', 'patchbay']);
+    });
+
+    test('成环时拒绝给顺序', () {
+      expect(
+        () => publishOrder(<String, Set<String>>{
+          'a': <String>{'b'},
+          'b': <String>{'a'},
+        }),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
+  group('CHANGELOG 落款', () {
+    const String changelog = '''
+# Changelog
+
+说明行。
+
+## Unreleased
+
+### Added
+
+- 某条。
+
+## 0.2.1 - 2026-08-14
+
+正文。
+''';
+
+    test('Unreleased 落款成版本段，且保留标题后的空行', () {
+      final String applied = applyChangelogRelease(
+        changelog,
+        '0.3.0',
+        '2026-08-20',
+      );
+      expect(applied, contains('## 0.3.0 - 2026-08-20\n\n### Added'));
+      expect(applied, isNot(contains('## Unreleased')));
+      // 0.2.1 段原样保留，本表历史不被改写。
+      expect(applied, contains('## 0.2.1 - 2026-08-14'));
+
+      final ChangelogState state = readChangelogState(applied, '0.3.0');
+      expect(state.released, isTrue);
+      expect(state.releaseDate, '2026-08-20');
+      expect(state.hasUnreleased, isFalse);
+      expect(state.releaseIsNewest, isTrue);
+    });
+
+    test('已落款则原样返回（apply 幂等）', () {
+      final String once = applyChangelogRelease(
+        changelog,
+        '0.3.0',
+        '2026-08-20',
+      );
+      expect(applyChangelogRelease(once, '0.3.0', '2026-08-20'), once);
+    });
+
+    test('既无 Unreleased 也无目标版本段时抛，不代造段落', () {
+      expect(
+        () => applyChangelogRelease(
+          '# Changelog\n\n## 0.2.1 - 2026-08-14\n',
+          '0.3.0',
+          '2026-08-20',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('版本段不在最前时能判出来', () {
+      const String outOfOrder = '''
+# Changelog
+
+## 0.2.1 - 2026-08-14
+
+## 0.3.0 - 2026-08-20
+''';
+      expect(readChangelogState(outOfOrder, '0.3.0').releaseIsNewest, isFalse);
+    });
+  });
+
+  group('包内 CHANGELOG', () {
+    const String root = '''
+# Changelog
+
+根表前言：本文件记录尚未发布和已发布版本的变化。
+
+## Unreleased
+
+### Added
+
+- 还没发的东西。
+
+## 0.3.0 - 2026-08-20
+
+### Added
+
+- 已发的东西。
+
+## 0.2.1 - 2026-08-14
+
+正文。
+''';
+
+    test('从根表派生：留全部已发布段、丢 Unreleased、换成自己的前言', () {
+      final String derived = derivePackageChangelog(root);
+      expect(packageChangelogMentions(derived, '0.3.0'), isTrue);
+      expect(derived, contains('## 0.2.1 - 2026-08-14'));
+      expect(derived, contains('- 已发的东西。'));
+      // pub.dev 的 Changelog tab 读包内这份，历史段落一并带过来。
+      expect(
+        derived.indexOf('## 0.3.0'),
+        lessThan(derived.indexOf('## 0.2.1')),
+      );
+      expect(derived, isNot(contains('## Unreleased')));
+      expect(derived, isNot(contains('- 还没发的东西。')));
+      expect(derived, isNot(contains('根表前言')));
+      expect(derived, contains('由\n`release_prep --apply` 从根表派生'));
+    });
+
+    test('整份重算，跑两遍一致（根表是唯一真源）', () {
+      final String once = derivePackageChangelog(root);
+      expect(derivePackageChangelog(root), once);
+      // 根表新增一段后，派生结果跟着变——不会留下第三份真源。
+      final String updated = root.replaceFirst(
+        '## 0.3.0 - 2026-08-20',
+        '## 0.4.0 - 2026-09-01\n\n新段。\n\n## 0.3.0 - 2026-08-20',
+      );
+      expect(
+        packageChangelogMentions(derivePackageChangelog(updated), '0.4.0'),
+        isTrue,
+      );
+    });
+
+    test('「提没提当前版本」只认版本段标题，前缀相同的版本不算', () {
+      const String markdown = '# Changelog\n\n## 0.3.10 - 2026-08-20\n';
+      expect(packageChangelogMentions(markdown, '0.3.1'), isFalse);
+      expect(packageChangelogMentions(markdown, '0.3.10'), isTrue);
+      expect(packageChangelogMentions(null, '0.3.0'), isFalse);
+    });
+  });
+
+  group('example/pubspec.lock', () {
+    const String lock = '''
+# Generated by pub
+packages:
+  args:
+    dependency: transitive
+    description:
+      name: args
+      sha256: "abc"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.7.0"
+  patchbay:
+    dependency: transitive
+    description:
+      path: "../../patchbay"
+      relative: true
+    source: path
+    version: "0.2.1"
+  patchbay_flutter:
+    dependency: "direct main"
+    description:
+      path: ".."
+      relative: true
+    source: path
+    version: "0.2.1"
+sdks:
+  dart: ">=3.11.0 <4.0.0"
+''';
+
+    test('只读 path 源的随版包版本', () {
+      expect(readLockPathVersions(lock), <String, String>{
+        'patchbay': '0.2.1',
+        'patchbay_flutter': '0.2.1',
+      });
+    });
+
+    test('刷版本只动这些格子，hosted 条目零漂移，且幂等', () {
+      final String applied = applyLockVersions(lock, '0.3.0');
+      expect(readLockPathVersions(applied), <String, String>{
+        'patchbay': '0.3.0',
+        'patchbay_flutter': '0.3.0',
+      });
+      // hosted 的 args 保持 2.7.0。
+      expect(applied, contains('    version: "2.7.0"'));
+      expect(applied, contains('  dart: ">=3.11.0 <4.0.0"'));
+      expect(applyLockVersions(applied, '0.3.0'), applied);
+    });
+  });
+
+  group('兼容矩阵', () {
+    const String matrix = '''
+# 兼容性矩阵
+
+## 当前记录
+
+| patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） | Flutter（文档最低支持） | 已知 consumer |
+|---|---|---|---|---|---|
+| `patchbay-v0.2.1` | `d32f45e9d652920902e51f9c3dc25c189d804e46` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2 |
+
+字段来源：
+''';
+
+    test('表头与分隔行不会被当成数据行', () {
+      final List<CompatRow> rows = parseCompatRows(matrix);
+      expect(rows, hasLength(1));
+      expect(rows.single.tag, 'patchbay-v0.2.1');
+      expect(rows.single.commitSha, 'd32f45e9d652920902e51f9c3dc25c189d804e46');
+      expect(rows.single.schemaVersion, '1');
+      expect(rows.single.flutterMin, '>=3.38.0');
+      expect(rows.single.hasPending, isFalse);
+    });
+
+    test('新行插到表顶，旧行不动', () {
+      const CompatRow row = CompatRow(
+        tag: 'patchbay-v0.3.0',
+        commitSha: pendingSha,
+        schemaVersion: '1',
+        flutterCi: '3.44.9',
+        flutterMin: '>=3.38.0',
+        consumers: pendingConsumers,
+      );
+      final String applied = applyCompatMatrixRow(matrix, row);
+      final List<CompatRow> rows = parseCompatRows(applied);
+      expect(rows.map((r) => r.tag), <String>[
+        'patchbay-v0.3.0',
+        'patchbay-v0.2.1',
+      ]);
+      expect(rows.first.hasPending, isTrue);
+    });
+
+    test('同 tag 行已存在时不覆盖——人工回填过的内容不被脚本推平', () {
+      const CompatRow row = CompatRow(
+        tag: 'patchbay-v0.2.1',
+        commitSha: pendingSha,
+        schemaVersion: '9',
+        flutterCi: '0.0.0',
+        flutterMin: '>=0.0.0',
+        consumers: pendingConsumers,
+      );
+      expect(applyCompatMatrixRow(matrix, row), matrix);
+    });
+
+    test('渲染体例与现表一致', () {
+      const CompatRow row = CompatRow(
+        tag: 'patchbay-v0.3.0',
+        commitSha: 'abc',
+        schemaVersion: '1',
+        flutterCi: '3.44.9',
+        flutterMin: '>=3.38.0',
+        consumers: '待确认',
+      );
+      expect(
+        row.render(),
+        '| `patchbay-v0.3.0` | `abc` | 1 | 3.44.9 | `>=3.38.0` | 待确认 |',
+      );
+    });
+  });
+
+  group('源码取值', () {
+    test('schemaVersion 与 CI Flutter 版本从真源读出', () {
+      expect(readSchemaVersion('  static const int schemaVersion = 3;'), 3);
+      expect(readSchemaVersion('无常量'), isNull);
+      expect(
+        readCiFlutterVersion("env:\n  FLUTTER_VERSION: '3.44.9'\n"),
+        '3.44.9',
+      );
+    });
+  });
+
+  group('判定', () {
+    test('未 bump / 未落款 / lock 未刷 / 缺矩阵行——四件套全红', () {
+      final List<ReleaseCheck> checks = evaluateRelease(
+        version: '0.3.0',
+        inputs: _inputs(),
+        resolveTag: (_) => null,
+      );
+      expect(_status(checks, 'version-parity'), ReleaseCheckStatus.failed);
+      expect(_status(checks, 'changelog-release'), ReleaseCheckStatus.failed);
+      expect(_status(checks, 'example-lock'), ReleaseCheckStatus.failed);
+      expect(_status(checks, 'compat-matrix-row'), ReleaseCheckStatus.failed);
+    });
+
+    test('0.2.0 / 0.2.1 漏过的两项是硬检查', () {
+      final List<ReleaseCheck> checks = evaluateRelease(
+        version: '0.3.0',
+        inputs: _inputs(),
+        resolveTag: (_) => null,
+      );
+      expect(_check(checks, 'example-lock').hard, isTrue);
+      expect(_check(checks, 'compat-matrix-row').hard, isTrue);
+      expect(_check(checks, 'compat-matrix-backfill').hard, isTrue);
+      expect(_check(checks, 'publish-manifest').hard, isTrue);
+      expect(_check(checks, 'package-changelog').hard, isTrue);
+      expect(_check(checks, 'internal-dep-constraints').hard, isTrue);
+      expect(_check(checks, 'local-overrides').hard, isTrue);
+    });
+
+    test('四件套补齐后转绿', () {
+      final List<ReleaseCheck> checks = evaluateRelease(
+        version: '0.3.0',
+        inputs: _inputs(released: true),
+        resolveTag: (_) => null,
+      );
+      for (final String id in <String>[
+        'version-parity',
+        'schema-version-parity',
+        'changelog-release',
+        'package-changelog',
+        'example-lock',
+        'compat-matrix-row',
+      ]) {
+        expect(_status(checks, id), ReleaseCheckStatus.ok, reason: id);
+      }
+    });
+
+    test('包内 CHANGELOG 没提当前版本就红——pub 会因此退 65', () {
+      final ReleaseCheck check = _check(
+        evaluateRelease(
+          version: '0.3.0',
+          inputs: _inputs(released: true, packageChangelogVersion: '0.2.1'),
+          resolveTag: (_) => null,
+        ),
+        'package-changelog',
+      );
+      expect(check.status, ReleaseCheckStatus.failed);
+      expect(check.detail, contains('未记 0.3.0'));
+    });
+
+    test('schemaVersion 两处不一致直接红', () {
+      final List<ReleaseCheck> checks = evaluateRelease(
+        version: '0.3.0',
+        inputs: _inputs(released: true, invocationSchema: 2),
+        resolveTag: (_) => null,
+      );
+      expect(
+        _status(checks, 'schema-version-parity'),
+        ReleaseCheckStatus.failed,
+      );
+    });
+
+    test('矩阵行的 schemaVersion 与源码漂移时红', () {
+      final List<ReleaseCheck> checks = evaluateRelease(
+        version: '0.3.0',
+        inputs: _inputs(released: true, matrixSchemaCell: '2'),
+        resolveTag: (_) => null,
+      );
+      expect(_status(checks, 'compat-matrix-row'), ReleaseCheckStatus.failed);
+    });
+
+    group('tag 后回填', () {
+      test('tag 已存在但格子还是占位符——0.2.1 漏的那一步会红', () {
+        final List<ReleaseCheck> checks = evaluateRelease(
+          version: '0.3.0',
+          inputs: _inputs(released: true),
+          resolveTag: (tag) => tag == 'patchbay-v0.3.0' ? _sha : null,
+        );
+        final ReleaseCheck backfill = _check(checks, 'compat-matrix-backfill');
+        expect(backfill.status, ReleaseCheckStatus.failed);
+        expect(backfill.detail, contains('占位符'));
+      });
+
+      test('回填成 peeled SHA 后转绿', () {
+        final List<ReleaseCheck> checks = evaluateRelease(
+          version: '0.3.0',
+          inputs: _inputs(released: true, sha: _sha, consumers: '内部接入方 ×2'),
+          resolveTag: (tag) => tag == 'patchbay-v0.3.0' ? _sha : null,
+        );
+        expect(
+          _status(checks, 'compat-matrix-backfill'),
+          ReleaseCheckStatus.ok,
+        );
+      });
+
+      test('填错 SHA 也红', () {
+        final List<ReleaseCheck> checks = evaluateRelease(
+          version: '0.3.0',
+          inputs: _inputs(released: true, sha: 'f' * 40, consumers: '内部接入方 ×2'),
+          resolveTag: (tag) => tag == 'patchbay-v0.3.0' ? _sha : null,
+        );
+        final ReleaseCheck backfill = _check(checks, 'compat-matrix-backfill');
+        expect(backfill.status, ReleaseCheckStatus.failed);
+        expect(backfill.detail, contains('实际 peeled SHA'));
+      });
+
+      test('tag 解析不出时跳过，不误判成红', () {
+        final List<ReleaseCheck> checks = evaluateRelease(
+          version: '0.3.0',
+          inputs: _inputs(released: true),
+          resolveTag: (_) => null,
+        );
+        expect(
+          _status(checks, 'compat-matrix-backfill'),
+          ReleaseCheckStatus.skipped,
+        );
+      });
+    });
+
+    group('pub 发布门', () {
+      test('path 依赖 / 缺 LICENSE 是硬红', () {
+        final ReleaseCheck manifest = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(released: true),
+            resolveTag: (_) => null,
+          ),
+          'publish-manifest',
+        );
+        expect(manifest.status, ReleaseCheckStatus.failed);
+        expect(manifest.detail, contains('path 依赖'));
+        expect(manifest.detail, contains('缺 LICENSE'));
+      });
+
+      test('发布开关单列一项，措辞说明它由仓主翻', () {
+        final ReleaseCheck off = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(released: true),
+            resolveTag: (_) => null,
+          ),
+          'publish-switch',
+        );
+        expect(off.status, ReleaseCheckStatus.failed);
+        expect(off.hard, isTrue);
+        expect(off.detail, contains('publish_to: none'));
+        expect(off.detail, contains('--enable-publish'));
+        // publish-manifest 不再重复报这一条，免得两处口径打架。
+        expect(
+          _check(
+            evaluateRelease(
+              version: '0.3.0',
+              inputs: _inputs(released: true),
+              resolveTag: (_) => null,
+            ),
+            'publish-manifest',
+          ).detail,
+          isNot(contains('publish_to')),
+        );
+
+        expect(
+          _status(
+            evaluateRelease(
+              version: '0.3.0',
+              inputs: _inputs(released: true, publishable: true),
+              resolveTag: (_) => null,
+            ),
+            'publish-switch',
+          ),
+          ReleaseCheckStatus.ok,
+        );
+      });
+
+      test('删 publish_to 只动那一行，没有该行则原样', () {
+        const String pubspec =
+            'name: patchbay\nversion: 0.3.0\npublish_to: none\n\nenvironment:\n';
+        final String enabled = applyRemovePublishTo(pubspec);
+        expect(enabled, 'name: patchbay\nversion: 0.3.0\n\nenvironment:\n');
+        expect(applyRemovePublishTo(enabled), enabled);
+      });
+
+      test('改成 hosted 约束并补齐包内文件后转绿', () {
+        final List<ReleaseCheck> checks = evaluateRelease(
+          version: '0.3.0',
+          inputs: _inputs(released: true, publishable: true),
+          resolveTag: (_) => null,
+        );
+        for (final String id in <String>[
+          'publish-manifest',
+          'publish-advisories',
+          'internal-dep-constraints',
+          'local-overrides',
+        ]) {
+          expect(_status(checks, id), ReleaseCheckStatus.ok, reason: id);
+        }
+      });
+
+      test('description 太短是 warning，一样挡发布', () {
+        final ReleaseCheck advisories = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(
+              released: true,
+              publishable: true,
+              description: '太短了。',
+            ),
+            resolveTag: (_) => null,
+          ),
+          'publish-advisories',
+        );
+        expect(advisories.status, ReleaseCheckStatus.failed);
+        expect(advisories.detail, contains('description'));
+        expect(advisories.hard, isTrue);
+      });
+
+      test('随版依赖约束停在旧版本时红', () {
+        final ReleaseCheck check = _check(
+          evaluateRelease(
+            version: '0.4.0',
+            inputs: _inputs(
+              released: true,
+              publishable: true,
+              version: '0.4.0',
+              constraintVersion: '0.3.0',
+            ),
+            resolveTag: (_) => null,
+          ),
+          'internal-dep-constraints',
+        );
+        expect(check.status, ReleaseCheckStatus.failed);
+        expect(check.detail, contains('不接纳 0.4.0'));
+      });
+
+      test('还是 path 依赖时该项跳过，交给 publish-manifest 说话', () {
+        expect(
+          _status(
+            evaluateRelease(
+              version: '0.3.0',
+              inputs: _inputs(released: true),
+              resolveTag: (_) => null,
+            ),
+            'internal-dep-constraints',
+          ),
+          ReleaseCheckStatus.skipped,
+        );
+      });
+
+      test('override 指错路径或缺条目时红', () {
+        final ReleaseCheck missing = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(
+              released: true,
+              publishable: true,
+              dropOverrides: <String>{'packages/patchbay_cli'},
+            ),
+            resolveTag: (_) => null,
+          ),
+          'local-overrides',
+        );
+        expect(missing.status, ReleaseCheckStatus.failed);
+        expect(missing.detail, contains('缺 patchbay'));
+
+        final ReleaseCheck wrong = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(
+              released: true,
+              publishable: true,
+              exampleOverridePath: '../patchbay',
+            ),
+            resolveTag: (_) => null,
+          ),
+          'local-overrides',
+        );
+        expect(wrong.status, ReleaseCheckStatus.failed);
+        expect(wrong.detail, contains('应为 ../../patchbay'));
+      });
+
+      test('排版门禁：有漂移即红，跑不起来才跳过', () {
+        expect(evaluateFormatGate(0).status, ReleaseCheckStatus.ok);
+        expect(evaluateFormatGate(1).status, ReleaseCheckStatus.failed);
+        expect(evaluateFormatGate(null).status, ReleaseCheckStatus.skipped);
+        expect(evaluateFormatGate(1).hard, isTrue);
+      });
+
+      test('dry-run 判定：有非零退出即红，静态门未过则跳过', () {
+        expect(
+          evaluatePublishDryRun(
+            exitCodes: const <String, int>{'patchbay': 0, 'patchbay_cli': 65},
+            skipped: const <String>[],
+          ).status,
+          ReleaseCheckStatus.failed,
+        );
+        expect(
+          evaluatePublishDryRun(
+            exitCodes: const <String, int>{'patchbay': 0},
+            skipped: const <String>[],
+          ).status,
+          ReleaseCheckStatus.ok,
+        );
+        expect(
+          evaluatePublishDryRun(
+            exitCodes: const <String, int>{},
+            skipped: const <String>['patchbay'],
+          ).status,
+          ReleaseCheckStatus.skipped,
+        );
+      });
+    });
+
+    test('版本号必须是 X.Y.Z', () {
+      expect(() => requireVersion('0.3'), throwsA(isA<FormatException>()));
+      expect(() => requireVersion('v0.3.0'), throwsA(isA<FormatException>()));
+      expect(requireVersion('0.3.0'), '0.3.0');
+    });
+  });
+
+  group('端到端（子进程）', () {
+    late Directory repo;
+
+    setUp(() {
+      repo = Directory.systemTemp.createTempSync('patchbay-release-');
+      _materialize(repo, _inputs());
+    });
+
+    tearDown(() => repo.deleteSync(recursive: true));
+
+    test('check 先红，apply 后四件套转绿，再 apply 无改动', () async {
+      final ProcessResult red = await _run(repo, '--check');
+      expect(red.exitCode, 1);
+      expect(red.stdout, contains('[未过] example-lock'));
+      expect(red.stdout, contains('[未过] compat-matrix-row'));
+      expect(red.stdout, contains('[未过] package-changelog'));
+
+      final ProcessResult applied = await _run(repo, '--apply');
+      expect(applied.stdout, contains('[通过] version-parity'));
+      expect(applied.stdout, contains('[通过] changelog-release'));
+      expect(applied.stdout, contains('[通过] example-lock'));
+      expect(applied.stdout, contains('[通过] compat-matrix-row'));
+      expect(applied.stdout, contains('[通过] package-changelog'));
+      // tag、push 与发布不由脚本代做。
+      expect(applied.stdout, contains('人工项'));
+      expect(applied.stdout, contains('git push origin patchbay-v0.3.0'));
+      expect(applied.stdout, contains('dart pub publish'));
+      expect(
+        File('${repo.path}/${packageChangelogPathOf('patchbay')}').existsSync(),
+        isTrue,
+      );
+
+      final ProcessResult again = await _run(repo, '--apply');
+      expect(again.stdout, contains('apply：无改动'));
+    });
+
+    test('apply 会把 hosted 约束与 overrides 一起带到目标版本', () async {
+      _materialize(repo, _inputs(publishable: true));
+      await _run(repo, '--apply', version: '0.4.0');
+      final String cli = File(
+        '${repo.path}/${pubspecPathOf('patchbay_cli')}',
+      ).readAsStringSync();
+      expect(readInternalConstraints(cli), <String, String>{
+        'patchbay': '^0.4.0',
+        'patchbay_transport': '^0.4.0',
+      });
+      final ProcessResult check = await _run(repo, '--check', version: '0.4.0');
+      expect(check.stdout, contains('[通过] internal-dep-constraints'));
+      expect(check.stdout, contains('[通过] local-overrides'));
+    });
+
+    test('缺 overrides 时 apply 代生成，且不推平已经指对的文件', () async {
+      _materialize(
+        repo,
+        _inputs(
+          publishable: true,
+          dropOverrides: <String>{'packages/patchbay_cli'},
+        ),
+      );
+      final File overrides = File(
+        '${repo.path}/${overridesPathOf('patchbay_cli')}',
+      );
+      expect(overrides.existsSync(), isFalse);
+      await _run(repo, '--apply');
+      expect(readPathOverrides(overrides.readAsStringSync()), <String, String>{
+        'patchbay': '../patchbay',
+        'patchbay_transport': '../patchbay_transport',
+      });
+
+      const String handEdited =
+          '# 手工加过的注释\ndependency_overrides:\n'
+          '  patchbay:\n    path: ../patchbay\n'
+          '  patchbay_transport:\n    path: ../patchbay_transport\n';
+      overrides.writeAsStringSync(handEdited);
+      await _run(repo, '--apply');
+      expect(overrides.readAsStringSync(), handEdited);
+    });
+
+    test('默认 apply 不碰发布开关，--enable-publish 才删', () async {
+      final File pubspec = File('${repo.path}/${pubspecPathOf('patchbay')}');
+      await _run(repo, '--apply');
+      expect(pubspec.readAsStringSync(), contains('publish_to: none'));
+      final ProcessResult still = await _run(repo, '--check');
+      expect(still.stdout, contains('[未过] publish-switch'));
+      // 开关没开时不去跑 dry-run：拿到的只会是「本包不可发布」。
+      expect(still.stdout, contains('[跳过] publish-dry-run'));
+
+      await _run(repo, '--apply', extra: <String>['--enable-publish']);
+      expect(pubspec.readAsStringSync(), isNot(contains('publish_to')));
+      expect(readPubspecVersion(pubspec.readAsStringSync()), '0.3.0');
+    });
+
+    test('--enable-publish 不配 --apply 直接退 64', () async {
+      final ProcessResult result = await _run(
+        repo,
+        '--check',
+        extra: <String>['--enable-publish'],
+      );
+      expect(result.exitCode, 64);
+    });
+
+    test('包内 CHANGELOG 是根表的投影：apply 后含已发布段、无 Unreleased', () async {
+      await _run(repo, '--apply');
+      final String derived = File(
+        '${repo.path}/${packageChangelogPathOf('patchbay_cli')}',
+      ).readAsStringSync();
+      expect(packageChangelogMentions(derived, '0.3.0'), isTrue);
+      expect(derived, isNot(contains('## Unreleased')));
+    });
+
+    test('check 只读：跑两遍不改任何文件', () async {
+      final String before = File(
+        '${repo.path}/$changelogPath',
+      ).readAsStringSync();
+      await _run(repo, '--check');
+      await _run(repo, '--check');
+      expect(File('${repo.path}/$changelogPath').readAsStringSync(), before);
+    });
+
+    test('参数错按 usage 退 64', () async {
+      final ProcessResult result = await _run(repo, '--check', version: '0.3');
+      expect(result.exitCode, 64);
+    });
+  });
+}
+
+// ===== 夹具 =====
+
+const String _sha = 'd32f45e9d652920902e51f9c3dc25c189d804e46';
+
+const String _description =
+    'Consumer-neutral fixture package used by the release_prep unit tests.';
+
+String _pubspec(
+  String name, {
+  required bool publishable,
+  required String version,
+  required String constraintVersion,
+  required String description,
+}) {
+  final bool isFlutter = name == 'patchbay_flutter';
+  final bool isCli = name == 'patchbay_cli';
+  final StringBuffer out = StringBuffer()
+    ..writeln('name: $name')
+    ..writeln('description: $description')
+    ..writeln('version: $version');
+  if (publishable) {
+    out.writeln('repository: https://example.invalid/patchbay');
+  } else {
+    out.writeln('publish_to: none');
+  }
+  out
+    ..writeln()
+    ..writeln('environment:')
+    ..writeln("  sdk: '>=3.11.0 <4.0.0'");
+  if (isFlutter) out.writeln("  flutter: '>=3.38.0'");
+  if (isFlutter || isCli) {
+    out
+      ..writeln()
+      ..writeln('dependencies:');
+    if (isFlutter) {
+      out
+        ..writeln('  flutter:')
+        ..writeln('    sdk: flutter');
+    }
+    if (publishable) {
+      out.writeln('  patchbay: ^$constraintVersion');
+      if (isCli) out.writeln('  patchbay_transport: ^$constraintVersion');
+    } else {
+      out
+        ..writeln('  patchbay:')
+        ..writeln('    path: ../patchbay');
+      if (isCli) {
+        out
+          ..writeln('  patchbay_transport:')
+          ..writeln('    path: ../patchbay_transport');
+      }
+    }
+  }
+  return out.toString();
+}
+
+ReleaseInputs _inputs({
+  bool released = false,
+  bool publishable = false,
+  int invocationSchema = 1,
+  String matrixSchemaCell = '1',
+  String sha = pendingSha,
+  String consumers = pendingConsumers,
+  String? version,
+  String? constraintVersion,
+  String? packageChangelogVersion,
+  String description = _description,
+  String exampleOverridePath = '../../patchbay',
+  Set<String> dropOverrides = const <String>{},
+}) {
+  final String resolved = version ?? (released ? '0.3.0' : '0.2.1');
+  final String constraints = constraintVersion ?? resolved;
+  final String changelogVersion = packageChangelogVersion ?? resolved;
+  final String newRow = released
+      ? '| `$tagPrefix$resolved` | `$sha` | $matrixSchemaCell | 3.44.9 '
+            '| `>=3.38.0` | $consumers |\n'
+      : '';
+  String? overridesFor(String name) {
+    if (!publishable) return null;
+    if (dropOverrides.contains('packages/$name')) return null;
+    return switch (name) {
+      'patchbay_cli' => renderOverrides(<String, String>{
+        'patchbay': '../patchbay',
+        'patchbay_transport': '../patchbay_transport',
+      }),
+      'patchbay_flutter' => renderOverrides(<String, String>{
+        'patchbay': '../patchbay',
+      }),
+      _ => null,
+    };
+  }
+
+  return ReleaseInputs(
+    packages: <String, PackageManifest>{
+      for (final String name in releasePackages)
+        name: PackageManifest(
+          name: name,
+          pubspec: _pubspec(
+            name,
+            publishable: publishable,
+            version: resolved,
+            constraintVersion: constraints,
+            description: description,
+          ),
+          files: publishable
+              ? <String>{'LICENSE', 'README.md', 'CHANGELOG.md'}
+              : <String>{},
+          overrides: overridesFor(name),
+          changelog: released
+              ? '# Changelog\n\n## $changelogVersion - 2026-08-14\n\n见根表。\n'
+              : null,
+        ),
+    },
+    changelog: released
+        ? '# Changelog\n\n## $resolved - 2026-08-14\n\n### Added\n\n- 某条。\n'
+        : '# Changelog\n\n## Unreleased\n\n### Added\n\n- 某条。\n',
+    examplePubspec:
+        'name: patchbay_flutter_example\n'
+        'publish_to: none\n'
+        '\n'
+        'dependencies:\n'
+        '  patchbay_flutter:\n'
+        '    path: ..\n',
+    exampleOverrides: publishable
+        ? renderOverrides(<String, String>{'patchbay': exampleOverridePath})
+        : null,
+    exampleLock:
+        '# Generated by pub\n'
+        'packages:\n'
+        '  patchbay:\n'
+        '    dependency: transitive\n'
+        '    description:\n'
+        '      path: "../../patchbay"\n'
+        '      relative: true\n'
+        '    source: path\n'
+        '    version: "$resolved"\n'
+        'sdks:\n'
+        '  dart: ">=3.11.0 <4.0.0"\n',
+    compatMatrix:
+        '# 兼容性矩阵\n\n## 当前记录\n\n'
+        '| patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） '
+        '| Flutter（文档最低支持） | 已知 consumer |\n'
+        '|---|---|---|---|---|---|\n'
+        '$newRow'
+        '| `patchbay-v0.2.1` | `$_sha` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2 |\n',
+    // 端到端用例会把这两串写进夹具仓，排版门禁要跑它们，因此必须是合法且已对齐的 Dart。
+    serviceHost:
+        'class ServiceHost {\n  static const int schemaVersion = 1;\n}\n',
+    invocation:
+        'class Envelope {\n'
+        '  static const int schemaVersion = $invocationSchema;\n'
+        '}\n',
+    workflow: "env:\n  FLUTTER_VERSION: '3.44.9'\n",
+  );
+}
+
+void _materialize(Directory repo, ReleaseInputs inputs) {
+  void write(String relative, String? content) {
+    final File file = File('${repo.path}/$relative');
+    if (content == null) {
+      if (file.existsSync()) file.deleteSync();
+      return;
+    }
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(content);
+  }
+
+  for (final MapEntry<String, PackageManifest> entry
+      in inputs.packages.entries) {
+    write(pubspecPathOf(entry.key), entry.value.pubspec);
+    write(overridesPathOf(entry.key), entry.value.overrides);
+    write(packageChangelogPathOf(entry.key), entry.value.changelog);
+  }
+  write(changelogPath, inputs.changelog);
+  write(examplePubspecPath, inputs.examplePubspec);
+  write(exampleOverridesPath, inputs.exampleOverrides);
+  write(exampleLockPath, inputs.exampleLock);
+  write(compatMatrixPath, inputs.compatMatrix);
+  write(serviceHostPath, inputs.serviceHost);
+  write(invocationPath, inputs.invocation);
+  write(workflowPath, inputs.workflow);
+}
+
+Future<ProcessResult> _run(
+  Directory repo,
+  String mode, {
+  String version = '0.3.0',
+  List<String> extra = const <String>[],
+}) => Process.run(Platform.resolvedExecutable, <String>[
+  'run',
+  'tool/release_prep.dart',
+  '--version',
+  version,
+  mode,
+  '--date',
+  '2026-08-14',
+  '--repo-root',
+  repo.path,
+  // 端到端用例不联网：dry-run 由上面的判定单测覆盖。
+  '--no-publish-dry-run',
+  ...extra,
+]);
+
+ReleaseCheck _check(List<ReleaseCheck> checks, String id) =>
+    checks.firstWhere((check) => check.id == id);
+
+ReleaseCheckStatus _status(List<ReleaseCheck> checks, String id) =>
+    _check(checks, id).status;
