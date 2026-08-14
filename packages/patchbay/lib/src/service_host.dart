@@ -120,7 +120,7 @@ final class PatchbayServiceHost {
     return <String, Object?>{
       'schemaVersion': schemaVersion,
       'selection': PatchbaySnapshotSelection.resolve(
-        read.response,
+        read.body,
         request.path,
       ).toJson(),
     };
@@ -149,11 +149,13 @@ final class PatchbayServiceHost {
     final Stopwatch elapsed = Stopwatch()..start();
     var polls = 0;
     PatchbaySnapshotSelection? last;
+    Map<String, Object?> body = const <String, Object?>{};
     while (true) {
       final _SnapshotRead read = await _readSnapshot();
       if (read.violated) return read.response;
       polls += 1;
-      last = PatchbaySnapshotSelection.resolve(read.response, request.path);
+      body = read.body;
+      last = PatchbaySnapshotSelection.resolve(body, request.path);
       // The budget caps the whole request, not merely the gaps between probes.
       // A consumer snapshot source slow enough to overrun it on its own would
       // otherwise let an observation come back *after* the deadline and still
@@ -199,8 +201,27 @@ final class PatchbayServiceHost {
         'pollIntervalMs': patchbaySnapshotPollInterval.inMilliseconds,
         'polls': polls,
         'observed': last.toJson(),
+        // Only when the path was never addressable here to begin with. A first
+        // segment that does not exist times out exactly like a field that has
+        // not arrived yet, and the two call for opposite actions — wait longer
+        // versus fix the path. The host is the only side that knows which keys
+        // the App actually publishes, so it is the only side that can say.
+        if (_unaddressableRoot(last, body) case final List<String> keys)
+          'availableKeys': keys,
       },
     );
+  }
+
+  /// The App's top-level keys when [selection] failed on its *first* segment,
+  /// or null when the path resolved far enough to be a genuine wait.
+  static List<String>? _unaddressableRoot(
+    PatchbaySnapshotSelection selection,
+    Map<String, Object?> body,
+  ) {
+    if (selection.miss != PatchbaySnapshotMiss.missingKey) return null;
+    final String root = selection.path.split('.').first;
+    if (body.containsKey(root)) return null;
+    return body.keys.toList(growable: false)..sort();
   }
 
   /// Reads the consumer snapshot once, answering a failed source instead of
@@ -226,7 +247,7 @@ final class PatchbayServiceHost {
       ...declared,
       // Protocol-owned fields always win over consumer callback data.
       'schemaVersion': schemaVersion,
-    });
+    }, declared);
   }
 
   Map<String, Object?> _rejectionEnvelope(
@@ -599,16 +620,30 @@ final class _CatalogRead {
 /// One snapshot read: either the snapshot to serve, or the envelope that
 /// replaces it when the consumer source could not be read.
 final class _SnapshotRead {
-  const _SnapshotRead._(this.response, {required this.violated});
+  const _SnapshotRead._(this.response, this.body, {required this.violated});
 
-  const _SnapshotRead.valid(Map<String, Object?> response)
-    : this._(response, violated: false);
+  const _SnapshotRead.valid(
+    Map<String, Object?> response,
+    Map<String, Object?> body,
+  ) : this._(response, body, violated: false);
 
   const _SnapshotRead.violated(Map<String, Object?> response)
-    : this._(response, violated: true);
+    : this._(response, const <String, Object?>{}, violated: true);
 
   /// The snapshot, or the rejection envelope every caller receives instead.
   final Map<String, Object?> response;
+
+  /// The App's snapshot exactly as it was served — the addressing root for a
+  /// selection, and deliberately *not* [response].
+  ///
+  /// The two differ by the protocol-owned fields the host layers on top. A path
+  /// resolved against the response could select `schemaVersion`, answering a
+  /// host field as though the App had published it; the operator has no way to
+  /// tell that apart from their own data. What the App nests inside its own
+  /// snapshot stays part of the path, because that nesting is the App's and the
+  /// host has no business guessing which of a consumer's keys is "really" the
+  /// body — the shipped example publishes its state flat, others wrap it.
+  final Map<String, Object?> body;
   final bool violated;
 }
 

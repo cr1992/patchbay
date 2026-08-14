@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
+import 'package:vm_service/vm_service.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
@@ -713,8 +714,11 @@ Future<_Execution> _execute(
     case PatchbayCommandTarget.clientCatalog:
       return _Execution(await connection.catalog());
     case PatchbayCommandTarget.clientSnapshot:
+      final PatchbaySnapshotRequest? selection = _selection(friendly);
       return _Execution(
-        await connection.snapshot(request: _selection(friendly)),
+        selection == null
+            ? await connection.snapshot()
+            : await _selectedSnapshot(connection, selection),
       );
     case PatchbayCommandTarget.clientWidgetTree:
       return _Execution(await connection.widgetTree());
@@ -817,6 +821,61 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+/// Stable code for "this App is too old to understand a snapshot selector".
+const String patchbaySnapshotSelectorUnsupportedCode =
+    'snapshotSelectionUnsupportedByHost';
+
+/// One selector-bearing snapshot, with a version skew named rather than guessed.
+///
+/// A host built before selectors existed has no idea what the extra `request`
+/// parameter is and refuses the message at the transport seam: the VM Service
+/// path answers `invalidParams`, the direct path a `protocolError`. Both escape
+/// as bare transport / protocol failures whose codes describe the plumbing
+/// rather than the cause, so the operator sees `exit 3` and goes looking for a
+/// dead socket instead of an App that predates the feature.
+///
+/// Only these two shapes are translated, and only when a selector was actually
+/// sent. Anything else keeps its own classification: a socket that died during
+/// a selector call is not a version skew, and blaming the App would send the
+/// operator to change a command that was never wrong.
+Future<Map<String, Object?>> _selectedSnapshot(
+  PatchbayClient connection,
+  PatchbaySnapshotRequest request,
+) async {
+  try {
+    return await connection.snapshot(request: request);
+  } on RPCError catch (failure) {
+    if (failure.code != RPCErrorKind.kInvalidParams.code) rethrow;
+    return _snapshotSelectorUnsupported();
+  } on PatchbayProtocolException catch (failure) {
+    if (failure.code != 'protocolError') rethrow;
+    return _snapshotSelectorUnsupported();
+  }
+}
+
+/// The refusal above, in the same typed shape the App's own rejections use.
+///
+/// A rejection rather than an error envelope because that is what happened —
+/// the request was refused, by a peer that cannot serve it — and it lets a
+/// script that already branches on `admission` classify a version skew without
+/// learning a second shape. The notice carries the fallback that does work, so
+/// the answer itself says what to run next.
+Map<String, Object?> _snapshotSelectorUnsupported() {
+  const String notice =
+      'This App does not support snapshot field selection or waits. Run '
+      '`patchbay snapshot` for the whole snapshot, or update the App to a '
+      'Patchbay version that serves selectors.';
+  return <String, Object?>{
+    'schemaVersion': PatchbayServiceHost.schemaVersion,
+    'admission': 'rejected',
+    'notice': notice,
+    'rejection': PatchbayRejection(
+      code: patchbaySnapshotSelectorUnsupportedCode,
+      notice: notice,
+    ).toJson(),
+  };
 }
 
 /// The snapshot selection this invocation asks for, or null for the whole

@@ -468,6 +468,22 @@ path=call.session.active found=true value=true wait=observed
 ——叶子字段、整棵子树都一样，**不重塑、不汇总**；含点或其它字符的键无法被点路径无歧义寻址，那种
 键仍然走整树读。路径写错（空段、空格、结尾的点）在 CLI 本地就以用法错误 `64` 挡下，不发请求。
 
+**寻址根是 App 交出来的那张快照本身**，不是 CLI 打印的那个响应信封。两者只差协议自己盖上去的
+`schemaVersion`——它不可寻址，否则 host 的字段会冒充成 App 发布的状态，操作者分辨不出来。
+
+推论是：**App 自己怎么套，路径就得怎么写。** 本仓 `example/` 的参考接入方把状态平铺在顶层
+（`--path counter`），而有的接入方会在自己的快照里再包一层：
+
+```jsonc
+// 某接入方的 snapshot 回调返回值
+{"admission": "accepted", "source": "appRecorded", "snapshot": {"call": {…}}}
+```
+
+这时正确写法是 `--path snapshot.call.session.active`，`--path call.session.active` 取不到——那层
+`snapshot` 是**该接入方自己的键**，不是协议字段，host 不会替谁拆包（拆了，平铺的接入方就全取不到
+了）。拿不准就先跑一次不带 `--path` 的整树读，照着实际形状写路径；`patchbay doctor` 打印的活跃
+会话路径也是同一套写法。
+
 **取不到不是失败。** `selection.found: false` 时退出码仍是 `0`，并带一个 `miss` 说明取不到的原因
 ——整树读同样只是"没这个键"，一次读取不该因为答案是"没有"而变成错误：
 
@@ -498,6 +514,16 @@ path=call.session.active found=true value=true wait=observed
 等待预算用 `--timeout-ms`（默认 5000，上限 2 分钟，与 `ui.wait` 家族同一上限）。**不必同时调
 `--transport-timeout-ms`**：声明的等待会自动加进 CLI 的 RPC 预算，与 `--wait` 的做法一致——一次
 有意的等待不是"对端不应答"。
+
+**路径根本不存在时，超时会把可用的顶层键报给你。** 第一段就不存在的路径，等待表现和"字段还没来"
+一模一样——白等满预算再超时，最容易被读成"条件还没发生"。所以这种情形下拒绝的 `details` 会多一个
+`availableKeys`（App 快照的顶层键，排序），一眼就能看出是路径写错而不是等得不够久；路径解析到一半
+才断的（真的在等某个字段）不会带这个键，免得指错方向。
+
+**打到不认识选择器的老 App 时**，答复是稳定的 `snapshotSelectionUnsupportedByHost` 拒绝
+（退出码 `5`），notice 里写明退路：改用不带 `--path` 的整树 `snapshot`，或把 App 侧 patchbay 升级到
+支持选择器的版本。这是版本错配，不是连接故障——此前它表现为裸 `transportError`（退出码 `3`），
+会把人引去查网络。
 
 **预算是对答案的硬顶，不是探测的时间表。** 条件成立、但拿到它的那次读取已经越过预算时，答复仍是
 `snapshotWaitTimeout`——超预算才拿到的成功，调用方已经不在等它了。墙上时间还可能再多出**一次快照

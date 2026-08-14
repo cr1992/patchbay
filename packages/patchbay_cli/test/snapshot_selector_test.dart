@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:test/test.dart';
+import 'package:vm_service/vm_service.dart';
 
 import 'fixture/fake_client.dart';
 
@@ -39,11 +40,15 @@ final class _HostBackedClient implements PatchbayClient {
   /// Every request that reached the host; null for a whole-snapshot read.
   final List<PatchbaySnapshotRequest?> requests = <PatchbaySnapshotRequest?>[];
 
+  /// Thrown instead of answering, to stand in for a transport-level refusal.
+  Object? snapshotFailure;
+
   @override
   Future<Map<String, Object?>> snapshot({
     PatchbaySnapshotRequest? request,
   }) async {
     requests.add(request);
+    if (snapshotFailure case final Object failure) throw failure;
     return _host.dispatchSnapshot(request?.toWire().toJson());
   }
 
@@ -134,6 +139,109 @@ Map<String, Object?> _details(Map<String, Object?> response) =>
         as Map<String, Object?>;
 
 void main() {
+  group('a host built before selectors existed', () {
+    /// Runs one command against a client whose snapshot RPC fails the way an
+    /// old host fails it: it never learned the `request` parameter, so it
+    /// refuses the message shape at the transport seam.
+    Future<_Result> refusing(Object failure, List<String> words) async {
+      final _HostBackedClient client = _HostBackedClient(
+        () async => _deviceSnapshot,
+      )..snapshotFailure = failure;
+      final StringBuffer out = StringBuffer();
+      final StringBuffer err = StringBuffer();
+      final int exitCode = await runPatchbayCli(
+        words,
+        connect: (_) async => client,
+        output: out,
+        errorOutput: err,
+      );
+      final String stdout = out.toString();
+      return (
+        exitCode: exitCode,
+        response: stdout.trim().startsWith('{')
+            ? jsonDecode(stdout) as Map<String, Object?>
+            : null,
+        out: stdout,
+        err: err.toString(),
+        requests: client.requests,
+      );
+    }
+
+    // Both transports, because the refusal looks different on each and an
+    // operator hitting a version skew must not have to know which one they are
+    // on: the VM Service path answers `invalidParams`, the direct path a
+    // `protocolError`.
+    final List<(String, Object)> refusals = <(String, Object)>[
+      (
+        'VM Service',
+        RPCError('snapshot', RPCErrorKind.kInvalidParams.code, 'unknown'),
+      ),
+      ('direct', const PatchbayProtocolException('protocolError')),
+    ];
+
+    for (final (String transport, Object failure) in refusals) {
+      test('$transport: a selector is refused as a typed rejection', () async {
+        final _Result result = await refusing(failure, <String>[
+          '--json',
+          'snapshot',
+          '--path',
+          'call.session.active',
+        ]);
+
+        // Not exit 3 with a bare `transportError`: that describes the plumbing
+        // and leaves a CLI/App version skew to be bisected by hand.
+        expect(result.exitCode, PatchbayExitCode.rejected);
+        final Map<String, Object?> rejection =
+            result.response!['rejection']! as Map<String, Object?>;
+        expect(rejection['code'], 'snapshotSelectionUnsupportedByHost');
+        // The fallback that does work against that host, in the answer itself.
+        expect(rejection['notice'], contains('snapshot'));
+      });
+    }
+
+    test('a wait is refused the same way', () async {
+      final _Result result = await refusing(
+        RPCError('snapshot', RPCErrorKind.kInvalidParams.code, 'unknown'),
+        <String>[
+          '--json',
+          'snapshot',
+          'wait',
+          'call.session.active',
+          '--until',
+          'exists',
+        ],
+      );
+
+      expect(result.exitCode, PatchbayExitCode.rejected);
+      expect(
+        (result.response!['rejection']! as Map<String, Object?>)['code'],
+        'snapshotSelectionUnsupportedByHost',
+      );
+    });
+
+    test('a whole-snapshot read is never reinterpreted', () async {
+      // No selector was sent, so a refusal here is a real failure and must keep
+      // its own classification rather than be blamed on an old host.
+      final _Result result = await refusing(
+        const PatchbayProtocolException('protocolError'),
+        <String>['--json', 'snapshot'],
+      );
+
+      expect(result.exitCode, PatchbayExitCode.protocol);
+    });
+
+    test('an unrelated failure keeps its own classification', () async {
+      // A dead socket during a selector call is not a version skew. Blaming the
+      // host would send the operator to change a command that was never wrong.
+      final _Result result = await refusing(
+        const PatchbayTransportException('appUnresponsive'),
+        <String>['--json', 'snapshot', '--path', 'call'],
+      );
+
+      expect(result.exitCode, PatchbayExitCode.transport);
+    });
+  });
+
   group('snapshot --path', () {
     test('an omitted --path is still the whole-snapshot read', () async {
       final _Result result = await _run(<String>['--json', 'snapshot']);

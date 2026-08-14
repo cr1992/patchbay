@@ -32,6 +32,14 @@ Map<String, Object?> rejectionOf(Map<String, Object?> response) =>
 Map<String, Object?> detailsOf(Map<String, Object?> response) =>
     rejectionOf(response)['details']! as Map<String, Object?>;
 
+/// One plain selection of [path] against a host serving [snapshot].
+Future<Map<String, Object?>> select_(
+  Map<String, Object?> snapshot,
+  String path,
+) async => selectionOf(
+  await hostWith(snapshot).dispatchSnapshot(<String, Object?>{'path': path}),
+);
+
 void main() {
   const Map<String, Object?> deviceSnapshot = <String, Object?>{
     'call': <String, Object?>{
@@ -86,16 +94,31 @@ void main() {
       });
     });
 
-    test('a protocol-owned field is selectable as it is served', () async {
+    test('a protocol-owned envelope field is not addressable', () async {
+      // The addressing root is the snapshot the App serves, not the response
+      // envelope the host wraps around it. `schemaVersion` is the host's, and
+      // answering it as though it were App state invents a field the consumer
+      // never published — the operator cannot tell it apart from their own.
+      final Map<String, Object?> response = await hostWith(
+        deviceSnapshot,
+      ).dispatchSnapshot(<String, Object?>{'path': 'schemaVersion'});
+
+      expect(selectionOf(response), <String, Object?>{
+        'path': 'schemaVersion',
+        'found': false,
+        'miss': 'missingKey',
+      });
+    });
+
+    test('a consumer keeps its own key of that name', () async {
+      // The flip side: the root is the consumer's map, so a consumer that
+      // genuinely publishes `schemaVersion` gets *their* value. The host does
+      // not blacklist words a consumer is allowed to own.
       final Map<String, Object?> response = await hostWith(
         const <String, Object?>{'schemaVersion': 999},
       ).dispatchSnapshot(<String, Object?>{'path': 'schemaVersion'});
 
-      expect(
-        selectionOf(response)['value'],
-        PatchbayServiceHost.schemaVersion,
-        reason: 'selection reads the served snapshot, not the consumer map',
-      );
+      expect(selectionOf(response)['value'], 999);
     });
 
     test('a path that resolves to nothing says why', () async {
@@ -124,6 +147,53 @@ void main() {
         'found': false,
         'miss': 'missingKey',
       });
+    });
+  });
+
+  group('a consumer that wraps its state in its own envelope', () {
+    // The reference consumer in `example/` publishes a flat snapshot, and every
+    // fixture in this repo does the same — which is exactly why an empty or
+    // flat fixture cannot catch an addressing mistake. A real integration was
+    // found publishing this shape instead: its own `admission` / `source`
+    // bookkeeping beside a nested `snapshot` body. Anything asserting *where*
+    // paths are rooted has to be written against a non-empty snapshot that
+    // actually has a second level, or it passes for the wrong reason.
+    const Map<String, Object?> enveloped = <String, Object?>{
+      'admission': 'accepted',
+      'source': 'appRecorded',
+      'snapshot': <String, Object?>{
+        'call': <String, Object?>{
+          'session': <String, Object?>{'active': true},
+        },
+      },
+    };
+
+    test('its own keys are addressable, nesting and all', () async {
+      Future<Map<String, Object?>> select(String path) async => selectionOf(
+        await hostWith(
+          enveloped,
+        ).dispatchSnapshot(<String, Object?>{'path': path}),
+      );
+
+      // `admission` and `source` here are the *consumer's* keys, so they
+      // resolve. They are not the host's envelope and must not be blacklisted:
+      // the host does not get to decide which words a consumer may publish.
+      expect((await select('admission'))['value'], 'accepted');
+      expect((await select('snapshot.call.session.active'))['value'], true);
+    });
+
+    test('the host does not unwrap a consumer-chosen body key', () async {
+      // `snapshot` is this consumer's own nesting, not a protocol field. If the
+      // host silently rooted paths inside it, every flat consumer — the shipped
+      // example included — would resolve against nothing.
+      expect(
+        (await select_(enveloped, 'call.session.active'))['miss'],
+        'missingKey',
+      );
+      expect(
+        (await select_(deviceSnapshot, 'call.session.active'))['value'],
+        true,
+      );
     });
   });
 
@@ -349,6 +419,46 @@ void main() {
         );
       },
     );
+
+    test('a wait on an unaddressable root names what is there', () async {
+      // The reported failure mode: a path whose very first segment does not
+      // exist burns the whole budget and reports a timeout, which reads like
+      // "the condition has not happened yet" when it is really "this path can
+      // never resolve here". Naming the top-level keys turns a silent false
+      // negative into a one-glance fix, and only the host knows them.
+      final Map<String, Object?> response =
+          await hostWith(const <String, Object?>{
+            'admission': 'accepted',
+            'source': 'appRecorded',
+            'snapshot': <String, Object?>{'call': <String, Object?>{}},
+          }).dispatchSnapshot(<String, Object?>{
+            'path': 'call.session.active',
+            'until': 'exists',
+            'timeoutMs': 60,
+          });
+
+      expect(rejectionOf(response)['code'], 'snapshotWaitTimeout');
+      expect(
+        detailsOf(response)['availableKeys'],
+        <String>['admission', 'snapshot', 'source'],
+        reason: 'sorted, so the hint is stable enough to assert on',
+      );
+    });
+
+    test('a wait that merely has not happened yet keeps quiet', () async {
+      // The hint is for an unaddressable *root* only. A path that resolves part
+      // way is a field that has not arrived, and listing top-level keys there
+      // would be noise pointing at the wrong thing.
+      final Map<String, Object?> response = await hostWith(deviceSnapshot)
+          .dispatchSnapshot(<String, Object?>{
+            'path': 'call.session.peerName',
+            'until': 'exists',
+            'timeoutMs': 60,
+          });
+
+      expect(rejectionOf(response)['code'], 'snapshotWaitTimeout');
+      expect(detailsOf(response).containsKey('availableKeys'), isFalse);
+    });
 
     test(
       'a source slower than the budget times out, it does not answer late',

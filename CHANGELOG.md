@@ -13,6 +13,15 @@
   等待另带 `wait: {outcome, condition, timeoutMs, elapsedMs, pollIntervalMs, polls}`。取到的值
   **原样返回**（叶子或整棵子树），不重塑不汇总——会重塑的调试读没人能据以推理。
 
+  **寻址根是 App 交出来的快照本身**，不是响应信封：协议自己盖的 `schemaVersion` 不可寻址，否则
+  host 字段会冒充 App 状态。App 自己在快照里套的层级仍属路径的一部分——那是接入方的键，host 不
+  替谁拆包（拆了平铺的接入方就全取不到）。路径第一段就不存在时，超时拒绝的 `details` 会带
+  `availableKeys`（顶层键，排序），把「路径写错」与「字段还没来」分开。
+
+  打到**不认识选择器的老 App** 时答稳定的 `snapshotSelectionUnsupportedByHost` 拒绝（退出码
+  `5`），notice 给退路（整树 `snapshot`，或升级 App 侧 patchbay）；此前是裸 `transportError`
+  （退出码 `3`），会把版本错配读成连接故障。
+
   **取不到不是失败，等不到才是。** `found: false` 退出码仍是 `0`，并带 `missingKey` /
   `nullValue` / `notAnObject` 说明原因——「字段还没来」与「这条路径与快照形状矛盾」是两种答案，
   合并会让写错的路径报成功，`--until absent` 同理不吃 `notAnObject`。等待超时以
