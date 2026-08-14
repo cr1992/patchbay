@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "targets": [
+    {
+      "id": "app.shell",
+      "kind": "capture"
+    },
+    {
+      "id": "login.phone",
+      "kind": "text",
+      "destination": "login"
+    },
+    {
+      "id": "login.password",
+      "kind": "text",
+      "sensitive": true,
+      "destination": "login"
+    },
+    {
+      "id": "settings.nickname",
+      "kind": "text",
+      "destination": "settings"
+    }
+  ]
+}
