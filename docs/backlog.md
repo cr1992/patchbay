@@ -22,7 +22,7 @@
 | 统一 CommandRegistry：descriptor+decoder+gate+handler+validator 过同一 dispatcher | 第二 consumer 手写 adapter 的元键坑已实证核心不机检 descriptor 语义的风险 | |
 | 协议演进套件：serverVersion / feature capabilities / catalog digest / 兼容 golden | 多 consumer 生态前的地基 | |
 | 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe` | dogfood（`doctor` 已实现） | |
-| DevTools 借用三批：inspect 开关 → perf VM RPC → net 画像 | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
+| DevTools 借用剩余两批：perf VM RPC → net 画像（第一批 inspect 开关已完成，随发版移入 CHANGELOG 后本行只剩这两批） | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
 | snapshot revision / diff | dogfood（低优先级） | |
 | launcher 监督循环收编：把首个接入方项目级的重连监督（退避策略 + machine-frame 生命周期 + 断连判读）抽为 patchbay_cli 通用 `launch` 能力；会话记录 schema 增显式 pending 状态位（现依赖 consumer 侧以自身 PID 通过探活的巧劲，跨仓契约应显式化） | 首个接入方已落项目级实现并真机验证；第二接入方已集成 session store，其启动器必复踩「断连即退」 | 等首个实现合入烤几天 + 第二试点确认形态 |
 | `ui verify-manifest` 按 destination 逐屏巡检：驱动导航依次落到每个被声明的屏，覆盖非常驻控件 | v1 只对账当前挂载态、`destination` 仅作过滤（已落，见 CHANGELOG Unreleased）；巡检要驱动导航，改变「只读对账」的性质 | |

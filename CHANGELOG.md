@@ -84,6 +84,32 @@
   `PatchbayServiceHost.snapshotRequestKey`（`request`，一个 JSON 编码的对象参数）。
   `PatchbayClient.snapshot` / `PatchbayDirectClient.snapshot` 增加可选具名参数。
 
+- **widget inspector 开关 `patchbay ui inspect on|off|status`（DevTools 借用第一批）。** 用 CLI 开关
+  Flutter 自带的设备端 widget inspector 选择模式，即 DevTools 上「圈一下看这块是什么 widget」那个。
+  `on` / `off` 是同一条协议命令 `ui.inspect.select` 的两种拼法，`status` 是只读的
+  `ui.inspect.status`。开着时点按被 inspector 吃掉、不再抵达 App，所以按 `sideEffect: appState`
+  声明——这是改 App 状态，不是一次观察。
+
+  **默认关，接入方显式 opt-in**：不注入 `PatchbayInspectPolicy` 时两条命令不进 catalog，调用得
+  `commandNotRegistered`（与 `PatchbaySemanticsActionPolicy` 同一口径）。policy 声明的
+  `defaultLease` 就是 catalog 里 `ttlMs` 的 `default`，`maxLease` 是请求带了也不许超过的上限。
+
+  **每次启用带租约，到期自动还原。** 两条传输都是请求/响应，App 侧观察不到断连，所以「断开还原」
+  在 App 侧只能表达成「静默还原」：租约走完没人续，桥把开关放回接手前的值；`dispose()` 同样还原。
+  续租不会把 Patchbay 自己装上去的 `true` 当成新基线。还原是有条件的——只在开关仍是 Patchbay 装的
+  那个值时回退，不掀 DevTools 期间别人拨的开关；显式 `off` 则照关不误。
+
+  **非 debug 构建如实拒绝。** overlay 由 `WidgetsApp` 在一句 `assert` 里注入，只有 debug 成立；
+  profile / release 下标志位写得进读得回却永不渲染。桥在动手前先判构建能力，命中即以
+  `inspectorUnavailable` 拒绝（`details.reason` 为 `notDebugBuild` / `rootInspectorExcluded`），
+  **不写标志位、也不问 consumer gate**。响应 `source` 恒为 `appRecorded`：写标志位只排了一次重建，
+  不冒充「带 overlay 的那帧到过屏幕」。
+
+  wire 新增 `PatchbayInspectSelectRequestWire` / `PatchbayInspectStateWire` 与
+  `PatchbayInspectUnavailableWire` / `PatchbayInspectReleaseWire`；`patchbay_flutter` 公共 API 新增
+  `PatchbayInspectPolicy` / `PatchbayInspectBridge` / `PatchbayInspectorSurface`（后者可注入，
+  用于在不切构建模式的前提下测试拒绝路径）。perf VM RPC 与 net 画像是后两批，不在本次范围内。
+
 - **体检命令 `patchbay doctor`。** 「连不上 / 没反应 / 命令全被拒」时一次把四件事按依赖顺序查完
   ——会话目录、连接与 identity 握手、catalog、App lifecycle——每项给「现象 → 可能原因 → 建议动作」。
   **它自己拨号**：拨不通正是它被问的那个问题，所以连接失败在它这里是一条 finding 而不是命令终止；
