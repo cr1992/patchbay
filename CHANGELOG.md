@@ -2,6 +2,42 @@
 
 本文件记录尚未发布和已发布版本中会影响接入方、协议行为或安全边界的变化。
 
+## Unreleased
+
+### Added
+
+- **会话粘性：`patchbay sessions list|prune` 与 `patchbay session use <id>|--clear`。** 双设备并连
+  （Android + iOS 同时跑）时会话不唯一，此前每条命令都要显式敲长 `--session <id>`。现在可以固定
+  一条会话，之后不带 `--session` 的命令都用它。选择是三级优先级链，不混用：显式 `--session` 最高
+  （且不改动固定项）→ 已固定的会话 → 唯一会话；三级都不成立时仍以 `sessionAmbiguous` 拒绝，并在
+  候选清单后附一句「可用 `session use` 固定」。
+
+  **固定项失效时 fail-closed，不回退。** 被固定的记录不见了、进程已死或连不上时，命令以自己的稳定
+  code 失败（新增 `sessionSelectionStale`，另有既有的 `sessionStaleProcess` / `sessionUnreachable`）
+  并附处置提示，**不会改用目录里另一条会话**——在双设备台上那意味着命令打到了另一台设备。CLI 也不
+  自行清掉固定项：清掉等于让下一条命令重新开始猜。`sessions prune` 只在它删掉的记录正是被固定的
+  那条时才顺带取消固定。
+
+  这三条命令**不连 App、不读 catalog**，只读写本地会话目录（`--session-dir`），因此在「CLI 选不出
+  会话」时照样可用；它们在 repl 内不可用（那条连接已经选定）。`sessions list` 的 `status` 是本地
+  判定而非一次往返：`live` / `pending` / `stale`，列 N 台设备不会变成 N 次连接尝试。记录里的
+  VM Service URI 带认证 token，列表只打印 `scheme://host:port`，路径一律不出，`--json` 的
+  `endpoint` 字段同样已打码。
+
+- `PatchbaySessionException.hint`：会话类错误可带一句处置提示，人读时跟在 stderr 的 code 之后，
+  `--json` 时进 `details.hint`（与 `appUnresponsive` 的 hint 同一口径）。
+- CLI 公共 API 增加 `PatchbaySessionStatus`、`PatchbaySessionListing`、`PatchbaySessionPruneResult`，
+  以及 `PatchbaySessionStore.readSelection/writeSelection/clearSelection` 与
+  `PatchbaySessionResolver.inventory/prune/select/selection`；启动器可据此自建会话面板。
+- `session` ↔ `sessions` 互为别名拼写（`session list` 与 `sessions list` 等价）。别名只增加拼写，
+  不新增命令，也不改任何既有命令名。
+
+### Fixed
+
+- `patchbay help <group>` 的可用性说明改为按组内各命令推导，不再对每个组一律打印「Availability is
+  still decided by the running App catalog」。`ui` 组因此同时说明 SDK passthrough 那一半，`sessions`
+  组说明它根本不需要 App。
+
 ## 0.2.1 - 2026-08-14
 
 诊断完备性批次：等待 App 的路径全部有超时预算并可诊断，拒绝信封不再有空 `details`；

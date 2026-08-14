@@ -193,8 +193,42 @@ $ patchbay --ws-uri '<uri>' identity      # 未接 launcher：使用 flutter run
 `<uri>` 可使用 VM Service 的 `http(s)` 或 `ws(s)` 形式。它通常包含认证信息，不要写入脚本、日志、
 shell history 或提交物。
 
-多个有效会话时要求 `--session` 显式选择，不猜。hot restart 后记录自动重锚，
+多个有效会话时要求显式选择，不猜——见[会话选择](#会话选择)。hot restart 后记录自动重锚，
 不需要重启 CLI 或 `flutter run`。
+
+### 会话选择
+
+双设备并连（Android + iOS 同时跑）时会话不唯一，逐条命令敲长 `--session <id>` 很费。会话目录
+本身有三条命令，它们**不连 App、不读 catalog**，只读写本地记录，因此在「CLI 选不出会话」时照样能用：
+
+```console
+$ patchbay sessions list                  # 有哪些记录，* 标记已固定的那条
+$ patchbay session use <session-id>       # 固定一条，之后不带 --session 的命令都用它
+$ patchbay session use --clear            # 取消固定
+$ patchbay sessions prune                 # 删掉进程已经没了的记录
+```
+
+`session` / `sessions` 两种拼写都收（`session list` 与 `sessions list` 等价）。
+
+**优先级链，三级，不混用：**
+
+1. 命令行显式 `--session <id>` —— 永远最高，且不会顺手改掉固定项；
+2. 已固定的会话 —— 有它就用它，即使目录里还有别的会话；
+3. 都没有 —— 唯一会话直接用，多个会话以 `sessionAmbiguous` 拒绝并列出候选。
+
+**固定项失效不回退。** 被固定的会话记录不见了、进程已死、或连不上时，命令以自己的稳定 code
+失败（`sessionSelectionStale` / `sessionStaleProcess` / `sessionUnreachable`）并附一句处置提示，
+**不会改用目录里另一条会话**——在双设备台上那意味着命令打到了另一台设备。固定项也不会被 CLI
+自行清掉：清掉等于让下一条命令重新开始猜。要么 `sessions prune`，要么 `session use --clear`
+之后重新选。`sessions prune` 只在它删掉的记录正是被固定的那条时才顺带取消固定。
+
+`sessions list` 的 `status` 是**本地判定**，不是一次往返：`live`（进程在、URI 已落盘）、
+`pending`（进程在、launcher 还没写 URI）、`stale`（进程没了）。列出 N 台设备不会变成 N 次连接
+尝试，而一个「进程还在但已经不应答」的对端仍然显示 `live`——能不能连上只有真正的命令才知道，
+它自带 RPC 预算。记录里的 VM Service URI 带认证 token，所以列表只打印 `scheme://host:port`，
+路径一律不出（`--json` 的 `endpoint` 字段同样已打码）。
+
+会话选择是「下一个进程连哪」的事，repl 里因此不可用：那条连接已经选定了。
 
 ### 常用命令
 
@@ -204,6 +238,8 @@ $ patchbay --json snapshot                  # 状态快照
 $ patchbay --args '{...}' exec <ns.command> # 领域命令
 $ patchbay --wait exec <ns.command>         # job 命令等终态
 $ patchbay job get|cancel <job-id>
+$ patchbay sessions list|prune               # 本地会话记录，不连 App
+$ patchbay session use <id>|--clear          # 固定 / 取消固定会话
 $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
 $ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
@@ -221,7 +257,7 @@ $ patchbay help <topic>                     # 帮助由声明生成
 `patchbay help` 的 topic 除了 CLI 路径（`ui wait`），还接受 catalog 里的协议名——手上拿着
 `navigation.go` 或响应里的 `ui.semantics.tap` 就能直接查，不必先反推 CLI 路径。多个 CLI 命令共用
 一个协议名（`ui.wait`、`blob.metadata`）时列出它们。`navigate` / `nav` / `wait` / `tap` / `text` /
-`semantics` 是既有路径的别名拼写，不是新命令。
+`semantics`，以及 `session` ↔ `sessions` 的互换，都是既有路径的别名拼写，不是新命令。
 
 ### navigation 的 revision 围栏
 
@@ -242,6 +278,11 @@ $ patchbay help <topic>                     # 帮助由声明生成
 | `ui wait destination` | `navigationDestination` |
 | `ui wait tree-revision` | `treeRevision` |
 | `ui wait frame-revision` | `frameRevision` |
+
+**动作之后确认页面切换或控件出现，用这两条，不要轮询整棵树**：等某个标注控件挂载是
+`ui wait semantics-mounted <identifier>`（长轮询在 App 侧按帧推进，`--timeout-ms` 给上界，超时以
+`uiWaitTimeout` 拒绝；同 identifier 挂载多个实例按 `uiSemanticsTargetAmbiguous` fail-closed 拒绝，
+与 `ui tap` 的解析同源）；等导航落到某个 destination 是 `ui wait destination <destination-id>`。
 
 两种拼写都能直接键入（`ui wait semanticsMounted app.ready` 与 `ui wait semantics-mounted app.ready`
 等价），映射表也在 `patchbay help ui wait` 里。命令名与 condition 名都不会改——它们是 wire 契约。
