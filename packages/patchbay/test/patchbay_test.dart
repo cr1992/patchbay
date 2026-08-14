@@ -224,6 +224,204 @@ void main() {
     );
   });
 
+  group('Patchbay host stdin provenance', () {
+    const PatchbayCommandDescriptor bind = PatchbayCommandDescriptor(
+      name: 'device.bind',
+      summary: 'Bind a device using credentials.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.external,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'deviceId',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'password',
+          type: PatchbayParameterType.string,
+          sensitive: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'apiKey',
+          type: PatchbayParameterType.string,
+          sensitive: true,
+        ),
+      ],
+    );
+    const PatchbayCommandDescriptor uiWrite = PatchbayCommandDescriptor(
+      name: 'ui.text.set',
+      summary: 'Framework-served UI text write.',
+      plane: PatchbayPlane.flutterUi,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.appState,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'text',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+      ],
+    );
+
+    late List<Map<String, Object?>> forwarded;
+
+    setUp(() => forwarded = <Map<String, Object?>>[]);
+
+    PatchbayServiceHost hostWith(PatchbayCatalogSource catalog) =>
+        PatchbayServiceHost(
+          applicationId: 'dev.patchbay.test',
+          registrar: (_, _) {},
+          catalog: catalog,
+          snapshot: () async => const <String, Object?>{},
+          invoke: (_, Map<String, Object?> arguments, String requestId) async {
+            forwarded.add(arguments);
+            return PatchbayInvocation.accepted(requestId: requestId).toJson();
+          },
+        );
+
+    PatchbayCatalogSource declaring(List<PatchbayCommandDescriptor> commands) =>
+        () async => <String, Object?>{
+          'commands': <Object?>[
+            for (final PatchbayCommandDescriptor command in commands)
+              command.toJson(),
+          ],
+        };
+
+    test('meta key never reaches a consumer adapter', () async {
+      final Map<String, Object?> arguments = <String, Object?>{
+        'deviceId': 'device-1',
+        'password': 'hunter2',
+        'inputWasStdin': true,
+      };
+      final Map<String, Object?> result = await hostWith(
+        declaring(<PatchbayCommandDescriptor>[bind]),
+      ).dispatchInvoke('device.bind', arguments, 'req-1');
+
+      expect(result['admission'], 'accepted');
+      expect(forwarded.single, <String, Object?>{
+        'deviceId': 'device-1',
+        'password': 'hunter2',
+      });
+      // The caller keeps its own map; only the forwarded copy loses the key.
+      expect(arguments, containsPair('inputWasStdin', true));
+    });
+
+    test('sensitive arguments without stdin provenance fail closed', () async {
+      final Map<String, Object?> result =
+          await hostWith(
+            declaring(<PatchbayCommandDescriptor>[bind]),
+          ).dispatchInvoke('device.bind', <String, Object?>{
+            'deviceId': 'device-1',
+            'password': 'hunter2',
+            'apiKey': 'ak-1',
+          }, 'req-2');
+
+      final Map<String, Object?> rejection =
+          result['rejection']! as Map<String, Object?>;
+      expect(result['admission'], 'rejected');
+      expect(rejection['code'], 'sensitiveInputRequiresStdin');
+      expect(
+        (rejection['details']! as Map<String, Object?>)['parameters'],
+        <String>['apiKey', 'password'],
+      );
+      expect(forwarded, isEmpty);
+    });
+
+    test('only an exact true attests stdin provenance', () async {
+      final Map<String, Object?> result =
+          await hostWith(
+            declaring(<PatchbayCommandDescriptor>[bind]),
+          ).dispatchInvoke('device.bind', <String, Object?>{
+            'password': 'hunter2',
+            'inputWasStdin': 'true',
+          }, 'req-3');
+
+      expect(
+        (result['rejection']! as Map<String, Object?>)['code'],
+        'sensitiveInputRequiresStdin',
+      );
+      expect(forwarded, isEmpty);
+    });
+
+    test(
+      'a sensitive parameter this request omits is not a violation',
+      () async {
+        final PatchbayServiceHost host = hostWith(
+          declaring(<PatchbayCommandDescriptor>[bind]),
+        );
+
+        expect(
+          (await host.dispatchInvoke('device.bind', <String, Object?>{
+            'deviceId': 'device-1',
+          }, 'req-4'))['admission'],
+          'accepted',
+        );
+        expect(
+          (await host.dispatchInvoke('device.bind', <String, Object?>{
+            'deviceId': 'device-1',
+            'password': null,
+          }, 'req-5'))['admission'],
+          'accepted',
+        );
+        expect(forwarded, hasLength(2));
+      },
+    );
+
+    test('the Flutter UI plane keeps the flag for its own bridge', () async {
+      // UI sensitivity is per target, not per parameter, so the framework host
+      // still reads the provenance itself.
+      await hostWith(
+        declaring(<PatchbayCommandDescriptor>[uiWrite]),
+      ).dispatchInvoke('ui.text.set', <String, Object?>{
+        'text': 'secret',
+        'inputWasStdin': true,
+      }, 'req-6');
+
+      expect(forwarded.single, containsPair('inputWasStdin', true));
+    });
+
+    test('an undeclared command also loses the meta key', () async {
+      await hostWith(
+        declaring(const <PatchbayCommandDescriptor>[]),
+      ).dispatchInvoke('device.unknown', <String, Object?>{
+        'value': 1,
+        'inputWasStdin': true,
+      }, 'req-7');
+
+      expect(forwarded.single, <String, Object?>{'value': 1});
+    });
+
+    test('an unreadable catalog rejects instead of dispatching', () async {
+      final Map<String, Object?> result =
+          await hostWith(
+            () async => throw StateError('catalog source is broken'),
+          ).dispatchInvoke('device.bind', <String, Object?>{
+            'password': 'hunter2',
+          }, 'req-8');
+
+      final Map<String, Object?> rejection =
+          result['rejection']! as Map<String, Object?>;
+      expect(rejection['code'], 'providerProtocolViolation');
+      expect(
+        (rejection['details']! as Map<String, Object?>)['reason'],
+        'catalogUnavailable',
+      );
+      expect(forwarded, isEmpty);
+    });
+
+    test('an argument-free command does not consult the catalog', () async {
+      final Map<String, Object?> result = await hostWith(
+        () async => throw StateError('catalog source is broken'),
+      ).dispatchInvoke('device.ping', const <String, Object?>{}, 'req-9');
+
+      expect(result['admission'], 'accepted');
+      expect(forwarded.single, isEmpty);
+    });
+  });
+
   group('Patchbay invocation envelope', () {
     test('expresses admission without completion-like outer fields', () {
       final Map<String, Object?> json = PatchbayInvocation.accepted(
@@ -549,6 +747,187 @@ void main() {
 
     body.complete(const <String, Object?>{});
   });
+
+  test(
+    'cancelAll invokes every cancellation callback before awaiting',
+    () async {
+      // The rendezvous below can only resolve while both callbacks are in
+      // flight, so a sweep that awaited one job before starting the next would
+      // park on the first callback until its timeout.
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry(
+        cancellationTimeout: const Duration(seconds: 2),
+      );
+      final Completer<Map<String, Object?>> firstBody =
+          Completer<Map<String, Object?>>();
+      final Completer<Map<String, Object?>> secondBody =
+          Completer<Map<String, Object?>>();
+      final Completer<void> bothInvoked = Completer<void>();
+      var invocations = 0;
+      Future<void> rendezvous() {
+        invocations += 1;
+        if (invocations == 2 && !bothInvoked.isCompleted)
+          bothInvoked.complete();
+        return bothInvoked.future;
+      }
+
+      final String first = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        operation: 'fixture.first',
+        body: () => firstBody.future,
+        cancel: rendezvous,
+      );
+      final String second = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        operation: 'fixture.second',
+        body: () => secondBody.future,
+        cancel: rendezvous,
+      );
+
+      final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs
+          .cancelAll(reason: 'sessionClosed');
+
+      expect(invocations, 2);
+      expect(outcomes, <String, PatchbayJobCancelOutcome>{
+        first: PatchbayJobCancelOutcome.cancelled,
+        second: PatchbayJobCancelOutcome.cancelled,
+      });
+      expect(jobs.snapshot(first)?.events.last.reason, 'sessionClosed');
+      expect(jobs.snapshot(second)?.events.last.reason, 'sessionClosed');
+      expect(jobs.runningJobs, 0);
+
+      firstBody.complete(const <String, Object?>{});
+      secondBody.complete(const <String, Object?>{});
+    },
+  );
+
+  test('cancelAll converges per job instead of serialising timeouts', () async {
+    const Duration timeout = Duration(milliseconds: 300);
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry(
+      cancellationTimeout: timeout,
+    );
+    final Completer<Map<String, Object?>> bodies =
+        Completer<Map<String, Object?>>();
+    final Completer<void> neverConfirms = Completer<void>();
+    final String stuckFirst = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+      cancel: () => neverConfirms.future,
+    );
+    final String stuckSecond = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+      cancel: () => neverConfirms.future,
+    );
+    final String confirming = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+      cancel: () {},
+    );
+    final String uncancellable = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+    );
+
+    final Stopwatch elapsed = Stopwatch()..start();
+    final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs.cancelAll(
+      reason: 'sessionClosed',
+    );
+    elapsed.stop();
+
+    // Serialised cancellation would spend one full timeout per stuck callback.
+    expect(elapsed.elapsed, lessThan(timeout * 2));
+    expect(outcomes, <String, PatchbayJobCancelOutcome>{
+      stuckFirst: PatchbayJobCancelOutcome.timedOut,
+      stuckSecond: PatchbayJobCancelOutcome.timedOut,
+      confirming: PatchbayJobCancelOutcome.cancelled,
+      uncancellable: PatchbayJobCancelOutcome.notCancellable,
+    });
+    // An unanswered callback and a missing callback are both non-evidence, so
+    // those jobs must still read as running.
+    expect(jobs.snapshot(stuckFirst)?.terminal, isFalse);
+    expect(jobs.snapshot(stuckSecond)?.terminal, isFalse);
+    expect(jobs.snapshot(uncancellable)?.terminal, isFalse);
+    expect(
+      jobs.snapshot(confirming)?.events.last.phase,
+      PatchbayJobPhase.cancelled,
+    );
+    expect(jobs.runningJobs, 3);
+
+    neverConfirms.complete();
+    bodies.complete(const <String, Object?>{});
+  });
+
+  test(
+    'cancelAll reports a throwing callback without aborting the sweep',
+    () async {
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+      final Completer<Map<String, Object?>> bodies =
+          Completer<Map<String, Object?>>();
+      final String throwing = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+        cancel: () => throw StateError('controller detached'),
+      );
+      final String confirming = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+        cancel: () {},
+      );
+
+      final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs
+          .cancelAll(reason: 'sessionClosed');
+
+      expect(outcomes[throwing], PatchbayJobCancelOutcome.callbackFailed);
+      expect(outcomes[confirming], PatchbayJobCancelOutcome.cancelled);
+      expect(jobs.snapshot(throwing)?.terminal, isFalse);
+      expect(jobs.snapshot(confirming)?.terminal, isTrue);
+      expect(jobs.runningJobs, 1);
+
+      bodies.complete(const <String, Object?>{});
+    },
+  );
+
+  test(
+    'cancelAll never overwrites a job that reached its own terminal state',
+    () async {
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+      final String settled = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () async => const <String, Object?>{'ok': true},
+        cancel: () {},
+      );
+      await Future<void>.delayed(Duration.zero);
+      final Completer<Map<String, Object?>> racing =
+          Completer<Map<String, Object?>>();
+      final String racingJob = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => racing.future,
+        cancel: () async {
+          racing.complete(const <String, Object?>{'ok': true});
+          // Yield past the microtask queue so the body's own terminal event
+          // lands before this callback confirms the stop.
+          await Future<void>.delayed(Duration.zero);
+        },
+      );
+
+      final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs
+          .cancelAll(reason: 'sessionClosed');
+
+      expect(outcomes.containsKey(settled), isFalse);
+      expect(outcomes[racingJob], PatchbayJobCancelOutcome.alreadySettled);
+      expect(
+        jobs.snapshot(settled)?.events.last.phase,
+        PatchbayJobPhase.completed,
+      );
+      expect(
+        jobs.snapshot(racingJob)?.events.map((PatchbayJobEvent e) => e.phase),
+        <PatchbayJobPhase>[
+          PatchbayJobPhase.running,
+          PatchbayJobPhase.completed,
+        ],
+      );
+    },
+  );
 
   test(
     'job wait observes changes without polling and returns generated wire',

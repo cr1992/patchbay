@@ -287,7 +287,10 @@ final class PatchbayArtifactService {
           .read(
             blobId: request.blobId,
             offset: request.offset,
-            limit: request.limit,
+            // The descriptor declares this default, so the wire must accept the
+            // argument being absent and the host must supply the same value the
+            // catalog advertises.
+            limit: request.limit ?? blobs.maxChunkBytes,
           )
           .toJson(),
     ).toJson();

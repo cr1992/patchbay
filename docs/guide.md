@@ -98,8 +98,38 @@ PatchbayCommandDescriptor(
 
 规则：
 - 长流程用 `job` 模式——受理即返回 `jobId`，别让 CLI 干等；
-- 敏感参数标 `sensitive: true`——CLI 会强制 `--stdin` 且不回显；
+- 敏感参数标 `sensitive: true`——值只能走 `--stdin`（不回显），强制由 host 完成，见下一节；
 - handler 复用你既有的 controller / 并发约束，**不要**为 CLI 另建一套状态机。
+
+#### 敏感参数由 host 强制，adapter 不用配合
+
+`sensitive: true` 写在 descriptor 里就够了。客户端会用 `inputWasStdin` 标记「这个值来自无回显
+stdin」，而这个键是**协议元数据，不是命令参数**。host 在把 arguments 交给你的 `domainInvoke` 之前
+就把它消费掉：
+
+1. **校验**——请求给任意一个 sensitive 参数带了非空值却没有该标记时，host 直接以
+   `sensitiveInputRequiresStdin` 拒绝，`details.parameters` 按字典序列出违规参数名；你的 handler
+   根本不会被调用；
+2. **剥离**——校验通过后 host 把该键删掉，**手写 adapter 收到的 `arguments` 永远不含
+   `inputWasStdin`**。
+
+所以 handler 只管声明参数、按严格白名单校验、干活。
+
+> **规范：host 已接管 sensitivePolicy 校验，手写 invoke 不得再依赖 `inputWasStdin` 键。**
+
+catalog 是这条策略的唯一真源，host 读不到 catalog 时 fail-closed：带参数的调用以
+`providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，不会把未校验的参数交给 adapter。
+
+**从旧版本升级：两步，都要做。**
+
+1. 删掉 arguments 白名单里对 `inputWasStdin` 的豁免——host 不再传这个键，留着只是死代码
+   （**不删无害**）；
+2. 删掉 adapter 自己实现的 stdin 强制检查（形如 `if (args['inputWasStdin'] != true) reject(...)`
+   或 `if (!args.fromStdin) reject(...)`）——**不删必炸**：host 剥键后该判断恒为假，所有合法的
+   敏感调用都会被 App 侧误拒。
+
+用 codegen 生成 typed 命令 API 的接入方，升级 pin 后重新生成即可：生成的 validator 已经不再豁免、
+也不再校验这个键。停留在旧 pin 的接入方不受影响——旧 host 与旧生成代码在旧语义下自洽。
 
 Job registry 必须使用有限预算。默认值适合普通调试会话，也可以按 App 的资源成本调整：
 
@@ -117,6 +147,10 @@ running；只有 controller 提供了真实终态，才能写入 completed / fai
 
 没有 cancellation callback 时 `cancel()` 返回 `false`。callback 只有在 controller 已确认操作停止后才可
 返回；若底层 API 只确认“取消请求已发送”，adapter 应继续观察真实终态，而不是提前释放运行名额。
+
+会话收尾用 `cancelAll()`：所有 callback 并行发起，单个卡死的 callback 只消耗一次 `cancellationTimeout`，
+不会把整批取消堵在后面。它返回逐 job 的 `PatchbayJobCancelOutcome`，adapter 不能把这次调用当作
+“全部已停止”——`timedOut` / `callbackFailed` / `notCancellable` 的 job 仍在运行。
 
 ### 4. UI 目标标注（可选，一行一个）
 

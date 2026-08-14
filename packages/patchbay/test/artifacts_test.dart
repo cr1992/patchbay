@@ -299,6 +299,39 @@ void main() {
       );
     });
 
+    test(
+      'blob.read applies the limit default the descriptor advertises',
+      () async {
+        final PatchbayArtifactService service = _service(
+          const _FakeLogSource(page: PatchbayLogPage.records()),
+        );
+        final PatchbayParameterDescriptor limit = service.descriptors
+            .firstWhere((descriptor) => descriptor.name == 'blob.read')
+            .parameters
+            .firstWhere((parameter) => parameter.name == 'limit');
+        expect(limit.required, isFalse);
+        expect(limit.defaultValue, service.blobs.maxChunkBytes);
+
+        final PatchbayBlobMetadataWire blob = service.blobs.put(
+          Uint8List.fromList(utf8.encode('x' * 3000)),
+          kind: PatchbayBlobSourceWire.logExport,
+          source: PatchbayFactSourceWire.appRecorded,
+          contentType: 'text/plain',
+        );
+        final Map<String, Object?> chunk = _payload(
+          await service.invoke('blob.read', <String, Object?>{
+            'blobId': blob.blobId,
+            'offset': 0,
+          }, 'read-default'),
+        );
+
+        // The advertised default is a chunk bound, not "read everything".
+        expect(chunk['length'], service.blobs.maxChunkBytes);
+        expect(chunk['nextOffset'], service.blobs.maxChunkBytes);
+        expect(chunk['eof'], isFalse);
+      },
+    );
+
     test('catalog and dispatch expose only explicitly injected capability', () {
       final PatchbayArtifactService blobsOnly = PatchbayArtifactService(
         blobs: PatchbayMemoryBlobStore(),

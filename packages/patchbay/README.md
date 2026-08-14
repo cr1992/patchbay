@@ -121,6 +121,21 @@ accepted 信封不能带 rejection，rejected 信封必须带 rejection 且不�
 - `none`、`appState` 或 `external` side effect；
 - 敏感参数策略和可能出现的事实来源。
 
+`sensitive: true` 的强制由 host 完成，不由接入方 handler 完成。客户端用 `inputWasStdin` 标记值来自
+无回显 stdin；host 在 dispatch 之前按 catalog 声明校验，并把这个元键从 arguments 中剥掉，因此
+`PatchbayInvocationSource` 收到的参数里永远没有它。任意 sensitive 参数带非空值却缺少该标记时，host
+以 `sensitiveInputRequiresStdin` 拒绝，`details.parameters` 列出违规参数名。手写 adapter 既不需要在
+参数白名单里豁免它，也**不得**再自行实现这条 stdin 检查——剥键之后那种检查恒为假。
+
+唯一例外是 `plane: flutterUi` 的命令：那条平面由 `patchbay_flutter` 自己的 bridge 服务，敏感性是
+目标级（`PatchbaySensitivePolicy.redacted`、obscured Semantics 节点）而不是参数级，descriptor 无法
+表达，所以元键继续交给该 bridge。领域平面的接入方不受影响。
+
+catalog 是这条策略的唯一真源。host 读不到 catalog 时 fail-closed：带参数的调用以
+`providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，不把未校验的参数交给 adapter；
+无参调用不查 catalog——没有可剥的元键，也没有任何被传输的值可能是敏感的。descriptor 声明的默认值
+不参与这条校验：标记描述的是**被传输的值**的来源，App 自带的默认值从未上过 wire。
+
 每次调用依次通过不可省略的基础门，再通过 descriptor 声明的接入方门：
 
 ```dart
@@ -152,6 +167,12 @@ Registry 默认最多同时运行 32 个 job，并保留最近 200 个已结束 
 未提供 cancellation callback 时，`cancel()` 返回 `false` 并保持 running。callback 正常返回代表接入方
 确认底层操作已经停止；如果 controller 的 API 只表示“取消请求已发送”，adapter 必须继续等待真实取消
 终态，不能立即返回 callback。
+
+`cancelAll()` 并行发起所有运行中 job 的取消：全部 callback 先被调用，再各自按 `cancellationTimeout`
+收敛，一个卡死或抛错的 callback 只消耗一次超时，不阻塞也不中断其余 job。返回值是逐 job 的
+`PatchbayJobCancelOutcome`（`cancelled` / `notCancellable` / `timedOut` / `callbackFailed` /
+`alreadySettled`），只覆盖发起时仍在运行的 job；超时、抛错和无 callback 的 job 保持 running，
+已自行进入终态的 job 保留自己的终态，不会被写成 cancelled。
 
 因此 registry 中可观察记录的理论上限是 `maxRunningJobs + retainedJobs`。`runningJobs`、
 `settledJobs` 和 `totalJobs` 可用于接入方健康检查，但不是业务完成性的替代证据。
