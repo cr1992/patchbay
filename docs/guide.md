@@ -1,7 +1,7 @@
 # 使用指南
 
 > 从安装到跑通，再到领域命令和自动发现。设计理由见[设计](design.md)，只想快速体验可先看
-> [根 README](../README.md#快速开始)。
+> [根 README](../README.zh-CN.md#快速开始)。
 
 ## 前置条件
 
@@ -232,7 +232,7 @@ ID 是 wire 契约：点分、小写、语义化（`<区>.<屏>.<控件>`），�
 同一 ID 同时挂载多个实例会被 fail-closed 拒绝。
 
 `PatchbayKey` 的注册时机、代际推进规则，以及 `build()` 内裸构造导致丢状态的陷阱，见
-[`patchbay_flutter/README` 的注册与重挂载语义](../packages/patchbay_flutter/README.md#注册与重挂载语义)。
+[`patchbay_flutter/README` 的注册与重挂载语义](../packages/patchbay_flutter/README.zh-CN.md#注册与重挂载语义)。
 
 #### ID 命名：三套校验口径不是同一套
 

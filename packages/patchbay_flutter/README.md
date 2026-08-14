@@ -1,47 +1,54 @@
 # Patchbay Flutter
 
-`patchbay_flutter` 是 Patchbay 的可选 Flutter adapter。它的目标是用最小 Widget 侵入提供稳定、
-可发现、fail-closed 的 UI 调试能力，而不是实现一套坐标驱动的黑盒自动化框架。本文中的
-consumer 指接入 Patchbay 的 App。
+English | [简体中文](README.zh-CN.md)
 
-快速安装和首次连接见[仓库 README](../../README.md#快速开始)，通用协议和传输边界见
-[`../patchbay/README.md`](../patchbay/README.md)。
+`patchbay_flutter` is Patchbay's optional Flutter adapter. Its goal is to provide stable,
+discoverable, fail-closed UI debugging capabilities with minimal widget intrusion — not to
+implement yet another coordinate-driven black-box automation framework. "Consumer" below means the
+app integrating Patchbay.
 
-## 当前能力
+For quick installation and a first connection, see the
+[repository README](../../README.md#quick-start); for the general protocol and transport
+boundaries, see [`../patchbay/README.md`](../patchbay/README.md).
 
-| 能力面 | 公共 API 与边界 |
+## Current Capabilities
+
+| Capability surface | Public API and boundaries |
 |---|---|
-| **稳定 target** | `PatchbayKey.text`、弱引用 registry、mounted generation、重复 ID 歧义和 stale 拒绝 |
-| **文本操作** | `text.set` / `text.enter`、每操作 gate、敏感输入和 side-effect descriptor |
-| **Semantics** | 无容器的规范化树、节点 generation、obscured value 脱敏，以及 policy 默认拒绝的标准 action |
-| **导航与等待** | composition-root navigation adapter、revision / redirect / timeout 语义和 `ui.wait` 条件 |
-| **截图** | 可选 root / target capture、下一帧复核、像素与字节上限、chunked blob 输出 |
-| **保持亮屏** | consumer 注入的 `keepAwakeDelegate`、默认关、租约到期与 host 销毁自动还原 |
-| **Host 组合** | `PatchbayFlutterServiceHost` 把 UI 与领域 catalog/operator 合并到同一 service extension |
+| **Stable targets** | `PatchbayKey.text`, weak-reference registry, mounted generation, duplicate-ID ambiguity, and stale rejection |
+| **Text operations** | `text.set` / `text.enter`, per-operation gates, sensitive input, and side-effect descriptors |
+| **Semantics** | Container-free normalized tree, node generations, obscured value redaction, and standard actions rejected by policy default |
+| **Navigation and waits** | Composition-root navigation adapter, revision / redirect / timeout semantics, and `ui.wait` conditions |
+| **Capture** | Optional root / target capture, next-frame re-check, pixel and byte limits, and chunked blob output |
+| **Keep awake** | Consumer-injected `keepAwakeDelegate`, off by default, auto-released on lease expiry and host disposal |
+| **Host composition** | `PatchbayFlutterServiceHost` merges the UI and domain catalogs/operators into one service extension |
 
-日志面位于 core `patchbay`，只有 consumer 显式注入 `PatchbayArtifactService` 时才进入本 host 的
-catalog。Widget/Render/Focus 诊断树由
-`patchbay_cli` 直接代理 Flutter 运行时 extension，不经过本包复制协议。
+The logging surface lives in core `patchbay` and only enters this host's catalog when the consumer
+explicitly injects a `PatchbayArtifactService`. The Widget/Render/Focus diagnostic trees are
+proxied by `patchbay_cli` straight to the Flutter runtime extensions, without this package
+duplicating the protocol.
 
-Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的契约
-见 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。该文档明确树驱动 action
-是默认低侵入路径，语义导航只作稳定增强。
+The contracts for the Widget/Render/Semantics trees, standard actions, node generations,
+redaction, and the DevTools diagnostic proxy are in
+[`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md) (currently in Chinese).
+That document makes it explicit that tree-driven actions are the default low-intrusion path, and
+semantic navigation is only a stable enhancement on top.
 
-## 低侵入分级
+## Intrusion Levels
 
-| 接入级别 | Consumer 改动 | 能力 |
+| Integration level | Consumer change | Capabilities |
 |---|---|---|
-| Host only | App 组合根启动 service host | identity、领域 catalog/snapshot/invoke；不承诺稳定 Widget 操作 |
-| Runtime observation | 只启动 Flutter host，不改 Widget 树 | Widget/Render/Semantics 摘要和标准 Semantics action |
-| Optional root bridge | App 最上层包一次 root bridge | 根截图和确实需要根渲染上下文的帧协调 |
-| Single Key | 目标 Widget 的 `key` 换成 `PatchbayKey` | 该目标 catalog 明示的操作 |
+| Host only | Start the service host at the app's composition root | identity, domain catalog/snapshot/invoke; no promise of stable widget operations |
+| Runtime observation | Start the Flutter host only, without touching the widget tree | Widget/Render/Semantics summaries and standard Semantics actions |
+| Optional root bridge | Wrap a root bridge once at the app's top level | Root capture and frame coordination that genuinely needs the root render context |
+| Single Key | Swap the target widget's `key` for a `PatchbayKey` | The operations that target declares in the catalog |
 
-不要求页面继承基类，不要求逐页面容器，不要求给所有 Widget 标 Key，也不维护一份与 Widget 树重复的
-集中 target 清单。
+No page base class is required, no per-page container, no Keys on every widget, and no central
+target list duplicating the widget tree.
 
-## Key 接入
+## Key Integration
 
-需要远程操作的控件只替换 Key：
+For widgets you need to drive remotely, just swap the Key:
 
 ```dart
 late final PatchbayKey nameKey = PatchbayKey.text(
@@ -59,89 +66,105 @@ TextField(
 )
 ```
 
-`PatchbayKey` 本身就是目标 Widget 唯一的 `key`，不再包 `PatchbayTextTarget` 等容器。
+The `PatchbayKey` *is* the target widget's only `key` — there is no `PatchbayTextTarget` or other
+wrapper.
 
-Key 在 debug、profile、release 中始终是同一种 `GlobalKey`，保持 Element/State 的挂载和跨位置移动
-语义。release 只裁掉 declaration、弱登记和 operator 引用，不能退化成另一种 Key。
+A Key stays the same kind of `GlobalKey` in debug, profile, and release, preserving Element/State
+mounting and cross-position move semantics. Release strips only the declaration, the weak
+registration, and the operator references; it must not degrade into a different kind of Key.
 
-## 注册与重挂载语义
+## Registration and Remount Semantics
 
-这一节是接入方最容易靠逆向源码才搞明白的部分，三句话概括：**构造即注册、弱引用出册、
-只有同时挂载才判歧义**。
+This is the part consumers most often end up reverse-engineering from source. Three phrases sum it
+up: **registration happens at construction, deregistration is by weak reference, and only
+simultaneously mounted instances count as ambiguous.**
 
-### 构造即注册
+### Registration happens at construction
 
-登记发生在 `PatchbayKey.text(...)` / `PatchbayKey.capture(...)` 的**构造函数**里，不是在
-Widget 挂载时。所以：
+Registration takes place in the **constructor** of `PatchbayKey.text(...)` /
+`PatchbayKey.capture(...)`, not when the widget mounts. Therefore:
 
-- 一个从未挂载过的 Key 也会出现在 `patchbay catalog` 的 `uiTargets` 里，只是 `mounted: false`
-  且 `operations` 为空——目录列出的是"声明过的目标"，不是"当前可操作的目标"；
-- release 下 `declaration` 为 `null` 且完全不登记，Key 退化成一个普通 `GlobalKey`；
-- 没有、也不需要 `dispose()`：接入方创建 Key，不管理注册生命周期。
+- a Key that has never mounted still appears in `patchbay catalog`'s `uiTargets`, just with
+  `mounted: false` and empty `operations` — the catalog lists "declared targets", not "currently
+  operable targets";
+- in release, `declaration` is `null` and nothing is registered at all; the Key degrades to a
+  plain `GlobalKey`;
+- there is no `dispose()`, and none is needed: the consumer creates Keys and does not manage the
+  registration lifecycle.
 
-### 弱引用出册
+### Deregistration is by weak reference
 
-registry 对每个 Key 持 `WeakReference`。Key 对象被 GC 后，条目在**下一次被观察时**
-（读 catalog 或解析一次调用）清掉；一个 ID 的条目全部清空后，该 ID 从目录消失。
+The registry holds a `WeakReference` to every Key. Once a Key object is garbage collected, its
+entry is cleared **the next time it is observed** (reading the catalog, or resolving one call);
+once all entries for an ID are cleared, that ID disappears from the catalog.
 
-这是弱引用语义，不是确定性析构：**页面已经销毁但 Key 还没被 GC 时，目录里仍会看到那条
-`mounted: false` 的记录**。这不是泄漏，也不影响操作——mounted 状态是当场按 `Element` 判的。
+These are weak-reference semantics, not deterministic destruction: **while a page has already been
+destroyed but its Key has not yet been collected, the catalog still shows that `mounted: false`
+record**. That is not a leak, and it does not affect operations — mounted state is judged on the
+spot from the `Element`.
 
-### mounted、generation 与歧义
+### mounted, generation, and ambiguity
 
-| 事实 | 判定方式 |
+| Fact | How it is determined |
 |---|---|
-| `mounted` | 当场读 Key 的 `currentContext`，有 `Element` 才算挂载 |
-| `generation` | 每个 ID 一个单调递增计数器；观察到 `Element` 身份变化时 +1 |
-| `ambiguous` | **只数同时 mounted 的实例**；>1 才置位 |
+| `mounted` | Read the Key's `currentContext` on the spot; only an existing `Element` counts as mounted |
+| `generation` | One monotonic counter per ID; +1 whenever a change of `Element` identity is observed |
+| `ambiguous` | **Counts only simultaneously mounted instances**; set only when >1 |
 
-几个由此推出、但容易猜错的结论：
+Several conclusions follow from this that are easy to guess wrong:
 
-- **首次观察到挂载时 generation 是 1，不是 0。** 未挂载过的条目是 0。
-- **计数器按 ID 共享**，不按 Key 实例。同一 ID 的第二个实例挂载时拿到的是全局下一个号，
-  不会从 1 重新开始。
-- **GlobalKey 跨位置移动不改号。** Element 被带着走、身份没变，generation 就不变——这正是
-  Key 必须保持 `GlobalKey` 语义的原因之一。
-- **未挂载的重复条目不构成歧义。** 三个同 ID 的 Key 只有一个挂载时，操作照常可执行。
-- **generation 只在被观察时推进。** 两次观察之间重挂载了三回，号也只 +1；重点是"变了"，
-  不是"变了几次"。
+- **On the first observed mount the generation is 1, not 0.** An entry that has never mounted is 0.
+- **The counter is shared per ID**, not per Key instance. When a second instance of the same ID
+  mounts, it takes the globally next number rather than restarting from 1.
+- **Moving a GlobalKey across positions does not change the number.** The Element is carried along
+  and its identity is unchanged, so the generation is unchanged — one of the reasons the Key must
+  retain `GlobalKey` semantics.
+- **Duplicate entries that are not mounted do not constitute ambiguity.** With three Keys sharing
+  one ID and only one of them mounted, operations execute as usual.
+- **The generation only advances when observed.** Three remounts between two observations still
+  bump it by only 1; the point is "it changed", not "how many times it changed".
 
-写操作必须携带最近观察到的 generation，解析失败的稳定 code 是：
+Write operations must carry the most recently observed generation. The stable codes for a failed
+resolution are:
 
-| code | 含义 |
+| code | Meaning |
 |---|---|
-| `uiTargetNotFound` | 该 ID 没有任何存活条目（从未声明，或 Key 已被 GC） |
-| `uiTargetUnmounted` | 有条目但一个都没挂载 |
-| `uiTargetAmbiguous` | 同时挂载了多个同 ID 实例 |
-| `uiGenerationStale` | 号对不上，`details.currentGeneration` 给出当前值 |
-| `uiOperationUnavailable` | 目标挂载了，但不支持这个 operation（如 text 目标的 Widget 不是 `TextField`/`EditableText`，或 capture 目标的 render object 不是现成的 `RenderRepaintBoundary`） |
+| `uiTargetNotFound` | No live entry exists for that ID (never declared, or the Key has been collected) |
+| `uiTargetUnmounted` | Entries exist but none of them is mounted |
+| `uiTargetAmbiguous` | Several instances of the same ID are mounted simultaneously |
+| `uiGenerationStale` | The number does not match; `details.currentGeneration` gives the current value |
+| `uiOperationUnavailable` | The target is mounted but does not support this operation (for example, a text target whose widget is not a `TextField`/`EditableText`, or a capture target whose render object is not already a `RenderRepaintBoundary`) |
 
-gate 中发生 `await` 后，operator 会**再解析一次** ID、generation 和歧义状态，所以门后发生的
-重挂载或新出现的重名实例同样拿不到这次调用的续程。页面退出后针对旧实例的迟到命令因此稳定被拒，
-不会写入后来出现的同名控件。
+After an `await` inside a gate, the operator **re-resolves** the ID, generation, and ambiguity
+state, so a remount after the gate — or a newly appeared same-named instance — likewise does not
+inherit this call's continuation. Late commands aimed at an old instance after a page exits are
+therefore rejected stably, and never write into a same-named widget that appeared afterwards.
 
-### 陷阱：`build()` 内裸构造 Key 会重挂载丢状态
+### Pitfall: constructing a Key inline in `build()` remounts and loses state
 
 ```dart
-// ❌ 每次 build 造一个新 GlobalKey
+// ❌ a new GlobalKey on every build
 @override
 Widget build(BuildContext context) {
   return TextField(key: PatchbayKey.text('login.phone'), controller: _controller);
 }
 ```
 
-`PatchbayKey` 是 `GlobalKey`，Flutter 按 Key **实例身份**决定复用还是重建。每帧换一个新实例，
-等于每帧告诉 Flutter"这是另一个控件"，代价是三重的：
+`PatchbayKey` is a `GlobalKey`, and Flutter decides between reuse and rebuild by Key **instance
+identity**. Swapping in a new instance every frame tells Flutter "this is a different widget" every
+frame, and the cost is threefold:
 
-1. **丢状态**——旧 `Element`/`State` 被销毁重建，输入焦点、滚动位置、动画进度一并丢失；
-2. **generation 每次观察都在跳**——你刚从 catalog 读到的号，下一次解析时已经过期，
-   写操作稳定以 `uiGenerationStale` 被拒，看上去像"围栏坏了"，其实是 Key 在漂；
-3. **registry 条目堆积**——每次构造都新增一条，只能等 GC 清。
+1. **State is lost** — the old `Element`/`State` is destroyed and rebuilt, taking input focus,
+   scroll position, and animation progress with it;
+2. **The generation jumps on every observation** — the number you just read from the catalog is
+   already stale by the next resolution, so write operations are stably rejected with
+   `uiGenerationStale`, which looks like "the fence is broken" when really the Key is drifting;
+3. **Registry entries pile up** — every construction adds another, and only GC clears them.
 
-正确做法是把实例缓存住，让它跨 build 稳定：
+The right approach is to cache the instance so it stays stable across builds:
 
 ```dart
-// ✅ State 字段：一个 State 实例一个 Key
+// ✅ a State field: one Key per State instance
 class _LoginFormState extends State<LoginForm> {
   late final PatchbayKey _phoneKey = PatchbayKey.text('login.phone');
 
@@ -151,71 +174,87 @@ class _LoginFormState extends State<LoginForm> {
 }
 ```
 
-`StatelessWidget` 同理：Key 要放在外层 `State`、注入的 controller，或一张模块级常量表里，
-**不能放在 `build()` 里**。这条对每一个 `GlobalKey` 都成立，不是 Patchbay 特有的规则；
-但因为 Patchbay 的代际围栏会把它变成一串看不懂的 `uiGenerationStale`，这里显式写明。
+The same applies to `StatelessWidget`: the Key belongs in an enclosing `State`, an injected
+controller, or a module-level constant table — **never inside `build()`**. This holds for every
+`GlobalKey` and is not a Patchbay-specific rule; it is spelled out here because Patchbay's
+generation fencing turns it into a stream of baffling `uiGenerationStale` rejections.
 
-### 怎么确认目标已经挂载
+### How to confirm a target is mounted
 
-页面切换或一次动作之后要确认控件出现了，走哪条路取决于你标的是哪种 ID——**这是两个互不相通的
-身份空间**：
+To confirm a widget has appeared after a page switch or an action, the route you take depends on
+which kind of ID you labelled it with — **these are two separate identity spaces that do not
+interconnect**:
 
-| 标注方式 | 查挂载的方式 |
+| How it is labelled | How to check whether it is mounted |
 |---|---|
-| `PatchbayKey.text/capture('id')` | 读 `patchbay catalog`，看 `uiTargets` 里该 ID 的 `mounted` / `generation` |
-| `Semantics(identifier: 'id')` | `patchbay ui wait semantics-mounted <identifier>`（长轮询，自 `patchbay-v0.1.0` 起提供） |
+| `PatchbayKey.text/capture('id')` | Read `patchbay catalog` and look at that ID's `mounted` / `generation` in `uiTargets` |
+| `Semantics(identifier: 'id')` | `patchbay ui wait semantics-mounted <identifier>` (long poll, available since `patchbay-v0.1.0`) |
 
-`PatchbayKey` 只替换 Widget 的 `key`，**不会**顺带写 Semantics `identifier`；反过来
-`ui wait semantics-mounted` 走的是 Semantics 树遍历，看不到只标了 `PatchbayKey` 的目标。
-需要"等它出现再操作"的控件，标 Semantics `identifier`（或两个都标）。
+`PatchbayKey` only replaces the widget's `key` and **does not** also write a Semantics
+`identifier`; conversely, `ui wait semantics-mounted` walks the Semantics tree and cannot see a
+target labelled only with a `PatchbayKey`. For widgets you need to "wait for, then operate on",
+label a Semantics `identifier` (or both).
 
-`ui wait` 的完整条件表、CLI 子命令与 wire 值的对应关系见
-[使用指南的 `ui wait` 一节](../../docs/guide.md#ui-wait-的-condition-名)。
+For `ui wait`'s full condition table and the correspondence between CLI subcommands and wire
+values, see [the `ui wait` section of the usage guide](../../docs/guide.md#ui-wait-的-condition-名)
+(currently in Chinese).
 
 ### requestId
 
-通过 `PatchbayFlutterServiceHost` 调用时，text 与 Semantics operator 会沿用 transport 传入的
-`requestId`；bridge 只在被直接调用且调用方未提供 ID 时生成本地 ID。这样日志、CLI 输出和 invocation
-信封可以稳定关联到同一次请求。
+When invoked through `PatchbayFlutterServiceHost`, the text and Semantics operators reuse the
+`requestId` passed in by the transport; the bridge generates a local ID only when called directly
+by a caller that supplied none. This keeps logs, CLI output, and invocation envelopes stably
+correlated to the same request.
 
-## 文本语义
+## Text Semantics
 
-当前支持两种不同语义：
+Two distinct semantics are supported today:
 
-- `text.set`：直接替换 `TextEditingController.value`，不调用 formatter 和 `onChanged`；适合准备状态；
-- `text.enter`：按顺序执行目标的 `inputFormatters`，写回 controller 后调用公开 `onChanged`；适合模拟
-  一次 Flutter 层用户输入。
+- `text.set` — replaces `TextEditingController.value` directly, invoking neither formatters nor
+  `onChanged`; suitable for preparing state;
+- `text.enter` — runs the target's `inputFormatters` in order, writes back to the controller, then
+  calls the public `onChanged`; suitable for simulating one Flutter-level user input.
 
-两者都只证明 Flutter target 接受并观测到值变化，不证明 IME、软键盘 UI 或系统输入法行为。
+Both prove only that the Flutter target accepted and observed the value change — never IME, soft
+keyboard UI, or system input method behavior.
 
-敏感 target 必须声明 `sensitive: true`。这类输入只接受 CLI stdin，catalog 和结果只返回长度及
-redacted 标记，不回显明文。
+Sensitive targets must declare `sensitive: true`. Such inputs are only accepted from CLI stdin,
+and the catalog and results return only a length and a redacted marker, never the plaintext.
 
-## Runtime observation
+## Runtime Observation
 
-Widget 与 Semantics 树不要求 consumer 包一层 root。Flutter host 可以通过公开 binding、Inspector 和
-Semantics API 读取当前树；Semantics action 由 consumer 在 composition root 注入一次 policy，默认拒绝。
+The widget and Semantics trees do not require the consumer to wrap a root. The Flutter host can
+read the current tree through the public binding, Inspector, and Semantics APIs; Semantics actions
+require the consumer to inject a policy once at the composition root, and are rejected by default.
 
-标准组件已有 label、flags 与 action 时不需要 `PatchbayKey`。例如一个带 `button + label + tap` 的底部
-Tab 可以直接从 Semantics 快照发现并执行原 callback，完整复用 Widget 自身的退出与切换流程。
+Standard components that already carry a label, flags, and actions do not need a `PatchbayKey`.
+A bottom tab with `button + label + tap`, for example, can be discovered from the Semantics
+snapshot and have its original callback executed, fully reusing the widget's own exit and
+switching flow.
 
-控件带稳定 Semantics identifier 时，`ui.semantics.tap` 把「解析 → 代际校验 → 派发」收进一次受理：
-调用方不必先读整棵树，再搬运只在当前 SemanticsOwner 内有效的 `nodeId`。围栏没有因此变松——bridge
-在过门前 pin 住解析到的 generation，门后二次解析必须命中同一 generation，await 期间发生重挂载仍以
-`uiSemanticsGenerationStale` 拒绝；调用方另可传 `generation` 做自己的前置围栏。同 identifier 多个
-mounted 实例一律歧义拒绝，不按树顺序选。
+When a widget has a stable Semantics identifier, `ui.semantics.tap` folds "resolve → generation
+check → dispatch" into a single admission: the caller need not first read the whole tree and then
+carry around a `nodeId` that is only valid within the current SemanticsOwner. The fence is not
+loosened by this — the bridge pins the resolved generation before the gates, the post-gate
+re-resolution must hit that same generation, and a remount during the `await` is still rejected
+with `uiSemanticsGenerationStale`; callers may additionally pass a `generation` as their own
+up-front fence. Multiple mounted instances of the same identifier are always rejected as
+ambiguous, never picked by tree order.
 
-该命令与 `ui.semantics.action` 共用同一个 action policy：没有 consumer policy 时它不进 catalog、
-也不可派发。未命中、多义与代际过期都带 details（已挂载 identifier 清单上限 20 条、候选列表、
-expected/current generation），obscured 节点的 label 在 details 中脱敏——拒绝要可行动，但不能变成
-第二个绕过树上限的观察面。
+This command shares one action policy with `ui.semantics.action`: with no consumer policy it
+neither enters the catalog nor can be dispatched. Misses, ambiguity, and stale generations all
+carry details (the mounted identifier list is capped at 20 entries, plus the candidate list and
+expected/current generation), and labels of obscured nodes are redacted in those details —
+a rejection must be actionable without becoming a second observation surface that bypasses the
+tree limits.
 
-详细协议、隐私边界和分批退出条件见
-[`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。
+For the detailed protocol, privacy boundaries, and staged exit conditions, see
+[`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md) (currently in Chinese).
 
-## Optional root bridge 与 capture
+## Optional Root Bridge and Capture
 
-需要全局 Flutter 观察时，允许 consumer 在 `MaterialApp.builder` 最上层包一次 root bridge：
+When global Flutter observation is needed, the consumer may wrap a root bridge once at the top of
+`MaterialApp.builder`:
 
 ```dart
 MaterialApp.router(
@@ -223,57 +262,74 @@ MaterialApp.router(
 )
 ```
 
-root bridge 只负责确实需要根渲染上下文的截图与帧调度。它不负责 Widget/Semantics 树发现，不登记
-业务页面，不把所有后代自动变成可操作 target，也不在 release 改变布局；release 构建直接返回原
-`child`，不保留运行时重新开启入口。
+The root bridge is responsible only for capture and frame scheduling that genuinely need the root
+render context. It does not handle widget/Semantics tree discovery, does not register business
+pages, does not automatically turn every descendant into an operable target, and does not change
+layout in release; a release build returns the original `child` directly, keeping no runtime
+re-enable entry point.
 
-默认路径是 root capture。确需局部截图时，可把现有 `RenderRepaintBoundary` 的 key 换成
-`PatchbayKey.capture('stable.id')`；Key 只负责稳定定位与 generation fencing，**不会**把任意 Widget
-变成 repaint boundary。目标不是唯一、未挂载、generation 过期或 render object 不是现成 boundary 时
-一律 fail-closed。
+The default path is root capture. When a partial capture is genuinely needed, swap an existing
+`RenderRepaintBoundary`'s key for `PatchbayKey.capture('stable.id')`; the Key only provides stable
+resolution and generation fencing and **will not** turn an arbitrary widget into a repaint
+boundary. If the target is not unique, not mounted, has a stale generation, or its render object
+is not already a boundary, it fails closed.
 
-根截图只证明 Flutter 合成树在该帧产生了这些像素。`PlatformView`、texture、系统弹窗和其他 App
-可能不在图像中，结果固定返回 `flutterSubtreeOnly`、`platformViewsMayBeMissing`、
-`systemUiNotIncluded` warning，不能冒充完整物理屏幕截图。capture 等待下一帧，调用前、gate await 后及
-编码前复核 resumed/target；默认限制 16 MP、8 MiB PNG、pixelRatio 不超过 3。PNG 只进入共享 blob
-store，响应返回尺寸、ratio、SHA-256、TTL 和 blobId，大字节不塞进单个 service-extension 响应。
+A root capture proves only that the Flutter composition tree produced those pixels in that frame.
+`PlatformView`s, textures, system dialogs, and other apps may be absent from the image, so results
+always return the `flutterSubtreeOnly`, `platformViewsMayBeMissing`, and `systemUiNotIncluded`
+warnings and must not pose as a full physical screen capture. Capture waits for the next frame and
+re-checks resumed/target before the call, after the gate `await`, and before encoding; the
+defaults cap at 16 MP, an 8 MiB PNG, and a pixelRatio of at most 3. The PNG goes only into the
+shared blob store, and the response returns dimensions, ratio, SHA-256, TTL, and a blobId, so large
+byte payloads are never stuffed into a single service-extension response.
 
-## 保持亮屏（consumer 注入）
+## Keep Awake (Consumer-Injected)
 
-本包是纯 Flutter 包，不碰 platform channel，也不为一个调试开关引入 wakelock 依赖。协议、记账和
-租约在框架侧，碰平台的那一行由 App 出：
+This is a pure Flutter package: it touches no platform channel, and it does not pull in a wakelock
+dependency for the sake of one debugging switch. The protocol, the bookkeeping, and the lease live
+in the framework; the one line that touches the platform comes from the app:
 
 ```dart
 PatchbayFlutterBridge(
   gates: gates,
-  // Android: FLAG_KEEP_SCREEN_ON；iOS: UIApplication.isIdleTimerDisabled。
+  // Android: FLAG_KEEP_SCREEN_ON; iOS: UIApplication.isIdleTimerDisabled.
   keepAwakeDelegate: (bool enabled) => myPlatformChannel.setKeepAwake(enabled),
   keepAwakeGates: const <String>{'my.debug.keepAwake'},
 )
 ```
 
-delegate 只在状态真正翻转时被调用，不会连着两次收到同一个值；抛异常是合法回答，请求以
-`keepAwakeDelegateFailed` 拒绝而不记成 hold。**默认关**：没人开口就什么都不做——押住屏幕会改变被
-观察 App 的行为，而息屏行为本身也是接入方要测的东西。每次开启带一条租约（默认 10 分钟、上限
-2 小时），到期由框架自己释放；`PatchbayFlutterBridge.dispose()` 也会归还。两种 transport 都不给
-App 连接生命周期，租约是「操作者已经走了」唯一能被诚实观察到的形式。
+The delegate is called only on an actual transition, never twice in a row with the same value.
+Throwing is a legitimate answer: the request is refused with `keepAwakeDelegateFailed` rather than
+recorded as a hold. **Off by default** — nothing is engaged until an operator asks, because holding
+the screen changes the behaviour of the app being observed, and screen-off behaviour is itself
+something a consumer tests. Every engagement carries a lease (10 minutes by default, 2 hours at
+most), released by the framework when it runs out; `PatchbayFlutterBridge.dispose()` gives it back
+too. Neither transport gives the app a connection lifecycle, so the lease is the only honestly
+observable form of "the operator is gone".
 
-与 `capture` / `navigation` 不同，命令**不接线也留在 catalog 里**：操作者伸手找它正是在 UI 面
-刚开始全拒的时候，`commandNotRegistered` 在那一刻等于什么都没说，所以改回 `keepAwakeNotWired`
-并点名缺的注入点。响应 `source` 恒为 `appRecorded`——它说的是 App 让宿主做了什么，本包不回读平台，
-不宣称屏幕确实亮着。
+Unlike `capture` / `navigation`, the command **stays in the catalog even with nothing wired**: an
+operator reaches for it exactly when the UI plane has started refusing everything, and
+`commandNotRegistered` says nothing useful at that moment — so it answers `keepAwakeNotWired` and
+names the missing injection point instead. The response `source` is always `appRecorded`: it states
+what the app asked its host to do. This package never reads the platform back and never claims the
+screen is in fact lit.
 
-**delegate 释放失败时 hold 不落账。** 平台没松手却把 `enabled` 记成 `false`，会让下一次 `off` 变成
-`unchanged` 空转、再也不碰平台，屏幕永久亮着且没有补救入口。所以记账只在 delegate 成功后才落：
-失败时保持 `enabled: true` 并带上 `lastReleaseFailure`，租约也不撤（到期释放失败会在一个租约之后
-再试）。`dispose()` 是同步的、不排进请求队列，因此可能落在一次进行中的开启中间——gate 与 delegate
-两个挂起点恢复后都会重查销毁态，销毁后的 `set` 一律以 `keepAwakeHostDisposed` 拒绝，delegate 已经
-拿到 hold 的那种情况先归还再拒绝。**销毁之后 delegate 不会再收到 `true`。**
+**A failed release does not commit the bookkeeping.** Recording `enabled: false` while the platform
+has not let go would turn the next `off` into an `unchanged` no-op that never reaches the platform
+again, stranding the screen lit with no way left to ask. So the state is committed only after the
+delegate succeeds: on failure the hold stays, `enabled` remains `true`, `lastReleaseFailure` carries
+the failure type, and the lease is left armed (a lease expiry whose release fails tries again one
+lease later). `dispose()` is synchronous and does not join the request queue, so it can land in the
+middle of an in-flight engagement — both suspended points, the gate and the delegate, re-check the
+disposed state on resume. Any `set` after teardown is refused with `keepAwakeHostDisposed`, and the
+case where the delegate already took the hold hands it back before refusing. **After disposal the
+delegate never receives `true` again.**
 
-## 语义导航
+## Semantic Navigation
 
-导航不应通过给首页、设置按钮加 Key 后模拟点击完成。推荐在 App 组合根注入一个 consumer adapter，
-协议只暴露稳定 destination ID：
+Navigation should not be done by adding Keys to home and settings buttons and simulating taps. The
+recommended approach is to inject a consumer adapter at the app's composition root, with the
+protocol exposing only stable destination IDs:
 
 ```text
 navigation.catalog
@@ -283,8 +339,9 @@ navigation.push <destination-id>
 navigation.back
 ```
 
-这里使用 destination 而不是 route：一个 consumer 的目标可能是 Router route、Shell tab、overlay 或
-dialog。差异只存在于 consumer adapter，通用 CLI 不认识路径和页面实现。
+The term is destination rather than route because one consumer's destination might be a Router
+route, a Shell tab, an overlay, or a dialog. That difference exists only inside the consumer
+adapter; the general-purpose CLI knows nothing about paths or page implementations.
 
 ```dart
 final navigation = PatchbayNavigationAdapter(
@@ -304,69 +361,86 @@ final navigation = PatchbayNavigationAdapter(
 );
 ```
 
-低侵入约束：
+Low-intrusion constraints:
 
-- App 顶层只接一个 navigation adapter；
-- 每个 destination 只在中央 catalog 登记一行，不修改目标页面；
-- Router route 使用现有 router，Shell tab 使用一个注入式 controller；
-- 不接受任意 route 字符串，不暴露 consumer 的真实 path；
-- 不绕过登录、隐私同意、startup redirect 或业务 route guard。
+- only one navigation adapter is wired at the app's top level;
+- each destination is registered as a single row in the central catalog, without modifying the
+  target page;
+- Router routes use the existing router, and Shell tabs use one injected controller;
+- arbitrary route strings are not accepted, and the consumer's real paths are not exposed;
+- login, privacy consent, startup redirects, and business route guards are never bypassed.
 
-调用 router/controller 返回只代表导航请求已发出。只有 observer 确认当前 destination，并等待下一帧
-完成后，结果才能标为 `uiObserved`。被 redirect、超时、后台化或 revision 失效必须稳定拒绝。
+A router/controller call returning only means the navigation request was issued. Only once the
+observer confirms the current destination and the next frame has completed may the result be
+marked `uiObserved`. Redirects, timeouts, backgrounding, and stale revisions must be rejected
+stably.
 
-导航命令串行化并携带 navigation revision，避免迟到的 `back`/`go` 操作新的页面栈。需要声明
-“页面已展示”的操作应要求 App lifecycle 为 `resumed`；后台或熄屏时最多报告路由状态变化。
+Navigation commands are serialized and carry a navigation revision, so a late `back`/`go` cannot
+operate on a new page stack. Operations that need to assert "the page is displayed" should require
+the app lifecycle to be `resumed`; while backgrounded or with the screen off, at most a route state
+change can be reported.
 
-`navigation.catalog` 和 `navigation.current` 是只读命令。`go`、`push`、`back` 必须携带调用方刚观察到的
-`revision`，可选 `timeoutMs` 默认 5000。consumer callback 返回只代表请求已交给既有 router/controller；
-bridge 继续观察 settled destination，并在下一帧复核后才返回 `outcome=arrived`、`source=uiObserved`。
+`navigation.catalog` and `navigation.current` are read-only commands. `go`, `push`, and `back` must
+carry the `revision` the caller has just observed, with an optional `timeoutMs` defaulting to 5000.
+A consumer callback returning only means the request has been handed to the existing
+router/controller; the bridge keeps observing the settled destination and returns
+`outcome=arrived`, `source=uiObserved` only after re-checking on the next frame.
 
-consumer observer 必须只发布已经 settled 的 destination，并在 settled destination 变化时单调增加
-revision。请求被业务 guard 改写到其他 settled destination 时返回 `navigationRedirected`；此外稳定拒绝码
-包括 `navigationTimeout`、`navigationLifecycleNotResumed`、`navigationRevisionStale`、
-`navigationDestinationAmbiguous`。gate 发生 await 后会重新解析 destination callback、歧义和 revision。
+The consumer's observer must publish only destinations that have already settled, and must
+increase the revision monotonically whenever the settled destination changes. When a business
+guard rewrites the request to a different settled destination, `navigationRedirected` is returned;
+the other stable rejection codes are `navigationTimeout`, `navigationLifecycleNotResumed`,
+`navigationRevisionStale`, and `navigationDestinationAmbiguous`. After an `await` in a gate, the
+destination callback, ambiguity, and revision are all re-resolved.
 
 ## ui.wait
 
-`ui.wait` 是无副作用、有明确 `timeoutMs` 的长轮询调用，不把“开始等待”包装成完成。当前条件为：
+`ui.wait` is a side-effect-free long-poll call with an explicit `timeoutMs`; it does not dress up
+"started waiting" as completion. The current conditions are:
 
-- `semanticsMounted` / `semanticsUnmounted` / `semanticsValue`：只接受稳定、非空的 Semantics
-  `identifier`，重复 identifier 返回 `uiSemanticsTargetAmbiguous`，obscured value 不可读取；
-- `navigationDestination`：等待 cataloged destination，可选要求 navigation revision 必须前进；
-- `treeRevision` / `frameRevision`：等待 revision 严格大于调用方基线。
+- `semanticsMounted` / `semanticsUnmounted` / `semanticsValue` — accept only a stable, non-empty
+  Semantics `identifier`; a duplicate identifier returns `uiSemanticsTargetAmbiguous`, and obscured
+  values cannot be read;
+- `navigationDestination` — waits for a cataloged destination, optionally requiring the navigation
+  revision to have advanced;
+- `treeRevision` / `frameRevision` — waits for a revision strictly greater than the caller's
+  baseline.
 
-成功结果统一为 `outcome=observed`、`source=uiObserved`，并返回该次可直接观测到的 revision/节点事实；
-超时统一返回 `uiWaitTimeout` 和明确的 timeout/当前 revision 摘要。App 不在 resumed 时返回
-`uiWaitLifecycleNotResumed`。
+Successful results are uniformly `outcome=observed`, `source=uiObserved`, returning the
+revision/node facts directly observable at that moment; timeouts uniformly return `uiWaitTimeout`
+with an explicit timeout and current-revision summary. When the app is not resumed,
+`uiWaitLifecycleNotResumed` is returned.
 
-## 标准 operator 状态
+## Standard Operator Status
 
-新增 operator 时只使用公开 Flutter API，并由 runtime catalog 决定目标实际支持什么：
+New operators use only public Flutter APIs, and the runtime catalog decides what a target actually
+supports:
 
-| Operator | 目标契约 | 失败策略 |
+| Operator | Target contract | Failure policy |
 |---|---|---|
-| `focus` | 唯一可聚焦目标 | 不可聚焦或歧义即拒绝 |
-| `action.invoke` | 唯一公开 Semantics/Actions 动作 | 不退化到 label、类型或坐标猜测 |
-| `scroll` | 唯一 ScrollableState | 返回操作前后 ScrollMetrics |
-| `wait` | Semantics identifier、destination、tree/frame revision | 超时与歧义返回稳定 rejection |
-| `capture` | root 或唯一 target RenderObject | 返回 warning、blob metadata 和 sha256 |
+| `focus` | A unique focusable target | Reject if not focusable or ambiguous |
+| `action.invoke` | A unique public Semantics/Actions action | No fallback to guessing by label, type, or coordinates |
+| `scroll` | A unique ScrollableState | Returns ScrollMetrics before and after |
+| `wait` | Semantics identifier, destination, tree/frame revision | Timeouts and ambiguity return stable rejections |
+| `capture` | Root, or a unique target RenderObject | Returns warnings, blob metadata, and sha256 |
 
-普通 `ValueKey`、Widget 文案、runtime type 和 Element 路径可以出现在只读摘要中，但不会自动成为稳定
-可操作目标。
+Plain `ValueKey`s, widget copy, runtime types, and Element paths may appear in read-only summaries,
+but never automatically become stable operable targets.
 
-## UI 与领域能力分离
+## Separating UI and Domain Capabilities
 
-UI action 只证明 Flutter callback、controller 或 RenderObject 的直接结果。如果 action 最终调用网络、
-文件、设备 SDK 或权限能力，真实 handler 仍必须经过 consumer 领域 gate、permit 和 generation。
+A UI action proves only the direct result of a Flutter callback, controller, or RenderObject. If
+the action ultimately calls network, file, device SDK, or permission capabilities, the real handler
+must still pass the consumer's domain gates, permits, and generations.
 
-Flutter bridge 不获取 consumer 的领域锁，也不提供绕过 controller 的快捷调用。对于复杂业务行为，
-优先注册领域命令；Key 只负责验证 UI 接线和标准控件语义。
+The Flutter bridge does not acquire the consumer's domain locks and offers no shortcut that
+bypasses controllers. For complex business behavior, prefer registering a domain command; Keys are
+only for verifying UI wiring and standard widget semantics.
 
-## Release 边界
+## Release Boundary
 
-- release 不注册 Flutter service host；
-- registry、descriptor、operator 和 consumer callback 必须不可达；
-- Key 类型、相等性和 State 保留语义保持不变；
-- root bridge 在 release 只透传 child；
-- 不提供运行时配置重新开启 Patchbay。
+- release does not register the Flutter service host;
+- the registry, descriptors, operators, and consumer callbacks must be unreachable;
+- Key types, equality, and State preservation semantics stay unchanged;
+- the root bridge passes the child straight through in release;
+- there is no runtime configuration that re-enables Patchbay.
