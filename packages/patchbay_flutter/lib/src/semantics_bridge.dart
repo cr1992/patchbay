@@ -217,13 +217,21 @@ final class PatchbaySemanticsBridge {
     String? requestId,
   }) async {
     final String id = requestId ?? _newRequestId();
-    if (maxDepth < 0 || maxNodes < 1 || maxNodes > 10000) {
+    final List<String> outOfRange = <String>[
+      if (maxDepth < 0) 'maxDepth',
+      if (maxNodes < 1 || maxNodes > 10000) 'maxNodes',
+    ];
+    if (outOfRange.isNotEmpty) {
+      // The notice states both bounds; `details.invalid` says which one this
+      // request actually crossed, so a caller reads one field instead of
+      // re-deriving it from the sentence.
       return PatchbayInvocation.rejected(
         requestId: id,
-        rejection: const PatchbayRejection(
+        rejection: PatchbayRejection(
           code: 'invalidUiTreeLimits',
           notice:
               'maxDepth must be non-negative and maxNodes must be 1..10000.',
+          details: <String, Object?>{'invalid': outOfRange},
         ),
       );
     }

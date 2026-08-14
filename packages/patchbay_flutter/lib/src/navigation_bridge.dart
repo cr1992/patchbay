@@ -213,10 +213,22 @@ final class PatchbayNavigationBridge {
     required Duration timeout,
     required String requestId,
   }) async {
-    if (revision < 0 ||
-        timeout <= Duration.zero ||
-        timeout > const Duration(minutes: 2)) {
-      return _rejected(requestId, 'invalidNavigationArguments');
+    final List<String> outOfRange = <String>[
+      if (timeout <= Duration.zero || timeout > const Duration(minutes: 2))
+        'timeoutMs',
+      if (revision < 0) 'revision',
+    ];
+    if (outOfRange.isNotEmpty) {
+      // Which bound was crossed, and what the bound is: a plausible number
+      // refused without either leaves the caller guessing at both.
+      return _rejected(
+        requestId,
+        'invalidNavigationArguments',
+        details: <String, Object?>{
+          'invalid': outOfRange,
+          'maxTimeoutMs': const Duration(minutes: 2).inMilliseconds,
+        },
+      );
     }
     if (!_isAppResumed()) {
       return _rejected(
