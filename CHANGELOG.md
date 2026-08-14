@@ -6,6 +6,35 @@
 
 ### Added
 
+- **体检命令 `patchbay doctor`。** 「连不上 / 没反应 / 命令全被拒」时一次把四件事按依赖顺序查完
+  ——会话目录、连接与 identity 握手、catalog、App lifecycle——每项给「现象 → 可能原因 → 建议动作」。
+  **它自己拨号**：拨不通正是它被问的那个问题，所以连接失败在它这里是一条 finding 而不是命令终止；
+  前一项失败时后面标 `skipped`，会话目录判定失败时连拨都不拨。lifecycle 一项发一条只读 UI 探针
+  （`ui.semantics.tree`，`maxDepth 0 / maxNodes 1`），未 resumed 时报出 `lifecycleState` 并给
+  Android / iOS / 桌面三条解法。
+
+  **退出码不另立**：取第一处 failed 检查项的类别（会话 / 连接 `3`、catalog `4`、lifecycle `5`），
+  即「换成普通命令撞上这一项时会拿到的那个码」；只有 warning（会话不唯一、门未开、App 没注册任何
+  命令）时是 `0`。`--json` 输出为 `{"doctor": {"verdict", "checks", "warnings"}}`，每条 check 带
+  稳定的 `check` / `verdict` 与机读 `details`。doctor 只读：不改会话目录、不删记录、不重连。
+
+- **活跃业务会话警示。** doctor 读一次 snapshot，扫各领域里为 `true` 的布尔 `active`（自顶层域起
+  最多五层、最多报八条），命中就打出**路径原样**并劝阻 `force-stop` / `kill` / 卸载——真机上强杀
+  正在通话或配网中的 App，代价远大于等它。这是结构化读法，CLI 不认识任何 consumer 的业务名词；
+  接入方把布尔 `active` 放在会话对象上即可被认出（如 `snapshot.call.session.active`）。App 连不上
+  或 snapshot 读不到时这条警示照样出，措辞换成「查不出，按不安全对待」——恰恰是那一刻最容易顺手
+  强杀进程。
+
+- **repl 会说出 App 未 resumed。** 息屏 / 后台 / 桌面失焦时每行 UI 命令都以 `*LifecycleNotResumed`
+  被拒，仅凭 code 猜不出该干什么。会话在**第一条**这样的拒绝之后把分平台解法打到 stderr，一个会话
+  只打一次（`--json` 的 stdout 仍只有命令结果）。提示是从 App 已经给出的拒绝里读的，会话**不为此
+  额外发命令**：唯一受 lifecycle 闸管的只读命令会 `ensureSemantics()` 并催帧，等于替操作者改了被
+  观测的 App；`doctor` 可以这么做（是点名要的体检），一条只是打开的会话不行。
+
+- CLI 公共 API 增加 `PatchbayDoctorReport` / `PatchbayDoctorFinding` / `PatchbayDoctorWarning`、
+  `runPatchbayDoctor` 与各项纯判定函数，以及 `dialPatchbayUnderBudget` / `closePatchbayQuietly`
+  （原为 `cli.dart` 私有，doctor 要用同一套拨号与静默关闭，故上提到 `rpc_timeout.dart`）。
+
 - **会话粘性：`patchbay sessions list|prune` 与 `patchbay session use <id>|--clear`。** 双设备并连
   （Android + iOS 同时跑）时会话不唯一，此前每条命令都要显式敲长 `--session <id>`。现在可以固定
   一条会话，之后不带 `--session` 的命令都用它。选择是三级优先级链，不混用：显式 `--session` 最高

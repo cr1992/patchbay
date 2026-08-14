@@ -15,11 +15,19 @@ final class FakePatchbayClient implements PatchbayClient {
     required this.commands,
     required this.handle,
     this.uiTargets = const <Object?>[],
+    this.snapshotData = const <String, Object?>{'source': 'appRecorded'},
   });
 
   /// Catalog rows exactly as an App would publish them.
   final List<Map<String, Object?>> commands;
   final List<Object?> uiTargets;
+
+  /// What the snapshot RPC answers.
+  ///
+  /// The snapshot is the one place a consumer's own domain state reaches the
+  /// CLI, so any CLI behaviour derived from it can only be exercised against a
+  /// snapshot the test controls.
+  final Map<String, Object?> snapshotData;
   final Future<Map<String, Object?>> Function(
     String command,
     Map<String, Object?> arguments,
@@ -45,8 +53,7 @@ final class FakePatchbayClient implements PatchbayClient {
   }
 
   @override
-  Future<Map<String, Object?>> snapshot() async =>
-      <String, Object?>{'source': 'appRecorded'};
+  Future<Map<String, Object?>> snapshot() async => snapshotData;
 
   @override
   Future<Map<String, Object?>> invoke({

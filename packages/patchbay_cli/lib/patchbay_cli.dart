@@ -6,6 +6,7 @@ export 'src/cli.dart';
 export 'src/command_help.dart';
 export 'src/command_registry.dart';
 export 'src/direct_connection.dart';
+export 'src/doctor.dart';
 export 'src/repl.dart';
 export 'src/result.dart';
 export 'src/rpc_timeout.dart';

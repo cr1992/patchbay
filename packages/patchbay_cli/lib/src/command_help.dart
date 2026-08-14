@@ -267,6 +267,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.localManifestVerification =>
           'Available on any connected Patchbay transport; a manifest that '
               'scopes entries to a destination also needs navigation.current.',
+        PatchbayCommandTarget.localDiagnostics =>
+          'Always available: a connection it cannot open is one of its '
+              'findings, not a precondition.',
       };
 
   /// What the CLI will actually call, phrased per dispatch target.
@@ -298,6 +301,10 @@ abstract final class PatchbayCommandHelp {
               'the verdict is computed locally and exits '
               '${PatchbayExitCode.verificationDeviation} when the report lists '
               'a deviation.',
+        PatchbayCommandTarget.localDiagnostics =>
+          'Reads the session directory, dials the App itself, then reads the '
+              'catalog, the snapshot and one read-only UI probe. Every failure '
+              'becomes a finding; the exit code is the class of the first one.',
       };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[

@@ -4,6 +4,7 @@ import 'package:args/args.dart';
 
 import 'command_help.dart';
 import 'command_registry.dart';
+import 'doctor.dart';
 import 'result.dart';
 import 'ui_manifest.dart';
 
@@ -116,6 +117,13 @@ final class PatchbayReplSession {
   final StringSink _err;
   final bool _json;
 
+  /// Whether this session has already explained a non-resumed App.
+  ///
+  /// A screen-off device refuses every UI line, so repeating the remedies each
+  /// time would bury the results the operator is reading. Once is a warning;
+  /// ten times is noise that hides the ninth line's answer.
+  bool _lifecycleExplained = false;
+
   Future<int> run(Stream<String> lines) async {
     var number = 0;
     await for (final String raw in lines) {
@@ -216,6 +224,19 @@ final class PatchbayReplSession {
         'the connection is already chosen; run them as a one-shot instead',
       );
     }
+    // Doctor is about how a connection gets established, and it answers with a
+    // verdict rather than an admission envelope — so a repl line could neither
+    // exercise the dial it is about nor carry its result through the per-line
+    // exit code every other line uses. The session prints its own lifecycle
+    // preflight when it opens; the rest is a one-shot.
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localDiagnostics) {
+      throw const FormatException(
+        'doctor is unavailable inside a repl session: it diagnoses how a '
+        'connection is established, and this session already holds one; run '
+        'it as a one-shot instead',
+      );
+    }
   }
 
   void _writeResult(
@@ -223,6 +244,7 @@ final class PatchbayReplSession {
     List<String> command,
     PatchbayReplOutcome outcome,
   ) {
+    _explainLifecycleOnce(outcome.response);
     if (_json) {
       _out.writeln(
         jsonEncode(<String, Object?>{
@@ -238,6 +260,26 @@ final class PatchbayReplSession {
       '[$number] exit=${outcome.exitCode} '
       '${patchbayResponseSummary(outcome.response)}',
     );
+  }
+
+  /// Prints the lifecycle remedies the first time a line proves they apply.
+  ///
+  /// A session is opened once and then typed into, often as a whole heredoc of
+  /// lines, and against a screen-off device every one of them is refused with
+  /// nothing but a code. The remedies are platform-specific and none of them
+  /// is guessable from `uiWaitLifecycleNotResumed`, so the session says them
+  /// out loud — on stderr, because `--json` promises stdout carries only
+  /// command results.
+  ///
+  /// It is read out of a refusal the App produced anyway rather than out of a
+  /// probe of the session's own: a repl must run the lines that were typed and
+  /// nothing else.
+  void _explainLifecycleOnce(Map<String, Object?> response) {
+    if (_lifecycleExplained) return;
+    if (patchbayLifecycleBannerFor(response) case final String banner) {
+      _lifecycleExplained = true;
+      _err.writeln(banner);
+    }
   }
 
   void _writeFailure(

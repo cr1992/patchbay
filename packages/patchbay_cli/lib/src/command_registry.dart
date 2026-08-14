@@ -61,6 +61,14 @@ enum PatchbayCommandTarget {
   /// invert the dependency: the operator reaches for them precisely when the
   /// CLI cannot pick a session on its own.
   localSessionStore,
+
+  /// A diagnosis that owns its own connection attempt.
+  ///
+  /// Every other target is dispatched *after* a successful dial, which is
+  /// exactly what a diagnosis cannot require: a dial that fails is the answer
+  /// it was asked for. So `runPatchbayCli` hands this target the connection
+  /// options rather than a connection, and it reports what happened to each.
+  localDiagnostics,
 }
 
 /// Mechanical mapping between CLI-friendly paths and stable protocol names.
@@ -100,6 +108,13 @@ enum PatchbayFriendlyCommand {
     <String>['repl'],
     summary: 'Connect once, then run commands from stdin over that connection.',
     target: PatchbayCommandTarget.clientReplSession,
+  ),
+  doctor(
+    null,
+    <String>['doctor'],
+    summary:
+        'Check session, connection, catalog and App lifecycle in one pass.',
+    target: PatchbayCommandTarget.localDiagnostics,
   ),
   sessionsList(
     null,
@@ -427,6 +442,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiRenderTree ||
       PatchbayFriendlyCommand.uiFocusTree ||
       PatchbayFriendlyCommand.repl ||
+      PatchbayFriendlyCommand.doctor ||
       PatchbayFriendlyCommand.sessionsList ||
       PatchbayFriendlyCommand.sessionsPrune => _noTail(
         tail,
@@ -732,7 +748,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.repl ||
     // `--session-dir` selects which directory these read, and it is global.
     PatchbayFriendlyCommand.sessionsList ||
-    PatchbayFriendlyCommand.sessionsPrune => const <String>{},
+    PatchbayFriendlyCommand.sessionsPrune ||
+    // Doctor runs a fixed set of checks: there is nothing per-command to
+    // configure, and the RPC budget it runs under is the global
+    // `--transport-timeout-ms` every other command already uses.
+    PatchbayFriendlyCommand.doctor => const <String>{},
     PatchbayFriendlyCommand.sessionUse => const <String>{'clear'},
     PatchbayFriendlyCommand.exec ||
     PatchbayFriendlyCommand.uiSemanticsTree => const <String>{'args', 'stdin'},
