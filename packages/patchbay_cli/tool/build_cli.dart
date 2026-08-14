@@ -75,9 +75,8 @@ bool _run(List<String> arguments, Directory workingDirectory) {
 }
 
 /// The `patchbay_cli` directory, resolved from this script rather than cwd.
-Directory _packageRoot() => Directory(
-  File.fromUri(Platform.script).parent.parent.path,
-);
+Directory _packageRoot() =>
+    Directory(File.fromUri(Platform.script).parent.parent.path);
 
 /// The name the command is typed as, so the artifact works by being on `PATH`.
 ///
