@@ -198,6 +198,49 @@ void main() {
     });
   });
 
+  group('越界拒绝指名越的是哪个界', () {
+    test('ui.capture 的 timeoutMs 与 pixelRatio 各自指名', () async {
+      final Map<String, Object?> rejection = await _rejection(
+        'ui.capture',
+        const <String, Object?>{'timeoutMs': 60000, 'pixelRatio': 99},
+      );
+
+      expect(rejection['code'], 'invalidCaptureArguments');
+      final Map<String, Object?> details =
+          rejection['details']! as Map<String, Object?>;
+      expect(details['invalid'], <String>['timeoutMs', 'pixelRatio']);
+      expect(details['maxTimeoutMs'], 30000);
+      expect(details['maxPixelRatio'], isA<num>());
+    });
+
+    test('navigation.go 的 revision 越界', () async {
+      final Map<String, Object?> rejection = await _rejection(
+        'navigation.go',
+        const <String, Object?>{'destinationId': 'home', 'revision': -1},
+      );
+
+      expect(rejection['code'], 'invalidNavigationArguments');
+      expect(
+        (rejection['details']! as Map<String, Object?>)['invalid'],
+        <String>['revision'],
+      );
+    });
+
+    test('ui.semantics.tree 的 maxNodes 越界，notice 与 details 并存', () async {
+      final Map<String, Object?> rejection = await _rejection(
+        'ui.semantics.tree',
+        const <String, Object?>{'maxNodes': 999999},
+      );
+
+      expect(rejection['code'], 'invalidUiTreeLimits');
+      expect(rejection['notice'], contains('1..10000'));
+      expect(
+        (rejection['details']! as Map<String, Object?>)['invalid'],
+        <String>['maxNodes'],
+      );
+    });
+  });
+
   group('形状规则由 reason 承载', () {
     test('semanticsValue 缺 value 时键差集为空，reason 说出规则', () async {
       final Map<String, Object?> details =
