@@ -272,6 +272,34 @@ void main() {
       expect(digest.isRecomputable, isFalse);
     });
 
+    test('covers 里混进非字符串时整体按畸形处理，不是把它丢掉再当可复算', () {
+      final PatchbayCatalogDigest digest = PatchbayCatalogDigest.fromJson(
+        <String, Object?>{
+          'algorithm': patchbayDigestAlgorithmSha256,
+          // 读不懂的那一项一旦被静默丢掉，剩下的恰好就是本版认得的覆盖面，
+          // 于是「我读不全」会被误判成「我全读懂了」——最坏的一种错。
+          'covers': <Object?>[patchbayCatalogDigestScopeCommands, 42],
+          'value': '00',
+        },
+      )!;
+
+      expect(digest.isRecomputable, isFalse);
+    });
+
+    test('畸形 covers 仍读得出摘要本身——是「验不了」，不是「没有」', () {
+      final PatchbayCatalogDigest? digest = PatchbayCatalogDigest.fromJson(
+        <String, Object?>{
+          'algorithm': patchbayDigestAlgorithmSha256,
+          'covers': <Object?>[patchbayCatalogDigestScopeCommands, 42],
+          'value': '00',
+        },
+      );
+
+      // 读成 null 会让上层把「host 带了摘要但我看不懂」错报成「host 声明了却没带」。
+      expect(digest, isNotNull);
+      expect(digest!.value, '00');
+    });
+
     test('缺字段或类型不对读成「没有摘要」', () {
       expect(PatchbayCatalogDigest.fromJson(null), isNull);
       expect(PatchbayCatalogDigest.fromJson('sha256:00'), isNull);

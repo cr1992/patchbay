@@ -35,6 +35,7 @@ final class PatchbayCatalogDigest {
     required this.algorithm,
     required this.covers,
     required this.value,
+    this.coversFullyRead = true,
   });
 
   /// Digests the `commands` array of a catalog.
@@ -73,6 +74,16 @@ final class PatchbayCatalogDigest {
   /// forward-compatibility mechanism. A newer host that attaches something
   /// extra here must leave this reader with a digest it can still evaluate,
   /// not with a decode failure.
+  ///
+  /// **Tolerance stops at the edge of [covers].** An unknown sibling *field* is
+  /// safe to ignore — it does not change what the fields this version does
+  /// understand mean. An unreadable *entry inside `covers`* is the opposite:
+  /// dropping it silently narrows the host's claim, and a narrowed claim that
+  /// happens to land on this version's coverage reads as "I understood all of
+  /// it" when the truth is "I could not read part of it". So an entry that is
+  /// not a string poisons the whole coverage via [coversFullyRead], and the
+  /// digest degrades to not-recomputable — the same fail-closed answer an
+  /// unknown [algorithm] gets, for the same reason.
   static PatchbayCatalogDigest? fromJson(Object? value) {
     if (value is! Map<Object?, Object?>) return null;
     final Object? algorithm = value['algorithm'];
@@ -87,6 +98,7 @@ final class PatchbayCatalogDigest {
         for (final Object? scope in covers)
           if (scope is String) scope,
       ],
+      coversFullyRead: covers.every((Object? scope) => scope is String),
       value: digest,
     );
   }
@@ -96,14 +108,33 @@ final class PatchbayCatalogDigest {
   final String algorithm;
 
   /// The catalog regions this digest was computed over.
+  ///
+  /// Holds only the entries this reader could name; when the wire carried one
+  /// it could not, [coversFullyRead] is false and this list is a *subset* of
+  /// what the host actually claimed. Never treat it as the full coverage
+  /// without checking that flag — and note [toJson] re-serialises this
+  /// narrowed list, so a digest that came off the wire malformed is not a
+  /// faithful thing to forward.
   final List<String> covers;
 
   /// Lowercase hex, no algorithm prefix — [algorithm] already carries that.
   final String value;
 
+  /// Whether every entry of the wire `covers` array was readable as a scope
+  /// name. False means [covers] under-reports what the host claimed.
+  ///
+  /// Hosts building a digest locally always produce string scopes, so this
+  /// defaults to true; only [fromJson] can turn it off.
+  final bool coversFullyRead;
+
   /// Whether a reader of *this* protocol version can recompute the digest and
   /// therefore judge whether it matches the catalog it arrived with.
+  ///
+  /// Requires [coversFullyRead]: a coverage this reader only partly understood
+  /// cannot be compared against anything, because the part it could not read is
+  /// exactly the part that would make the comparison wrong.
   bool get isRecomputable =>
+      coversFullyRead &&
       algorithm == patchbayDigestAlgorithmSha256 &&
       covers.length == 1 &&
       covers.single == patchbayCatalogDigestScopeCommands;

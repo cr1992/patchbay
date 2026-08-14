@@ -657,6 +657,11 @@ Map<String, Object?> patchbayCatalogDigestDetails(
       'catalogDigestAlgorithm': digest.algorithm,
       'catalogDigestCovers': digest.covers,
       'catalogDigestCheck': 'unsupported',
+      // Without this an operator reads `covers: ["commands"]` next to
+      // `unsupported` and cannot tell why a coverage this CLI obviously knows
+      // got refused. The answer is that the list printed is only the part that
+      // was readable — the host claimed more than it shows.
+      if (!digest.coversFullyRead) 'catalogDigestCoversUnreadable': true,
     };
   }
   final String recomputed = PatchbayCatalogDigest.ofCommands(

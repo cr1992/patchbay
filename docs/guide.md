@@ -484,6 +484,11 @@ host 声明的能力，CLI 按声明降级而不是猜；**没有这个键**和 
 | `mismatched` | 对不上，另附 `catalogDigestRecomputed` |
 | `unsupported` | 算法或覆盖面超出本版 CLI 认知，查不了——不等于「错了」 |
 
+`unsupported` 时若还带 `catalogDigestCoversUnreadable: true`，说明 host 声明的覆盖面里有本版 CLI
+读不懂的条目：同一份 details 里的 `catalogDigestCovers` 因此只是**能读懂的那部分**，比 host 实际
+声明的要窄。CLI 不会把读不懂的条目丢掉后接着复算——丢完剩下的可能**恰好**是它认得的覆盖面，那样
+就会对着一个并非按此口径算出来的值说 `verified`。
+
 换个 App 构建后拿两次 `catalogDigest` 比一下，就知道命令面动没动。老 host 不带摘要不算问题，
 CLI 也不会生造一个。
 

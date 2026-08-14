@@ -389,6 +389,39 @@ void main() {
       expect(result.details('catalog')['catalogDigestAlgorithm'], 'blake3');
     });
 
+    test('covers 混进非字符串时报 unsupported，不因为「算出来一样」就说 verified', () async {
+      store.write(record());
+      const List<Map<String, Object?>> commands = <Map<String, Object?>>[
+        <String, Object?>{'name': 'domain.ping', 'summary': 'ping'},
+      ];
+
+      final _Run result = await runDoctor(
+        FakePatchbayClient(
+          identityData: modernIdentity(),
+          commands: commands,
+          handle: (_, _) async => fakeCommandNotRegistered(),
+          catalogExtras: <String, Object?>{
+            'catalogDigest': <String, Object?>{
+              'algorithm': patchbayDigestAlgorithmSha256,
+              // 这个 host 的覆盖面比本版认得的多一项，且那一项本版根本读不懂。
+              'covers': <Object?>[patchbayCatalogDigestScopeCommands, 42],
+              // 值恰好等于「只对 commands」算出来的那个。所以一旦把读不懂的那项
+              // 悄悄丢掉，CLI 会算出一模一样的数，然后自信地说 verified——
+              // 「让客户端相信 host 没说过的话」正是这套东西要防的那一件事。
+              'value': PatchbayCatalogDigest.ofCommands(commands).value,
+            },
+          },
+        ),
+      );
+
+      expect(result.details('catalog')['catalogDigestCheck'], 'unsupported');
+      // 摘要是「验不了」而不是「没有」，所以不能顺手报成能力失约。
+      expect(
+        result.warnings.map((Map<String, Object?> w) => w['kind']),
+        isNot(contains(patchbayCapabilityNotHonouredWarningKind)),
+      );
+    });
+
     test('声明了 catalogDigest 却不带，报「能力失约」', () async {
       store.write(record());
 
