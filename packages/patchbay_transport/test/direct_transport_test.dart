@@ -106,6 +106,66 @@ void main() {
     });
 
     test(
+      'the snapshot selector is forwarded verbatim and fails closed',
+      () async {
+        client.close(force: true);
+        await host.stop();
+        Map<String, Object?>? received;
+        var reads = 0;
+        host = _host(
+          identity: identity,
+          snapshot: ([Map<String, Object?>? request]) async {
+            reads += 1;
+            received = request;
+            return _snapshotBody;
+          },
+        );
+        session = await host.start();
+        client = PatchbayDirectClient(session: session);
+
+        expect(await client.snapshot(), _snapshotBody);
+        expect(
+          received,
+          isNull,
+          reason: 'a plain read must still arrive as no selector at all',
+        );
+
+        // Verbatim, not decoded: the selector's shape is the protocol package's
+        // rule, and a transport that parsed its own copy would be a second
+        // decoder free to disagree with the VM Service path.
+        const Map<String, Object?> selector = <String, Object?>{
+          'path': 'call.session.active',
+          'until': 'equals',
+          'value': true,
+          'timeoutMs': 400,
+        };
+        expect(await client.snapshot(request: selector), _snapshotBody);
+        expect(received, selector);
+
+        final Uri uri = session.endpoint.resolve(
+          '${session.endpoint.path}/snapshot',
+        );
+        final List<_WireResponse> refused = <_WireResponse>[
+          // The one shape rule this host does keep: a selector is an object.
+          await _post(uri, <String, Object?>{
+            ...identity.toJson(),
+            'request': 'call.session',
+          }, token: session.bearerToken),
+          // An optional field does not open the message up.
+          await _post(uri, <String, Object?>{
+            ...identity.toJson(),
+            'depth': 2,
+          }, token: session.bearerToken),
+        ];
+        expect(
+          refused.map((_WireResponse response) => response.errorCode),
+          everyElement(PatchbayDirectErrorCode.protocolError.name),
+        );
+        expect(reads, 2, reason: 'a refused message must not reach the App');
+      },
+    );
+
+    test(
       'client rejects an invoke response with a different requestId',
       () async {
         client.close(force: true);
