@@ -63,18 +63,115 @@ TextField(
 Key 在 debug、profile、release 中始终是同一种 `GlobalKey`，保持 Element/State 的挂载和跨位置移动
 语义。release 只裁掉 declaration、弱登记和 operator 引用，不能退化成另一种 Key。
 
-## 动态 target 与 generation
+## 注册与重挂载语义
 
-registry 不因为 Key 对象存在就宣称目标已挂载：
+这一节是接入方最容易靠逆向源码才搞明白的部分，三句话概括：**构造即注册、弱引用出册、
+只有同时挂载才判歧义**。
 
-- catalog 只根据当前 `Element` 生成 mounted 状态；
-- 同一个稳定 ID 每次挂载到新 Element 都获得更大的 generation；
-- 同一 ID 同时挂载多次时标记 `ambiguous`，不暴露可执行 operation；
-- 调用必须携带 catalog 返回的 generation；
-- gate 中发生 `await` 后，operator 再解析一次 ID、generation 和歧义状态。
+### 构造即注册
 
-因此页面退出后，针对旧实例的迟到命令会以 `uiTargetNotFound`、`uiTargetUnmounted` 或
-`uiGenerationStale` 拒绝，不会写入后来出现的同名控件。
+登记发生在 `PatchbayKey.text(...)` / `PatchbayKey.capture(...)` 的**构造函数**里，不是在
+Widget 挂载时。所以：
+
+- 一个从未挂载过的 Key 也会出现在 `patchbay catalog` 的 `uiTargets` 里，只是 `mounted: false`
+  且 `operations` 为空——目录列出的是"声明过的目标"，不是"当前可操作的目标"；
+- release 下 `declaration` 为 `null` 且完全不登记，Key 退化成一个普通 `GlobalKey`；
+- 没有、也不需要 `dispose()`：接入方创建 Key，不管理注册生命周期。
+
+### 弱引用出册
+
+registry 对每个 Key 持 `WeakReference`。Key 对象被 GC 后，条目在**下一次被观察时**
+（读 catalog 或解析一次调用）清掉；一个 ID 的条目全部清空后，该 ID 从目录消失。
+
+这是弱引用语义，不是确定性析构：**页面已经销毁但 Key 还没被 GC 时，目录里仍会看到那条
+`mounted: false` 的记录**。这不是泄漏，也不影响操作——mounted 状态是当场按 `Element` 判的。
+
+### mounted、generation 与歧义
+
+| 事实 | 判定方式 |
+|---|---|
+| `mounted` | 当场读 Key 的 `currentContext`，有 `Element` 才算挂载 |
+| `generation` | 每个 ID 一个单调递增计数器；观察到 `Element` 身份变化时 +1 |
+| `ambiguous` | **只数同时 mounted 的实例**；>1 才置位 |
+
+几个由此推出、但容易猜错的结论：
+
+- **首次观察到挂载时 generation 是 1，不是 0。** 未挂载过的条目是 0。
+- **计数器按 ID 共享**，不按 Key 实例。同一 ID 的第二个实例挂载时拿到的是全局下一个号，
+  不会从 1 重新开始。
+- **GlobalKey 跨位置移动不改号。** Element 被带着走、身份没变，generation 就不变——这正是
+  Key 必须保持 `GlobalKey` 语义的原因之一。
+- **未挂载的重复条目不构成歧义。** 三个同 ID 的 Key 只有一个挂载时，操作照常可执行。
+- **generation 只在被观察时推进。** 两次观察之间重挂载了三回，号也只 +1；重点是"变了"，
+  不是"变了几次"。
+
+写操作必须携带最近观察到的 generation，解析失败的稳定 code 是：
+
+| code | 含义 |
+|---|---|
+| `uiTargetNotFound` | 该 ID 没有任何存活条目（从未声明，或 Key 已被 GC） |
+| `uiTargetUnmounted` | 有条目但一个都没挂载 |
+| `uiTargetAmbiguous` | 同时挂载了多个同 ID 实例 |
+| `uiGenerationStale` | 号对不上，`details.currentGeneration` 给出当前值 |
+| `uiOperationUnavailable` | 目标挂载了，但不支持这个 operation（如 text 目标的 Widget 不是 `TextField`/`EditableText`，或 capture 目标的 render object 不是现成的 `RenderRepaintBoundary`） |
+
+gate 中发生 `await` 后，operator 会**再解析一次** ID、generation 和歧义状态，所以门后发生的
+重挂载或新出现的重名实例同样拿不到这次调用的续程。页面退出后针对旧实例的迟到命令因此稳定被拒，
+不会写入后来出现的同名控件。
+
+### 陷阱：`build()` 内裸构造 Key 会重挂载丢状态
+
+```dart
+// ❌ 每次 build 造一个新 GlobalKey
+@override
+Widget build(BuildContext context) {
+  return TextField(key: PatchbayKey.text('login.phone'), controller: _controller);
+}
+```
+
+`PatchbayKey` 是 `GlobalKey`，Flutter 按 Key **实例身份**决定复用还是重建。每帧换一个新实例，
+等于每帧告诉 Flutter"这是另一个控件"，代价是三重的：
+
+1. **丢状态**——旧 `Element`/`State` 被销毁重建，输入焦点、滚动位置、动画进度一并丢失；
+2. **generation 每次观察都在跳**——你刚从 catalog 读到的号，下一次解析时已经过期，
+   写操作稳定以 `uiGenerationStale` 被拒，看上去像"围栏坏了"，其实是 Key 在漂；
+3. **registry 条目堆积**——每次构造都新增一条，只能等 GC 清。
+
+正确做法是把实例缓存住，让它跨 build 稳定：
+
+```dart
+// ✅ State 字段：一个 State 实例一个 Key
+class _LoginFormState extends State<LoginForm> {
+  late final PatchbayKey _phoneKey = PatchbayKey.text('login.phone');
+
+  @override
+  Widget build(BuildContext context) =>
+      TextField(key: _phoneKey, controller: _controller);
+}
+```
+
+`StatelessWidget` 同理：Key 要放在外层 `State`、注入的 controller，或一张模块级常量表里，
+**不能放在 `build()` 里**。这条对每一个 `GlobalKey` 都成立，不是 Patchbay 特有的规则；
+但因为 Patchbay 的代际围栏会把它变成一串看不懂的 `uiGenerationStale`，这里显式写明。
+
+### 怎么确认目标已经挂载
+
+页面切换或一次动作之后要确认控件出现了，走哪条路取决于你标的是哪种 ID——**这是两个互不相通的
+身份空间**：
+
+| 标注方式 | 查挂载的方式 |
+|---|---|
+| `PatchbayKey.text/capture('id')` | 读 `patchbay catalog`，看 `uiTargets` 里该 ID 的 `mounted` / `generation` |
+| `Semantics(identifier: 'id')` | `patchbay ui wait semantics-mounted <identifier>`（长轮询，自 `patchbay-v0.1.0` 起提供） |
+
+`PatchbayKey` 只替换 Widget 的 `key`，**不会**顺带写 Semantics `identifier`；反过来
+`ui wait semantics-mounted` 走的是 Semantics 树遍历，看不到只标了 `PatchbayKey` 的目标。
+需要"等它出现再操作"的控件，标 Semantics `identifier`（或两个都标）。
+
+`ui wait` 的完整条件表、CLI 子命令与 wire 值的对应关系见
+[使用指南的 `ui wait` 一节](../../docs/guide.md#ui-wait-的-condition-名)。
+
+### requestId
 
 通过 `PatchbayFlutterServiceHost` 调用时，text 与 Semantics operator 会沿用 transport 传入的
 `requestId`；bridge 只在被直接调用且调用方未提供 ID 时生成本地 ID。这样日志、CLI 输出和 invocation
