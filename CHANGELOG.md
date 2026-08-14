@@ -32,6 +32,27 @@
 - `session` ↔ `sessions` 互为别名拼写（`session list` 与 `sessions list` 等价）。别名只增加拼写，
   不新增命令，也不改任何既有命令名。
 
+- **`patchbay ui verify-manifest <file>`：UI 目标「声明 ↔ 运行时挂载」对账。** 接入方把「这个 App
+  应该开放哪些 UI 目标」写成一份 JSON manifest（`id` / `kind` / `sensitive` / `destination`），CLI
+  连上运行中的 App 与 catalog 的 `uiTargets` 对一遍，报三类偏差：`declaredNotMounted`、
+  `mountedNotDeclared`、`propertyMismatch`（逐字段给 `declared` / `runtime`）。**纯 CLI 侧比对：不新增
+  wire 命令，App 侧零改动。** `kind` 的取值直接由 catalog 自己的 `PatchbayUiTargetKindWire` 解码，
+  不另立一份会漂移的词表。
+
+  **对账范围是当前挂载态**，所以「未挂载」如实报成「当前未挂载」（`runtime` 区分 `absent` 与
+  `unmounted`），不替调用方判成缺失——非常驻控件不在当前屏本来就不该挂载。`destination` 在本版只做
+  过滤：manifest 里出现它时 CLI 先读一次 `navigation.current`，只对账未 scope 和 scope 到当前屏的
+  条目，其余计入 `stats.skippedOutOfScope`；逐屏自动巡检要驱动导航，不在本版内。同一 ID 同时挂载
+  多个实例不算偏差，但会进 `notices`——桥对这种目标拒绝一切操作。
+
+  人读输出直接列出偏差条目，`--json` 给三组数组 + `stats`。**新增退出码 `7`**：对账跑完且报告里有
+  偏差，此时 App 侧每个请求都正常应答，因此既不是拒绝（`5`）也不是类型化失败（`6`）。manifest 读
+  不了或不合法时 fail-closed 退到 `64`，稳定 code `manifestInvalid` / `manifestUnreadable`，
+  `details.field` 指到具体位置（形如 `$.targets[2].kind`）；文件内容本身不进信封。
+
+  schema 与边界见[使用指南](docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件
+  [`docs/examples/ui-targets-manifest.json`](docs/examples/ui-targets-manifest.json)。
+
 ### Fixed
 
 - `patchbay help <group>` 的可用性说明改为按组内各命令推导，不再对每个组一律打印「Availability is
