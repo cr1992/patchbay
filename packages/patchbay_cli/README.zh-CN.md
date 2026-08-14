@@ -312,4 +312,4 @@ navigation、wait、capture、结构化日志与 direct 仅在运行时 catalog/
 bearer。日志是 consumer 已脱敏的 App 记录；capture 只证明 Flutter repaint boundary 的合成结果，不含
 系统权限弹窗，PlatformView 也可能缺失。
 三树与 action 的稳定命令、passthrough 边界和退出条件见
-[`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)。
+[`../patchbay_flutter/doc/ui-inspection-and-actions.md`](../patchbay_flutter/doc/ui-inspection-and-actions.md)。

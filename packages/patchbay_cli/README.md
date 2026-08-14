@@ -385,5 +385,5 @@ capture proves only the composited result of Flutter repaint boundaries, exclude
 dialogs, and may be missing PlatformViews.
 For the stable commands, passthrough boundaries, and exit conditions of the three trees and
 actions, see
-[`../patchbay_flutter/docs/ui-inspection-and-actions.md`](../patchbay_flutter/docs/ui-inspection-and-actions.md)
+[`../patchbay_flutter/doc/ui-inspection-and-actions.md`](../patchbay_flutter/doc/ui-inspection-and-actions.md)
 (currently in Chinese).

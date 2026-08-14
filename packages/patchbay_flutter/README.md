@@ -29,7 +29,7 @@ duplicating the protocol.
 
 The contracts for the Widget/Render/Semantics trees, standard actions, node generations,
 redaction, and the DevTools diagnostic proxy are in
-[`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md) (currently in Chinese).
+[`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md) (currently in Chinese).
 That document makes it explicit that tree-driven actions are the default low-intrusion path, and
 semantic navigation is only a stable enhancement on top.
 
@@ -248,7 +248,7 @@ a rejection must be actionable without becoming a second observation surface tha
 tree limits.
 
 For the detailed protocol, privacy boundaries, and staged exit conditions, see
-[`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md) (currently in Chinese).
+[`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md) (currently in Chinese).
 
 ## Optional Root Bridge and Capture
 

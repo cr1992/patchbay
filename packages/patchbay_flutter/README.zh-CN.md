@@ -25,7 +25,7 @@ catalog。Widget/Render/Focus 诊断树由
 `patchbay_cli` 直接代理 Flutter 运行时 extension，不经过本包复制协议。
 
 Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的契约
-见 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。该文档明确树驱动 action
+见 [`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md)。该文档明确树驱动 action
 是默认低侵入路径，语义导航只作稳定增强。
 
 ## 低侵入分级
@@ -212,7 +212,7 @@ expected/current generation），obscured 节点的 label 在 details 中脱敏�
 第二个绕过树上限的观察面。
 
 详细协议、隐私边界和分批退出条件见
-[`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。
+[`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md)。
 
 ## Optional root bridge 与 capture
 

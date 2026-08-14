@@ -485,7 +485,7 @@ generation 提供。同 identifier 挂载多个实例、identifier 不存在、�
 > `ui tap` 与 `ui semantics action` 需要 App 侧注入 `PatchbaySemanticsActionPolicy` 才会进 catalog
 > ——默认 deny，没注入时这两条命令根本不出现在 `patchbay catalog` 里，调用得到
 > `commandNotRegistered`（只读的 `ui semantics tree` 不受影响）。接法与 policy 语义见
-> [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。
+> [`patchbay_flutter/doc/ui-inspection-and-actions.md`](../packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。
 
 ### UI 目标声明对账（ui verify-manifest）
 
@@ -660,7 +660,7 @@ lifecycle `5`），只有 warning 时是 `0`。
   `patchbay doctor` 的 `lifecycle` 一项就是查这个，`repl` 会在第一条被拒的行之后打出分平台解法。
   更细粒度的判定（例如区分「失焦但仍在出帧」）是待评估的优化项，不在本版范围内，闸本身不放松；
   各桥的 resumed 要求见
-  [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。
+  [`patchbay_flutter/doc/ui-inspection-and-actions.md`](../packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。
 - 移动端息屏同理（Android 真机实测）：息屏后 UI 平面以 `*LifecycleNotResumed` 快速拒绝，
   协议面命令（`identity` / `catalog` / `logs` / `job`）短期内仍可用；息屏一段时间后系统可能
   冻结 App 进程（实测 MIUI），此时对端停止应答，CLI 请求在 RPC 预算（默认 30 秒）耗尽后以
