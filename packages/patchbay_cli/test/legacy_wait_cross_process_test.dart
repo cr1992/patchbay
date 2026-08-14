@@ -56,6 +56,9 @@ void main() {
       );
       expect(output['waitMode'], 'legacyPolling');
       expect(output['waitNotice'], contains('patchbay.job.get'));
+      // Same contract on the compatibility path: the admitted job id is at the
+      // top level of a `--wait` result, whichever way the CLI waited.
+      expect(output['jobId'], 'legacy-job');
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );

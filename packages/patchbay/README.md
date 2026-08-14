@@ -197,6 +197,12 @@ Registry 默认最多同时运行 32 个 job，并保留最近 200 个已结束 
 确认底层操作已经停止；如果 controller 的 API 只表示“取消请求已发送”，adapter 必须继续等待真实取消
 终态，不能立即返回 callback。
 
+`cancelAll()` 并行发起所有运行中 job 的取消：全部 callback 先被调用，再各自按 `cancellationTimeout`
+收敛，一个卡死或抛错的 callback 只消耗一次超时，不阻塞也不中断其余 job。返回值是逐 job 的
+`PatchbayJobCancelOutcome`（`cancelled` / `notCancellable` / `timedOut` / `callbackFailed` /
+`alreadySettled`），只覆盖发起时仍在运行的 job；超时、抛错和无 callback 的 job 保持 running，
+已自行进入终态的 job 保留自己的终态，不会被写成 cancelled。
+
 因此 registry 中可观察记录的理论上限是 `maxRunningJobs + retainedJobs`。`runningJobs`、
 `settledJobs` 和 `totalJobs` 可用于接入方健康检查，但不是业务完成性的替代证据。
 

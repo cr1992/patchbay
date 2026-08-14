@@ -234,6 +234,65 @@ void main() {
     );
   });
 
+  test('a ui wait condition name is accepted as the command name', () {
+    for (final PatchbayFriendlyCommand spec in PatchbayFriendlyCommand.values) {
+      if (spec.waitCondition case final String condition) {
+        final List<String> tail = switch (spec) {
+          PatchbayFriendlyCommand.uiWaitSemanticsValue => <String>[
+            'field.id',
+            'ready',
+          ],
+          PatchbayFriendlyCommand.uiWaitTreeRevision ||
+          PatchbayFriendlyCommand.uiWaitFrameRevision => <String>['7'],
+          _ => <String>['screen.id'],
+        };
+        final PatchbayFriendlyInvocation byCondition = _resolve(<String>[
+          'ui',
+          'wait',
+          condition,
+          ...tail,
+        ]);
+        // Same declaration, same request: the alias is a spelling, not a
+        // second command with a life of its own.
+        expect(byCondition.spec, spec, reason: condition);
+        expect(
+          byCondition.arguments,
+          _resolve(<String>[...spec.path, ...tail]).arguments,
+          reason: condition,
+        );
+        expect(byCondition.arguments['condition'], condition);
+      }
+    }
+  });
+
+  test('group aliases expand without inventing commands', () {
+    expect(
+      _resolve(<String>['navigate', 'current']).spec,
+      PatchbayFriendlyCommand.navigationCurrent,
+    );
+    expect(
+      _resolve(<String>['wait', 'semantics-mounted', 'app.ready']).spec,
+      PatchbayFriendlyCommand.uiWaitSemanticsMounted,
+    );
+    expect(
+      _resolve(<String>['tap', 'login.submit']).spec,
+      PatchbayFriendlyCommand.uiTap,
+    );
+    // An alias word in an argument position stays an argument.
+    expect(
+      PatchbayFriendlyCommandRegistry.canonicalPath(<String>['exec', 'wait']),
+      <String>['exec', 'wait'],
+    );
+    expect(
+      PatchbayFriendlyCommandRegistry.canonicalPath(<String>[
+        'ui',
+        'tap',
+        'nav',
+      ]),
+      <String>['ui', 'tap', 'nav'],
+    );
+  });
+
   test('--generation is refused by commands that do not fence a node', () {
     expect(
       () => _resolve(<String>['--generation', '7', 'ui', 'semantics', 'tree']),
@@ -255,6 +314,66 @@ void main() {
       () => _resolve(<String>['--args', '[1]', 'exec', 'fixture.command']),
       throwsA(isA<FormatException>()),
     );
+  });
+
+  test('--stdin merges over --args and wins on a shared key', () {
+    final PatchbayFriendlyInvocation invocation = _resolve(
+      <String>[
+        '--args',
+        '{"deviceId":"abc","retries":2}',
+        '--stdin',
+        'exec',
+        'fixture.command',
+      ],
+      stdin: () => '{"token":"s3cret","retries":9}',
+    );
+    expect(invocation.arguments, <String, Object?>{
+      'deviceId': 'abc',
+      'retries': 9,
+      'token': 's3cret',
+      'inputWasStdin': true,
+    });
+    // Only the argv half is reported as plaintext; the merged result must not
+    // make the stdin keys look like they came from the command line.
+    expect(invocation.plaintextArgumentKeys, <String>{'deviceId', 'retries'});
+  });
+
+  test('stdin alone still supplies the whole object, unchanged', () {
+    final PatchbayFriendlyInvocation invocation = _resolve(<String>[
+      '--stdin',
+      'exec',
+      'fixture.command',
+    ], stdin: () => '{"token":"s3cret"}');
+    expect(invocation.arguments, <String, Object?>{
+      'token': 's3cret',
+      'inputWasStdin': true,
+    });
+    expect(invocation.plaintextArgumentKeys, isEmpty);
+  });
+
+  test('a stdin payload cannot unset the no-echo marker', () {
+    expect(
+      _resolve(<String>[
+        '--stdin',
+        'exec',
+        'fixture.command',
+      ], stdin: () => '{"inputWasStdin":false}').arguments['inputWasStdin'],
+      true,
+    );
+  });
+
+  test('bare text and non-object JSON on stdin are still refused', () {
+    for (final String payload in <String>['not json at all', '[1]', '"text"']) {
+      expect(
+        () => _resolve(<String>[
+          '--stdin',
+          'exec',
+          'fixture.command',
+        ], stdin: () => payload),
+        throwsA(isA<FormatException>()),
+        reason: payload,
+      );
+    }
   });
 
   test('newly declared commands fail closed on irrelevant options', () {

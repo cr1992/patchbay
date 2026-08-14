@@ -51,16 +51,30 @@ final class PatchbayArtifactDownloader {
   PatchbayArtifactDownloader({
     required PatchbayArtifactInvoker invoke,
     this.maxArtifactBytes = 64 * 1024 * 1024,
+    this.chunkBytes = defaultChunkBytes,
   }) : _invoke = invoke {
     if (maxArtifactBytes <= 0) {
       throw ArgumentError.value(maxArtifactBytes, 'maxArtifactBytes');
     }
+    if (chunkBytes <= 0) {
+      throw ArgumentError.value(chunkBytes, 'chunkBytes');
+    }
   }
 
-  static const int chunkBytes = 64 * 1024;
+  /// Chunk size used when the host declares no limit of its own.
+  static const int defaultChunkBytes = 64 * 1024;
 
   final PatchbayArtifactInvoker _invoke;
   final int maxArtifactBytes;
+
+  /// Bytes requested per `blob.read`.
+  ///
+  /// The host publishes its own ceiling as the `limit` parameter default and
+  /// rejects anything above it, so this is the App's number, not the CLI's: a
+  /// hardcoded constant is right only by coincidence, and a consumer that
+  /// lowered the ceiling would see every artifact download refused with
+  /// `blobInvalidChunkLimit`.
+  final int chunkBytes;
 
   Future<PatchbayDownloadedArtifact> download({
     required Map<String, Object?> metadataJson,

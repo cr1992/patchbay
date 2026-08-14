@@ -1,0 +1,40 @@
+# 兼容性矩阵
+
+> 维度：patchbay tag × wire `schemaVersion` × Flutter 版本 × 已知 consumer。
+> 用于发版前后核对——升级 `schemaVersion` 或提高 Flutter 最低版本时，consumer 侧能否安全换 pin
+> 应先查本表，而不是逐包翻源码。
+
+## 当前记录
+
+| patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） | Flutter（文档最低支持） | 已知 consumer |
+|---|---|---|---|---|---|
+| `patchbay-v0.1.0` | `7c82c68d9dfed4b2a546e81de68b9e0101be4878` | 1 | 3.44.9 | `>=3.38.0` | `moii_app`（pin `v0.1.0`；**交接口径，未在本仓验证，以 moii 仓 pubspec / `PATCHBAY_PINS` 为准**） |
+
+字段来源：
+
+- **commit SHA**：`git rev-parse patchbay-v0.1.0`，与 `git log --oneline` 中
+  `7c82c68 chore(repo): 独立仓模板——README 三件套、MIT、CI 与 bin 入口` 一致。
+- **wire schemaVersion**：`packages/patchbay/lib/src/service_host.dart:34` 与
+  `packages/patchbay/lib/src/invocation.dart:58` 的 `static const int schemaVersion = 1;`。
+  两处需保持同值，drift 会被 `packages/patchbay_transport` 与 `packages/patchbay_cli` 的握手校验
+  在运行时拒绝（如 `packages/patchbay_cli/lib/src/client.dart:250` 的
+  `schemaVersionMismatch`），不是仅文档层面的约定。
+- **Flutter（CI 验证）**：`.gitlab-ci.yml` 第 7 行 CI 镜像 tag
+  `registry.gitlab.hirobot.in:9090/cloud/sproboagent/ci/flutter-node:3.44.9-node24-r1`。
+- **Flutter（文档最低支持）**：`docs/guide.md` 第 9 行「使用 UI 能力时需要 Flutter `>=3.38.0`」，
+  与根 `README.md` 第 26–27 行项目状态声明一致。两个 Flutter 数字不是同一件事：CI 验证版本是
+  当前门禁实际跑过的版本，最低支持版本是文档承诺的下限，二者之间未逐版本回归，出现兼容问题以
+  CI 验证版本为准。
+- **已知 consumer**：仅 `moii_app` 一条，来自任务交接口径，patchbay 仓本身不持有 consumer 侧
+  pin 配置，无法在本仓验证；新增或变更 consumer 记录前应先向对应 consumer 仓核实。
+
+## 维护规则
+
+- 每次打 `patchbay-vX.Y.Z` tag 前，在「当前记录」新增一行，不覆盖旧行——本表是历史矩阵，
+  保留每个已发布 tag 对应的兼容组合，供排查「某个旧 consumer 卡在哪个 tag / schema」时回查。
+- `schemaVersion` 变更（即使 tag 只是 patch 号）必须在新增行中体现，因为它是运行时强校验的
+  兼容边界，不是版本号语义能替代的信息。
+- consumer 列如果同一 consumer 在同一 tag 下有多条 pin 记录（例如同仓多个 flavor），拆成多行，
+  不要在同一格塞多个 pin 值。
+- 本表由 patchbay 仓维护 tag / schemaVersion / Flutter 三列；consumer 列的准确性依赖 consumer
+  仓自己上报或人工核对，patchbay 仓不主动扫描外部仓库。

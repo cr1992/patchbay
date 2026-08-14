@@ -51,6 +51,35 @@ void main() {
     );
   });
 
+  test('a terminal job summary keeps both the id and the outcome', () {
+    // The top-level id is the admitted job; the summary must not drop the
+    // phase, which is the half the operator was waiting for.
+    expect(
+      patchbayResponseSummary(<String, Object?>{
+        'admission': 'accepted',
+        'jobId': 'job-7',
+        'payload': <String, Object?>{
+          'jobId': 'snapshot-7',
+          'terminal': true,
+          'events': <Object?>[
+            <String, Object?>{'phase': 'running'},
+            <String, Object?>{'phase': 'failed'},
+          ],
+        },
+      }),
+      'jobId=job-7 terminal=true phase=failed',
+    );
+    // An admission that has not reached a terminal state still summarises as
+    // the bare id it always did.
+    expect(
+      patchbayResponseSummary(<String, Object?>{
+        'admission': 'accepted',
+        'jobId': 'job-7',
+      }),
+      'jobId=job-7',
+    );
+  });
+
   test('wait timeout is a typed job failure, not a transport exception', () {
     expect(
       waitForPatchbayJob(
