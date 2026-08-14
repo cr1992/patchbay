@@ -101,51 +101,220 @@ void main() {
     );
   });
 
-  test('service host rejects duplicate command names in catalog', () async {
-    final PatchbayServiceHost host = PatchbayServiceHost(
-      applicationId: 'dev.patchbay.test',
-      registrar: (_, _) {},
-      catalog: () async => <String, Object?>{
-        'commands': const <Object?>[
+  group('a catalog that violates the protocol', () {
+    // Every case here used to throw out of the host. On the VM Service that is
+    // a response the transport never sends, so the CLI waits forever — a broken
+    // catalog presented itself as a hung App instead of as a named bad command.
+    late List<String> invoked;
+
+    PatchbayServiceHost hostWith(PatchbayCatalogSource catalog) {
+      invoked = <String>[];
+      return PatchbayServiceHost(
+        applicationId: 'dev.patchbay.test',
+        registrar: (_, _) {},
+        catalog: catalog,
+        snapshot: () async => const <String, Object?>{},
+        invoke: (String command, _, String requestId) async {
+          invoked.add(command);
+          return PatchbayInvocation.accepted(requestId: requestId).toJson();
+        },
+      );
+    }
+
+    PatchbayCatalogSource declaring(List<Object?> commands) =>
+        () async => <String, Object?>{'commands': commands};
+
+    Map<String, Object?> rejectionOf(Map<String, Object?> response) =>
+        response['rejection']! as Map<String, Object?>;
+
+    Map<String, Object?> detailsOf(Map<String, Object?> response) =>
+        rejectionOf(response)['details']! as Map<String, Object?>;
+
+    test('names the kebab-cased command instead of throwing', () async {
+      final Map<String, Object?> response = await hostWith(
+        declaring(const <Object?>[
+          <String, Object?>{'name': 'auth.tenant.switch'},
+          <String, Object?>{'name': 'auth.switch-tenant'},
+        ]),
+      ).dispatchCatalog();
+
+      expect(response['admission'], 'rejected');
+      expect(rejectionOf(response)['code'], 'providerProtocolViolation');
+      expect(detailsOf(response)['reason'], 'invalidCatalogCommands');
+      expect(detailsOf(response)['violations'], <Object?>[
+        <String, Object?>{
+          'index': 1,
+          'name': 'auth.switch-tenant',
+          'reason': 'invalidCommandName',
+        },
+      ]);
+      expect(
+        detailsOf(response)['commandNamePattern'],
+        r'^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$',
+      );
+    });
+
+    test('serves no commands at all, not the surviving ones', () async {
+      // Dropping the offending entry and serving the rest would turn a consumer
+      // bug into an App that silently lost a capability.
+      final Map<String, Object?> response = await hostWith(
+        declaring(const <Object?>[
+          <String, Object?>{'name': 'auth.tenant.switch'},
+          <String, Object?>{'name': 'auth.switch-tenant'},
+        ]),
+      ).dispatchCatalog();
+
+      expect(response.containsKey('commands'), isFalse);
+      expect(response['schemaVersion'], PatchbayServiceHost.schemaVersion);
+    });
+
+    test('answers the catalog RPC instead of dropping the reply', () async {
+      final ServiceExtensionResponse response =
+          await hostWith(
+            declaring(const <Object?>[
+              <String, Object?>{'name': 'auth.switch-tenant'},
+            ]),
+          ).handleCatalog(
+            PatchbayServiceHost.catalogMethod,
+            const <String, String>{},
+          );
+
+      expect(response.isError(), isFalse);
+      final Map<String, Object?> decoded =
+          jsonDecode(response.result!) as Map<String, Object?>;
+      expect(decoded['admission'], 'rejected');
+      expect(
+        (decoded['rejection']! as Map<String, Object?>)['code'],
+        'providerProtocolViolation',
+      );
+    });
+
+    test('reports duplicate names', () async {
+      final Map<String, Object?> response = await hostWith(
+        declaring(const <Object?>[
           <String, Object?>{'name': 'device.select'},
           <String, Object?>{'name': 'device.select'},
-        ],
-      },
-      snapshot: () async => const <String, Object?>{},
-      invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
-        requestId: requestId,
-        rejection: const PatchbayRejection(code: 'notRegistered'),
-      ).toJson(),
-    );
+        ]),
+      ).dispatchCatalog();
 
-    await expectLater(host.dispatchCatalog(), throwsStateError);
-  });
+      expect(detailsOf(response)['violations'], <Object?>[
+        <String, Object?>{
+          'index': 1,
+          'name': 'device.select',
+          'reason': 'duplicateCommandName',
+        },
+      ]);
+    });
 
-  test(
-    'service host rejects non-descriptor and invalid command names',
-    () async {
+    test('reports an entry with no usable name by position', () async {
       for (final Object? command in <Object?>[
         'device.select',
-        const <String, Object?>{'name': ' device.select '},
-        const <String, Object?>{'name': 'Device.select'},
+        const <String, Object?>{'summary': 'no name at all'},
+        const <String, Object?>{'name': 42},
       ]) {
-        final PatchbayServiceHost host = PatchbayServiceHost(
-          applicationId: 'dev.patchbay.test',
-          registrar: (_, _) {},
-          catalog: () async => <String, Object?>{
-            'commands': <Object?>[command],
-          },
-          snapshot: () async => const <String, Object?>{},
-          invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
-            requestId: requestId,
-            rejection: const PatchbayRejection(code: 'notRegistered'),
-          ).toJson(),
-        );
+        final Map<String, Object?> response = await hostWith(
+          declaring(<Object?>[command]),
+        ).dispatchCatalog();
 
-        await expectLater(host.dispatchCatalog(), throwsStateError);
+        expect(detailsOf(response)['violations'], <Object?>[
+          <String, Object?>{'index': 0, 'reason': 'missingCommandName'},
+        ], reason: 'entry $command');
       }
-    },
-  );
+    });
+
+    test('still rejects names that are strings but malformed', () async {
+      for (final String name in <String>[' device.select ', 'Device.select']) {
+        final Map<String, Object?> response = await hostWith(
+          declaring(<Object?>[
+            <String, Object?>{'name': name},
+          ]),
+        ).dispatchCatalog();
+
+        expect(detailsOf(response)['violations'], <Object?>[
+          <String, Object?>{
+            'index': 0,
+            'name': name,
+            'reason': 'invalidCommandName',
+          },
+        ], reason: name);
+      }
+    });
+
+    test('reports every offender in one answer', () async {
+      final Map<String, Object?> response = await hostWith(
+        declaring(const <Object?>[
+          <String, Object?>{'name': 'auth.switch-tenant'},
+          <String, Object?>{'name': 'device.select'},
+          <String, Object?>{'name': 'device.select'},
+          'device.select',
+        ]),
+      ).dispatchCatalog();
+
+      expect(
+        (detailsOf(response)['violations']! as List<Object?>)
+            .cast<Map<String, Object?>>()
+            .map((Map<String, Object?> violation) => violation['reason']),
+        <String>[
+          'invalidCommandName',
+          'duplicateCommandName',
+          'missingCommandName',
+        ],
+      );
+    });
+
+    test('reports a commands field that is not an array', () async {
+      final Map<String, Object?> response = await hostWith(
+        () async => <String, Object?>{'commands': 'device.select'},
+      ).dispatchCatalog();
+
+      expect(detailsOf(response)['reason'], 'commandsNotAnArray');
+    });
+
+    test('reports a catalog source that throws, by type only', () async {
+      final Map<String, Object?> response = await hostWith(
+        () async => throw StateError('secret-bearing consumer message'),
+      ).dispatchCatalog();
+
+      expect(detailsOf(response)['reason'], 'catalogSourceFailed');
+      expect(detailsOf(response)['error'], 'StateError');
+      expect(jsonEncode(response), isNot(contains('secret-bearing')));
+    });
+
+    test('an omitted commands field is not a violation', () async {
+      final Map<String, Object?> response = await hostWith(
+        () async => const <String, Object?>{},
+      ).dispatchCatalog();
+
+      expect(response.containsKey('admission'), isFalse);
+      expect(response['schemaVersion'], PatchbayServiceHost.schemaVersion);
+    });
+
+    test('makes invoke fail closed with the same diagnosis', () async {
+      // The CLI reads the catalog to resolve a command before it invokes, so a
+      // broken catalog used to hang `exec` too. Both paths now answer, and the
+      // invoke answer carries the catalog's own violation.
+      final Map<String, Object?> response =
+          await hostWith(
+            declaring(const <Object?>[
+              <String, Object?>{'name': 'auth.switch-tenant'},
+            ]),
+          ).dispatchInvoke('device.bind', <String, Object?>{
+            'password': 'hunter2',
+          }, 'req-catalog');
+
+      expect(response['admission'], 'rejected');
+      expect(rejectionOf(response)['code'], 'providerProtocolViolation');
+      expect(detailsOf(response)['reason'], 'catalogUnavailable');
+      final Map<String, Object?> catalog =
+          detailsOf(response)['catalog']! as Map<String, Object?>;
+      expect(catalog['reason'], 'invalidCatalogCommands');
+      expect(
+        (catalog['violations']! as List<Object?>).single,
+        containsPair('name', 'auth.switch-tenant'),
+      );
+      expect(invoked, isEmpty);
+    });
+  });
 
   test('service host replaces invalid provider invocation envelopes', () async {
     final PatchbayServiceHost host = PatchbayServiceHost(
