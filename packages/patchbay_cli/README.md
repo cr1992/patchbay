@@ -73,6 +73,7 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics action <node-id> <generation> <action>
 dart run bin/patchbay.dart --ws-uri <uri> --json ui tap <identifier>
 dart run bin/patchbay.dart --ws-uri <uri> --json --generation <generation> ui tap <identifier>
+dart run bin/patchbay.dart --ws-uri <uri> --json ui verify-manifest ./ui-targets.json
 dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
@@ -113,6 +114,20 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 调用方自己的前置围栏；不传时围栏由 bridge 在过门前 pin 住的 generation 提供。未命中、多义和代际
 过期都是带 details 的稳定拒绝（分别给出已挂载 identifier 清单、候选列表、expected/current），不会用
 空拒绝把调用方推回全树 dump。
+
+### UI 目标声明对账
+
+`ui verify-manifest <file>` 读一份接入方维护的 JSON manifest，与 catalog 的 `uiTargets` 对账，报
+`declaredNotMounted` / `mountedNotDeclared` / `propertyMismatch` 三类偏差。比对完全在 CLI 侧完成：
+不新增 wire 命令，只用 catalog；manifest 里出现 `destination` 时额外读一次 `navigation.current`
+做范围过滤。schema、字段语义、`destination` 过滤口径与「未挂载 ≠ 丢失」的边界见
+[使用指南](../../docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件在
+[`docs/examples/ui-targets-manifest.json`](../../docs/examples/ui-targets-manifest.json)。
+
+全部相符退出 `0`，报告里有任一类偏差退出 `7`——App 侧一切正常应答，所以它既不是拒绝（`5`）也不是
+类型化失败（`6`）。manifest 读不了或不合法时 fail-closed 退出 `64`，`--json` 给 `manifestInvalid` /
+`manifestUnreadable` 和指到具体位置的 `details.field`。人读输出直接列出偏差条目；repl 内每行只占
+一行，给的是计数。
 
 ### repl 会话
 
@@ -261,7 +276,8 @@ artifact 下载的分块大小取自 catalog 中 `blob.read` 的 `limit` 默认�
 | `4` | schema/identity 不兼容，或目录中没有该命令 |
 | `5` | App adapter 或 Flutter bridge 拒绝受理 |
 | `6` | 已受理的 operation 返回 `outcome=failed`、job 失败/取消，或等待终态超时 |
-| `64` | 命令格式、参数或本地输入不合法 |
+| `7` | 本地对账（`ui verify-manifest`）完成，报告里有偏差；App 侧请求全部正常应答 |
+| `64` | 命令格式、参数或本地输入不合法（含拒读的 manifest 文件） |
 
 调用方应同时读取 JSON 信封；退出码不承载设备完成性。
 

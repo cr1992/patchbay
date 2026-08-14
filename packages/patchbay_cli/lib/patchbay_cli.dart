@@ -11,3 +11,4 @@ export 'src/result.dart';
 export 'src/rpc_timeout.dart';
 export 'src/session.dart';
 export 'src/sensitive_input.dart';
+export 'src/ui_manifest.dart';

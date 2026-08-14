@@ -39,6 +39,14 @@ enum PatchbayCommandTarget {
   /// `PatchbayClient.focusTree` — Flutter SDK diagnostic passthrough.
   clientFocusTree,
 
+  /// A verdict computed on this side of the wire from a catalog reading.
+  ///
+  /// The App is asked only for facts it already publishes — the UI target
+  /// catalog, and the current destination when the manifest scopes anything.
+  /// The comparison and the exit code are the CLI's, which is what lets this
+  /// command exist without a single new wire command.
+  localManifestVerification,
+
   /// A reusable session: connect once, then run many of the targets above.
   ///
   /// It is declared here so help, option validation and the usage banner all
@@ -224,6 +232,13 @@ enum PatchbayFriendlyCommand {
     summary: 'Resolve a semantics identifier and tap it in one request.',
     usageSuffix: '<identifier> [--generation <generation>]',
   ),
+  uiVerifyManifest(
+    null,
+    <String>['ui', 'verify-manifest'],
+    summary: 'Reconcile a declared UI target manifest against the runtime.',
+    usageSuffix: '<manifest-file>',
+    target: PatchbayCommandTarget.localManifestVerification,
+  ),
   uiWidgetTree(
     null,
     <String>['ui', 'widget-tree'],
@@ -339,6 +354,7 @@ final class PatchbayFriendlyInvocation {
     required this.arguments,
     this.serviceCommand,
     this.outputPath,
+    this.manifestPath,
     this.force = false,
     this.plaintextArgumentKeys = const <String>{},
     this.resolvesRevision = false,
@@ -350,6 +366,12 @@ final class PatchbayFriendlyInvocation {
   /// Resolved protocol name for the invoke targets; `null` for client targets.
   final String? serviceCommand;
   final String? outputPath;
+
+  /// Local file the command reads before it talks to the App.
+  ///
+  /// It is kept out of [arguments] on purpose: a manifest is caller input read
+  /// on this side of the wire, and nothing about it is ever sent to the App.
+  final String? manifestPath;
   final bool force;
 
   /// Argument keys that came from `--args`, i.e. from an echoing argv.
@@ -427,6 +449,12 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiSemanticsTree => _noTail(
         tail,
         _domainArguments(options, readSensitiveInput),
+      ),
+      // The manifest path is local input rather than an invoke argument, so it
+      // travels in `manifestPath` and this command sends no arguments at all.
+      PatchbayFriendlyCommand.uiVerifyManifest => _oneTail(
+        tail,
+        (String _) => const <String, Object?>{},
       ),
       PatchbayFriendlyCommand.uiSemanticsAction => _semanticsActionArguments(
         tail,
@@ -531,6 +559,10 @@ abstract final class PatchbayFriendlyCommandRegistry {
       arguments: arguments,
       serviceCommand: serviceCommand,
       outputPath: outputPath,
+      // `_oneTail` above already refused any other arity for this declaration.
+      manifestPath: spec == PatchbayFriendlyCommand.uiVerifyManifest
+          ? tail.single
+          : null,
       force: options.flag('force'),
       plaintextArgumentKeys: _plaintextArgumentKeys(options),
       resolvesRevision:
@@ -692,6 +724,9 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.navigationCatalog ||
     PatchbayFriendlyCommand.navigationCurrent ||
     PatchbayFriendlyCommand.blobMetadata ||
+    // Nothing about the comparison is tunable: the manifest is the whole
+    // request, and the current destination comes from the App, not a flag.
+    PatchbayFriendlyCommand.uiVerifyManifest ||
     // A repl carries connection options and `--json`, which are global rather
     // than per-command; every command option belongs on the lines it runs.
     PatchbayFriendlyCommand.repl ||

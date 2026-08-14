@@ -1,12 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'ui_manifest.dart';
+
 abstract final class PatchbayExitCode {
   static const int accepted = 0;
   static const int transport = 3;
   static const int protocol = 4;
   static const int rejected = 5;
   static const int typedFailure = 6;
+
+  /// A local reconciliation the App answered normally, whose report is not
+  /// clean.
+  ///
+  /// It is deliberately not `5` or `6`: nothing was rejected and nothing failed
+  /// — every request in the command succeeded — so a script must be able to
+  /// tell "the App refused me" from "the App answered, and what it answered
+  /// disagrees with the file I brought".
+  static const int verificationDeviation = 7;
   static const int usage = 64;
 }
 
@@ -83,6 +94,12 @@ String patchbayResponseSummary(Map<String, Object?> value) {
     'appInstanceId': final Object instance,
   }) {
     return '$app instance=$instance';
+  }
+  // A locally computed report, not an App response. The one-shot path prints
+  // the deviations themselves; a repl line owns exactly one line, so it gets
+  // the same counts every other summary here gives.
+  if (value['schema'] == patchbayUiManifestReportSchema) {
+    return patchbayUiManifestSummaryLine(value);
   }
   if (value['uiTargets'] case final List<Object?> targets) {
     return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} '

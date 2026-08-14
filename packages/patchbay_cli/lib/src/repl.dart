@@ -5,6 +5,7 @@ import 'package:args/args.dart';
 import 'command_help.dart';
 import 'command_registry.dart';
 import 'result.dart';
+import 'ui_manifest.dart';
 
 /// One command's result, classified exactly as the same command would be
 /// classified when run standalone.
@@ -174,6 +175,11 @@ final class PatchbayReplSession {
           PatchbayExitCode.typedFailure,
           'waitTimeout',
         );
+      } on PatchbayUiManifestException catch (error) {
+        // A file this line could not read says nothing about the connection
+        // the session is reusing, so it ends the line the way a usage error
+        // does rather than tearing down every command after it.
+        _writeFailure(number, parsed.rest, PatchbayExitCode.usage, error.sentence);
       }
     }
     return PatchbayExitCode.accepted;

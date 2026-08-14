@@ -25,7 +25,9 @@
 | DevTools 借用三批：inspect 开关 → perf VM RPC → net 画像 | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
 | snapshot revision / diff | dogfood（低优先级） | |
 | launcher 监督循环收编：把首个接入方项目级的重连监督（退避策略 + machine-frame 生命周期 + 断连判读）抽为 patchbay_cli 通用 `launch` 能力；会话记录 schema 增显式 pending 状态位（现依赖 consumer 侧以自身 PID 通过探活的巧劲，跨仓契约应显式化） | 首个接入方已落项目级实现并真机验证；第二接入方已集成 session store，其启动器必复踩「断连即退」 | 等首个实现合入烤几天 + 第二试点确认形态 |
-| UI 目标声明对账 `ui verify-manifest <file>`：consumer 交 expected-targets manifest（id/kind/sensitive/所在屏），CLI 对比 catalog uiTargets + semantics 树，报「声明未挂载 / 挂载未声明 / 属性漂移」三类偏差；可选按 destination 逐屏巡检覆盖非常驻控件 | 第二接入方提案（由「标注能否契约生成」review 引出：正向生成不成立，反向机械对账成立）；纯 CLI 侧、wire 零改动；该接入方自荐首个试点（已有 ID 台账） | |
+| `ui verify-manifest` 按 destination 逐屏巡检：驱动导航依次落到每个被声明的屏，覆盖非常驻控件 | v1 只对账当前挂载态、`destination` 仅作过滤（已落，见 CHANGELOG Unreleased）；巡检要驱动导航，改变「只读对账」的性质 | |
+| `ui verify-manifest` 接受 YAML manifest | v1 只认 JSON；大清单人手维护 YAML 更省事，但要引入解析依赖 | |
+| `ui verify-manifest` 覆盖 Semantics identifier（`ui tap` 的目标面） | catalog `uiTargets` 只登记 `PatchbayKey` 注册的 text / capture 目标，可点控件的 identifier 不在其中；要取 `ui.semantics.tree`，那是另一个命名空间和另一套挂载语义 | |
 
 ## 文档债（快赢，可随任意批次走）
 

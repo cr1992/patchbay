@@ -1,6 +1,7 @@
 import 'package:args/args.dart';
 
 import 'command_registry.dart';
+import 'result.dart';
 
 /// Renders CLI help from the parser and friendly-command declarations.
 abstract final class PatchbayCommandHelp {
@@ -263,6 +264,9 @@ abstract final class PatchbayCommandHelp {
               'whose token would have to share stdin with the commands.',
         PatchbayCommandTarget.localSessionStore =>
           'Always available: it needs no App, no connection and no catalog.',
+        PatchbayCommandTarget.localManifestVerification =>
+          'Available on any connected Patchbay transport; a manifest that '
+              'scopes entries to a destination also needs navigation.current.',
       };
 
   /// What the CLI will actually call, phrased per dispatch target.
@@ -289,6 +293,11 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.localSessionStore =>
           'Reads and writes the local launcher session directory '
               '(--session-dir); it never dials the App.',
+        PatchbayCommandTarget.localManifestVerification =>
+          'Compares the manifest against the UI targets the catalog publishes; '
+              'the verdict is computed locally and exits '
+              '${PatchbayExitCode.verificationDeviation} when the report lists '
+              'a deviation.',
       };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[
