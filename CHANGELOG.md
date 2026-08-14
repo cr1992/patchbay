@@ -139,6 +139,12 @@
   的约定，下游解析器会失败——需要工作树即时生效又要读 `--json` 时，用 AOT 产物或仓内
   `dart run`，不要用 path 模式。
 
+- **退出码一节写明判定口径（`docs/guide.md` 退出码）。** 原来只有一句「脚本应同时读 JSON 信封」，
+  没点出最容易把失败读成成功的那个写法：`patchbay --json … | jq …` 之后的 `$?` 是 `jq` 的码，
+  patchbay 判红也照样是 `0`。现在明确：脚本与 agent 判定结果读 `--json` 的结构化字段或 patchbay
+  自己的退出码；确实要在管道里拿真码，用 `set -o pipefail`（或 bash 的 `${PIPESTATUS[0]}`），
+  否则先把输出接到变量再解析。
+
 ### Fixed
 
 - README 的项目状态与安装 tag 跟上四包 `0.2.1`，并新增版本一致性测试，后续四包 version、README
