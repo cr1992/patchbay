@@ -310,7 +310,7 @@ void main() {
       final Completer<void> release = Completer<void>();
       final PatchbayDirectHost host = _host(
         identity: identity,
-        snapshot: () async {
+        snapshot: ([_]) async {
           entered.complete();
           await release.future;
           return <String, Object?>{'released': true};
@@ -338,7 +338,7 @@ void main() {
     final PatchbayDirectHost host = _host(
       identity: identity,
       config: PatchbayDirectHostConfig(maxResponseBodyBytes: 128),
-      snapshot: () async => <String, Object?>{'value': 'x' * 256},
+      snapshot: ([_]) async => <String, Object?>{'value': 'x' * 256},
     );
     final PatchbayDirectSession session = await host.start();
     final _WireResponse response = await _post(
@@ -360,7 +360,7 @@ void main() {
       config: PatchbayDirectHostConfig(
         requestTimeout: const Duration(milliseconds: 100),
       ),
-      snapshot: () => pending ? never.future : Future.value(_snapshotBody),
+      snapshot: ([_]) => pending ? never.future : Future.value(_snapshotBody),
     );
     final PatchbayDirectSession session = await host.start();
     final _WireResponse response = await _post(
@@ -404,7 +404,7 @@ void main() {
         requestTimeout: const Duration(milliseconds: 100),
         maxRequestTimeout: const Duration(seconds: 30),
       ),
-      snapshot: () => Future<Map<String, Object?>>.delayed(
+      snapshot: ([_]) => Future<Map<String, Object?>>.delayed(
         const Duration(milliseconds: 400),
         () => _snapshotBody,
       ),
@@ -439,7 +439,7 @@ void main() {
         requestTimeout: const Duration(milliseconds: 50),
         maxRequestTimeout: const Duration(milliseconds: 200),
       ),
-      snapshot: () => Completer<Map<String, Object?>>().future,
+      snapshot: ([_]) => Completer<Map<String, Object?>>().future,
     );
     final PatchbayDirectSession session = await host.start();
     final Stopwatch elapsed = Stopwatch()..start();
@@ -533,7 +533,7 @@ PatchbayDirectHost _host({
     catalog: () async => <String, Object?>{
       'commands': <Object?>['probe.read'],
     },
-    snapshot: snapshot ?? () async => <String, Object?>{'state': 'ready'},
+    snapshot: snapshot ?? ([_]) async => <String, Object?>{'state': 'ready'},
     invoke:
         invoke ??
         (

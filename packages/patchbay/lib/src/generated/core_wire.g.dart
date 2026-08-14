@@ -375,6 +375,46 @@ enum PatchbayCaptureWarningWire {
   String toJson() => name;
 }
 
+enum PatchbaySnapshotConditionWire {
+  exists,
+  absent,
+  equals;
+
+  static PatchbaySnapshotConditionWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbaySnapshotConditionWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbaySnapshotMissWire {
+  missingKey,
+  nullValue,
+  notAnObject;
+
+  static PatchbaySnapshotMissWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException('$path has unknown PatchbaySnapshotMissWire: $wire');
+  }
+
+  String toJson() => name;
+}
+
 final class PatchbayParameterDescriptorWire {
   const PatchbayParameterDescriptorWire({
     required this.name,
@@ -2306,6 +2346,144 @@ final class PatchbayCaptureResultWire {
     'pixelRatio': pixelRatio,
     'warnings': warnings.map((item) => item.toJson()).toList(growable: false),
     'blob': blob.toJson(),
+  };
+}
+
+final class PatchbaySnapshotRequestWire {
+  const PatchbaySnapshotRequestWire({
+    required this.path,
+    required this.until,
+    required this.value,
+    required this.timeoutMs,
+  });
+
+  final String path;
+  final PatchbaySnapshotConditionWire? until;
+  final Object? value;
+  final int? timeoutMs;
+
+  factory PatchbaySnapshotRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'path',
+      'until',
+      'value',
+      'timeoutMs',
+    }, path);
+    return PatchbaySnapshotRequestWire(
+      path: _wireString(json['path'], '$path.path'),
+      until: json['until'] == null
+          ? null
+          : PatchbaySnapshotConditionWire.fromJson(
+              json['until'],
+              path: '$path.until',
+            ),
+      value: json['value'] == null
+          ? null
+          : _wireJson(json['value'], '$path.value'),
+      timeoutMs: json['timeoutMs'] == null
+          ? null
+          : _wireInt(json['timeoutMs'], '$path.timeoutMs'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'path': path,
+    if (until != null) 'until': until!.toJson(),
+    if (value != null) 'value': _wireJson(value!, r'$.value'),
+    if (timeoutMs != null) 'timeoutMs': timeoutMs!,
+  };
+}
+
+final class PatchbaySnapshotSelectionWire {
+  const PatchbaySnapshotSelectionWire({
+    required this.path,
+    required this.found,
+    required this.value,
+    required this.miss,
+  });
+
+  final String path;
+  final bool found;
+  final Object? value;
+  final PatchbaySnapshotMissWire? miss;
+
+  factory PatchbaySnapshotSelectionWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'path', 'found', 'value', 'miss'}, path);
+    return PatchbaySnapshotSelectionWire(
+      path: _wireString(json['path'], '$path.path'),
+      found: _wireBool(json['found'], '$path.found'),
+      value: json['value'] == null
+          ? null
+          : _wireJson(json['value'], '$path.value'),
+      miss: json['miss'] == null
+          ? null
+          : PatchbaySnapshotMissWire.fromJson(json['miss'], path: '$path.miss'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'path': path,
+    'found': found,
+    if (value != null) 'value': _wireJson(value!, r'$.value'),
+    if (miss != null) 'miss': miss!.toJson(),
+  };
+}
+
+final class PatchbaySnapshotWaitWire {
+  const PatchbaySnapshotWaitWire({
+    required this.outcome,
+    required this.condition,
+    required this.timeoutMs,
+    required this.elapsedMs,
+    required this.pollIntervalMs,
+    required this.polls,
+  });
+
+  final String outcome;
+  final PatchbaySnapshotConditionWire condition;
+  final int timeoutMs;
+  final int elapsedMs;
+  final int pollIntervalMs;
+  final int polls;
+
+  factory PatchbaySnapshotWaitWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'condition',
+      'timeoutMs',
+      'elapsedMs',
+      'pollIntervalMs',
+      'polls',
+    }, path);
+    return PatchbaySnapshotWaitWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      condition: PatchbaySnapshotConditionWire.fromJson(
+        json['condition'],
+        path: '$path.condition',
+      ),
+      timeoutMs: _wireInt(json['timeoutMs'], '$path.timeoutMs'),
+      elapsedMs: _wireInt(json['elapsedMs'], '$path.elapsedMs'),
+      pollIntervalMs: _wireInt(json['pollIntervalMs'], '$path.pollIntervalMs'),
+      polls: _wireInt(json['polls'], '$path.polls'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'condition': condition.toJson(),
+    'timeoutMs': timeoutMs,
+    'elapsedMs': elapsedMs,
+    'pollIntervalMs': pollIntervalMs,
+    'polls': polls,
   };
 }
 

@@ -279,8 +279,20 @@ final class PatchbayDirectHost {
         _hasOnlyFields(message, commonFields)) {
       result = await _handlers.catalog();
     } else if (path == '$protocolPathPrefix/snapshot' &&
-        _hasOnlyFields(message, commonFields)) {
-      result = await _handlers.snapshot();
+        _hasFields(message, commonFields, optional: _snapshotFields)) {
+      // `request` is optional and forwarded verbatim; only its JSON type is
+      // checked here, because what a selector may contain is the protocol
+      // package's rule and this host must not grow a second opinion about it.
+      final Object? selector = message['request'];
+      if (selector != null && selector is! Map<String, Object?>) {
+        await _sendError(
+          request.response,
+          HttpStatus.badRequest,
+          PatchbayDirectErrorCode.protocolError,
+        );
+        return;
+      }
+      result = await _handlers.snapshot(selector as Map<String, Object?>?);
     } else if (path == '$protocolPathPrefix/invoke' &&
         _hasOnlyFields(message, <String>{
           ...commonFields,
@@ -350,6 +362,26 @@ final class PatchbayDirectHost {
     Map<String, Object?> message,
     Set<String> allowed,
   ) => message.keys.every(allowed.contains) && message.length == allowed.length;
+
+  /// Fields the snapshot message may carry beyond the common identity ones.
+  static const Set<String> _snapshotFields = <String>{'request'};
+
+  /// Every [required] field present, and nothing outside [required] plus
+  /// [optional].
+  ///
+  /// An operation with an optional field cannot use [_hasOnlyFields], whose
+  /// exact-length rule is what makes the fixed-shape messages fail closed. The
+  /// closed-set half is kept: an unknown key is still a protocol error rather
+  /// than something quietly ignored.
+  static bool _hasFields(
+    Map<String, Object?> message,
+    Set<String> required, {
+    Set<String> optional = const <String>{},
+  }) =>
+      required.every(message.containsKey) &&
+      message.keys.every(
+        (String key) => required.contains(key) || optional.contains(key),
+      );
 
   bool _isAuthorized(HttpRequest request) {
     final List<String>? values =

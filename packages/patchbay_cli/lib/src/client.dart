@@ -65,7 +65,10 @@ final class PatchbayRuntimeIdentity {
 abstract interface class PatchbayClient {
   Future<Map<String, Object?>> identity();
   Future<Map<String, Object?>> catalog();
-  Future<Map<String, Object?>> snapshot();
+
+  /// [request] selects one field and may ask the App to wait for a condition
+  /// on it. Passing none reads the whole snapshot, as it always did.
+  Future<Map<String, Object?>> snapshot({PatchbaySnapshotRequest? request});
 
   /// [deadline] is how long the caller intends to wait for a long-poll command.
   /// Transports that cannot be torn down by one slow request may ignore it.
@@ -179,8 +182,17 @@ final class PatchbayConnection implements PatchbayClient {
       _call(PatchbayServiceHost.catalogMethod);
 
   @override
-  Future<Map<String, Object?>> snapshot() =>
-      _call(PatchbayServiceHost.snapshotMethod);
+  Future<Map<String, Object?>> snapshot({PatchbaySnapshotRequest? request}) =>
+      _call(
+        PatchbayServiceHost.snapshotMethod,
+        arguments: request == null
+            ? null
+            : <String, Object?>{
+                PatchbayServiceHost.snapshotRequestKey: jsonEncode(
+                  request.toWire().toJson(),
+                ),
+              },
+      );
 
   /// Reads Flutter's own diagnostic extensions without translating their
   /// SDK-specific schema into the stable Patchbay protocol.

@@ -110,6 +110,16 @@
       "values": ["flutterSubtreeOnly", "platformViewsMayBeMissing", "systemUiNotIncluded"]
     },
     {
+      "kind": "enum",
+      "name": "PatchbaySnapshotConditionWire",
+      "values": ["exists", "absent", "equals"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbaySnapshotMissWire",
+      "values": ["missingKey", "nullValue", "notAnObject"]
+    },
+    {
       "kind": "object",
       "name": "PatchbayParameterDescriptorWire",
       "fields": [
@@ -485,6 +495,38 @@
         {"name": "pixelRatio", "type": "num"},
         {"name": "warnings", "type": "PatchbayCaptureWarningWire", "list": true},
         {"name": "blob", "type": "PatchbayBlobMetadataWire"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbaySnapshotRequestWire",
+      "fields": [
+        {"name": "path", "type": "String"},
+        {"name": "until", "type": "PatchbaySnapshotConditionWire", "nullable": true},
+        {"name": "value", "type": "Json", "nullable": true},
+        {"name": "timeoutMs", "type": "int", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbaySnapshotSelectionWire",
+      "fields": [
+        {"name": "path", "type": "String"},
+        {"name": "found", "type": "bool"},
+        {"name": "value", "type": "Json", "nullable": true},
+        {"name": "miss", "type": "PatchbaySnapshotMissWire", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbaySnapshotWaitWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "condition", "type": "PatchbaySnapshotConditionWire"},
+        {"name": "timeoutMs", "type": "int"},
+        {"name": "elapsedMs", "type": "int"},
+        {"name": "pollIntervalMs", "type": "int"},
+        {"name": "polls", "type": "int"}
       ]
     }
   ]

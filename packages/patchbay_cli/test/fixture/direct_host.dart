@@ -22,7 +22,7 @@ Future<void> main() async {
         ],
         'uiTargets': const <Object?>[],
       },
-      snapshot: () async => <String, Object?>{
+      snapshot: ([_]) async => <String, Object?>{
         'schemaVersion': 1,
         'source': 'appRecorded',
       },

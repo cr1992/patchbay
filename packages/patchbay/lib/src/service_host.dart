@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'generated/core_wire.g.dart';
 import 'invocation.dart';
+import 'snapshot.dart';
 
 typedef PatchbayCatalogSource = Future<Map<String, Object?>> Function();
 typedef PatchbaySnapshotSource = Future<Map<String, Object?>> Function();
@@ -48,6 +49,15 @@ final class PatchbayServiceHost {
   /// stdin check against it.
   static const String stdinProvenanceKey = 'inputWasStdin';
 
+  /// Wire parameter carrying one JSON-encoded [PatchbaySnapshotRequestWire].
+  ///
+  /// The snapshot RPC takes its selection and wait as a single encoded object
+  /// for the same reason `invoke` takes `args` that way: the VM Service hands a
+  /// handler `Map<String, String>`, so one decoder shared with the direct
+  /// transport is the only way both paths can enforce the same shape instead of
+  /// each re-parsing loose strings.
+  static const String snapshotRequestKey = 'request';
+
   final String applicationId;
   final String appInstanceId;
   final PatchbayCatalogSource _catalog;
@@ -62,11 +72,164 @@ final class PatchbayServiceHost {
   Future<Map<String, Object?>> dispatchCatalog() async =>
       (await _readCatalog()).response;
 
-  Future<Map<String, Object?>> dispatchSnapshot() async => <String, Object?>{
-    ...await _snapshot(),
-    // Protocol-owned fields always win over consumer callback data.
+  /// Serves the snapshot RPC: the whole snapshot, one selected field, or a
+  /// server-side wait for a condition on that field.
+  ///
+  /// [request] is the raw wire object, decoded here rather than by each
+  /// transport, so the VM Service path and the direct HTTP path enforce one
+  /// shape and answer one vocabulary. Passing null keeps the original
+  /// behaviour — the whole snapshot — unchanged.
+  ///
+  /// Like the catalog, every failure is *answered*: a malformed request, a
+  /// consumer snapshot source that throws, and a wait that runs out all come
+  /// back as envelopes. Throwing would cost the caller an unbounded wait for a
+  /// reply that a precise diagnosis was already available for, because every
+  /// transport in front of this seam turns an escaping error into a dropped
+  /// response.
+  Future<Map<String, Object?>> dispatchSnapshot([
+    Map<String, Object?>? request,
+  ]) async {
+    if (request == null) {
+      final _SnapshotRead read = await _readSnapshot();
+      return read.response;
+    }
+    final PatchbaySnapshotRequest selection;
+    try {
+      selection = PatchbaySnapshotRequest.fromWire(
+        PatchbaySnapshotRequestWire.fromJson(request),
+      );
+    } on FormatException catch (error) {
+      // The decoder phrases its own failures in protocol vocabulary — which
+      // field, which rule — so its sentence is exactly what the caller needs.
+      return _rejectionEnvelope(
+        'invalidSnapshotRequest',
+        _invalidSnapshotRequestNotice,
+        <String, Object?>{'reason': error.message},
+      );
+    }
+    return selection.isWait
+        ? _awaitSnapshot(selection)
+        : _selectSnapshot(selection);
+  }
+
+  Future<Map<String, Object?>> _selectSnapshot(
+    PatchbaySnapshotRequest request,
+  ) async {
+    final _SnapshotRead read = await _readSnapshot();
+    if (read.violated) return read.response;
+    return <String, Object?>{
+      'schemaVersion': schemaVersion,
+      'selection': PatchbaySnapshotSelection.resolve(
+        read.response,
+        request.path,
+      ).toJson(),
+    };
+  }
+
+  /// Polls the consumer snapshot until the condition holds or the budget ends.
+  ///
+  /// The first probe happens before any delay, so a condition that already
+  /// holds answers immediately instead of paying one poll interval. A snapshot
+  /// source that fails mid-wait ends the wait with its own envelope rather than
+  /// being retried: the caller asked about App state, and a source that cannot
+  /// be read is not a state the wait can ever observe.
+  Future<Map<String, Object?>> _awaitSnapshot(
+    PatchbaySnapshotRequest request,
+  ) async {
+    final Duration timeout = request.timeout!;
+    final PatchbaySnapshotCondition condition = request.until!;
+    final Stopwatch elapsed = Stopwatch()..start();
+    var polls = 0;
+    PatchbaySnapshotSelection? last;
+    while (true) {
+      final _SnapshotRead read = await _readSnapshot();
+      if (read.violated) return read.response;
+      polls += 1;
+      last = PatchbaySnapshotSelection.resolve(read.response, request.path);
+      if (last.satisfies(condition, request.value)) {
+        return <String, Object?>{
+          'schemaVersion': schemaVersion,
+          'selection': last.toJson(),
+          'wait': PatchbaySnapshotWaitWire(
+            outcome: 'observed',
+            condition: condition.wire,
+            timeoutMs: timeout.inMilliseconds,
+            elapsedMs: elapsed.elapsed.inMilliseconds,
+            pollIntervalMs: patchbaySnapshotPollInterval.inMilliseconds,
+            polls: polls,
+          ).toJson(),
+        };
+      }
+      final Duration remaining = timeout - elapsed.elapsed;
+      if (remaining <= Duration.zero) break;
+      await Future<void>.delayed(
+        remaining < patchbaySnapshotPollInterval
+            ? remaining
+            : patchbaySnapshotPollInterval,
+      );
+    }
+    // A timeout is a rejection, exactly as `ui.wait` reports one: the condition
+    // was never observed, so there is no observation to accept. The last
+    // resolution travels with it — "waited for equals true, kept seeing false"
+    // is the half that says whether to wait longer or fix the path.
+    return _rejectionEnvelope(
+      'snapshotWaitTimeout',
+      'The snapshot condition was not observed inside the declared budget.',
+      <String, Object?>{
+        'path': request.path,
+        'condition': condition.name,
+        'timeoutMs': timeout.inMilliseconds,
+        'elapsedMs': elapsed.elapsed.inMilliseconds,
+        'pollIntervalMs': patchbaySnapshotPollInterval.inMilliseconds,
+        'polls': polls,
+        'observed': last.toJson(),
+      },
+    );
+  }
+
+  /// Reads the consumer snapshot once, answering a failed source instead of
+  /// letting it escape as a dropped response.
+  Future<_SnapshotRead> _readSnapshot() async {
+    final Map<String, Object?> declared;
+    try {
+      declared = await _snapshot();
+    } on Object catch (error) {
+      // The type, never the message: a consumer error string is arbitrary App
+      // data and this envelope goes back over the wire.
+      return _SnapshotRead.violated(
+        _providerViolationEnvelope(
+          'The App snapshot source failed.',
+          <String, Object?>{
+            'reason': 'snapshotSourceFailed',
+            'error': error.runtimeType.toString(),
+          },
+        ),
+      );
+    }
+    return _SnapshotRead.valid(<String, Object?>{
+      ...declared,
+      // Protocol-owned fields always win over consumer callback data.
+      'schemaVersion': schemaVersion,
+    });
+  }
+
+  Map<String, Object?> _rejectionEnvelope(
+    String code,
+    String notice,
+    Map<String, Object?> details,
+  ) => <String, Object?>{
     'schemaVersion': schemaVersion,
+    'admission': PatchbayAdmissionWire.rejected.name,
+    'notice': notice,
+    'rejection': PatchbayRejection(
+      code: code,
+      notice: notice,
+      details: details,
+    ).toJson(),
   };
+
+  static const String _invalidSnapshotRequestNotice =
+      'The snapshot request violates the Patchbay selection contract.';
 
   Future<Map<String, Object?>> dispatchInvoke(
     String command,
@@ -152,10 +315,24 @@ final class PatchbayServiceHost {
     String method,
     Map<String, String> parameters,
   ) async {
-    if (method != snapshotMethod || _hasUserParameters(parameters)) {
-      return _invalidParams('snapshot does not accept parameters');
+    if (method != snapshotMethod ||
+        parameters.keys.any(
+          (String key) => key != 'isolateId' && key != snapshotRequestKey,
+        )) {
+      return _invalidParams('snapshot received unknown parameters');
     }
-    return _result(await dispatchSnapshot());
+    final String? encoded = parameters[snapshotRequestKey];
+    if (encoded == null) return _result(await dispatchSnapshot());
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(encoded);
+    } on FormatException {
+      return _invalidParams('$snapshotRequestKey must be a JSON object');
+    }
+    if (decoded is! Map<String, dynamic>) {
+      return _invalidParams('$snapshotRequestKey must be a JSON object');
+    }
+    return _result(await dispatchSnapshot(Map<String, Object?>.from(decoded)));
   }
 
   Future<ServiceExtensionResponse> handleIdentity(
@@ -395,25 +572,48 @@ final class _CatalogRead {
   /// The rejection `details` naming what is wrong, or null for a valid catalog.
   final Map<String, Object?>? violation;
 
-  /// Reuses the invocation vocabulary — `admission` plus a stable rejection
-  /// `code` — so a client that already classifies rejections classifies a
-  /// broken catalog without learning a second error shape.
   static Map<String, Object?> _violationEnvelope(
     Map<String, Object?> violation,
-  ) => <String, Object?>{
-    'schemaVersion': PatchbayServiceHost.schemaVersion,
-    'admission': PatchbayAdmissionWire.rejected.name,
-    'notice': _violationNotice,
-    'rejection': PatchbayRejection(
-      code: 'providerProtocolViolation',
-      notice: _violationNotice,
-      details: violation,
-    ).toJson(),
-  };
+  ) => _providerViolationEnvelope(_violationNotice, violation);
 
   static const String _violationNotice =
       'The App catalog violates the Patchbay command contract.';
 }
+
+/// One snapshot read: either the snapshot to serve, or the envelope that
+/// replaces it when the consumer source could not be read.
+final class _SnapshotRead {
+  const _SnapshotRead._(this.response, {required this.violated});
+
+  const _SnapshotRead.valid(Map<String, Object?> response)
+    : this._(response, violated: false);
+
+  const _SnapshotRead.violated(Map<String, Object?> response)
+    : this._(response, violated: true);
+
+  /// The snapshot, or the rejection envelope every caller receives instead.
+  final Map<String, Object?> response;
+  final bool violated;
+}
+
+/// The envelope a provider-side contract failure is answered with.
+///
+/// Reuses the invocation vocabulary — `admission` plus a stable rejection
+/// `code` — so a client that already classifies rejections classifies a broken
+/// catalog or an unreadable snapshot without learning a second error shape.
+Map<String, Object?> _providerViolationEnvelope(
+  String notice,
+  Map<String, Object?> violation,
+) => <String, Object?>{
+  'schemaVersion': PatchbayServiceHost.schemaVersion,
+  'admission': PatchbayAdmissionWire.rejected.name,
+  'notice': notice,
+  'rejection': PatchbayRejection(
+    code: 'providerProtocolViolation',
+    notice: notice,
+    details: violation,
+  ).toJson(),
+};
 
 /// The catalog-declared argument policy the host enforces before dispatch.
 final class _CommandPolicy {

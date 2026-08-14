@@ -124,10 +124,18 @@ abstract final class PatchbayCommandHelp {
     }
     _writeConditions(output, sorted);
     _writeOptions(output, parser, optionNames);
+    // A group name can also be a command of its own — `snapshot` is both — and
+    // that page is what `patchbay snapshot --help` prints. Saying what the
+    // typed command calls belongs here, or it would be the one command whose
+    // help omits it. Deeper commands keep their own page for that.
+    output.writeln();
+    for (final PatchbayFriendlyCommand command in sorted) {
+      if (command.path.length != topic.length) continue;
+      output.writeln(protocolLine(command));
+    }
     // Derived per command rather than asserted once for the page: a group is
     // not required to be homogeneous, and `sessions` needs no App at all while
     // `ui` mixes catalog commands with SDK passthrough.
-    output.writeln();
     for (final String line in <String>{
       for (final PatchbayFriendlyCommand command in sorted)
         availabilityLine(command),

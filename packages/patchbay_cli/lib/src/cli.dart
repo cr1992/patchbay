@@ -420,6 +420,12 @@ ArgParser patchbayCliParser() => ArgParser()
         'asks the App to wait (--timeout-ms) extends its own request by this '
         'much rather than being cut short by it.',
   )
+  ..addOption(
+    'path',
+    help:
+        'Dot path into the snapshot (a.b.c); answers that field or subtree '
+        'instead of the whole snapshot.',
+  )
   ..addOption('args', help: 'JSON object passed to a domain command.')
   ..addFlag(
     'stdin',
@@ -448,7 +454,16 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('levels', help: 'Comma-separated log levels.')
   ..addOption('categories', help: 'Comma-separated log categories.')
   ..addOption('since', help: 'ISO-8601 lower log time bound.')
-  ..addOption('until', help: 'ISO-8601 upper log time bound.')
+  // One option, two commands, never both at once: `_validateOptions` refuses
+  // it for every command that does not list it, so the two readings can never
+  // meet. The help says both because a shared option that documents only one
+  // of them is the kind of lie an operator finds out about at the prompt.
+  ..addOption(
+    'until',
+    help:
+        'logs query|export: ISO-8601 upper time bound. snapshot wait: the '
+        'condition to wait for (exists|absent|equals).',
+  )
   ..addOption('ttl-ms', help: 'Artifact lifetime in milliseconds.')
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
   ..addOption('output', help: 'Local artifact output path.')
@@ -698,7 +713,9 @@ Future<_Execution> _execute(
     case PatchbayCommandTarget.clientCatalog:
       return _Execution(await connection.catalog());
     case PatchbayCommandTarget.clientSnapshot:
-      return _Execution(await connection.snapshot());
+      return _Execution(
+        await connection.snapshot(request: _selection(friendly)),
+      );
     case PatchbayCommandTarget.clientWidgetTree:
       return _Execution(await connection.widgetTree());
     case PatchbayCommandTarget.clientRenderTree:
@@ -800,6 +817,20 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+/// The snapshot selection this invocation asks for, or null for the whole
+/// snapshot.
+///
+/// The declaration already produced the wire object; decoding it through the
+/// same request type the App validates is what keeps the CLI from having a
+/// second, looser opinion about what a selector may say. A malformed one is a
+/// usage error here rather than a round trip that comes back rejected.
+PatchbaySnapshotRequest? _selection(PatchbayFriendlyInvocation friendly) {
+  if (friendly.arguments.isEmpty) return null;
+  return PatchbaySnapshotRequest.fromWire(
+    PatchbaySnapshotRequestWire.fromJson(friendly.arguments),
+  );
 }
 
 /// The `blob.read` chunk size this host will actually accept.
