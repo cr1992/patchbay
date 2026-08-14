@@ -1,0 +1,41 @@
+# 问题与特性台账
+
+> 本仓已确认缺陷与待实现特性的**唯一真源**。新条目随发现进表，带一句动机与证据指针；
+> 完成后随发版移入 CHANGELOG 对应版本段并从此处删行。`design-gate` 条目未经仓主裁决
+> 不得进入实现 MR。只记结论与指针，不写过程叙事；裁决理由在对应 MR / note。
+> 已裁决不做的方向见 [design.md 的非目标台账](design.md)，此处不重复、不重提。
+
+## 缺陷
+
+| 条目 | 动机 / 证据 | 状态 |
+|---|---|---|
+| CLI 对无应答对端的失败总时长偏离单次超时量级（Android SIGSTOP 实测 178s，期望 ~30s 量级） | 诊断批真机验收发现，评审追问中 | 在途 |
+
+## 特性（待排期）
+
+| 条目 | 动机 / 出处 | 备注 |
+|---|---|---|
+| 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 呼叫线真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | **design-gate** |
+| 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 呼叫线：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | |
+| 调试台「保持亮屏」开关（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，opt-in） | iOS 真机无系统级 stay-awake 命令，app 侧是唯一自动化手段；Android 可 `adb shell svc power stayon usb` 兜底 | |
+| 会话粘性：`sessions list/prune`、`session use` | 双设备并连时每条命令显式敲长 `--session` | |
+| 领域条件等待与字段选择：`snapshot --path`、`wait --until` | 客户端轮询应变服务端长轮询 | |
+| 统一 CommandRegistry：descriptor+decoder+gate+handler+validator 过同一 dispatcher | 第二 consumer 手写 adapter 的元键坑已实证核心不机检 descriptor 语义的风险 | |
+| 协议演进套件：serverVersion / feature capabilities / catalog digest / 兼容 golden | 多 consumer 生态前的地基 | |
+| 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe`/`doctor` | dogfood | |
+| DevTools 借用三批：inspect 开关 → perf VM RPC → net 画像 | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
+| snapshot revision / diff | dogfood（低优先级） | |
+
+## design-gate（需仓主裁决后动工）
+
+| 条目 | 裁决点 |
+|---|---|
+| macOS 桌面 lifecycle 闸判定 | 「失焦但在渲」是否放行：桌面端改帧活性判定、移动端维持 `resumed`（方案 A）；第二 consumer 有复现环境可验证 |
+| 锚定式手势 | 相对比例坐标手势与「不做坐标定位」立场的边界划法 |
+| DevTools net 画像 | 请求画像的脱敏口径 |
+
+## 维护规则
+
+- 一条一行，动机一句话，证据给指针；不粘贴过程。
+- 完成 = 移入 CHANGELOG 对应版本段并删行；放弃 = 移入 design.md 非目标台账并写理由。
+- 每次发版前过一遍本表，与 CHANGELOG、兼容矩阵同批核对。
