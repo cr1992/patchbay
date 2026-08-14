@@ -30,6 +30,94 @@ flowchart LR
 Flutter 与 `patchbay`。接入方（consumer）的设备 SDK、路由字符串和领域词汇不进入这四个 package；
 需要这些类型时，先在接入方 adapter 中转成中立 DTO。
 
+## 一条请求的生命周期
+
+上面那张图说的是"谁依赖谁"。这一节说的是"一条命令实际走过哪些关口"——新接入方排查
+"我的命令为什么被拒"时，先在这张图上定位是哪一层说的话，再去读对应的稳定 code。
+
+```mermaid
+sequenceDiagram
+    participant CLI as patchbay CLI
+    participant T as 传输<br/>VM Service / direct HTTP
+    participant H as service host<br/>(patchbay)
+    participant B as UI 桥 / 领域 adapter
+    participant C as consumer controller
+
+    CLI->>CLI: 解析 argv；CLI 路径译成协议命令名
+    CLI->>CLI: 选会话（只读本地目录，不连 App）
+    CLI->>T: 拨号 + identity 握手（同样计入 RPC 预算）
+    CLI->>H: catalog（每条服务命令调用前必读一次）
+    CLI->>CLI: sensitive 参数写在命令行 → 用法错误，请求根本不发出
+    CLI->>H: invoke 命令、参数、requestId
+    H->>H: 参数白名单 → 重读 catalog → sensitive 校验 → 处理 inputWasStdin 元键
+    H->>B: 路由：ui.* / navigation.* / artifact → 桥；其余 → domainInvoke
+    B->>B: 解析目标 → 基础门 + 声明门（可能 await）→ 门后二次解析
+    B->>C: 复用既有 controller
+    C-->>B: 类型化结果
+    B-->>H: PatchbayInvocation 信封
+    H->>H: 复核信封：schemaVersion / requestId / admission 语义
+    H-->>CLI: admission 为 accepted 或 rejected
+    CLI->>CLI: 目录漂移复核 → 分类退出码
+```
+
+### requestId 贯穿全程，三处独立校验
+
+`requestId` 由客户端生成（VM Service 路径是 `patchbay-cli-vm-<n>`），随 invoke 发出，
+沿途三处各自校验一次，任何一处对不上都不是"猜"，而是稳定拒绝：
+
+1. **host 收到时**——参数里没带就自己补一个 nonce；带了但为空串，以 invalidParams 拒绝；
+2. **host 拿到 adapter 回程信封时**——信封里的 `requestId` 与本次请求不一致，整条应答被替换成
+   `providerProtocolViolation`（`details.reason: requestIdMismatch`），adapter 的原始 payload 不外发；
+3. **CLI 收到应答时**——顶层 `requestId` 与自己发出的不同，抛 `requestIdMismatch`。
+
+桥被 `PatchbayFlutterServiceHost` 调用时沿用传入的 `requestId`；只有在被直接调用且调用方没给 ID
+时才生成本地 ID。所以日志、CLI 输出和信封能稳定关联到同一次请求。
+
+### 谁能拒绝，用什么码
+
+| 关口 | 典型稳定 code | 退出码 |
+|---|---|---|
+| CLI 用法（`--args` 塞 sensitive、参数形状不对） | `usageError` | 64 |
+| 会话选择 / 拨号 / 对端不应答 | `sessionAmbiguous`、`appUnresponsive`、`transportError` | 3 |
+| 协议不兼容、目录里没有该命令、目录漂移 | `schemaVersionMismatch`、`commandNotRegistered`、`catalogInvocationDrift` | 4 |
+| host 前置校验（目录不可用、敏感值未走 stdin） | `providerProtocolViolation`、`sensitiveInputRequiresStdin` | 5 |
+| 桥 / adapter 受理前拒绝（门、目标歧义、代际过期、生命周期） | `uiTargetAmbiguous`、`uiGenerationStale`、`*LifecycleNotResumed` | 5 |
+| 已受理但业务返回类型化失败 | payload 里的 `outcome: failed` / job 终态 `failed` | 6 |
+
+这张表跨了两种信封，别当成一种：
+
+- **App 说的话**——`commandNotRegistered` 及第四、五行，是 `admission: rejected` 的响应信封，
+  带 `rejection.code` 与自由 `details`；最后一行则是 `admission: accepted`，失败事实在 payload 里。
+  受理与执行刻意不混，理由见[受理 ≠ 执行](#1-受理--执行)。
+- **CLI 说的话**——用法、会话、传输，以及 CLI 侧的协议复核（`schemaVersionMismatch`、
+  `catalogInvocationDrift`），App 根本没表态或表态没通过复核，走 CLI 自己的错误信封
+  `{"error": {"code": …, "details": …}}`。
+
+两种信封字段同构（稳定 `code` + 自由 `details`），所以一个解析器读两种；但"谁拒绝的"要看
+它出现在哪一种里。
+
+目录违规是**整份**失效而不是跳过坏行：host 发现命令名非法或重名时，应答里干脆没有 `commands`
+键，并在 `details.violations` 里一次列全所有违规项。跳过坏行会让接入方以为自己只是少注册了几条
+命令，而不是目录本身坏了。
+
+### job 的异步分支
+
+长流程命令受理即返回 `admission: accepted` + 顶层 `jobId`，controller 在 App 侧继续跑。
+CLI 侧 `--wait` 有两条路，取决于 catalog 里有没有 `patchbay.job.wait`：
+
+- **有**——服务端长轮询循环：每轮带 `afterSequence`（已见过的最大事件序号）与 `timeoutMs`
+  （剩余预算，单轮夹到 30 秒），收到终态快照即返回，结果标 `waitMode: serverLongPoll`；
+- **没有**——退化为按固定间隔轮询 `patchbay.job.get`，结果标 `waitMode: legacyPolling`
+  并附一句说明。这是对老 host 的兼容路径，不是推荐形态。
+
+两条路都在总预算耗尽时以 `waitTimeout`（退出码 6）收尾，`details.jobId` 指明是哪个 job。
+终态结果里**顶层 `jobId` 是稳定取值位置**——`payload.jobId` 是 App 自己的快照字段，两处都保留，
+脚本读顶层那个。job 事件语义与取消的终态规则见[慢事实用 job 表达](#6-慢事实用-job-表达)。
+
+> **`patchbay.job.get|wait|cancel` 是接入方 adapter 的命令，不由这四个 package 注册。**
+> 本仓提供 `PatchbayJobRegistry`（账本、预算、取消 callback 语义），把它接成协议命令是接入方的事。
+> 没接就没有 job 面，CLI 的 `--wait` 也就无从谈起。
+
 ## 为什么需要 App 合作接入
 
 Patchbay 不是 adb 那种对任意 App 生效的外部工具：它要求 App 在组合根花约 30 行接入。
