@@ -506,13 +506,20 @@ $ patchbay ui keep-awake off                      # 立刻归还，不等租约
 
 各 `outcome`：`engaged`（本次开启）、`renewed`（已经押着，只是续租，不会再调一次 delegate）、
 `released`、`unchanged`（本来就没押着）、`observed`（`status`）。`source` 恒为 `appRecorded`——它说的
-是 **App 让宿主做了什么**，不是「屏幕确实亮着」。Patchbay 不回读平台，delegate 释放失败时
-`enabled` 照样落回 `false`（App 确实不再要求了），失败本身留在 `lastReleaseFailure` 里，两件事分开报。
+是 **App 让宿主做了什么**，不是「屏幕确实亮着」。Patchbay 不回读平台。
+
+**平台释放失败时 hold 不落账，保持可重试。** delegate 抛错意味着平台没松手，此时把 `enabled` 记成
+`false` 会让下一次 `off` 变成 `unchanged` 空转、再也不碰平台，屏幕就永久亮着且没有任何补救入口。
+所以记账只在 delegate 成功后才落：失败时 `enabled` 保持 `true`、`lastRelease` 保持空，
+`lastReleaseFailure` 带上失败类型，再敲一次 `off` 会真的再调一次平台。租约同理不撤——**它是没人
+在场时唯一会替你重试的东西**，到期释放失败会在一个租约之后再试一次（与你选的租约同频，不是重试
+风暴）。重新 `on` 属于你已经知情并主动改主意，会清掉这条陈旧失败。
 
 **接入方没接线**时 `set` 回 `keepAwakeNotWired` 并在 notice 里点名 `keepAwakeDelegate`；`status`
 不拒绝，回 `wired: false`。**App 不在前台**时 `on` 以 `keepAwakeLifecycleNotResumed` 拒绝并带上
 `lifecycleState`（iOS 在后台设 `isIdleTimerDisabled` 是无效的，记下来等于记一件没发生的事）；
-`off` 永远允许——归还屏幕不该是被拒的那个动作。
+`off` 永远允许——归还屏幕不该是被拒的那个动作。**debug 面已销毁**时 `set` 回
+`keepAwakeHostDisposed`（销毁时已经归还过），`status` 照常可读。
 
 `doctor` 的 lifecycle 项在 iOS 上会顺带提这条命令：那正是「设备睡了、怎么让它别再睡」的场景，而
 Android 的 `adb` 解法在 iOS 上不存在。

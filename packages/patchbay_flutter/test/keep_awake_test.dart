@@ -197,7 +197,7 @@ void main() {
       // No `off` is ever sent: this is the operator whose terminal died, and
       // neither transport tells the App about that.
       await tester.pump(const Duration(milliseconds: 1001));
-      await _drain(bridge);
+      await _drain(tester, bridge);
 
       expect(bridge.enabled, isFalse);
       expect(delegate.calls, <bool>[true, false]);
@@ -219,7 +219,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 900));
       await bridge.status();
       await tester.pump(const Duration(milliseconds: 200));
-      await _drain(bridge);
+      await _drain(tester, bridge);
 
       // A polling operator must not be able to hold the screen forever by
       // watching it.
@@ -240,7 +240,7 @@ void main() {
         const PatchbayKeepAwakeRequestWire(enabled: false, leaseMs: null),
       );
       await tester.pump(const Duration(milliseconds: 2000));
-      await _drain(bridge);
+      await _drain(tester, bridge);
 
       // The delegate is not asked to release twice, and the recorded reason
       // stays the one that actually happened.
@@ -294,6 +294,110 @@ void main() {
       await tester.pump();
 
       expect(delegate.calls, <bool>[true, false]);
+    });
+  });
+
+  // `dispose()` is synchronous and cannot join the request queue, so it can
+  // land in the middle of an in-flight engage. At that instant nothing is held
+  // yet, so there is nothing for `dispose` itself to release — the danger is
+  // entirely on the other side: the suspended request resuming afterwards and
+  // engaging a host that no longer exists.
+  group('keep-awake dispose race', () {
+    testWidgets('a dispose during an awaited gate cannot engage afterwards', (
+      WidgetTester tester,
+    ) async {
+      final _RecordingDelegate delegate = _RecordingDelegate();
+      final Completer<void> gateEntered = Completer<void>();
+      final Completer<void> gateHeld = Completer<void>();
+      final PatchbayKeepAwakeBridge bridge = _bridge(
+        delegate: delegate,
+        gateIds: const <String>{'consumer.keepAwake'},
+        gates: PatchbayGateEvaluator(
+          baseGate: () => const PatchbayGateDecision.allow(),
+          consumerGate: (_) async {
+            gateEntered.complete();
+            await gateHeld.future;
+            return const PatchbayGateDecision.allow();
+          },
+        ),
+      );
+
+      final Future<PatchbayInvocation> pending = bridge.set(
+        PatchbayKeepAwakeRequestWire(
+          enabled: true,
+          leaseMs: PatchbayKeepAwakeBridge.maxLease.inMilliseconds,
+        ),
+      );
+      // `set` is queued, so waiting for the gate to actually be entered is what
+      // puts the teardown inside this window rather than in front of it.
+      await gateEntered.future;
+      // Nothing is held yet, so the teardown has nothing to give back and
+      // returns immediately — the request is still suspended behind the gate.
+      bridge.dispose();
+      gateHeld.complete();
+
+      expect(_rejection(await pending)['code'], 'keepAwakeHostDisposed');
+      // The screen must never be taken by a host that is already gone.
+      expect(delegate.calls, isEmpty);
+      expect(bridge.enabled, isFalse);
+      // A surviving lease would also be a timer outliving the host; pumping
+      // past the longest one it could have armed proves none was.
+      await tester.pump(PatchbayKeepAwakeBridge.maxLease);
+      expect(delegate.calls, isEmpty);
+    });
+
+    testWidgets('a dispose while the delegate engages gives the screen back', (
+      WidgetTester tester,
+    ) async {
+      final Completer<void> entered = Completer<void>();
+      final Completer<void> engaging = Completer<void>();
+      final _RecordingDelegate delegate = _RecordingDelegate(
+        before: (bool enabled) async {
+          if (!enabled) return;
+          entered.complete();
+          await engaging.future;
+        },
+      );
+      final PatchbayKeepAwakeBridge bridge = _bridge(delegate: delegate);
+
+      final Future<PatchbayInvocation> pending = bridge.set(
+        const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
+      );
+      // `set` is queued, so the teardown has to wait until the request is
+      // genuinely suspended inside the delegate — otherwise it just beats the
+      // request to the entry check and proves nothing about this window.
+      await entered.future;
+      bridge.dispose();
+      engaging.complete();
+
+      expect(_rejection(await pending)['code'], 'keepAwakeHostDisposed');
+      // This one did reach the platform, so refusing is not enough: the hold
+      // it took has to be handed back before the request is answered.
+      expect(delegate.calls, <bool>[true, false]);
+      expect(bridge.enabled, isFalse);
+      await tester.pump(const Duration(minutes: 2));
+      expect(delegate.calls, <bool>[true, false]);
+    });
+
+    testWidgets('a request that arrives after teardown is refused outright', (
+      WidgetTester tester,
+    ) async {
+      final _RecordingDelegate delegate = _RecordingDelegate();
+      final PatchbayKeepAwakeBridge bridge = _bridge(delegate: delegate);
+
+      bridge.dispose();
+
+      expect(
+        _rejection(
+          await bridge.set(
+            const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: null),
+          ),
+        )['code'],
+        'keepAwakeHostDisposed',
+      );
+      expect(delegate.calls, isEmpty);
+      // Reading stays available: it is the answer that explains the refusal.
+      expect(_payload(await bridge.status())['enabled'], isFalse);
     });
   });
 
@@ -617,7 +721,7 @@ void main() {
       expect(_payload(await bridge.status())['enabled'], isFalse);
     });
 
-    testWidgets('a throwing release drops the hold and keeps the failure', (
+    testWidgets('a throwing release leaves the hold retryable, not dropped', (
       WidgetTester tester,
     ) async {
       final _RecordingDelegate delegate = _RecordingDelegate(failOn: false);
@@ -633,13 +737,55 @@ void main() {
       );
 
       expect(rejection['code'], 'keepAwakeDelegateFailed');
-      // `enabled` says what the App is asking for, and after a release it is
-      // asking for nothing. Whether the platform let go is the separate fact
-      // that `lastReleaseFailure` carries.
+      // The platform did not let go, so the App is still holding it. Recording
+      // the release as done would make the next `off` an `unchanged` no-op and
+      // strand the screen lit with no way left to ask again.
       final Map<String, Object?> payload = _payload(await bridge.status());
-      expect(payload['enabled'], isFalse);
-      expect(payload['lastRelease'], 'operatorRequest');
+      expect(payload['enabled'], isTrue);
+      expect(payload['lastRelease'], isNull);
       expect(payload['lastReleaseFailure'], '_KeepAwakeDelegateFailure');
+
+      delegate.failOn = null;
+      final Map<String, Object?> retried = _payload(
+        await bridge.set(
+          const PatchbayKeepAwakeRequestWire(enabled: false, leaseMs: null),
+        ),
+      );
+
+      expect(retried['outcome'], 'released');
+      expect(retried['enabled'], isFalse);
+      expect(retried['lastRelease'], 'operatorRequest');
+      expect(retried['lastReleaseFailure'], isNull);
+      expect(delegate.calls, <bool>[true, false]);
+    });
+
+    testWidgets('an expiry whose release fails retries a lease later', (
+      WidgetTester tester,
+    ) async {
+      final _RecordingDelegate delegate = _RecordingDelegate(failOn: false);
+      final PatchbayKeepAwakeBridge bridge = _bridge(delegate: delegate);
+
+      await bridge.set(
+        const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 1000),
+      );
+      await tester.pump(const Duration(milliseconds: 1001));
+      await _drain(tester, bridge);
+
+      // Nobody is here to type `off` — this is exactly the unattended session
+      // the lease exists for, so a failed release cannot be the last attempt.
+      expect(bridge.enabled, isTrue);
+      expect(
+        _payload(await bridge.status())['lastReleaseFailure'],
+        '_KeepAwakeDelegateFailure',
+      );
+
+      delegate.failOn = null;
+      await tester.pump(const Duration(milliseconds: 1001));
+      await _drain(tester, bridge);
+
+      expect(bridge.enabled, isFalse);
+      expect(delegate.calls, <bool>[true, false]);
+      expect(_payload(await bridge.status())['lastRelease'], 'leaseExpired');
     });
 
     testWidgets('a later clean engage clears the stale failure', (
@@ -655,10 +801,17 @@ void main() {
         const PatchbayKeepAwakeRequestWire(enabled: false, leaseMs: null),
       );
       delegate.failOn = null;
-      await bridge.set(
-        const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
+      // The hold survived the failed release, so asking again is a renewal —
+      // and an operator who deliberately re-engages has made the stale
+      // "the last release failed" no longer their problem.
+      final Map<String, Object?> payload = _payload(
+        await bridge.set(
+          const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
+        ),
       );
 
+      expect(payload['outcome'], 'renewed');
+      expect(payload['lastReleaseFailure'], isNull);
       expect(_payload(await bridge.status())['lastReleaseFailure'], isNull);
 
       await _release(tester, bridge);
@@ -815,12 +968,17 @@ void main() {
 /// [failOn] names the one transition that throws, so a test can fail an engage
 /// and a release independently.
 final class _RecordingDelegate {
-  _RecordingDelegate({this.failOn});
+  _RecordingDelegate({this.failOn, this.before});
 
   final List<bool> calls = <bool>[];
   bool? failOn;
 
+  /// Awaited before the transition is applied, so a test can suspend the
+  /// delegate mid-call and land a `dispose()` inside that window.
+  final Future<void> Function(bool enabled)? before;
+
   Future<void> call(bool enabled) async {
+    await before?.call(enabled);
     if (enabled == failOn) throw const _KeepAwakeDelegateFailure();
     calls.add(enabled);
   }
@@ -878,7 +1036,11 @@ Future<void> _release(
 }
 
 /// Lets a lease expiry queued by the timer finish before the state is read.
-Future<void> _drain(PatchbayKeepAwakeBridge bridge) => bridge.status();
+Future<void> _drain(WidgetTester tester, PatchbayKeepAwakeBridge bridge) async {
+  await tester.pump();
+  await bridge.status();
+  await tester.pump();
+}
 
 PatchbayFlutterServiceHost _host(PatchbayFlutterBridge bridge) =>
     PatchbayFlutterServiceHost(

@@ -263,6 +263,13 @@ App 连接生命周期，租约是「操作者已经走了」唯一能被诚实�
 并点名缺的注入点。响应 `source` 恒为 `appRecorded`——它说的是 App 让宿主做了什么，本包不回读平台，
 不宣称屏幕确实亮着。
 
+**delegate 释放失败时 hold 不落账。** 平台没松手却把 `enabled` 记成 `false`，会让下一次 `off` 变成
+`unchanged` 空转、再也不碰平台，屏幕永久亮着且没有补救入口。所以记账只在 delegate 成功后才落：
+失败时保持 `enabled: true` 并带上 `lastReleaseFailure`，租约也不撤（到期释放失败会在一个租约之后
+再试）。`dispose()` 是同步的、不排进请求队列，因此可能落在一次进行中的开启中间——gate 与 delegate
+两个挂起点恢复后都会重查销毁态，销毁后的 `set` 一律以 `keepAwakeHostDisposed` 拒绝，delegate 已经
+拿到 hold 的那种情况先归还再拒绝。**销毁之后 delegate 不会再收到 `true`。**
+
 ## 语义导航
 
 导航不应通过给首页、设置按钮加 Key 后模拟点击完成。推荐在 App 组合根注入一个 consumer adapter，

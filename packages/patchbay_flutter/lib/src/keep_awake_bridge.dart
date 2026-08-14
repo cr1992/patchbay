@@ -97,6 +97,16 @@ final class PatchbayKeepAwakeBridge {
   final Set<String> gateIds;
 
   bool _enabled = false;
+
+  /// Set synchronously by [dispose], read back after every await in [_apply].
+  ///
+  /// [dispose] cannot join the request queue — it is synchronous, and a
+  /// teardown that had to wait behind a slow consumer gate would be a teardown
+  /// a consumer could stall. So it lands wherever it lands, including in the
+  /// middle of an in-flight engagement, and the suspended request is the one
+  /// that has to notice.
+  bool _disposed = false;
+
   Duration? _lease;
   DateTime? _leaseDeadline;
   Timer? _leaseTimer;
@@ -147,7 +157,15 @@ final class PatchbayKeepAwakeBridge {
   /// hold up host teardown. The delegate call itself is still made before this
   /// returns, and its failure is recorded rather than thrown at a caller that
   /// is on its way out.
+  ///
+  /// Releasing what is held is only half of it. Nothing is held yet during the
+  /// window between a request arriving and its gate returning, so a `dispose`
+  /// landing there has nothing to give back — and the danger is entirely on the
+  /// other side, in the suspended request that would otherwise resume and
+  /// engage a host that no longer exists. [_disposed] is what closes that door;
+  /// it is set first, before anything can await.
   void dispose() {
+    _disposed = true;
     _cancelLease();
     if (!_enabled) return;
     unawaited(_release(PatchbayKeepAwakeReleaseWire.hostDisposed));
@@ -157,6 +175,10 @@ final class PatchbayKeepAwakeBridge {
     PatchbayKeepAwakeRequestWire request,
     String requestId,
   ) async {
+    // There is no switch left to operate: the teardown already gave back
+    // whatever was held, so a release has nothing to do and an engagement would
+    // arm a lease nobody owns.
+    if (_disposed) return _hostDisposed(requestId);
     // A release carries no lease: accepting one would leave the caller to guess
     // whether it scheduled a later re-engagement.
     if (!request.enabled && request.leaseMs != null) {
@@ -216,8 +238,13 @@ final class PatchbayKeepAwakeBridge {
 
     final PatchbayGateRejection? gate = await _gates.evaluate(gateIds);
     if (gate != null) return _gateRejected(requestId, gate);
-    // A gate may await. The App can have been backgrounded in the meantime,
-    // which is exactly the state the check above refuses.
+    // A gate may await, and the host can have been torn down in the meantime.
+    // Nothing was held when `dispose` ran, so it returned without releasing
+    // anything; resuming here would engage a dead host and leave a lease timer
+    // running for up to [maxLease] after the App stopped answering.
+    if (_disposed) return _hostDisposed(requestId);
+    // The App can also have been backgrounded in the meantime, which is exactly
+    // the state the check above refuses.
     if (request.enabled && !_isAppResumed()) {
       return _rejected(
         requestId,
@@ -257,33 +284,60 @@ final class PatchbayKeepAwakeBridge {
           },
         );
       }
+      // The delegate is the other place this request can be suspended, and the
+      // teardown that arrived during it saw `_enabled` still false. Refusing
+      // alone would not be enough here: the platform is holding the screen now,
+      // so the hold has to be handed back before the caller is answered.
+      if (_disposed) {
+        _enabled = true;
+        await _release(PatchbayKeepAwakeReleaseWire.hostDisposed);
+        return _hostDisposed(requestId);
+      }
       _enabled = true;
-      _lastReleaseFailure = null;
     }
+    // Cleared on a renewal too, not just a fresh engagement: after a release
+    // that the platform refused, the hold survives and asking again is a
+    // renewal — and an operator who deliberately re-engages has settled what
+    // that stale failure was there to warn them about.
+    _lastReleaseFailure = null;
     _arm(Duration(milliseconds: leaseMs));
     return _accepted(requestId, wasEnabled ? 'renewed' : 'engaged');
   }
 
+  static PatchbayInvocation _hostDisposed(String requestId) => _rejected(
+    requestId,
+    'keepAwakeHostDisposed',
+    notice:
+        'The Patchbay debug surface was torn down; any keep-awake hold was '
+        'already released.',
+  );
+
   /// Drops the hold and reports the delegate failure type, or null on success.
   ///
-  /// `enabled` goes false either way: it states whether the App is *asking* for
-  /// the screen to stay awake, and after a release it no longer is. Whether the
-  /// platform actually let go is a different question, and a failed delegate is
-  /// the one case where the two can differ — which is why the failure survives
-  /// in [status] instead of being swallowed here.
+  /// **The bookkeeping is committed only after the platform has actually let
+  /// go.** Recording the release first reads as though `enabled` merely states
+  /// what the App is *asking* for — but it makes a failed release terminal: the
+  /// next `off` would find nothing held, answer `unchanged`, and never reach
+  /// the platform again, leaving the screen lit with no way left to ask. So a
+  /// delegate that throws leaves the hold exactly where it was, still held and
+  /// still releasable, with the failure reported alongside it.
+  ///
+  /// The lease is left armed for the same reason: it is the only thing that
+  /// retries on behalf of an operator who is no longer there.
   Future<String?> _release(PatchbayKeepAwakeReleaseWire reason) async {
+    final PatchbayKeepAwakeDelegate? delegate = _delegate;
+    if (delegate != null) {
+      try {
+        await delegate(false);
+      } on Object catch (error) {
+        return _lastReleaseFailure = error.runtimeType.toString();
+      }
+    }
     _cancelLease();
     _enabled = false;
     _lastRelease = reason;
     _lastReleaseFailure = null;
-    final PatchbayKeepAwakeDelegate? delegate = _delegate;
-    if (delegate == null) return null;
-    try {
-      await delegate(false);
-      return null;
-    } on Object catch (error) {
-      return _lastReleaseFailure = error.runtimeType.toString();
-    }
+    return null;
   }
 
   void _arm(Duration lease) {
@@ -296,8 +350,15 @@ final class PatchbayKeepAwakeBridge {
           // A release that landed while the timer was queued wins; re-releasing
           // would overwrite `operatorRequest` with a lease that expired on an
           // engagement nobody holds any more.
-          if (!_enabled) return;
-          await _release(PatchbayKeepAwakeReleaseWire.leaseExpired);
+          if (!_enabled || _disposed) return;
+          final String? failure = await _release(
+            PatchbayKeepAwakeReleaseWire.leaseExpired,
+          );
+          // The platform refused to let go and, by construction, nobody is here
+          // to type `off` — an unattended session is the whole reason the lease
+          // exists. Re-arm so the next attempt comes one lease later: the same
+          // cadence the operator opted into, not a retry loop.
+          if (failure != null && _enabled && !_disposed) _arm(lease);
         }),
       );
     });

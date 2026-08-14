@@ -28,11 +28,17 @@
   并点名缺的参数，`status` 用 `wired: false` 报同一件事。
 
   响应 `source` 恒为 `appRecorded`：它说的是 App 让宿主做了什么，Patchbay 不回读平台，绝不宣称
-  屏幕确实亮着。delegate 抛异常是合法回答——开启时以 `keepAwakeDelegateFailed` 拒绝且不记成 hold，
-  释放时 `enabled` 照样落回 `false`（App 确实不再要求了），失败留在 `lastReleaseFailure` 分开报。
+  屏幕确实亮着。delegate 抛异常是合法回答——开启时以 `keepAwakeDelegateFailed` 拒绝且不记成 hold；
+  **释放失败时 hold 不落账、保持可重试**：平台没松手就把 `enabled` 记成 `false`，会让下一次 `off`
+  变成 `unchanged` 空转、再也不碰平台，屏幕永久亮着且没有补救入口。所以记账只在 delegate 成功后
+  才落，失败时 `enabled` 保持 `true`、`lastReleaseFailure` 带失败类型，再敲一次 `off` 会真的重试；
+  租约也不撤，到期释放失败会在一个租约之后再试（没人在场时它是唯一会重试的东西）。
   后台 `on` 以 `keepAwakeLifecycleNotResumed` 拒绝并带 `lifecycleState`（iOS 在后台设
-  `isIdleTimerDisabled` 无效，记下来等于记一件没发生的事），`off` 永远允许。`doctor` 的 lifecycle
-  解法在 iOS 一侧改为指向这条命令。接法与语义见
+  `isIdleTimerDisabled` 无效，记下来等于记一件没发生的事），`off` 永远允许。debug 面销毁后 `set`
+  以 `keepAwakeHostDisposed` 拒绝——`dispose()` 是同步的、无法排进请求队列，可能落在一次进行中的
+  开启中间，此时尚无 hold 可归还，风险全在「挂起的请求随后把已销毁的宿主重新点亮」那一侧；
+  gate 与 delegate 两个挂起点恢复后都重查销毁态，delegate 已经拿到 hold 的那种情况先归还再拒绝。
+  `doctor` 的 lifecycle 解法在 iOS 一侧改为指向这条命令。接法与语义见
   [使用指南](docs/guide.md#5-保持亮屏可选不接线就没有这个能力)。
 
 - **体检命令 `patchbay doctor`。** 「连不上 / 没反应 / 命令全被拒」时一次把四件事按依赖顺序查完
