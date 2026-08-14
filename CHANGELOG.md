@@ -26,6 +26,17 @@
   耗尽时以退出码 `3` 和稳定 code `appUnresponsive` 失败，并附一句处置提示（冻结 / 息屏 / 挂起 →
   亮屏解锁或检查进程；`--json` 时在 `details.hint`）。direct 传输自己的 `timeout` 码归一到同一个
   `appUnresponsive`，脚本对「对端不应答」只需认一个码。
+
+  一条命令对不应答的对端只花**一个**预算，不按 RPC 段数叠加：第一次没等到应答就结束整条命令，
+  后面的往返不会发出。对端**已死**（端口无人监听）走另一条路——内核立刻拒绝，毫秒级以
+  `transportError` 失败，不等预算。
+- **CLI 进程在判决作出后仍可能挂住。** 预算判完、`appUnresponsive` 也打印了，进程却不退出：被放弃的
+  VM Service WebSocket 握手仍注册在事件循环上，`main` 返回后 VM 会一直等它，而冻结对端的握手永远
+  不会完成、也无法从调用方取消。Android 真机实测 **178 秒**（30 秒预算早已判完并打印），直到系统把
+  App 杀掉、TCP 断开才结束。现在 `bin/patchbay.dart` 在命令结果产出后冲刷 stdio 并显式 `exit(code)`
+  ——判决即结果，进程随之结束；命令要落盘的东西（artifact、stdout 响应）在 `runPatchbayCli` 返回前
+  都已 await 完成。同时 `runPatchbayCli` 不再遗留被放弃的连接（迟到成功的拨号会被关掉），连接释放
+  本身也有上界，不会成为新的挂起点。同一场景复测：178s → **30.5s**（30s 预算 + 进程启动）。
 - CLI `catalogInvocationDrift` 不再吞掉 host 已经给出的目录违规原因。host 目录违规时会在 invoke
   应答的 `rejection.details.catalog` 里说明哪条命令名非法或重名，CLI 原先只抛一个裸码，操作者还得
   再跑一次 `patchbay catalog` 才能知道刚才那次应答已经说过的话。现在原样透传到错误信封的
