@@ -257,8 +257,79 @@ final class PatchbaySemanticsBridge {
     String? text,
     bool inputWasStdin = false,
     String? requestId,
-  }) async {
+  }) => _dispatch(
+    requestId: requestId ?? _newRequestId(),
+    action: action,
+    text: text,
+    inputWasStdin: inputWasStdin,
+    // The caller already fenced this target, so there is nothing to pin.
+    resolve: (int? _) =>
+        _resolve(nodeId: nodeId, generation: generation, action: action),
+  );
+
+  /// Resolves a stable Semantics [identifier] and dispatches `tap` in one
+  /// admitted request.
+  ///
+  /// Splitting resolution from dispatch across two round trips makes the
+  /// caller carry a `nodeId` that is only meaningful inside the current
+  /// SemanticsOwner, and widens the window in which the tree can move under
+  /// it. Resolving here removes the round trip without weakening the fence:
+  /// the generation observed before the gates is pinned and re-checked after
+  /// them, so a remount during an awaited gate still fails closed.
+  ///
+  /// [expectedGeneration] is the optional caller-side fence. Supplying it
+  /// rejects a target that already moved before this request was admitted;
+  /// omitting it only accepts whatever is mounted right now, which is why the
+  /// pinned re-check after the gates is not optional.
+  Future<PatchbayInvocation> tapIdentifier({
+    required String identifier,
+    int? expectedGeneration,
+    String? requestId,
+  }) {
     final String id = requestId ?? _newRequestId();
+    if (identifier.isEmpty || (expectedGeneration ?? 0) < 0) {
+      return Future<PatchbayInvocation>.value(
+        PatchbayInvocation.rejected(
+          requestId: id,
+          rejection: PatchbayRejection(
+            code: 'invalidUiArguments',
+            notice:
+                'identifier must be non-empty and generation non-negative.',
+            details: <String, Object?>{
+              'identifier': identifier,
+              'expectedGeneration': ?expectedGeneration,
+            },
+          ),
+        ),
+      );
+    }
+    return _dispatch(
+      requestId: id,
+      action: PatchbaySemanticsAction.tap,
+      identifier: identifier,
+      resolve: (int? pinnedGeneration) => _resolveIdentifier(
+        identifier: identifier,
+        expectedGeneration: pinnedGeneration ?? expectedGeneration,
+        action: PatchbaySemanticsAction.tap,
+      ),
+    );
+  }
+
+  /// Shared admission pipeline for every Semantics action.
+  ///
+  /// [resolve] receives the generation resolved by the first pass, so an
+  /// identifier-based resolver can pin the same object across the gates while
+  /// a caller-fenced resolver simply ignores it.
+  Future<PatchbayInvocation> _dispatch({
+    required String requestId,
+    required PatchbaySemanticsAction action,
+    required Future<_SemanticsResolution> Function(int? pinnedGeneration)
+    resolve,
+    String? identifier,
+    String? text,
+    bool inputWasStdin = false,
+  }) async {
+    final String id = requestId;
     final PatchbaySemanticsActionPolicy? policy = _actionPolicy;
     if (policy == null) {
       return PatchbayInvocation.rejected(
@@ -277,12 +348,9 @@ final class PatchbaySemanticsBridge {
       );
     }
 
-    _SemanticsResolution resolution = await _resolve(
-      nodeId: nodeId,
-      generation: generation,
-      action: action,
-    );
+    _SemanticsResolution resolution = await resolve(null);
     if (!resolution.resolved) return _resolutionRejected(id, resolution);
+    final int pinnedGeneration = resolution.target!.generation;
 
     PatchbaySemanticsActionDecision decision = policy(
       resolution.target!,
@@ -325,11 +393,7 @@ final class PatchbaySemanticsBridge {
 
     // Both a gate and the consumer policy may observe mutable state. Resolve
     // and decide again so a late continuation cannot target a replacement.
-    resolution = await _resolve(
-      nodeId: nodeId,
-      generation: generation,
-      action: action,
-    );
+    resolution = await resolve(pinnedGeneration);
     if (!resolution.resolved) return _resolutionRejected(id, resolution);
     decision = policy(resolution.target!, action);
     if (!decision.allowed) return _policyRejected(id, decision);
@@ -351,6 +415,8 @@ final class PatchbaySemanticsBridge {
     }
 
     final SemanticsOwner owner = resolution.owner!;
+    final int nodeId = resolution.target!.nodeId;
+    final int generation = resolution.target!.generation;
     final int beforeRevision = _treeRevision;
     try {
       owner.performAction(
@@ -366,6 +432,7 @@ final class PatchbaySemanticsBridge {
         payload: <String, Object?>{
           'outcome': 'dispatched',
           'source': PatchbayFactSource.uiObserved.name,
+          'identifier': ?identifier,
           'nodeId': nodeId,
           'generation': generation,
           'action': action.name,
@@ -384,6 +451,7 @@ final class PatchbaySemanticsBridge {
         payload: <String, Object?>{
           'outcome': 'failed',
           'source': PatchbayFactSource.uiObserved.name,
+          'identifier': ?identifier,
           'nodeId': nodeId,
           'generation': generation,
           'action': action.name,
@@ -391,6 +459,130 @@ final class PatchbaySemanticsBridge {
         },
       );
     }
+  }
+
+  /// Upper bound on the identifiers echoed back in a not-found rejection.
+  ///
+  /// A rejection has to be actionable, but a full tree dump inside an error is
+  /// a second observation surface that never passed the snapshot's own limits.
+  static const int _maxReportedIdentifiers = 20;
+
+  /// Resolves one currently mounted node by its stable Semantics identifier.
+  ///
+  /// Every rejection carries details, because "no" without a reason forces the
+  /// caller back into the tree dump this command exists to avoid. Ambiguity is
+  /// never broken by tree order: two mounted matches fail closed, exactly as
+  /// the registered-target path does.
+  Future<_SemanticsResolution> _resolveIdentifier({
+    required String identifier,
+    required int? expectedGeneration,
+    required PatchbaySemanticsAction action,
+  }) async {
+    final SemanticsOwner? owner = await _ensureOwner();
+    final SemanticsNode? root = owner?.rootSemanticsNode;
+    if (owner == null || root == null) {
+      return _SemanticsResolution.rejected(
+        'uiSemanticsUnavailable',
+        details: <String, Object?>{'identifier': identifier},
+      );
+    }
+
+    final List<SemanticsNode> matches = <SemanticsNode>[];
+    final Set<String> mounted = <String>{};
+    void visit(SemanticsNode node) {
+      final SemanticsData data = node.getSemanticsData();
+      if (data.identifier.isNotEmpty) mounted.add(data.identifier);
+      if (data.identifier == identifier) matches.add(node);
+      node.visitChildren((SemanticsNode child) {
+        visit(child);
+        return true;
+      });
+    }
+
+    visit(root);
+
+    if (matches.isEmpty) {
+      final List<String> reported = mounted.toList()..sort();
+      return _SemanticsResolution.rejected(
+        'uiSemanticsIdentifierNotFound',
+        details: <String, Object?>{
+          'identifier': identifier,
+          'treeRevision': _treeRevision,
+          'matchCount': 0,
+          'mountedIdentifierCount': reported.length,
+          'mountedIdentifiers': reported
+              .take(_maxReportedIdentifiers)
+              .toList(growable: false),
+          'mountedIdentifiersTruncated':
+              reported.length > _maxReportedIdentifiers,
+        },
+      );
+    }
+    if (matches.length > 1) {
+      return _SemanticsResolution.rejected(
+        'uiSemanticsIdentifierAmbiguous',
+        details: <String, Object?>{
+          'identifier': identifier,
+          'treeRevision': _treeRevision,
+          'matchCount': matches.length,
+          'candidates': <Object?>[
+            for (final SemanticsNode node in matches)
+              _candidate(node, node.getSemanticsData()),
+          ],
+        },
+      );
+    }
+
+    final SemanticsNode node = matches.single;
+    final _SemanticsEntry entry = _observe(node);
+    if (expectedGeneration != null && entry.generation != expectedGeneration) {
+      return _SemanticsResolution.rejected(
+        'uiSemanticsGenerationStale',
+        details: <String, Object?>{
+          'identifier': identifier,
+          'nodeId': node.id,
+          'expectedGeneration': expectedGeneration,
+          'currentGeneration': entry.generation,
+        },
+      );
+    }
+    final SemanticsData data = node.getSemanticsData();
+    if (node.isInvisible || node.areUserActionsBlocked) {
+      return _SemanticsResolution.rejected(
+        'uiSemanticsActionBlocked',
+        details: _candidate(node, data),
+      );
+    }
+    if (!data.hasAction(action.flutterAction)) {
+      return _SemanticsResolution.rejected(
+        'uiSemanticsActionUnavailable',
+        details: <String, Object?>{
+          ..._candidate(node, data),
+          'requestedAction': action.name,
+        },
+      );
+    }
+    return _SemanticsResolution.resolved(
+      owner,
+      _target(node, entry.generation, data),
+    );
+  }
+
+  /// Bounded, redaction-safe description of one identifier match.
+  Map<String, Object?> _candidate(SemanticsNode node, SemanticsData data) {
+    final bool obscured = data.flagsCollection.isObscured;
+    return <String, Object?>{
+      'nodeId': node.id,
+      'generation': _observe(node).generation,
+      if (obscured) 'labelRedacted': true else 'label': data.label,
+      'actions': <String>[
+        for (final PatchbaySemanticsAction candidate
+            in PatchbaySemanticsAction.values)
+          if (data.hasAction(candidate.flutterAction)) candidate.name,
+      ]..sort(),
+      'invisible': node.isInvisible,
+      'userActionsBlocked': node.areUserActionsBlocked,
+    };
   }
 
   Future<_SemanticsResolution> _resolve({

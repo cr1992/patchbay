@@ -38,6 +38,13 @@ enum PatchbayCommandTarget {
 
   /// `PatchbayClient.focusTree` — Flutter SDK diagnostic passthrough.
   clientFocusTree,
+
+  /// A reusable session: connect once, then run many of the targets above.
+  ///
+  /// It is declared here so help, option validation and the usage banner all
+  /// derive from the same table as every other path, but it dispatches nothing
+  /// itself — `runPatchbayCli` hands the connection to the repl loop.
+  clientReplSession,
 }
 
 /// Mechanical mapping between CLI-friendly paths and stable protocol names.
@@ -71,6 +78,12 @@ enum PatchbayFriendlyCommand {
     summary: 'Invoke any cataloged service command by its protocol name.',
     usageSuffix: '<service-command>',
     target: PatchbayCommandTarget.callerServiceCommand,
+  ),
+  repl(
+    null,
+    <String>['repl'],
+    summary: 'Connect once, then run commands from stdin over that connection.',
+    target: PatchbayCommandTarget.clientReplSession,
   ),
   jobGet(
     'patchbay.job.get',
@@ -168,6 +181,12 @@ enum PatchbayFriendlyCommand {
     <String>['ui', 'semantics', 'action'],
     summary: 'Dispatch a semantics action against an observed node.',
     usageSuffix: '<node-id> <generation> <action> [text]',
+  ),
+  uiTap(
+    'ui.semantics.tap',
+    <String>['ui', 'tap'],
+    summary: 'Resolve a semantics identifier and tap it in one request.',
+    usageSuffix: '<identifier> [--generation <generation>]',
   ),
   uiWidgetTree(
     null,
@@ -303,10 +322,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.snapshot ||
       PatchbayFriendlyCommand.uiWidgetTree ||
       PatchbayFriendlyCommand.uiRenderTree ||
-      PatchbayFriendlyCommand.uiFocusTree => _noTail(
-        tail,
-        const <String, Object?>{},
-      ),
+      PatchbayFriendlyCommand.uiFocusTree ||
+      PatchbayFriendlyCommand.repl => _noTail(tail, const <String, Object?>{}),
       // The service command already consumed the single positional above.
       PatchbayFriendlyCommand.exec => _domainArguments(
         options,
@@ -328,6 +345,16 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         options,
         readSensitiveInput,
+      ),
+      // `--generation` stays optional: the App resolves and fences the target
+      // itself, so requiring a generation here would reintroduce the tree read
+      // this command exists to remove. Supplying it adds a caller-side fence.
+      PatchbayFriendlyCommand.uiTap => _oneTail(
+        tail,
+        (String identifier) => <String, Object?>{
+          'identifier': identifier,
+          'generation': ?_optionalInt(options, 'generation'),
+        },
       ),
       PatchbayFriendlyCommand.navigationCatalog ||
       PatchbayFriendlyCommand.navigationCurrent ||
@@ -459,6 +486,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'args',
       'stdin',
       'revision',
+      'generation',
       'timeout-ms',
       'cursor',
       'direction',
@@ -498,12 +526,16 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiFocusTree ||
     PatchbayFriendlyCommand.navigationCatalog ||
     PatchbayFriendlyCommand.navigationCurrent ||
-    PatchbayFriendlyCommand.blobMetadata => const <String>{},
+    PatchbayFriendlyCommand.blobMetadata ||
+    // A repl carries connection options and `--json`, which are global rather
+    // than per-command; every command option belongs on the lines it runs.
+    PatchbayFriendlyCommand.repl => const <String>{},
     PatchbayFriendlyCommand.exec ||
     PatchbayFriendlyCommand.uiSemanticsTree => const <String>{'args', 'stdin'},
     PatchbayFriendlyCommand.uiTextSet ||
     PatchbayFriendlyCommand.uiTextEnter ||
     PatchbayFriendlyCommand.uiSemanticsAction => const <String>{'stdin'},
+    PatchbayFriendlyCommand.uiTap => const <String>{'generation'},
     PatchbayFriendlyCommand.navigationGo ||
     PatchbayFriendlyCommand.navigationPush ||
     PatchbayFriendlyCommand.navigationBack => const <String>{

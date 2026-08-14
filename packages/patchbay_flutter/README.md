@@ -101,6 +101,17 @@ Semantics API 读取当前树；Semantics action 由 consumer 在 composition ro
 标准组件已有 label、flags 与 action 时不需要 `PatchbayKey`。例如一个带 `button + label + tap` 的底部
 Tab 可以直接从 Semantics 快照发现并执行原 callback，完整复用 Widget 自身的退出与切换流程。
 
+控件带稳定 Semantics identifier 时，`ui.semantics.tap` 把「解析 → 代际校验 → 派发」收进一次受理：
+调用方不必先读整棵树，再搬运只在当前 SemanticsOwner 内有效的 `nodeId`。围栏没有因此变松——bridge
+在过门前 pin 住解析到的 generation，门后二次解析必须命中同一 generation，await 期间发生重挂载仍以
+`uiSemanticsGenerationStale` 拒绝；调用方另可传 `generation` 做自己的前置围栏。同 identifier 多个
+mounted 实例一律歧义拒绝，不按树顺序选。
+
+该命令与 `ui.semantics.action` 共用同一个 action policy：没有 consumer policy 时它不进 catalog、
+也不可派发。未命中、多义与代际过期都带 details（已挂载 identifier 清单上限 20 条、候选列表、
+expected/current generation），obscured 节点的 label 在 details 中脱敏——拒绝要可行动，但不能变成
+第二个绕过树上限的观察面。
+
 详细协议、隐私边界和分批退出条件见
 [`docs/ui-inspection-and-actions.md`](docs/ui-inspection-and-actions.md)。
 

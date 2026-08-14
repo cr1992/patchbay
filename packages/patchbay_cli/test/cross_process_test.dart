@@ -514,6 +514,41 @@ void main() {
       expect(tapPayload['outcome'], 'dispatched');
       expect((tapPayload['arguments']! as Map<String, Object?>)['nodeId'], 42);
 
+      final ProcessResult identifierTap = await _runCli(uri, <String>[
+        '--generation',
+        '7',
+        'ui',
+        'tap',
+        'fixture.tap',
+      ]);
+      expect(identifierTap.exitCode, 0, reason: identifierTap.stderr);
+      final Map<String, Object?> identifierTapArguments =
+          ((jsonDecode(identifierTap.stdout.toString())
+                      as Map<String, Object?>)['payload']!
+                  as Map<String, Object?>)['arguments']!
+              as Map<String, Object?>;
+      expect(identifierTapArguments['identifier'], 'fixture.tap');
+      expect(identifierTapArguments['generation'], 7);
+      expect(identifierTapArguments, isNot(contains('nodeId')));
+
+      // A rejection has to reach the operator with its details intact; an
+      // empty `rejected` would push them back to the two-hop tree read.
+      final ProcessResult missingIdentifier = await _runCli(uri, <String>[
+        'ui',
+        'tap',
+        'fixture.absent',
+      ]);
+      expect(missingIdentifier.exitCode, PatchbayExitCode.rejected);
+      final Map<String, Object?> tapRejection =
+          (jsonDecode(missingIdentifier.stdout.toString())
+                  as Map<String, Object?>)['rejection']!
+              as Map<String, Object?>;
+      expect(tapRejection['code'], 'uiSemanticsIdentifierNotFound');
+      expect(
+        (tapRejection['details']! as Map<String, Object?>)['mountedIdentifiers'],
+        contains('fixture.tap'),
+      );
+
       final ProcessResult unavailableFlutterTree =
           await Process.run(Platform.resolvedExecutable, <String>[
             'run',
@@ -532,6 +567,53 @@ void main() {
       expect(
         unavailableFlutterTree.stderr.toString(),
         contains('flutterDiagnosticUnavailable'),
+      );
+
+      // One process, one connection, four typed commands. The exact
+      // connection count is asserted in repl_test.dart against an injected
+      // client; what this proves is that the same loop works over a real VM
+      // Service and still exits cleanly when stdin closes.
+      final Process replProcess = await Process.start(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--ws-uri',
+          uri.toString(),
+          '--json',
+          'repl',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      final Future<String> replOut = replProcess.stdout
+          .transform(utf8.decoder)
+          .join();
+      replProcess.stdin
+        ..writeln('identity')
+        ..writeln('snapshot')
+        ..writeln('ui semantics tree')
+        ..writeln('ui tap fixture.tap')
+        ..writeln('ui tap fixture.absent');
+      await replProcess.stdin.close();
+      final int replExit = await replProcess.exitCode;
+      final List<Map<String, Object?>> replLines = const LineSplitter()
+          .convert(await replOut)
+          .where((String line) => line.isNotEmpty)
+          .map((String line) => jsonDecode(line) as Map<String, Object?>)
+          .toList(growable: false);
+
+      expect(replExit, PatchbayExitCode.accepted);
+      expect(replLines, hasLength(5));
+      expect(
+        replLines.map((Map<String, Object?> row) => row['exitCode']),
+        <int>[0, 0, 0, 0, PatchbayExitCode.rejected],
+      );
+      expect(replLines[3]['command'], <String>['ui', 'tap', 'fixture.tap']);
+      expect(
+        (((replLines[3]['response']! as Map<String, Object?>)['payload']!
+                    as Map<String, Object?>)['arguments']!
+                as Map<String, Object?>)['identifier'],
+        'fixture.tap',
       );
 
       final Map<String, Object?> invocation = await connection.invoke(
@@ -559,7 +641,9 @@ void main() {
         ),
       );
     },
-    timeout: const Timeout(Duration(seconds: 30)),
+    // GH 共享 runner 冷启时真实 VM Service 拉起可超 30s（main 首跑实测翻车）。
+    // 显式标注会压过 dart test --timeout 的默认值，上限必须写在这里。
+    timeout: const Timeout(Duration(seconds: 120)),
   );
 }
 

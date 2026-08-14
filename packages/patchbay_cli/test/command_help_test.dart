@@ -84,6 +84,7 @@ Availability is still decided by the running App catalog.
         'catalog',
         'snapshot',
         'exec',
+        'repl',
         'job',
         'navigation',
         'ui',

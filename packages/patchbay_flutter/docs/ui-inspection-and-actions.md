@@ -90,6 +90,26 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
 `setSelection`、剪贴板、custom action、坐标手势和 `scrollToOffset` 当前不支持。它们的参数、
 隐私或跨 SDK 语义未冻结，不能用无类型 JSON 猜测补齐。
 
+### 按 identifier 直接 tap
+
+`ui.semantics.tap` 用稳定 Semantics identifier 在一次受理内完成解析、代际校验与派发，取代
+`ui.semantics.tree` + `ui.semantics.action` 两跳。它不是新的定位方式：identifier 已经是本文冻结的
+稳定身份，label、树路径和坐标仍然不能充当执行身份。
+
+约束（与两跳路径同源，不因为省了一跳而放宽）：
+
+- 解析出的 generation 在过门前被 pin；门 await 之后必须重新遍历当前树并命中同一 generation，
+  否则以 `uiSemanticsGenerationStale` 拒绝。调用方可另外传入 `generation` 作为前置围栏；
+- 同 identifier 多个 mounted 节点一律 `uiSemanticsIdentifierAmbiguous`，不按树顺序选；
+- 节点 detached、不可见、user action 被阻断或没有 `tap` action 时 fail-closed；
+- 三类拒绝都必须带 details——未命中给出已挂载 identifier 清单（上限 20 条，超出标记截断）、
+  多义给出候选摘要、代际过期给出 expected/current。空拒绝会把调用方推回它本来要省掉的全树 dump；
+- details 中 obscured 节点的 label 脱敏，且 details 不得成为绕过快照节点上限的第二个观察面；
+- 与 `ui.semantics.action` 共用同一个 `PatchbaySemanticsActionPolicy`：没有注入 policy 时该命令
+  不出现在 catalog，也不可派发。
+
+结果同样只声明 `dispatched`，不冒充页面或领域完成。
+
 Semantics action 是“沿 Flutter 已公开辅助功能 action 分派了一次”，不是业务成功：
 
 - admission accepted 不等于 callback 产生的网络、文件或设备动作完成；
@@ -120,6 +140,8 @@ consumer 可以用一个保守的全局 UI interaction gate 开始接入，无�
 patchbay ui semantics tree
 patchbay ui semantics action <node-id> <generation> <action>
 patchbay ui semantics action <node-id> <generation> setText --stdin
+patchbay ui tap <identifier>
+patchbay ui tap <identifier> --generation <generation>
 patchbay ui widget-tree
 patchbay ui render-tree
 patchbay ui focus-tree
@@ -135,6 +157,13 @@ patchbay ui focus-tree
 ui semantics tree
   -> 从当前树筛出 label=设置 且 actions 唯一包含 tap 的节点
   -> 使用该节点的 nodeId + generation 执行 tap
+  -> 再取 semantics/widget tree 验证设置内容已出现
+```
+
+控件已有稳定 identifier 时，探索阶段之后的重复执行走一步式：
+
+```text
+ui tap app.settings.entry
   -> 再取 semantics/widget tree 验证设置内容已出现
 ```
 

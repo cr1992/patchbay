@@ -137,6 +137,7 @@ $ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '138
 | **UI 操作** | 文本输入、Semantics action、三种诊断树、截图和条件等待，只作用于明确开放的目标 |
 | **日志** | query / tail / export，所有出口统一脱敏 |
 | **导航** | 按稳定 destination ID 跳转，不暴露任意 route 字符串 |
+| **连续执行** | `repl` 在一次连接内逐行跑 typed 命令，每行自带退出码 |
 | **帮助** | 由命令声明生成，使用 `patchbay help <topic>` 查看 |
 
 ```console
@@ -144,8 +145,10 @@ $ patchbay identity
 $ patchbay --json snapshot
 $ patchbay --wait exec pairing.ble.pair
 $ patchbay ui semantics tree
+$ patchbay ui tap login.submit
 $ patchbay --output screen.png capture root
 $ patchbay logs tail
+$ patchbay repl < commands.txt
 ```
 
 ## 为什么是 Patchbay

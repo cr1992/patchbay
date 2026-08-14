@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 abstract final class PatchbayExitCode {
   static const int accepted = 0;
@@ -40,6 +41,30 @@ int patchbayExitCodeFor(Map<String, Object?> response) {
     }
   }
   return PatchbayExitCode.accepted;
+}
+
+/// One human-readable line for a decoded response.
+///
+/// It summarises, it never classifies: the exit code beside it is what says
+/// whether the App admitted the request, so this must not add a verdict of its
+/// own. Anything without a known shape falls back to the raw JSON.
+String patchbayResponseSummary(Map<String, Object?> value) {
+  if (value['localArtifact'] case final Map<Object?, Object?> artifact) {
+    return 'artifact=${artifact['path']} length=${artifact['length']} '
+        'verified=true';
+  }
+  if (value case {
+    'applicationId': final Object app,
+    'appInstanceId': final Object instance,
+  }) {
+    return '$app instance=$instance';
+  }
+  if (value['uiTargets'] case final List<Object?> targets) {
+    return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} '
+        'uiTargets=${targets.length}';
+  }
+  if (value['jobId'] case final String jobId) return 'jobId=$jobId';
+  return jsonEncode(value);
 }
 
 typedef PatchbayJobReader = Future<Map<String, Object?>> Function(String jobId);

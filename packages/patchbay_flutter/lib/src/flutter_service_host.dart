@@ -73,6 +73,7 @@ final class PatchbayFlutterServiceHost {
                command == 'ui.text.enter' ||
                command == 'ui.semantics.tree' ||
                command == 'ui.semantics.action' ||
+               command == 'ui.semantics.tap' ||
                command == 'ui.wait' ||
                command == 'ui.capture' ||
                command.startsWith('navigation.');
@@ -135,6 +136,31 @@ final class PatchbayFlutterServiceHost {
                action: action,
                text: text as String?,
                inputWasStdin: arguments['inputWasStdin'] == true,
+               requestId: requestId,
+             )).toJson();
+           }
+           if (command == 'ui.semantics.tap') {
+             if (!bridge.semantics.actionsEnabled) {
+               return PatchbayInvocation.rejected(
+                 requestId: requestId,
+                 rejection: const PatchbayRejection(
+                   code: 'commandNotRegistered',
+                 ),
+               ).toJson();
+             }
+             final Object? identifier = arguments['identifier'];
+             final Object? generation = arguments['generation'];
+             if (identifier is! String ||
+                 generation != null && generation is! int ||
+                 arguments.keys.any(
+                   (String key) =>
+                       key != 'identifier' && key != 'generation',
+                 )) {
+               return _invalidUiArguments(requestId);
+             }
+             return (await bridge.semantics.tapIdentifier(
+               identifier: identifier,
+               expectedGeneration: generation as int?,
                requestId: requestId,
              )).toJson();
            }
@@ -392,6 +418,27 @@ final class PatchbayFlutterServiceHost {
           PatchbayParameterDescriptor(
             name: 'text',
             type: PatchbayParameterType.string,
+          ),
+        ],
+      ),
+    if (semanticsActionsEnabled)
+      const PatchbayCommandDescriptor(
+        name: 'ui.semantics.tap',
+        summary:
+            'Resolve a stable Semantics identifier and tap it in one request.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.immediate,
+        sideEffect: PatchbaySideEffect.appState,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+        parameters: <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'identifier',
+            type: PatchbayParameterType.string,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'generation',
+            type: PatchbayParameterType.integer,
           ),
         ],
       ),
