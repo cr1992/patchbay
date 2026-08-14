@@ -31,6 +31,11 @@
   `PatchbaySessionResolver.inventory/prune/select/selection`；启动器可据此自建会话面板。
 - `session` ↔ `sessions` 互为别名拼写（`session list` 与 `sessions list` 等价）。别名只增加拼写，
   不新增命令，也不改任何既有命令名。
+- 周期性 Android emulator 冒烟（`.github/workflows/android-emulator-smoke.yml`，每周一 + 手动触发）：
+  在真实 Android 上装起 example 并跑通 `identity` → `catalog` → `snapshot` / `ui semantics tree`
+  的 CLI 往返。既有门禁全跑在 Ubuntu 上，覆盖不到「App 真的装进设备、VM Service 真的可连」这段；
+  它不是 PR 必过项，失败只表示平台链路有信号要查。example 的 Android 工程由 CI 临时生成，仓内
+  仍不带平台目录。
 
 ### Fixed
 

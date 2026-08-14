@@ -1,0 +1,204 @@
+# 周期性 Android emulator 冒烟：证明「真实 Android 平台上 CLI 能连上 App 并完成基础往返」。
+#
+# 与 ci.yml 的分工：ci.yml 是每次推送必过的 analyze / test 门禁，全跑在 Ubuntu 上，
+# 覆盖不到「App 真的装进 Android、VM Service 真的可连」这段平台链路。本文件补的就是这段，
+# 因此只按计划和手动触发，不进 PR 必过项——它证明的是链路仍然通，不是这次改动对不对。
+#
+# Flutter 版本与 ci.yml 保持同一常量，三处（本文件 / ci.yml / 内网主仓镜像）需同步。
+#
+# example 不带平台目录（见 packages/patchbay_flutter/example/README.md），
+# Android 工程在 CI 内临时生成、用完即弃，不入库。
+name: Android emulator smoke
+
+on:
+  schedule:
+    # 每周一 03:17 UTC。错开整点，避开计划任务高峰。
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-emulator-smoke
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: '3.44.9'
+
+jobs:
+  android_emulator_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # 生成的 Android 工程要求 JDK 17（app/build.gradle.kts 的 sourceCompatibility）。
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: A 生成 example 的 Android 平台工程
+        run: |
+          set -euo pipefail
+          cd packages/patchbay_flutter/example
+          flutter create --platforms=android --org dev.patchbay \
+            --project-name patchbay_flutter_example .
+          # flutter create 顺手补的默认 widget 测试引用模板里的 MyApp，与本 example 的
+          # main.dart 不是一回事。冒烟不跑测试，删掉免得日后误读。
+          rm -f test/widget_test.dart
+          test -f android/app/build.gradle.kts
+
+      - name: B 取依赖并构建 debug APK
+        run: |
+          set -euo pipefail
+          (cd packages/patchbay_cli && dart pub get)
+          cd packages/patchbay_flutter/example
+          flutter pub get
+          # 构建放在 emulator 之外：Gradle 首跑最慢，且构建失败与运行失败是两回事，
+          # 分开才能在日志里一眼分辨断在哪一头。
+          flutter build apk --debug
+
+      - name: C 打开 KVM 权限
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: D emulator 上跑 CLI 往返冒烟
+        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 35
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: >-
+            -no-window -no-snapshot -noaudio -no-boot-anim
+            -gpu swiftshader_indirect -camera-back none -camera-front none
+          script: |
+            set -euo pipefail
+
+            EXAMPLE="$GITHUB_WORKSPACE/packages/patchbay_flutter/example"
+            CLI="$GITHUB_WORKSPACE/packages/patchbay_cli"
+            URI_FILE="$RUNNER_TEMP/vmservice.uri"
+            RUN_LOG="$RUNNER_TEMP/flutter-run.log"
+            OUT="$RUNNER_TEMP/patchbay-out.json"
+            RUN_PID=""
+            STEP="S0"
+
+            # 每一步都先认领步号，失败时 ::error:: 打出断点，日志里可直接定位。
+            step() { STEP="$1"; echo "::group::[$1] $2"; }
+            fail() { echo "::error::emulator smoke 断在 [$STEP]：$1"; exit 1; }
+
+            cleanup() {
+              rc=$?
+              [ -n "$RUN_PID" ] && kill "$RUN_PID" 2>/dev/null || true
+              if [ "$rc" -ne 0 ] && [ -f "$RUN_LOG" ]; then
+                echo "::group::flutter run 日志尾部（URI 已抹除）"
+                # VM Service URI 带认证信息，不进日志——脱敏后再打印。
+                sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' \
+                  "$RUN_LOG" | tail -n 80
+                echo "::endgroup::"
+              fi
+              exit "$rc"
+            }
+            trap cleanup EXIT
+
+            step S1 "设备就绪"
+            adb devices
+            DEVICE="$(adb devices \
+              | awk '$2 == "device" && $1 ~ /^emulator-/ { print $1; exit }')"
+            [ -n "$DEVICE" ] || fail "adb 里没有 online 的 emulator"
+            echo "device=$DEVICE"
+            [ "$(adb -s "$DEVICE" shell getprop sys.boot_completed | tr -d '\r')" = "1" ] \
+              || fail "sys.boot_completed 不是 1"
+            # UI 面有 lifecycle 闸：App 不在 resumed 时按 uiLifecycleNotResumed 拒绝。
+            # 息屏 / 锁屏就会踩到，所以先唤醒、解锁并钉住常亮，再启动 App。
+            adb -s "$DEVICE" shell input keyevent KEYCODE_WAKEUP || true
+            adb -s "$DEVICE" shell wm dismiss-keyguard || true
+            adb -s "$DEVICE" shell svc power stayon true || true
+            echo "::endgroup::"
+
+            step S2 "flutter run：安装 + 启动 + 端口转发，URI 落盘"
+            cd "$EXAMPLE"
+            rm -f "$URI_FILE"
+            # docs/guide.md「会话自动发现」推荐的姿势：让 flutter run 自己把 URI 写文件，
+            # 不接管 stdio、不解析 machine frame。
+            flutter run -d "$DEVICE" --debug --vmservice-out-file "$URI_FILE" \
+              > "$RUN_LOG" 2>&1 < /dev/null &
+            RUN_PID=$!
+            echo "flutter run pid=$RUN_PID"
+            echo "::endgroup::"
+
+            step S3 "等 VM Service URI（拿到 = App 已在设备上跑起来）"
+            for _ in $(seq 1 120); do
+              kill -0 "$RUN_PID" 2>/dev/null \
+                || fail "flutter run 已退出，App 没起来（见下方日志）"
+              [ -s "$URI_FILE" ] && break
+              sleep 5
+            done
+            [ -s "$URI_FILE" ] || fail "600s 内没等到 VM Service URI"
+            # 文件刚出现时可能还没写完，先让它落定再读。
+            sleep 1
+            WS_URI="$(cat "$URI_FILE")"
+            # URI 含认证 token：先注册掩码，后面任何意外回显都会被 Actions 打码。
+            echo "::add-mask::$WS_URI"
+            echo "已取到 VM Service URI（内容已掩码）"
+            echo "::endgroup::"
+
+            step S4 "CLI 连接：identity"
+            cd "$CLI"
+            dart run bin/patchbay.dart --ws-uri "$WS_URI" --json identity > "$OUT" \
+              || fail "identity 失败，CLI 退出码 $?（3=传输 4=schema 5=拒绝 64=用法）"
+            jq -e '.applicationId == "dev.patchbay.example"' "$OUT" > /dev/null \
+              || fail "identity 的 applicationId 不是 dev.patchbay.example"
+            jq -c '{applicationId, schemaVersion}' "$OUT"
+            echo "::endgroup::"
+
+            step S5 "catalog：App 实际注册了什么"
+            dart run bin/patchbay.dart --ws-uri "$WS_URI" --json catalog > "$OUT" \
+              || fail "catalog 失败，CLI 退出码 $?"
+            jq -e '[.commands[].name] | index("example.counter.increment")' "$OUT" \
+              > /dev/null || fail "catalog 里没有 example.counter.increment"
+            jq -e '[.uiTargets[].id] | index("example.note")' "$OUT" > /dev/null \
+              || fail "catalog 的 uiTargets 里没有 example.note"
+            jq -c '{commands: [.commands[].name], uiTargets: [.uiTargets[].id]}' "$OUT"
+            echo "::endgroup::"
+
+            step S6 "只读回程：snapshot + ui semantics tree"
+            dart run bin/patchbay.dart --ws-uri "$WS_URI" --json snapshot > "$OUT" \
+              || fail "snapshot 失败，CLI 退出码 $?"
+            jq -e 'type == "object"' "$OUT" > /dev/null || fail "snapshot 不是 JSON object"
+            jq -c . "$OUT"
+            # UI 面过 lifecycle 闸：App 冷启后进 resumed 有延迟，非 resumed 期间会以
+            # uiLifecycleNotResumed 拒绝（本地实测过这条拒绝，见 MR 描述）。有界重试，
+            # 仍不过就把最后一次的 rejection 原样打出来，断点自解释。
+            ok=""
+            for _ in $(seq 1 12); do
+              if dart run bin/patchbay.dart --ws-uri "$WS_URI" --json \
+                   ui semantics tree > "$OUT" 2>/dev/null; then
+                ok="1"
+                break
+              fi
+              jq -c '.rejection // .error // .' "$OUT" 2>/dev/null || true
+              sleep 5
+            done
+            [ -n "$ok" ] || fail "ui semantics tree 60s 内始终没通过，末次响应见上一行"
+            grep -q 'example.counter.value' "$OUT" \
+              || fail "semantics 树里没有 example.counter.value"
+            echo "semantics 树含 example.counter.value"
+            echo "::endgroup::"
+
+            echo "冒烟通过：Android emulator 上 CLI 完成 identity / catalog / snapshot / semantics 往返"
