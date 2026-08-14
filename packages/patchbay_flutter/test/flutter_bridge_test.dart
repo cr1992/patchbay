@@ -35,10 +35,26 @@ void main() {
         .toSet();
     expect(names, contains('ui.semantics.tree'));
     expect(names, isNot(contains('ui.semantics.action')));
-    for (final Map<String, Object?> command
-        in commands.cast<Map<String, Object?>>()) {
-      expect(command['factSources'], <String>['uiObserved']);
-    }
+    // Per command, not a blanket rule: `uiObserved` claims Patchbay looked at
+    // the live Flutter tree, and only the commands that do may say it.
+    // `ui.keepAwake.*` reports what the App asked its host to do and never
+    // reads the platform back, so it is `appRecorded` — declaring it
+    // `uiObserved` would present bookkeeping as a device observation.
+    expect(
+      <Object?, Object?>{
+        for (final Map<String, Object?> command
+            in commands.cast<Map<String, Object?>>())
+          command['name']: command['factSources'],
+      },
+      <String, List<String>>{
+        'ui.text.set': <String>['uiObserved'],
+        'ui.text.enter': <String>['uiObserved'],
+        'ui.semantics.tree': <String>['uiObserved'],
+        'ui.wait': <String>['uiObserved'],
+        'ui.keepAwake.set': <String>['appRecorded'],
+        'ui.keepAwake.status': <String>['appRecorded'],
+      },
+    );
   });
 
   test(

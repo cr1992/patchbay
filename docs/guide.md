@@ -317,7 +317,46 @@ AppTextField(patchbayId: DebugIds.loginPhone, controller: phoneController)
   是目标级的、参数 descriptor 表达不了，所以 host **保留**该元键交给桥自己读。写领域 adapter 时
   不要去读它，写 UI 桥扩展时才需要。
 
-### 5. 会话自动发现（可选）
+### 5. 保持亮屏（可选，不接线就没有这个能力）
+
+设备中途息屏会把整个 UI 面一起带走：`ui.*` / `navigation.*` 开始清一色回
+`*LifecycleNotResumed`，再过一会儿系统冻结进程，CLI 只看得到 `appUnresponsive`。Android 有不碰
+App 的外部解法（`adb shell svc power stayon usb`）；**iOS 真机没有**——没有 `devicectl` 开关，也没有
+libimobiledevice 等价物，唯一的杠杆在 App 进程内的 `UIApplication.isIdleTimerDisabled`。所以长时间
+手动联调 iOS 真机时，这个开关是唯一能让设备别睡的办法。
+
+四个包都是纯 Dart / 纯 Flutter，不碰 platform channel。为一个调试开关把 `patchbay_flutter` 变成
+plugin，或者引入第三方 wakelock 依赖，会改变每个接入方 release 构建链接的东西。所以框架只拿协议、
+记账和租约，碰平台的那一行由 App 自己出：
+
+```dart
+PatchbayFlutterServiceHost(
+  applicationId: 'com.example.app',
+  bridge: PatchbayFlutterBridge(
+    gates: gates,
+    // Android: FLAG_KEEP_SCREEN_ON；iOS: UIApplication.isIdleTimerDisabled。
+    keepAwakeDelegate: (bool enabled) => myPlatformChannel.setKeepAwake(enabled),
+    // 可选：额外挂一道 consumer 门，门 id 会进 catalog descriptor。
+    keepAwakeGates: const <String>{'my.debug.keepAwake'},
+  ),
+).register();
+```
+
+delegate 只在真正发生状态翻转时被调用，不会连着两次收到同一个值；抛异常是合法回答，请求以
+`keepAwakeDelegateFailed` 拒绝，而不是记成一次并未发生的 hold。
+
+**没接线也照样在 catalog 里。** 这点和 `ui.capture` / `navigation.*` 相反——那两个没注入就整条不出现。
+操作者伸手找 keep-awake 恰恰是在屏幕刚黑、UI 面刚开始全拒的时候，此刻回 `commandNotRegistered`
+等于什么都没说。所以命令留在目录里，回 `keepAwakeNotWired` 并指名缺的是哪个参数；
+`patchbay ui keep-awake status` 用 `wired: false` 报同一件事，连试都不用试。
+
+**默认关、显式开、会话断开自动还原。** 押着屏幕不灭会改变被观察 App 的行为（息屏行为本身也是接入方
+要测的东西），所以没人开口就什么都不做。而两种 transport 都不给 App 连接生命周期——VM Service
+扩展只管应答，不知道 CLI 死没死；终端被杀也不会道别。只靠显式 `off` 释放的 hold 会活过每一次崩掉的
+会话，把设备一直点亮到没电。租约把这件事反过来：人还在就续租，人走了就不再续，于是**断开**和
+**租约到期**在 App 看来就是同一件事。默认租约 10 分钟，上限 2 小时；App 销毁 debug 面时也会归还。
+
+### 6. 会话自动发现（可选）
 
 自动发现不是 `flutter run` 自带行为，需要一层启动器把 VM Service URI 写成会话记录。推荐让
 `flutter run` 自己把 URI 落盘，启动器只监视这个文件：
@@ -438,6 +477,7 @@ $ patchbay ui widget-tree|render-tree|focus-tree
 $ patchbay --output out.png capture root
 $ patchbay navigation go <dest>             # 不带 --revision 时自动先读当前 revision
 $ patchbay ui wait <condition> …
+$ patchbay ui keep-awake on|off|status      # 押住 / 归还 / 读屏幕常亮，接入方接线才有
 $ patchbay logs query|tail|export …
 $ patchbay help <topic>                     # 帮助由声明生成
 ```
@@ -449,6 +489,33 @@ $ patchbay help <topic>                     # 帮助由声明生成
 `navigation.go` 或响应里的 `ui.semantics.tap` 就能直接查，不必先反推 CLI 路径。多个 CLI 命令共用
 一个协议名（`ui.wait`、`blob.metadata`）时列出它们。`navigate` / `nav` / `wait` / `tap` / `text` /
 `semantics`，以及 `session` ↔ `sessions` 的互换，都是既有路径的别名拼写，不是新命令。
+
+### 保持亮屏（ui keep-awake）
+
+```console
+$ patchbay ui keep-awake on                       # 默认租约（App 声明，当前 10 分钟）
+$ patchbay ui keep-awake on --lease-ms 7200000    # 显式租约，上限 2 小时
+$ patchbay ui keep-awake status                   # 只读，不续租
+$ patchbay ui keep-awake off                      # 立刻归还，不等租约
+```
+
+`on` / `off` 是同一条协议命令 `ui.keepAwake.set` 的两种拼法，`enabled` 由**你敲的那个词**决定而不是
+参数——`off` 不可能被一个多余的 flag 变成一次开启。`--lease-ms` 只属于 `on`：释放不带租约，读什么
+都不带。不传 `--lease-ms` 时 CLI 什么都不发，默认值在 App 的 catalog descriptor 里，CLI 侧不留第二份
+（留了就是会过期的那份）。
+
+各 `outcome`：`engaged`（本次开启）、`renewed`（已经押着，只是续租，不会再调一次 delegate）、
+`released`、`unchanged`（本来就没押着）、`observed`（`status`）。`source` 恒为 `appRecorded`——它说的
+是 **App 让宿主做了什么**，不是「屏幕确实亮着」。Patchbay 不回读平台，delegate 释放失败时
+`enabled` 照样落回 `false`（App 确实不再要求了），失败本身留在 `lastReleaseFailure` 里，两件事分开报。
+
+**接入方没接线**时 `set` 回 `keepAwakeNotWired` 并在 notice 里点名 `keepAwakeDelegate`；`status`
+不拒绝，回 `wired: false`。**App 不在前台**时 `on` 以 `keepAwakeLifecycleNotResumed` 拒绝并带上
+`lifecycleState`（iOS 在后台设 `isIdleTimerDisabled` 是无效的，记下来等于记一件没发生的事）；
+`off` 永远允许——归还屏幕不该是被拒的那个动作。
+
+`doctor` 的 lifecycle 项在 iOS 上会顺带提这条命令：那正是「设备睡了、怎么让它别再睡」的场景，而
+Android 的 `adb` 解法在 iOS 上不存在。
 
 ### navigation 的 revision 围栏
 

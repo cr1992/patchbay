@@ -6,6 +6,35 @@
 
 ### Added
 
+- **跨平台「保持亮屏」开关 `patchbay ui keep-awake on|off|status`（`ui.keepAwake.set` /
+  `ui.keepAwake.status`）。** 设备中途息屏会把整个 UI 面带走：`ui.*` / `navigation.*` 全部开始回
+  `*LifecycleNotResumed`，随后系统冻结进程、CLI 只看得到 `appUnresponsive`。Android 有不碰 App 的
+  外部解法（`adb shell svc power stayon usb`），**iOS 真机没有**——这条命令是长时间手动联调 iOS
+  真机时唯一能让设备别睡的杠杆。
+
+  **默认关、显式开、会话断开自动还原。** 押住屏幕会改变被观察 App 的行为（息屏行为本身也是接入方
+  要测的东西），所以没人开口就什么都不做。两种 transport 都不给 App 连接生命周期——VM Service
+  扩展不知道 CLI 死没死，终端被杀也不会道别——所以每次开启都带一条租约（默认 10 分钟，上限 2 小时，
+  `--lease-ms` 可显式给），到期由 App 自己释放：人还在就续租，人走了就不再续，**断开**和**租约到期**
+  因此是同一件事。App 销毁 debug 面时也归还。`on` / `off` 是同一条协议命令的两种拼法，`enabled` 由
+  敲的词决定而不是参数，`off` 不可能被多余的 flag 变成一次开启；`--lease-ms` 只属于 `on`。
+
+  **`patchbay_flutter` 仍是纯 Flutter 包**：不转 plugin，也不引第三方 wakelock 依赖——那会改变每个
+  接入方 release 构建链接的东西。碰平台的那一行由接入方在组合根注入
+  `PatchbayFlutterBridge(keepAwakeDelegate: ...)`（Android `FLAG_KEEP_SCREEN_ON`、iOS
+  `UIApplication.isIdleTimerDisabled`），框架只拿协议、记账和租约。**没接线时命令仍留在 catalog 里**
+  ——与 `ui.capture` / `navigation.*` 的「没注入就不出现」相反，因为操作者伸手找它正是在屏幕刚黑、
+  UI 面刚开始全拒的时候，此刻回 `commandNotRegistered` 等于什么都没说；改回 `keepAwakeNotWired`
+  并点名缺的参数，`status` 用 `wired: false` 报同一件事。
+
+  响应 `source` 恒为 `appRecorded`：它说的是 App 让宿主做了什么，Patchbay 不回读平台，绝不宣称
+  屏幕确实亮着。delegate 抛异常是合法回答——开启时以 `keepAwakeDelegateFailed` 拒绝且不记成 hold，
+  释放时 `enabled` 照样落回 `false`（App 确实不再要求了），失败留在 `lastReleaseFailure` 分开报。
+  后台 `on` 以 `keepAwakeLifecycleNotResumed` 拒绝并带 `lifecycleState`（iOS 在后台设
+  `isIdleTimerDisabled` 无效，记下来等于记一件没发生的事），`off` 永远允许。`doctor` 的 lifecycle
+  解法在 iOS 一侧改为指向这条命令。接法与语义见
+  [使用指南](docs/guide.md#5-保持亮屏可选不接线就没有这个能力)。
+
 - **体检命令 `patchbay doctor`。** 「连不上 / 没反应 / 命令全被拒」时一次把四件事按依赖顺序查完
   ——会话目录、连接与 identity 握手、catalog、App lifecycle——每项给「现象 → 可能原因 → 建议动作」。
   **它自己拨号**：拨不通正是它被问的那个问题，所以连接失败在它这里是一条 finding 而不是命令终止；

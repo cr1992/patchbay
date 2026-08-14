@@ -652,10 +652,18 @@ PatchbayDoctorFinding patchbayLifecycleFinding(Map<String, Object?> response) {
 /// reading this while the thing they were doing is blocked, and because the
 /// CLI deliberately runs none of them itself: waking a device is the platform
 /// tooling's job, not Patchbay's.
+///
+/// iOS is the exception, and the reason `ui.keepAwake.*` exists: no external
+/// tool can hold an iPhone awake, so the only lever is inside the App. It is
+/// named conditionally because it is a consumer opt-in — an App that wired no
+/// delegate has no such lever either, and `ui keep-awake status` is the cheap
+/// way to find out which one this is.
 const String patchbayWakeAction =
     'Android: `adb shell input keyevent KEYCODE_WAKEUP` then unlock, and '
     '`adb shell svc power stayon usb` to stop it recurring. '
-    'iOS: wake the device by hand (there is no system stay-awake command). '
+    'iOS: wake the device by hand — there is no system stay-awake command, so '
+    'stopping it recurring takes the App itself: `patchbay ui keep-awake on`, '
+    'if this App wired a keep-awake delegate (`ui keep-awake status` says). '
     'Desktop: click the App window — an unfocused window is not resumed.';
 
 /// The banner a session prints when it opens against a non-resumed App.

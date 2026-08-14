@@ -435,6 +435,12 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('since', help: 'ISO-8601 lower log time bound.')
   ..addOption('until', help: 'ISO-8601 upper log time bound.')
   ..addOption('ttl-ms', help: 'Artifact lifetime in milliseconds.')
+  ..addOption(
+    'lease-ms',
+    help:
+        'Keep-awake lease in milliseconds; the App releases the screen on its '
+        'own when it runs out. Omit to use the App-declared default.',
+  )
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
   ..addOption('output', help: 'Local artifact output path.')
   ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.')

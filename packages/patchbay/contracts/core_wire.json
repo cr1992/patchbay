@@ -110,6 +110,11 @@
       "values": ["flutterSubtreeOnly", "platformViewsMayBeMissing", "systemUiNotIncluded"]
     },
     {
+      "kind": "enum",
+      "name": "PatchbayKeepAwakeReleaseWire",
+      "values": ["operatorRequest", "leaseExpired", "hostDisposed"]
+    },
+    {
       "kind": "object",
       "name": "PatchbayParameterDescriptorWire",
       "fields": [
@@ -485,6 +490,28 @@
         {"name": "pixelRatio", "type": "num"},
         {"name": "warnings", "type": "PatchbayCaptureWarningWire", "list": true},
         {"name": "blob", "type": "PatchbayBlobMetadataWire"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayKeepAwakeRequestWire",
+      "fields": [
+        {"name": "enabled", "type": "bool"},
+        {"name": "leaseMs", "type": "int", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayKeepAwakeStateWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "wired", "type": "bool"},
+        {"name": "enabled", "type": "bool"},
+        {"name": "leaseMs", "type": "int", "nullable": true, "emitNull": true},
+        {"name": "leaseRemainingMs", "type": "int", "nullable": true, "emitNull": true},
+        {"name": "lastRelease", "type": "PatchbayKeepAwakeReleaseWire", "nullable": true},
+        {"name": "lastReleaseFailure", "type": "String", "nullable": true}
       ]
     }
   ]
