@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay_cli/patchbay_cli.dart';
@@ -214,6 +215,199 @@ void main() {
     );
   });
 
+  group('sticky selection', () {
+    // The priority chain is `--session` > pinned > unique, and each rung is
+    // pinned down separately: a bug that collapses two of them still looks
+    // correct from the third.
+    test('an explicit --session outranks the pinned session', () async {
+      store.write(_record('worktree-a', workspacePath: '/repo/a'));
+      store.write(_record('worktree-b', workspacePath: '/repo/b'));
+      store.writeSelection('worktree-b');
+
+      final PatchbayDiscoveredSession resolved = await _resolver(
+        store,
+      ).resolve(sessionId: 'worktree-a');
+
+      expect(resolved.record.sessionId, 'worktree-a');
+      // Naming one session for one command must not re-pin anything.
+      expect(store.readSelection(), 'worktree-b');
+    });
+
+    test('the pinned session decides what would otherwise be ambiguous', () async {
+      store.write(_record('worktree-a', workspacePath: '/repo/a'));
+      store.write(_record('worktree-b', workspacePath: '/repo/b'));
+      store.writeSelection('worktree-b');
+
+      final PatchbayDiscoveredSession resolved = await _resolver(
+        store,
+      ).resolve();
+
+      expect(resolved.record.sessionId, 'worktree-b');
+    });
+
+    test('a single session still resolves with nothing pinned', () async {
+      store.write(_record('only'));
+
+      expect(store.readSelection(), isNull);
+      expect((await _resolver(store).resolve()).record.sessionId, 'only');
+    });
+
+    test('a pin with no record left fails closed instead of guessing', () async {
+      store.write(_record('worktree-a', workspacePath: '/repo/a'));
+      store.write(_record('worktree-b', workspacePath: '/repo/b'));
+      store.writeSelection('worktree-gone');
+
+      await expectLater(
+        _resolver(store).resolve(),
+        throwsA(
+          isA<PatchbaySessionException>()
+              .having((error) => error.code, 'code', 'sessionSelectionStale')
+              .having((error) => error.hint, 'hint', contains('prune')),
+        ),
+      );
+      // Neither live session was silently substituted, and the pin is still
+      // there: clearing it here would make the *next* command guess instead.
+      expect(store.readSelection(), 'worktree-gone');
+    });
+
+    test('a pinned session whose process died fails closed', () async {
+      store.write(_record('alive', workspacePath: '/repo/a'));
+      store.write(_record('dead', workspacePath: '/repo/b', processId: 4243));
+      store.writeSelection('dead');
+
+      await expectLater(
+        PatchbaySessionResolver(
+          store: store,
+          pidProbe: (int processId) => processId != 4243,
+          identityProbe: (_) async => _identity('instance-1'),
+        ).resolve(),
+        throwsA(
+          isA<PatchbaySessionException>()
+              .having((error) => error.code, 'code', 'sessionStaleProcess')
+              .having((error) => error.hint, 'hint', contains('prune')),
+        ),
+      );
+      expect(store.readAll().single.sessionId, 'alive');
+    });
+
+    test('ambiguity points at the command that would fix it', () async {
+      store.write(_record('worktree-a', workspacePath: '/repo/a'));
+      store.write(_record('worktree-b', workspacePath: '/repo/b'));
+
+      await expectLater(
+        _resolver(store).resolve(),
+        throwsA(
+          isA<PatchbaySessionException>()
+              .having((error) => error.code, 'code', 'sessionAmbiguous')
+              .having((error) => error.hint, 'hint', contains('session use')),
+        ),
+      );
+    });
+
+    test('a corrupt selection is discarded rather than obeyed', () {
+      store.write(_record('only'));
+      final File selection = File(
+        '${directory.path}${Platform.pathSeparator}selected-session',
+      )..writeAsStringSync('{"schemaVersion": 1, "sessionId": 42}');
+
+      expect(store.readSelection(), isNull);
+      // Discarded, not left to be re-read as something else next time.
+      expect(selection.existsSync(), isFalse);
+    });
+
+    test('the selection file is not mistaken for a session record', () {
+      store.write(_record('only'));
+      store.writeSelection('only');
+
+      // `readAll` deletes every `.json` file it cannot parse as a record, so a
+      // selection stored under that extension would erase itself on first read.
+      expect(store.readAll().map((record) => record.sessionId), <String>[
+        'only',
+      ]);
+      expect(store.readSelection(), 'only');
+    });
+  });
+
+  group('sessions list / prune / use', () {
+    test('a listing never carries the URI authentication token', () {
+      store.write(
+        _record('worktree-a', wsUri: 'ws://127.0.0.1:1234/SeCrEt=/ws'),
+      );
+
+      final PatchbaySessionListing listing = _resolver(store).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.live);
+      // Host and port identify the record; the path is the credential.
+      expect(listing.label, contains('ws://127.0.0.1:1234'));
+      expect(listing.label, isNot(contains('SeCrEt')));
+      expect(jsonEncode(listing.toJson()), isNot(contains('SeCrEt')));
+      expect(listing.toJson()['endpoint'], 'ws://127.0.0.1:1234');
+      expect(listing.toJson()['deviceId'], 'device-1');
+    });
+
+    test('a record with no URI yet is listed as pending', () {
+      store.write(_record('starting', wsUri: null));
+
+      final PatchbaySessionListing listing = _resolver(store).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.pending);
+      expect(listing.toJson()['endpoint'], isNull);
+    });
+
+    test('prune removes dead records and keeps live ones', () {
+      store.write(_record('alive'));
+      store.write(_record('dead', processId: 4243));
+      store.writeSelection('alive');
+
+      final PatchbaySessionPruneResult result = PatchbaySessionResolver(
+        store: store,
+        pidProbe: (int processId) => processId != 4243,
+      ).prune();
+
+      expect(result.removed, <String>['dead']);
+      expect(result.remaining.single.record.sessionId, 'alive');
+      expect(result.selectionCleared, isFalse);
+      expect(store.readSelection(), 'alive');
+    });
+
+    test('prune unpins only when it removed the pinned record', () {
+      store.write(_record('alive'));
+      store.write(_record('dead', processId: 4243));
+      store.writeSelection('dead');
+
+      final PatchbaySessionPruneResult result = PatchbaySessionResolver(
+        store: store,
+        pidProbe: (int processId) => processId != 4243,
+      ).prune();
+
+      expect(result.selectionCleared, isTrue);
+      expect(store.readSelection(), isNull);
+    });
+
+    test('use refuses an id that has no record', () {
+      store.write(_record('worktree-a'));
+
+      expect(
+        () => _resolver(store).select('worktree-z'),
+        throwsA(_sessionError('sessionNotFound')),
+      );
+      expect(store.readSelection(), isNull);
+    });
+
+    test('use refuses to pin a record whose process is gone', () {
+      store.write(_record('dead', processId: 4243));
+
+      expect(
+        () => PatchbaySessionResolver(
+          store: store,
+          pidProbe: (int processId) => processId != 4243,
+        ).select('dead'),
+        throwsA(_sessionError('sessionStaleProcess')),
+      );
+      expect(store.readSelection(), isNull);
+    });
+  });
+
   test('live provisional record without URI is reported as pending', () async {
     store.write(_record('pending', wsUri: null));
 
@@ -250,6 +444,14 @@ String _mode(String path) {
   return result.stdout.toString().trim();
 }
 
+/// A resolver whose probes both answer "alive and the same App".
+PatchbaySessionResolver _resolver(PatchbaySessionStore store) =>
+    PatchbaySessionResolver(
+      store: store,
+      pidProbe: (_) => true,
+      identityProbe: (_) async => _identity('instance-1'),
+    );
+
 Matcher _sessionError(String code) =>
     isA<PatchbaySessionException>().having((error) => error.code, 'code', code);
 
@@ -266,12 +468,13 @@ PatchbaySessionRecord _record(
   String? isolateId,
   String? wsUri = 'ws://127.0.0.1:1234/auth/ws',
   String workspacePath = '/repo/worktree',
+  int processId = 4242,
 }) => PatchbaySessionRecord(
   sessionId: id,
   applicationId: 'dev.patchbay.fixture',
   appInstanceId: appInstanceId,
   isolateId: isolateId,
-  processId: 4242,
+  processId: processId,
   wsUri: wsUri,
   buildMode: 'debug',
   createdAt: DateTime.utc(2026, 8, 12),
