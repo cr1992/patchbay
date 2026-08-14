@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -72,10 +73,7 @@ Future<int> runPatchbayCli(
     // the discovery handshake is a round trip like any other.
     final Duration rpcTimeout = _rpcTimeout(parsed);
     connection = PatchbayTimeoutClient(
-      await awaitPatchbayRpc(
-        (connect ?? _connect)(parsed),
-        rpcTimeout: rpcTimeout,
-      ),
+      await _dial(connect ?? _connect, parsed, rpcTimeout),
       rpcTimeout: rpcTimeout,
     );
     if (repl) {
@@ -206,7 +204,50 @@ Future<int> runPatchbayCli(
       exitCode: PatchbayExitCode.transport,
     );
   } finally {
-    await connection?.close();
+    await _closeQuietly(connection);
+  }
+}
+
+/// Opens the connection under the RPC budget, leaving nothing behind if the
+/// budget runs out first.
+///
+/// A dial the CLI stopped waiting for may still succeed a moment later. Nobody
+/// will ever read from it, so it is closed rather than left open against an App
+/// nobody is talking to. This is the half that can be cleaned up; the half that
+/// cannot — a WebSocket handshake still stuck inside the transport — is why
+/// `bin/patchbay.dart` ends the process on the command's result instead of
+/// waiting for the event loop to drain.
+Future<PatchbayClient> _dial(
+  Future<PatchbayClient> Function(ArgResults) connect,
+  ArgResults parsed,
+  Duration rpcTimeout,
+) async {
+  final Future<PatchbayClient> dialing = connect(parsed);
+  try {
+    return await awaitPatchbayRpc(dialing, rpcTimeout: rpcTimeout);
+  } on PatchbayTransportException {
+    unawaited(
+      dialing
+          .then((PatchbayClient abandoned) => abandoned.close())
+          // A dial that fails after being abandoned has no one left to tell.
+          .catchError((Object _) {}),
+    );
+    rethrow;
+  }
+}
+
+/// Releases the connection without letting teardown become the thing that hangs.
+///
+/// The command has already produced its result. A peer that stopped answering
+/// must not get a second chance to hold the CLI open while the transport says
+/// goodbye, and a failed goodbye cannot be allowed to replace an outcome that
+/// was already decided and written.
+Future<void> _closeQuietly(PatchbayClient? connection) async {
+  if (connection == null) return;
+  try {
+    await connection.close().timeout(const Duration(seconds: 2));
+  } on Object {
+    // Nothing about this changes what the command answered.
   }
 }
 
@@ -303,10 +344,7 @@ Future<_Outcome> _executeOnce(
   } on PatchbayArtifactRejected catch (rejected) {
     // The App answered; the artifact simply is not downloadable. That is a
     // normal typed response, not a CLI-level error.
-    return _Outcome(
-      rejected.response,
-      patchbayExitCodeFor(rejected.response),
-    );
+    return _Outcome(rejected.response, patchbayExitCodeFor(rejected.response));
   }
 }
 
