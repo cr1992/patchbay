@@ -25,10 +25,24 @@ void main() {
       final String generated = output.readAsStringSync();
       expect(generated, contains("import 'package:patchbay/patchbay.dart';"));
       expect(generated, isNot(contains('patchbay_flutter')));
-      expect(generated, contains('enum FixturePatchbayCommandId'));
-      expect(generated, isNot(contains('Moii')));
-      expect(generated, isNot(contains('bleProvisioning')));
-      expect(generated, isNot(contains('wifiSsid')));
+      // The generator must emit only vocabulary the contract declares — no
+      // naming from whatever codebase it was extracted from may survive into
+      // a consumer's generated file. Both checks derive from the contract
+      // itself rather than blacklisting known-bad strings.
+      final Set<String> declaredTypes = _declaredTypes(generated);
+      expect(declaredTypes, contains('FixturePatchbayCommandId'));
+      expect(
+        declaredTypes.where(
+          (String name) => !name.startsWith('FixturePatchbay'),
+        ),
+        isEmpty,
+        reason: 'every generated type must derive from the contract apiPrefix',
+      );
+      expect(
+        _declaredCommandIds(generated),
+        <String>{'fixtureRun'},
+        reason: 'command ids must come from the contract, not the generator',
+      );
       expect(generated, contains('enum FixturePatchbayPermission'));
       expect(generated, contains('FixturePatchbayPermission.fixtureAccess'));
       expect(generated, contains('FixturePatchbayCancellation.fixtureStop'));
@@ -150,6 +164,28 @@ void main() {
       64,
     );
   });
+}
+
+/// Top-level type names the generated file declares.
+Set<String> _declaredTypes(String generated) =>
+    RegExp(r'^(?:enum|class|extension|mixin) (\w+)', multiLine: true)
+        .allMatches(generated)
+        .map((RegExpMatch match) => match.group(1)!)
+        .toSet();
+
+/// Command-id enum members the generated file declares. Enum members are the
+/// comma-separated names before the first `;` of the enum body.
+Set<String> _declaredCommandIds(String generated) {
+  final RegExpMatch? body = RegExp(
+    r'enum FixturePatchbayCommandId \{([^;]*);',
+  ).firstMatch(generated);
+  if (body == null) return <String>{};
+  return body
+      .group(1)!
+      .split(',')
+      .map((String member) => member.trim())
+      .where((String member) => member.isNotEmpty)
+      .toSet();
 }
 
 Map<String, Object?> _fixtureContract() => <String, Object?>{
