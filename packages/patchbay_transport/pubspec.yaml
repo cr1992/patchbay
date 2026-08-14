@@ -1,5 +1,6 @@
 name: patchbay_transport
-description: Consumer-neutral, explicitly enabled direct debug transport for Patchbay.
+description: 'Optional direct HTTP/JSON debug transport for Patchbay: explicitly started, loopback by default, short-lived bearer auth, fail-closed surface.'
+repository: https://github.com/cr1992/patchbay
 version: 0.2.1
 publish_to: none
 

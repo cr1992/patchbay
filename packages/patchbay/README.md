@@ -1,46 +1,55 @@
 # patchbay
 
-`patchbay` 是 Patchbay 的纯 Dart 协议与 host package。它让本机客户端连接正在运行的 Dart / Flutter
-App，读取 runtime identity、catalog 和 snapshot，并调用 App 明确注册的调试命令。
+English | [简体中文](README.zh-CN.md)
 
-本 package 不认识页面、设备 SDK、路由或业务领域。使用 Patchbay 的 App（下文称“接入方”）需要在
-自己的 adapter 中完成领域类型转换、门禁判断、并发所有权、脱敏和事实裁决。
+`patchbay` is Patchbay's pure Dart protocol and host package. It lets a local client connect to a
+running Dart / Flutter app, read the runtime identity, catalog, and snapshot, and invoke the debug
+commands that app has explicitly registered.
 
-完整上手流程见[仓库 README](../../README.md#快速开始)。Flutter UI 接入见
-[`patchbay_flutter`](../patchbay_flutter/README.md)，CLI 用法见
-[`patchbay_cli`](../patchbay_cli/README.md)。
+This package knows nothing about pages, device SDKs, routing, or business domains. The app using
+Patchbay (the "consumer" below) is responsible for domain type conversion, gate decisions,
+concurrency ownership, redaction, and fact adjudication in its own adapter.
 
-## Package 边界
+For the full getting-started flow, see the [repository README](../../README.md#quick-start). For
+Flutter UI integration see [`patchbay_flutter`](../patchbay_flutter/README.md); for CLI usage see
+[`patchbay_cli`](../patchbay_cli/README.md).
 
-| Package | 职责 | 依赖边界 |
+## Package Boundaries
+
+| Package | Responsibility | Dependency boundary |
 |---|---|---|
-| `patchbay` | 协议、service extension host、门禁、命令声明、调用信封、job、日志与 blob | 纯 Dart |
-| `patchbay_flutter` | 可选 Flutter UI、Semantics、导航、等待与截图 bridge | Flutter + `patchbay` |
-| `patchbay_cli` | VM Service / direct client、会话发现、命令行和稳定输出 | 纯 Dart |
-| `patchbay_transport` | 显式启用的 direct HTTP/JSON host/client | 纯 Dart，不依赖 VM Service |
+| `patchbay` | Protocol, service extension host, gates, command declarations, invocation envelopes, jobs, logs, and blobs | Pure Dart |
+| `patchbay_flutter` | Optional Flutter UI, Semantics, navigation, wait, and capture bridge | Flutter + `patchbay` |
+| `patchbay_cli` | VM Service / direct client, session discovery, command line, and stable output | Pure Dart |
+| `patchbay_transport` | Explicitly enabled direct HTTP/JSON host and client | Pure Dart, no VM Service dependency |
 
-领域 DTO、品牌命令别名、设备 SDK、路由映射和日志源都留在接入方工程。通用 package 不依赖这些类型，
-也不从自由文本、Widget 状态或命令名推导业务结论。
+Domain DTOs, branded command aliases, device SDKs, route mappings, and log sources all stay in the
+consumer's own project. The general-purpose packages neither depend on those types nor infer
+business conclusions from free text, widget state, or command names.
 
-## 核心能力
+## Core Capabilities
 
-- `PatchbayServiceHost`：注册 identity、catalog、snapshot 和 invoke 四个稳定入口；
-- `PatchbayCommandDescriptor`：声明命令参数、模式、门禁、副作用和允许的事实来源；
-- `PatchbayGateEvaluator`：按固定顺序执行基础门和命令声明门；
-- `PatchbayInvocation`：区分“受理 / 拒绝”和业务执行结果；
-- `PatchbayJobRegistry`：记录长任务、单调事件序号、取消和类型化终态；
-- `PatchbayArtifactService`：提供脱敏日志与有界 blob 下载；
-- wire DTO 与 codegen：统一字段、枚举、校验和双向 JSON codec。
+- `PatchbayServiceHost` — registers the four stable entry points: identity, catalog, snapshot, and
+  invoke;
+- `PatchbayCommandDescriptor` — declares a command's parameters, mode, gates, side effects, and
+  permitted fact sources;
+- `PatchbayGateEvaluator` — runs the base gate and the declared command gates in a fixed order;
+- `PatchbayInvocation` — separates "accepted / rejected" from the domain execution result;
+- `PatchbayJobRegistry` — tracks long-running work, monotonic event sequences, cancellation, and
+  typed terminal states;
+- `PatchbayArtifactService` — serves redacted logs and bounded blob downloads;
+- Wire DTOs and codegen — unified fields, enums, validation, and bidirectional JSON codecs.
 
-Flutter UI、Semantics、导航和 capture 不在本 package 内实现；它们由 `patchbay_flutter` 组合到同一个
-host catalog。direct HTTP 由 `patchbay_transport` 承载，并复用相同的上层 handler。
+Flutter UI, Semantics, navigation, and capture are not implemented in this package; they are
+composed into the same host catalog by `patchbay_flutter`. Direct HTTP is carried by
+`patchbay_transport`, which reuses the same upper-layer handlers.
 
-## 架构
+## Architecture
 
 ```text
 CLI / automation
        │
-       │ VM Service 或 direct HTTP
+       │ VM Service or direct HTTP
        ▼
 PatchbayServiceHost
        │
@@ -50,39 +59,46 @@ PatchbayServiceHost
        └── PatchbayJobRegistry
                     │
                     ▼
-             接入方 adapter
+             Consumer adapter
                     │
                     ▼
-       既有 runtime / controller / ports
+    Existing runtime / controllers / ports
 ```
 
-adapter 复用 App 现有 controller 和状态机。Patchbay 负责协议与边界，不为 CLI 复制一套业务实现。
+The adapter reuses the app's existing controllers and state machines. Patchbay owns the protocol
+and the boundaries; it does not reimplement business logic for the CLI's benefit.
 
-## Service extension
+## Service Extension
 
-`PatchbayServiceHost` 注册四个稳定 RPC：
+`PatchbayServiceHost` registers four stable RPCs:
 
-| RPC | 含义 |
+| RPC | Meaning |
 |---|---|
-| `ext.patchbay.identity` | App、isolate、schema 与短期实例 ID |
-| `ext.patchbay.catalog` | 当前实际注册的命令和动态 UI target |
-| `ext.patchbay.snapshot` | 接入方提供的只读 runtime 快照 |
-| `ext.patchbay.invoke` | 调用 catalog 中存在的命令 |
+| `ext.patchbay.identity` | App, isolate, schema, and short-lived instance ID |
+| `ext.patchbay.catalog` | The commands and dynamic UI targets actually registered right now |
+| `ext.patchbay.snapshot` | The read-only runtime snapshot supplied by the consumer |
+| `ext.patchbay.invoke` | Invoke a command present in the catalog |
 
-所有载荷带 `schemaVersion`。`appInstanceId` 在同一 isolate 内稳定，hot restart 后必须变化。客户端连接后
-会重新校验 schema、isolate 和 App 实例，不能只凭 PID 或旧 URI 判断会话仍有效。
+Every payload carries a `schemaVersion`. `appInstanceId` is stable within one isolate and must
+change after a hot restart. On connecting, a client re-validates the schema, isolate, and app
+instance — it cannot judge a session still valid from a PID or a stale URI alone.
 
-`schemaVersion` 由 host 拥有，接入方回调不能覆盖。catalog 中 command name 必须非空且全局唯一；
-invocation 返回值必须是合法 wire envelope，并回显同一个 `requestId`。违反这些 provider 契约时 host
-返回 `providerProtocolViolation`，不会把无法关联或无法解析的结果继续交给客户端。
+`schemaVersion` is owned by the host and cannot be overridden by consumer callbacks. Command names
+in the catalog must be non-empty and globally unique; an invocation's return value must be a valid
+wire envelope echoing back the same `requestId`. When these provider contracts are violated, the
+host returns `providerProtocolViolation` rather than passing a result it cannot correlate or parse
+on to the client.
 
-Command catalog 行必须是带合法 dotted `name` 的对象，不接受字符串缩写。命令名语法是
-`^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$`：每段以小写字母开头，段内只有字母和数字，**不允许
-连字符**（`auth.switch-tenant` 非法，写成 `auth.tenant.switch`）。`requestId` 必须非空；
-accepted 信封不能带 rejection，rejected 信封必须带 rejection 且不能带 payload / jobId。
+Command catalog rows must be objects with a valid dotted `name`; string shorthand is not accepted.
+The command name syntax is `^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$`: each segment starts with
+a lowercase letter and contains only letters and digits — **hyphens are not allowed**
+(`auth.switch-tenant` is invalid; write `auth.tenant.switch`). `requestId` must be non-empty; an
+accepted envelope must not carry a rejection, and a rejected envelope must carry a rejection and
+must not carry a payload or a jobId.
 
-catalog 违反上述约定时，**整个 catalog 调用**返回拒绝信封，而不是抛异常——异常在 VM Service 和
-direct HTTP 上都变不成回复，调用方只会看到挂起：
+When the catalog violates these rules, the **entire catalog call** returns a rejection envelope
+rather than throwing — an exception cannot become a reply over either VM Service or direct HTTP,
+so the caller would only ever see a hang:
 
 ```json
 {
@@ -101,15 +117,17 @@ direct HTTP 上都变不成回复，调用方只会看到挂起：
 }
 ```
 
-`details.reason` 另有 `commandsNotAnArray` 和 `catalogSourceFailed`（接入方回调自己抛异常，
-`details.error` 只给异常类型名，不回显消息）；逐条 `reason` 另有 `duplicateCommandName` 和
-`missingCommandName`（没有可回显的名字时只给 `index`）。命令名是协议词汇不是接入方数据，所以直接
-指名。非法名、重名、缺名一次全报，不是报完第一条就停。违规目录**不带 `commands`**：跳过坏条目只
-服务其余的，等于把接入方 bug 藏成「App 少了个能力」。
+`details.reason` also has `commandsNotAnArray` and `catalogSourceFailed` (the consumer callback
+threw; `details.error` gives only the exception type name, never the message). Per-row `reason`
+also has `duplicateCommandName` and `missingCommandName` (when there is no name to echo, only the
+`index` is given). Command names are protocol vocabulary rather than consumer data, so they are
+named directly. Invalid names, duplicates, and missing names are all reported at once, not stopped
+at the first one. A violating catalog carries **no `commands`** — skipping the bad rows and serving
+the rest would hide a consumer bug as "the app is missing a capability".
 
-## 受理信封与事实来源
+## Admission Envelope and Fact Sources
 
-外层信封只表达 handler 是否接纳请求：
+The outer envelope expresses only whether the handler accepted the request:
 
 ```json
 {
@@ -122,50 +140,62 @@ direct HTTP 上都变不成回复，调用方只会看到挂起：
 }
 ```
 
-`accepted` 不等于业务完成、设备执行或 UI 正确。协议不会增加容易被误读的外层 `ok`、`success` 或
-`executed` 字段。业务结果进入 payload 或 job 终态。
+`accepted` does not mean the business operation completed, the device executed, or the UI is
+correct. The protocol adds no easily misread outer `ok`, `success`, or `executed` field. Business
+results go into the payload or the job's terminal state.
 
-观测值使用以下事实来源：
+Observed values use the following fact sources:
 
-| 来源 | 含义 |
+| Source | Meaning |
 |---|---|
-| `appRecorded` | App 本地记账或请求回执 |
-| `commandEcho` | 命令回显，不是外部状态 |
-| `deviceReported` | 设备主动上报或可验证读回 |
-| `uiObserved` | Flutter target、metrics 或 render tree 的直接观测 |
-| `unknown` | 当前证据不足 |
+| `appRecorded` | App-local bookkeeping or a request receipt |
+| `commandEcho` | A command echo, not external state |
+| `deviceReported` | Reported by the device, or a verifiable read-back |
+| `uiObserved` | Direct observation of a Flutter target, metrics, or the render tree |
+| `unknown` | Insufficient evidence right now |
 
-对象上的 `source` 可由后代继承，更深层字段可以覆盖。descriptor 的 `factSources` 是可能来源的闭集，
-实际 payload 上的 `source` 才是该次结果的事实。传输层和 CLI 都不能把弱来源升级成强结论。
+A `source` on an object can be inherited by its descendants, and deeper fields may override it. A
+descriptor's `factSources` is the closed set of possible sources; the `source` on the actual
+payload is the fact for that particular result. Neither the transport layer nor the CLI may
+upgrade a weak source into a strong conclusion.
 
-## 命令声明与门禁
+## Command Declarations and Gates
 
-`PatchbayCommandDescriptor` 是 CLI 帮助、参数校验和副作用提示的真源，至少描述：
+`PatchbayCommandDescriptor` is the source of truth for CLI help, parameter validation, and
+side-effect notices. It describes at least:
 
-- 稳定完整命令名和摘要；
-- `readOnly`、`immediate` 或 `job` mode；
-- 参数类型、必填、默认值和枚举；
-- 接入方 gate ID；
-- `none`、`appState` 或 `external` side effect；
-- 敏感参数策略和可能出现的事实来源。
+- the stable full command name and a summary;
+- the `readOnly`, `immediate`, or `job` mode;
+- parameter types, requiredness, defaults, and enums;
+- the consumer gate IDs;
+- a `none`, `appState`, or `external` side effect;
+- the sensitive-parameter policy and the fact sources that may appear.
 
-`sensitive: true` 的强制由 host 完成，不由接入方 handler 完成。客户端用 `inputWasStdin` 标记值来自
-无回显 stdin；host 在 dispatch 之前按 catalog 声明校验，并把这个元键从 arguments 中剥掉，因此
-`PatchbayInvocationSource` 收到的参数里永远没有它。任意 sensitive 参数带非空值却缺少该标记时，host
-以 `sensitiveInputRequiresStdin` 拒绝，`details.parameters` 列出违规参数名。手写 adapter 既不需要在
-参数白名单里豁免它，也**不得**再自行实现这条 stdin 检查——剥键之后那种检查恒为假。
+Enforcement of `sensitive: true` is done by the host, not by the consumer's handler. The client
+marks a value as coming from no-echo stdin with `inputWasStdin`; the host validates against the
+catalog declaration before dispatch and strips that meta key out of the arguments, so
+`PatchbayInvocationSource` never receives it. If any sensitive parameter has a non-empty value but
+lacks that marker, the host rejects with `sensitiveInputRequiresStdin` and `details.parameters`
+lists the offending parameter names. A hand-written adapter neither needs to exempt the key in a
+parameter allowlist nor **may** reimplement this stdin check itself — after the key is stripped,
+such a check is always false.
 
-唯一例外是 `plane: flutterUi` 的命令：那条平面由 `patchbay_flutter` 自己的 bridge 服务，敏感性是
-目标级（`PatchbaySensitivePolicy.redacted`、obscured Semantics 节点）而不是参数级，descriptor 无法
-表达，所以元键继续交给该 bridge。领域平面的接入方不受影响。
+The one exception is commands with `plane: flutterUi`: that plane is served by
+`patchbay_flutter`'s own bridge, where sensitivity is per target (`PatchbaySensitivePolicy.redacted`,
+obscured Semantics nodes) rather than per parameter, which a descriptor cannot express — so the
+meta key is passed through to that bridge. Consumers on the domain plane are unaffected.
 
-catalog 是这条策略的唯一真源。host 读不到**可用**的 catalog 时 fail-closed（读不出来和读出来不合法
-一样算）：带参数的调用以 `providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，
-`details.catalog` 原样带上目录本身的违规原因，不把未校验的参数交给 adapter；
-无参调用不查 catalog——没有可剥的元键，也没有任何被传输的值可能是敏感的。descriptor 声明的默认值
-不参与这条校验：标记描述的是**被传输的值**的来源，App 自带的默认值从未上过 wire。
+The catalog is the single source of truth for this policy. When the host cannot read a **usable**
+catalog it fails closed (failing to read it counts the same as reading an invalid one): calls with
+arguments are rejected with `providerProtocolViolation` (`reason: catalogUnavailable`),
+`details.catalog` carrying the catalog's own violation reason verbatim, and unvalidated arguments
+are never handed to the adapter. Argument-free calls do not consult the catalog — there is no meta
+key to strip, and no transmitted value that could be sensitive. Descriptor-declared defaults are
+not subject to this check: the marker describes the origin of a **transmitted value**, and the
+app's own defaults never went over the wire.
 
-每次调用依次通过不可省略的基础门，再通过 descriptor 声明的接入方门：
+Every invocation passes the mandatory base gate first, then the consumer gates declared by the
+descriptor:
 
 ```dart
 final gates = PatchbayGateEvaluator(
@@ -174,57 +204,72 @@ final gates = PatchbayGateEvaluator(
 );
 ```
 
-基础门不会替 App 猜测登录、隐私同意、依赖就绪或设备状态。会触发网络、文件、权限或外部设备动作的
-命令，必须显式声明相应门禁。service extension 没有对称注销能力，所以状态撤回后 handler 仍需逐次
-fail-closed。
+The base gate does not guess login, privacy consent, dependency readiness, or device state on the
+app's behalf. Commands that trigger network, file, permission, or external device actions must
+declare the corresponding gates explicitly. Service extensions have no symmetric deregistration,
+so handlers must still fail closed on every call once state has been revoked.
 
-## 长任务
+## Long-Running Work
 
-长操作不能伪装成立即命令。`PatchbayJobRegistry` 的基本契约是：
+Long operations must not masquerade as immediate commands. The basic contract of
+`PatchbayJobRegistry` is:
 
-1. admission 返回 `jobId`；
-2. job 先产生 `running` 事件，再进入单一终态；
-3. 每个事件有单调 sequence、时间、phase、source 和 payload；
-4. 取消只终止对应 job，不推导外部系统已经停止；
-5. App / isolate 消失时由客户端以连接终止收尾，不伪造 App job 终态。
+1. admission returns a `jobId`;
+2. a job emits a `running` event first, then enters a single terminal state;
+3. every event has a monotonic sequence, timestamp, phase, source, and payload;
+4. cancellation terminates only that job — it does not imply the external system has stopped;
+5. when the app or isolate disappears, the client closes out via connection termination rather
+   than fabricating an app-side job terminal state.
 
-Registry 默认最多同时运行 32 个 job，并保留最近 200 个已结束 job；两项都可在构造时调整，但必须是
-有限正整数。达到运行上限时 `start()` 在启动 body 之前抛出 `PatchbayJobCapacityExceeded`，接入方应
-转换成稳定 admission rejection。取消回调默认最多等待 5 秒；超时后 job 保持 running，因为“取消请求
-超时”不能证明底层操作已经停止。
+By default the registry allows at most 32 concurrently running jobs and retains the 200 most
+recently settled ones; both are adjustable at construction but must be finite positive integers.
+On reaching the running limit, `start()` throws `PatchbayJobCapacityExceeded` before starting the
+body, and the consumer should convert that into a stable admission rejection. Cancellation
+callbacks wait at most 5 seconds by default; on timeout the job stays running, because "the
+cancellation request timed out" does not prove the underlying operation stopped.
 
-未提供 cancellation callback 时，`cancel()` 返回 `false` 并保持 running。callback 正常返回代表接入方
-确认底层操作已经停止；如果 controller 的 API 只表示“取消请求已发送”，adapter 必须继续等待真实取消
-终态，不能立即返回 callback。
+With no cancellation callback provided, `cancel()` returns `false` and the job stays running. A
+callback returning normally means the consumer confirms the underlying operation has stopped; if
+the controller's API only means "a cancellation request was sent", the adapter must keep waiting
+for the real cancellation terminal state rather than returning from the callback immediately.
 
-`cancelAll()` 并行发起所有运行中 job 的取消：全部 callback 先被调用，再各自按 `cancellationTimeout`
-收敛，一个卡死或抛错的 callback 只消耗一次超时，不阻塞也不中断其余 job。返回值是逐 job 的
-`PatchbayJobCancelOutcome`（`cancelled` / `notCancellable` / `timedOut` / `callbackFailed` /
-`alreadySettled`），只覆盖发起时仍在运行的 job；超时、抛错和无 callback 的 job 保持 running，
-已自行进入终态的 job 保留自己的终态，不会被写成 cancelled。
+`cancelAll()` initiates cancellation of all running jobs in parallel: every callback is invoked
+first, then each converges under its own `cancellationTimeout`, so one hung or throwing callback
+consumes a single timeout without blocking or interrupting the rest. The return value is a
+per-job `PatchbayJobCancelOutcome` (`cancelled` / `notCancellable` / `timedOut` / `callbackFailed`
+/ `alreadySettled`), covering only the jobs still running when it was called; jobs that time out,
+throw, or have no callback stay running, and jobs that already settled on their own keep their own
+terminal state rather than being rewritten as cancelled.
 
-因此 registry 中可观察记录的理论上限是 `maxRunningJobs + retainedJobs`。`runningJobs`、
-`settledJobs` 和 `totalJobs` 可用于接入方健康检查，但不是业务完成性的替代证据。
+The theoretical upper bound on observable records in the registry is therefore
+`maxRunningJobs + retainedJobs`. `runningJobs`, `settledJobs`, and `totalJobs` are useful for
+consumer health checks, but are not a substitute for evidence of business completion.
 
-如果接入方的异步 API 只表示“请求已发出”，不能在该 Future 返回时直接标记 `completed`；必须继续观察
-领域状态，直到 App 能给出真实终态。`suggestedWaitTimeoutMs` 只建议客户端观察窗口，不改变完成语义。
+If the consumer's async API only means "the request has been sent", you cannot mark `completed`
+when that Future returns; you must keep observing domain state until the app can give a real
+terminal state. `suggestedWaitTimeoutMs` only suggests an observation window to the client — it
+does not change completion semantics.
 
-## 日志与 blob
+## Logs and Blobs
 
-`PatchbayLogSource` 是接入方注入的查询接口，不接管或复制 App 日志管线。接入方先完成 schema-aware
-脱敏，再构造 `PatchbayRedactedLogRecord`。core 会额外拒绝常见敏感字段名和凭据形态，但这只是防御层，
-不能替代 App 自己的隐私策略。
+`PatchbayLogSource` is a query interface injected by the consumer; it does not take over or
+duplicate the app's logging pipeline. The consumer performs schema-aware redaction first, then
+constructs a `PatchbayRedactedLogRecord`. Core additionally rejects common sensitive field names
+and credential shapes, but this is only a defensive layer — it does not replace the app's own
+privacy policy.
 
-日志 query / tail 受条数、编码字节和时间上限约束。日志 export 与 Flutter capture 复用
-`PatchbayMemoryBlobStore`；响应只返回 metadata 和 `blobId`，二进制通过 offset / limit 分块读取，并校验
-TTL、容量和 SHA-256。
+Log query / tail are bounded by record count, encoded byte size, and time limits. Log export and
+Flutter capture share `PatchbayMemoryBlobStore`; responses return only metadata and a `blobId`,
+with the binary read in chunks via offset / limit and validated against TTL, capacity, and SHA-256.
 
-## Wire contract 与生成代码
+## Wire Contract and Generated Code
 
-descriptor、invocation、job、UI target 等稳定 DTO 从 JSON contract 生成。生成物负责字段名、枚举、
-嵌套结构、未知字段拒绝和 JSON 类型校验；接入方仍需手写“领域对象 → wire DTO”的语义投影。
+Stable DTOs — descriptors, invocations, jobs, UI targets, and so on — are generated from a JSON
+contract. The generated code handles field names, enums, nested structures, unknown-field
+rejection, and JSON type validation; the consumer still hand-writes the semantic projection from
+domain object to wire DTO.
 
-仓库内生成和漂移检查：
+Generation and drift checking inside the repository:
 
 ```console
 $ dart run packages/patchbay/bin/wire_codegen.dart \
@@ -235,15 +280,18 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
     --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
 ```
 
-contract 格式与依赖方用法见 [wire-contract-v1.md](contracts/wire-contract-v1.md)。
+For the contract format and how dependents use it, see
+[wire-contract-v1.md](contracts/wire-contract-v1.md) (currently in Chinese).
 
-## Command contract 与生成代码
+## Command Contract and Generated Code
 
-`command_codegen` 是给**接入方**用的：把自己的命令表写成 contract（`contractVersion: 2`），
-生成 typed 命令 id、参数读取器、descriptor 与 dispatch 面。它不生成本仓自己的任何代码。
+`command_codegen` is for **consumers**: write your own command table as a contract
+(`contractVersion: 2`) and it generates typed command ids, argument readers, descriptors, and a
+dispatch surface. It generates none of this repository's own code.
 
-仓内带一份可跑的样例 contract 及其生成物，CI 的 `codegen_drift` 对它跑 `--check`——生成器改动
-一旦让输出漂移，在本仓就判红，而不是等接入方升级 pin 之后才发现：
+The repository carries a runnable sample contract and its generated output, and CI's
+`codegen_drift` runs `--check` against it — so if a change to the generator makes the output drift,
+it goes red here rather than only surfacing after a consumer upgrades their pin:
 
 ```console
 $ dart run packages/patchbay/bin/command_codegen.dart \
@@ -251,35 +299,38 @@ $ dart run packages/patchbay/bin/command_codegen.dart \
     --output packages/patchbay/contracts/example_commands.g.dart --check
 ```
 
-与 `wire_codegen` 不同，这条**从哪个目录调用都一样**：生成物 header 记录的是相对生成物自身的
-路径，不是相对调用目录的路径。
+Unlike `wire_codegen`, this one behaves **the same from any directory**: the header of the
+generated file records a path relative to the generated file itself, not to the calling directory.
 
-## Release 边界
+## Release Boundary
 
-接入方必须用编译期常量让 host、adapter 和注册调用在 release 不可达，不能只靠运行时 flag 隐藏入口。
-`patchbay` 不提供 release 后门或远程重开机制。
+Consumers must use compile-time constants to make the host, adapters, and registration calls
+unreachable in release — hiding the entry point behind a runtime flag is not enough. `patchbay`
+provides no release back door or remote re-enable mechanism.
 
-core 无法替任意 App 证明最终 AOT 产物中不存在调试符号。接入方需要在自己的构建链中扫描和验收 release
-产物；Flutter Key 的跨 build mode 语义由 `patchbay_flutter` 负责。
+Core cannot prove, on behalf of an arbitrary app, that no debug symbols exist in the final AOT
+artifact. Consumers need to scan and sign off on release artifacts in their own build chain;
+cross-build-mode semantics of Flutter Keys are `patchbay_flutter`'s responsibility.
 
-## 接入方职责
+## Consumer Responsibilities
 
-- 复用既有 runtime / controller，不为 CLI 另建状态机；
-- snapshot 只读现有状态，不隐式启动订阅或外部动作；
-- 并发 permit、lease、generation 和取消所有权仍归 App；
-- 敏感值在进入 Patchbay 前完成脱敏；
-- UI 观测、App 状态和外部设备结果分别标明来源；
-- 用真机结果验证平台行为和有副作用的领域命令。
+- Reuse the existing runtime and controllers; do not build a second state machine for the CLI;
+- Keep snapshots read-only over existing state; do not implicitly start subscriptions or external
+  actions;
+- Concurrency permits, leases, generations, and cancellation ownership still belong to the app;
+- Redact sensitive values before they enter Patchbay;
+- Label UI observations, app state, and external device results with their respective sources;
+- Validate platform behavior and side-effecting domain commands against real-device results.
 
-## 非目标
+## Non-Goals
 
-- 不提供坐标驱动或跨 App 黑盒自动化；
-- 不替代 Widget test、集成测试、DevTools 或人工验收；
-- 不处理系统权限弹窗、安装卸载、shell 和其他 App；
-- 不把 CLI 输出升级为完整产品验收证据；
-- 不支持 release，也不建立隐式降级通道。
+- No coordinate-driven or cross-app black-box automation;
+- Not a replacement for widget tests, integration tests, DevTools, or manual acceptance;
+- No handling of system permission dialogs, install / uninstall, shells, or other apps;
+- CLI output is never promoted to complete product acceptance evidence;
+- No release support, and no implicit downgrade path.
 
-## 验证
+## Verification
 
 ```console
 $ dart pub get

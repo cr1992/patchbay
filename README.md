@@ -1,7 +1,7 @@
 # Patchbay
 
 <p align="center">
-  <img src="docs/assets/patchbay-hero.svg" width="100%" alt="Patchbay：从终端安全连接正在运行的 Flutter App">
+  <img src="docs/assets/patchbay-hero.svg" width="100%" alt="Patchbay: connect safely to a running Flutter app from your terminal">
 </p>
 
 <p align="center">
@@ -9,43 +9,51 @@
 </p>
 
 <p align="center">
-  <a href="#适合解决什么问题">适用场景</a> ·
-  <a href="#快速开始">快速开始</a> ·
-  <a href="#能做什么">核心能力</a> ·
-  <a href="#架构与包">架构</a> ·
-  <a href="docs/guide.md">使用指南</a> ·
-  <a href="docs/design.md">设计</a>
+  English | <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-Patchbay 是一条伸进 Flutter runtime 的类型化控制通道：从终端连接正在运行的 App，
-读取带来源的状态、调用业务命令、按稳定 ID 操作控件，以及获取脱敏日志和截图。
+<p align="center">
+  <a href="#what-it-solves">Use cases</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-you-can-do">Capabilities</a> ·
+  <a href="#architecture-and-packages">Architecture</a> ·
+  <a href="docs/guide.md">Usage guide</a> ·
+  <a href="docs/design.md">Design</a>
+</p>
 
-adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iOS 来说，它补上了
-系统工具无法提供的 App 内部调试面。
+Patchbay is a typed control channel reaching into the Flutter runtime: connect to a running app
+from your terminal, read state with its fact source attached, invoke domain commands, drive
+widgets by stable ID, and pull redacted logs and screenshots.
 
-> **项目状态：** `v0.2.1`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
-> Flutter `>=3.38.0`。控制面仅在 debug / profile 启用；package 可以参与 release 编译，但接入方
-> 必须在组合根通过编译期分支让 host 与 adapter 保持不可达。
+adb looks at a device from outside the system; Patchbay looks at the runtime from inside the app.
+On iOS in particular, it fills in the in-app debugging surface that system tooling cannot provide.
 
-## 适合解决什么问题
+> **Project status:** `v0.2.1`, consumed from source; requires Dart `>=3.11.0`, and Flutter
+> `>=3.38.0` for the Flutter UI capabilities. The control plane is enabled only in debug /
+> profile; the packages can take part in a release compile, but the consumer must keep the host
+> and adapters unreachable through compile-time branching at the composition root.
 
-| 使用 Patchbay | 继续使用 adb / xcrun |
+## What It Solves
+
+| Use Patchbay for | Keep using adb / xcrun for |
 |---|---|
-| 读取 App 内部类型化状态 | 安装、卸载和启动 App |
-| 调用 App 主动开放的业务命令 | 执行系统 shell |
-| 操作 Flutter Semantics 或稳定 UI ID | 处理系统权限弹窗和其他 App |
-| 获取 App 侧脱敏日志与 Flutter 截图 | 获取完整物理屏幕或原生 `PlatformView` 内部状态 |
+| Reading typed state from inside the app | Installing, uninstalling, and launching apps |
+| Invoking domain commands the app deliberately exposes | Running a system shell |
+| Driving Flutter Semantics or stable UI IDs | Handling system permission dialogs and other apps |
+| Fetching redacted app-side logs and Flutter screenshots | Capturing the full physical screen or the internals of a native `PlatformView` |
 
-Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架；两者组合使用才是完整的调试工具链。
+Patchbay is not an adb replacement, nor a coordinate-driven black-box test framework; the complete
+debugging toolchain is the two of them used together.
 
-## 快速开始
+## Quick Start
 
-下面用 VM Service 跑通最短链路。完整的门禁、业务命令、会话发现和 direct HTTP 接入见
-[使用指南](docs/guide.md)。
+The shortest path below runs over VM Service. For the full treatment of gates, domain commands,
+session discovery, and direct HTTP integration, see the [usage guide](docs/guide.md)
+(currently in Chinese).
 
-### 1. 添加 Flutter 依赖
+### 1. Add the Flutter dependency
 
-当前 package 尚未发布到 pub.dev，请固定 tag 从 Git 引用：
+These packages are not published to pub.dev yet — reference them from Git, pinned to a tag:
 
 ```yaml
 dependencies:
@@ -56,9 +64,10 @@ dependencies:
       path: packages/patchbay_flutter
 ```
 
-`patchbay_flutter` 已导出 core API；纯 Dart 接入可改用 `packages/patchbay`。
+`patchbay_flutter` re-exports the core API; for pure Dart integration use `packages/patchbay`
+instead.
 
-### 2. 安装 CLI
+### 2. Install the CLI
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
@@ -66,9 +75,10 @@ $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
 $ patchbay --help
 ```
 
-如果全局命令不在 `PATH`，按 Dart 提示把 pub cache 的 `bin` 目录加入 `PATH`。
+If the global command is not on your `PATH`, add the pub cache `bin` directory to `PATH` as Dart
+instructs.
 
-### 3. 在组合根注册
+### 3. Register at the composition root
 
 ```dart
 import 'package:flutter/foundation.dart';
@@ -95,11 +105,14 @@ void main() {
 }
 ```
 
-这段最小接入已能提供 identity、catalog、空 snapshot、Semantics 只读观察和 `ui.wait`。
-Semantics action 默认拒绝；领域命令、截图、日志和导航都需要 App 显式注入对应能力。
+This minimal integration already gives you identity, catalog, an empty snapshot, read-only
+Semantics observation, and `ui.wait`. Semantics actions are rejected by default; domain commands,
+capture, logs, and navigation each require the app to inject the corresponding capability
+explicitly.
 
-需要稳定文本目标时，用 `PatchbayKey` 替换现有 Key。它是 `GlobalKey`，必须像普通
-`GlobalKey` 一样缓存，不能在 `build()` 中每次重新构造：
+When you need a stable text target, replace the existing Key with a `PatchbayKey`. It is a
+`GlobalKey`, so it must be cached like any ordinary `GlobalKey` and never reconstructed on every
+`build()`:
 
 ```dart
 late final PatchbayKey phoneKey = PatchbayKey.text('login.phone');
@@ -111,9 +124,10 @@ Widget build(BuildContext context) => TextField(
 );
 ```
 
-### 4. 连接运行中的 App
+### 4. Connect to the running app
 
-运行 App，复制 `flutter run` 输出的 VM Service URI。Patchbay 同时接受 `http(s)` 和 `ws(s)` URI：
+Run the app and copy the VM Service URI that `flutter run` prints. Patchbay accepts both `http(s)`
+and `ws(s)` URIs:
 
 ```console
 $ flutter run
@@ -122,30 +136,33 @@ $ patchbay --ws-uri '<VM Service URI>' catalog
 $ patchbay --ws-uri '<VM Service URI>' --json snapshot
 ```
 
-VM Service URI 通常包含认证信息，不要把它写入脚本、日志或提交物。接入 launcher 后可以把
-`--ws-uri` 省略，详见[会话自动发现](docs/guide.md#5-会话自动发现可选)。多台设备同时连着时用
-`patchbay sessions list` 看有哪些会话、`patchbay session use <session-id>` 固定一个，之后的命令
-不必再逐条敲 `--session`，详见[会话选择](docs/guide.md#会话选择)。
+A VM Service URI usually carries authentication material — keep it out of scripts, logs, and
+anything you commit. Once the launcher is wired up you can drop `--ws-uri` entirely; see
+[automatic session discovery](docs/guide.md#5-会话自动发现可选). With several devices connected at
+once, use `patchbay sessions list` to see the available sessions and `patchbay session use
+<session-id>` to pin one, so later commands no longer need `--session`; see
+[session selection](docs/guide.md#会话选择).
 
-catalog 中的 UI target 会返回当前 `generation`。声明了调用方代际围栏的写操作（如文本输入）
-必须携带这个值，防止迟到的命令打到重挂载后的同名控件；`ui tap` 可以省略 generation，host 会在
-解析 identifier 后钉住本次操作的代际：
+UI targets in the catalog come with their current `generation`. Write operations that declare a
+caller-side generation fence (text input, for example) must carry that value, so a late command
+cannot land on a same-named widget that has since remounted; `ui tap` may omit the generation, as
+the host pins the generation for that operation once it has resolved the identifier:
 
 ```console
 $ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '13800000000'
 ```
 
-## 能做什么
+## What You Can Do
 
-| 能力 | Patchbay 提供什么 |
+| Capability | What Patchbay provides |
 |---|---|
-| **状态** | `snapshot` 类型化快照，每个值带事实来源（App 记账 / 命令回显 / 设备上报 / UI 观测） |
-| **业务命令** | 接入方注册的领域命令直调既有 controller；长流程走 job（受理 / 事件 / 终态） |
-| **UI 操作** | 文本输入、Semantics action、三种诊断树、截图和条件等待，只作用于明确开放的目标 |
-| **日志** | query / tail / export，所有出口统一脱敏 |
-| **导航** | 按稳定 destination ID 跳转，不暴露任意 route 字符串 |
-| **连续执行** | `repl` 在一次连接内逐行跑 typed 命令，每行自带退出码 |
-| **帮助** | 由命令声明生成，使用 `patchbay help <topic>` 查看 |
+| **State** | Typed `snapshot`, every value carrying its fact source (app-recorded / command echo / device-reported / UI-observed) |
+| **Domain commands** | Consumer-registered domain commands call existing controllers directly; long flows run as jobs (admission / events / terminal state) |
+| **UI operations** | Text input, Semantics actions, three diagnostic trees, capture, and conditional waits — only against explicitly opened targets |
+| **Logs** | query / tail / export, redacted uniformly at every exit |
+| **Navigation** | Jump by stable destination ID, without exposing arbitrary route strings |
+| **Continuous execution** | `repl` runs typed commands line by line over a single connection, each line with its own exit code |
+| **Help** | Generated from command declarations; browse with `patchbay help <topic>` |
 
 ```console
 $ patchbay identity
@@ -158,56 +175,67 @@ $ patchbay logs tail
 $ patchbay repl < commands.txt
 ```
 
-## 为什么是 Patchbay
+## Why Patchbay
 
-普通外部自动化看到的是像素、文案和坐标；Patchbay 看到的是 App 主动暴露的语义与事实：
+Ordinary external automation sees pixels, copy, and coordinates; Patchbay sees the semantics and
+facts the app deliberately exposes:
 
-- **可信**：状态值携带事实来源，受理、执行和设备完成性不混为一谈；
-- **可控**：每条命令经过基础门与声明门，只触达 App 明确开放的能力；
-- **稳定**：UI 目标使用稳定 ID 和 generation 围栏，不依赖坐标、树序号或易变文案；
-- **可裁剪**：接入方用编译期分支让 host 与 adapter 在 release 不可达，不留运行时重开入口。
+- **Trustworthy** — state values carry their fact source, and admission, execution, and
+  device-level completion are never conflated;
+- **Controlled** — every command passes the base gate and its declared gate, reaching only the
+  capabilities the app has explicitly opened;
+- **Stable** — UI targets use stable IDs and generation fencing, rather than coordinates, tree
+  indices, or volatile copy;
+- **Strippable** — consumers use compile-time branching to make the host and adapters unreachable
+  in release, leaving no runtime switch to turn them back on.
 
-这些不是传输层替 App 做出的保证。领域完成性、隐私脱敏、release 产物扫描和平台行为仍由接入方
-根据自己的 controller、构建链与真机结果负责。设计理由见[六条设计立场](docs/design.md#六条设计立场)。
+None of this is a guarantee the transport makes on the app's behalf. Domain completion, privacy
+redaction, release artifact scanning, and platform behavior remain the consumer's responsibility,
+judged against its own controllers, build chain, and real-device results. The reasoning is in
+[the six design positions](docs/design.md#六条设计立场) (currently in Chinese).
 
-## 架构与包
+## Architecture and Packages
 
 <p align="center">
-  <img src="docs/assets/patchbay-architecture.svg" width="100%" alt="Patchbay 架构：CLI 通过 VM Service 或 direct HTTP 进入 App 内的门禁控制面">
+  <img src="docs/assets/patchbay-architecture.svg" width="100%" alt="Patchbay architecture: the CLI enters the gated control plane inside the app over VM Service or direct HTTP">
 </p>
 
-CLI 只面对统一协议。VM Service 是默认主通道；direct HTTP 是显式开启的可选通道。进入 App 后，
-所有操作先过门禁，再分别交给 Flutter bridge、业务 adapter 或 artifact service；真正的状态机、
-router、设备 SDK 和隐私策略仍由 App 自己拥有。
+The CLI only ever faces one unified protocol. VM Service is the default main channel; direct HTTP
+is an optional channel you turn on explicitly. Inside the app, every operation passes the gates
+first and is then handed to the Flutter bridge, a domain adapter, or the artifact service; the real
+state machines, router, device SDKs, and privacy policy still belong to the app itself.
 
-| Package | 依赖 | 职责 |
+| Package | Depends on | Responsibility |
 |---|---|---|
-| [`patchbay`](packages/patchbay) | 纯 Dart | 协议、命令声明、信封、事实来源、门禁、job、blob |
-| [`patchbay_cli`](packages/patchbay_cli) | 纯 Dart | CLI、会话发现、VM Service / direct client、输出与退出码 |
-| [`patchbay_flutter`](packages/patchbay_flutter) | Flutter | Key / Semantics 操作、截图、导航与等待 |
-| [`patchbay_transport`](packages/patchbay_transport) | 纯 Dart | 可选 direct HTTP；默认关闭，必须显式启动 |
+| [`patchbay`](packages/patchbay) | Pure Dart | Protocol, command declarations, envelopes, fact sources, gates, jobs, blobs |
+| [`patchbay_cli`](packages/patchbay_cli) | Pure Dart | CLI, session discovery, VM Service / direct clients, output and exit codes |
+| [`patchbay_flutter`](packages/patchbay_flutter) | Flutter | Key / Semantics operations, capture, navigation, and waits |
+| [`patchbay_transport`](packages/patchbay_transport) | Pure Dart | Optional direct HTTP; off by default, must be started explicitly |
 
-业务 DTO、设备 SDK、路由和领域词汇都留在接入方 adapter，不进入这四个通用 package。
+Domain DTOs, device SDKs, routing, and domain vocabulary all stay in the consumer's adapter — none
+of it enters these four general-purpose packages.
 
-## 术语速查
+## Glossary
 
-| 文档术语 | 含义 |
+| Term used in the docs | Meaning |
 |---|---|
-| consumer / 接入方 | 使用 Patchbay 的 App 或它的适配层 |
-| descriptor / 命令声明 | 命令名、参数、门禁、副作用和事实来源的结构化描述 |
-| gate / 门禁 | App 在每次操作前执行的准入判断 |
-| generation / 代际 | UI 目标每次重新挂载时变化的防误击版本号 |
-| job / 长任务 | 通过事件与类型化终态表达的异步业务操作 |
+| consumer | The app using Patchbay, or its adapter layer |
+| descriptor | A structured description of a command's name, parameters, gates, side effects, and fact sources |
+| gate | The admission check the app runs before every operation |
+| generation | An anti-misfire version number that changes each time a UI target remounts |
+| job | An asynchronous domain operation expressed through events and a typed terminal state |
 
-## 文档
+## Documentation
 
-- **[使用指南](docs/guide.md)** — 安装、App 接入、CLI 手册、退出码与边界
-- **[设计](docs/design.md)** — 架构、六条设计立场与传输选型
-- **[Core package](packages/patchbay/README.md)** — 协议、信封、门禁、job 与 blob
-- **[Flutter package](packages/patchbay_flutter/README.md)** — UI 观察、操作、导航与截图
-- **[CLI package](packages/patchbay_cli/README.md)** — 完整命令和连接安全
-- **[Direct transport](packages/patchbay_transport/README.md)** — HTTP 协议与 LAN 风险
-- **[变更记录](CHANGELOG.md)** — 未发布与已发布的 API、协议和安全行为变化
+Long-form documents under `docs/` are currently in Chinese only.
+
+- **[Usage guide](docs/guide.md)** — installation, app integration, CLI manual, exit codes, and boundaries (in Chinese)
+- **[Design](docs/design.md)** — architecture, the six design positions, and transport selection (in Chinese)
+- **[Core package](packages/patchbay/README.md)** — protocol, envelopes, gates, jobs, and blobs
+- **[Flutter package](packages/patchbay_flutter/README.md)** — UI observation, operations, navigation, and capture
+- **[CLI package](packages/patchbay_cli/README.md)** — the full command set and connection safety
+- **[Direct transport](packages/patchbay_transport/README.md)** — HTTP protocol and LAN risks
+- **[Changelog](CHANGELOG.md)** — unreleased and released changes to the API, protocol, and security behavior
 
 ## License
 

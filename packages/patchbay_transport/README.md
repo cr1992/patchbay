@@ -1,51 +1,71 @@
 # Patchbay direct transport
 
-`patchbay_transport` 是与业务无关的纯 Dart 调试传输。它用固定 HTTP/JSON 协议承载
-`identity`、`catalog`、`snapshot` 和 `invoke`，不依赖 Flutter、业务 App、plugin、VM Service 或 CLI。
-包同时提供 host 与 client，产品装配层无需复制 wire codec。
+English | [简体中文](README.zh-CN.md)
 
-## 安全边界
+`patchbay_transport` is a consumer-neutral, pure Dart debug transport. It carries `identity`,
+`catalog`, `snapshot`, and `invoke` over a fixed HTTP/JSON protocol, with no dependency on Flutter,
+the consumer app, plugins, VM Service, or the CLI. The package ships both a host and a client, so
+the product assembly layer never has to duplicate the wire codec.
 
-- 构造 host 不监听；只有显式 `start()` 才绑定 socket，默认 IPv4 loopback 和系统分配端口；
-- 非 loopback 地址只有再显式选择
-  `PatchbayLanExposure.experimentalSameTrustedNetworkOnly` 才允许绑定；没有 mDNS、广播、扫描或常驻发现；
-- `Random.secure` 生成 256-bit、最长一小时的短期 bearer，只接受
-  `Authorization: Bearer ...`；URI query 一律拒绝；
-- session 和 client 的 `toString()` 隐去 token，类型化错误不带 token、请求体或 endpoint；本包不记录日志；
-- 浏览器 `Origin` / preflight 默认拒绝，不返回 CORS 放行头；
-- 每个响应关闭 HTTP 连接；默认同一时刻只处理一个请求，可配置硬上限 1–8；
-- request body、response body、callback timeout 和 token TTL 都有硬上限；
-- `stop()`、TTL、产品通知的 background / identity change、请求中检测到的 identity drift 或 handler timeout
-  都停止接收新连接；
-- 每个已认证请求仍必须在 JSON object 中携带 `schemaVersion`、`applicationId`、`appInstanceId`；
-  host 在调用业务 handler 前重新读取 identity 并同时与启动身份、请求身份核对；
-- `/patchbay/direct/v1/{identity,catalog,snapshot,invoke}` 是全部可达面。未知字段、路径、方法、query、
-  content type 或 JSON 形状 fail-closed；没有远端任意方法反射。
+## Security Boundary
 
-LAN 模式是明文 HTTP。bearer 只提供持有者认证，**不提供机密性、服务端身份认证或重放防护**；同一
-网络中的被动监听者可窃取 token 和全部载荷，主动攻击者也可冒充端点。因此 LAN 模式只能标记为
-experimental，并仅用于受信任、隔离的同一网络；不能称为 secure。需要跨不受信网络时，应在产品层
-增加经过评审的 TLS 与端点 pinning，不能靠本文档升级安全结论。
+- Constructing a host does not listen; only an explicit `start()` binds a socket, defaulting to
+  IPv4 loopback and a system-assigned port;
+- Binding a non-loopback address requires the additional explicit choice of
+  `PatchbayLanExposure.experimentalSameTrustedNetworkOnly`; there is no mDNS, broadcast, scanning,
+  or resident discovery;
+- `Random.secure` generates a 256-bit, at-most-one-hour short-lived bearer, accepted only as
+  `Authorization: Bearer ...`; URI query is always rejected;
+- `toString()` on sessions and clients elides the token, and typed errors carry no token, request
+  body, or endpoint; this package writes no logs;
+- Browser `Origin` and preflight are rejected by default, with no CORS allow headers returned;
+- Every response closes its HTTP connection; by default only one request is processed at a time,
+  with a configurable hard limit of 1–8;
+- Request body, response body, callback timeout, and token TTL all have hard limits;
+- `stop()`, TTL expiry, product-notified background / identity change, and identity drift or
+  handler timeout detected mid-request all stop accepting new connections;
+- Every authenticated request must still carry `schemaVersion`, `applicationId`, and
+  `appInstanceId` in a JSON object; before calling the business handler, the host re-reads identity
+  and cross-checks it against both the startup identity and the request identity;
+- `/patchbay/direct/v1/{identity,catalog,snapshot,invoke}` is the entire reachable surface. Unknown
+  fields, paths, methods, query strings, content types, or JSON shapes fail closed; there is no
+  remote arbitrary-method reflection.
 
-## 产品装配
+LAN mode is plaintext HTTP. The bearer provides bearer-holder authentication only — **no
+confidentiality, no server identity authentication, and no replay protection**; a passive listener
+on the same network can steal the token and the entire payload, and an active attacker can
+impersonate endpoints. LAN mode is therefore marked experimental and is only for a trusted,
+isolated, same-network setting; it must not be called secure. To cross an untrusted network, add
+reviewed TLS and endpoint pinning at the product layer — this document cannot be used to upgrade
+the security conclusion.
 
-本包不决定 debug/profile/release build policy。consumer 必须以编译期边界确保 release 不构造 host，
-并自行提供显式用户入口、token 的带外分发、前后台通知和 identity 变化通知。token 不应进入普通日志、
-错误、剪贴板历史、shell history、URL 或持久会话文件。
+## Product Assembly
 
-Android、iOS 与 HarmonyOS 都只消费本包的 `dart:io` socket；package 本身不包含 native 改动：
+This package does not decide debug/profile/release build policy. Consumers must use compile-time
+boundaries to ensure release never constructs a host, and must themselves provide the explicit
+user entry point, out-of-band token distribution, foreground/background notifications, and
+identity-change notifications. Tokens should not enter ordinary logs, errors, clipboard history,
+shell history, URLs, or persistent session files.
 
-- Android：产品层负责选择并声明网络权限，只在允许的调试构建装配；本包不改 manifest；
-- iOS：LAN 模式是否申请 Local Network 权限由产品装配层决定；本包不改 Info.plist、不触发权限
-  弹窗；loopback 是否满足目标真机工作流也必须真机验证；
-- HarmonyOS/CPF：本包不声明已通过 fork 编译或真机网络策略，接线时需单独验证。
+Android, iOS, and HarmonyOS all consume only this package's `dart:io` sockets; the package itself
+contains no native changes:
 
-前后台 hook 不是平台生命周期监听器；产品若漏接 `notifyBackgrounded()`，本包无法推断 App 已进入后台。
-同理，本包无法安全地“发现”客户端，endpoint 与 token 必须由产品选择的带外渠道交付。
+- Android — the product layer chooses and declares network permissions and assembles only in
+  permitted debug builds; this package does not modify the manifest;
+- iOS — whether LAN mode requests the Local Network permission is up to the product assembly
+  layer; this package does not modify `Info.plist` and does not trigger permission dialogs. Whether
+  loopback alone satisfies your target real-device workflow must also be verified on device;
+- HarmonyOS/CPF — this package makes no claim about fork compilation or real-device network policy
+  having been validated; verify separately when wiring it up.
 
-## 固定协议
+The foreground/background hooks are not platform lifecycle listeners; if the product forgets to
+call `notifyBackgrounded()`, this package cannot infer that the app has gone to the background.
+Likewise, this package cannot safely "discover" clients — the endpoint and token must be delivered
+through an out-of-band channel of the product's choosing.
 
-所有请求是 `POST`、`application/json`，并在 header 中携带 bearer。基础请求：
+## Fixed Protocol
+
+All requests are `POST`, `application/json`, with the bearer in a header. The base request:
 
 ```json
 {
@@ -55,22 +75,26 @@ Android、iOS 与 HarmonyOS 都只消费本包的 `dart:io` socket；package 本
 }
 ```
 
-`invoke` 仅增加 `command`、`arguments` 和 `requestId`。command 是否存在、参数 schema、gate、并发所有权
-和事实强度继续由注入 handler 负责；transport 不从字符串推导命令，也不把 `accepted` 升级为执行成功。
-Direct client 会验证 handler result 回显同一个 `requestId`；不一致返回 `requestIdMismatch`，不会作为
-业务结果交给调用方。空 `requestId` 在发送前以 `protocolError` 拒绝。
+`invoke` adds only `command`, `arguments`, and `requestId`. Whether the command exists, its
+parameter schema, its gates, concurrency ownership, and fact strength all remain the injected
+handler's responsibility; the transport neither infers commands from strings nor upgrades
+`accepted` into successful execution. The direct client verifies that the handler result echoes
+the same `requestId`; a mismatch returns `requestIdMismatch` and is never handed to the caller as
+a business result. An empty `requestId` is rejected with `protocolError` before sending.
 
-成功响应固定包含 schema、复核后的完整 identity 与 handler result。错误响应只含稳定 code：
-`protocolError`、`unauthorized`、`expired`、`busy`、`bodyTooLarge`、`responseTooLarge`、`originDenied`、
-`identityMismatch`、`identityDrift`、`timeout` 或 `internalError`。
+A successful response always contains the schema, the re-checked full identity, and the handler
+result. Error responses contain only a stable code: `protocolError`, `unauthorized`, `expired`,
+`busy`, `bodyTooLarge`, `responseTooLarge`, `originDenied`, `identityMismatch`, `identityDrift`,
+`timeout`, or `internalError`.
 
-## 验证
+## Verification
 
-在本目录运行：
+Run in this directory:
 
 ```sh
 dart analyze
 dart test --reporter expanded
 ```
 
-测试使用真实 loopback socket，并单独拉起子进程验证 client/host wire 兼容；不以 mock HTTP 代替传输验收。
+The tests use real loopback sockets and spawn a separate subprocess to verify client/host wire
+compatibility; transport acceptance is not substituted with mock HTTP.
