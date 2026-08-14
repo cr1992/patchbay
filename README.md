@@ -35,8 +35,7 @@ adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iO
 | 操作 Flutter Semantics 或稳定 UI ID | 处理系统权限弹窗和其他 App |
 | 获取 App 侧脱敏日志与 Flutter 截图 | 获取完整物理屏幕或原生 `PlatformView` 内部状态 |
 
-Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架。两者分别负责 App 内部和系统外部，
-组合使用才是完整的调试工具链。
+Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架；两者组合使用才是完整的调试工具链。
 
 ## 快速开始
 
