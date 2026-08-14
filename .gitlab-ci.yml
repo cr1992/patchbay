@@ -1,12 +1,12 @@
 # Patchbay 独立仓 CI：四包 analyze + test + 生成物零漂移。
-# runner 与镜像沿用 cloud/mobile 组现行约定（同 moii_app / sproboagent）。
-# 双 CI 并行：GitLab（本文件，内网 runner ci13-general）+ GitHub Actions
-# （.github/workflows/ci.yml，公开仓协作门禁），三 job 两边一一对应，改动需同步。
+# 双 CI 并行：GitLab（本文件）+ GitHub Actions（.github/workflows/ci.yml，公开仓协作门禁），
+# 三 job 两边一一对应，改动需同步。
 
 default:
   tags:
     - podman-par
-  image: registry.gitlab.hirobot.in:9090/cloud/sproboagent/ci/flutter-node:3.44.9-node24-r1
+  # 镜像地址由 GitLab 项目级 CI/CD 变量 PATCHBAY_CI_IMAGE 提供（Flutter 3.44.9）。
+  image: $PATCHBAY_CI_IMAGE
   interruptible: true
 
 stages: [check]
