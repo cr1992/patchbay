@@ -6,6 +6,37 @@
 
 ### Added
 
+- **snapshot 的字段选择与领域条件等待：`snapshot --path <dot.path>` 与
+  `snapshot wait <dot.path> --until exists|absent|equals [<json>]`。** 此前盯一个状态字段只能整树
+  反复拉，每轮一次完整往返；现在选择在 App 侧完成，等待也在 App 侧完成（长轮询，间隔 100ms，
+  第一次探测不等待，故条件已成立即刻返回）。响应新增 `selection: {path, found, value|miss}`，
+  等待另带 `wait: {outcome, condition, timeoutMs, elapsedMs, pollIntervalMs, polls}`。取到的值
+  **原样返回**（叶子或整棵子树），不重塑不汇总——会重塑的调试读没人能据以推理。
+
+  **取不到不是失败，等不到才是。** `found: false` 退出码仍是 `0`，并带 `missingKey` /
+  `nullValue` / `notAnObject` 说明原因——「字段还没来」与「这条路径与快照形状矛盾」是两种答案，
+  合并会让写错的路径报成功，`--until absent` 同理不吃 `notAnObject`。等待超时以
+  `snapshotWaitTimeout` 拒绝（退出码 `5`，与 `ui wait` 同口径），`details` 带最后一次解析结果。
+
+  条件是**闭合词表**而非表达式语言：三条覆盖等待的全部用途，再多就是在 host 里塞进第二个没人
+  测过的求值器。`equals` 按 **JSON 结构相等**比较，命令行上的比较值按 JSON 字面量读（字符串要
+  写成 `'"ready"'`，裸词会被拒绝并把该加的引号写出来；`null` 不接受，那是 `absent` 的事）。
+  等待预算 `--timeout-ms` 默认 5000、上限 2 分钟（`ui.wait` 家族同一上限），且会自动加进 CLI 的
+  RPC 预算，不必另调 `--transport-timeout-ms`。
+
+  **一律答复，不抛出。** 非法选择器答 `invalidSnapshotRequest`；App 的 snapshot 回调抛错答
+  `providerProtocolViolation` + `details.reason: snapshotSourceFailed`，只带异常类型不带消息
+  （consumer 的错误串是 App 数据，不跟着信封出去）。CLI 能先判的（路径语法、条件名、值形状）
+  在本地就以用法错误 `64` 挡下，不发请求。
+
+- 协议新增 `PatchbaySnapshotRequest` / `PatchbaySnapshotSelection` /
+  `PatchbaySnapshotCondition` / `PatchbaySnapshotMiss` 与对应 wire 类型，
+  `patchbaySnapshotWaitCeiling` / `patchbaySnapshotPollInterval` 两个常量，以及结构化 JSON 比较
+  `patchbayJsonEquals`。`PatchbayServiceHost.dispatchSnapshot` 与
+  `PatchbayFlutterServiceHost.dispatchSnapshot` 接受可选的原始 wire 请求；VM Service 侧新增
+  `PatchbayServiceHost.snapshotRequestKey`（`request`，一个 JSON 编码的对象参数）。
+  `PatchbayClient.snapshot` / `PatchbayDirectClient.snapshot` 增加可选具名参数。
+
 - **体检命令 `patchbay doctor`。** 「连不上 / 没反应 / 命令全被拒」时一次把四件事按依赖顺序查完
   ——会话目录、连接与 identity 握手、catalog、App lifecycle——每项给「现象 → 可能原因 → 建议动作」。
   **它自己拨号**：拨不通正是它被问的那个问题，所以连接失败在它这里是一条 finding 而不是命令终止；
@@ -126,6 +157,13 @@
   产物不覆盖正文。首次真实运行在 `0.3.0` tag。
 
 ### Changed
+
+- **`PatchbayDirectSnapshotSource` 改为接受一个可选位置参数**（`Future<Map<String, Object?>>
+  Function([Map<String, Object?>? request])`），用于把 snapshot 选择器原样交给 App 侧。**自建
+  direct host 的接入方要改这一处**：`snapshot: () async => …` 写成 `snapshot: ([_]) async => …`；
+  不改则在此处编译失败，不会静默改变行为。`PatchbayDirectHost` 只校验选择器是不是 JSON 对象，
+  不解释其内容——选择器的形状是协议包的规则，传输层再解一遍就是第二个可以与 VM Service 路径
+  各说各话的解码器。snapshot 消息多出的 `request` 是唯一可选键，其余未知键照旧 fail-closed。
 
 - **安装文档改按形态组织（`docs/guide.md` 安装节）。** 原来只给一条 `dart pub global activate`
   命令，漏掉了两件每个新用户都会踩的事：`$HOME/.pub-cache/bin` 默认不在 PATH 上（装完了

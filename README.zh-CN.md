@@ -143,7 +143,7 @@ $ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '138
 
 | 能力 | Patchbay 提供什么 |
 |---|---|
-| **状态** | `snapshot` 类型化快照，每个值带事实来源（App 记账 / 命令回显 / 设备上报 / UI 观测） |
+| **状态** | `snapshot` 类型化快照，每个值带事实来源（App 记账 / 命令回显 / 设备上报 / UI 观测）；可按点路径只取一个字段，也可让 App 侧等某个字段满足条件 |
 | **业务命令** | 接入方注册的领域命令直调既有 controller；长流程走 job（受理 / 事件 / 终态） |
 | **UI 操作** | 文本输入、Semantics action、三种诊断树、截图和条件等待，只作用于明确开放的目标 |
 | **日志** | query / tail / export，所有出口统一脱敏 |
