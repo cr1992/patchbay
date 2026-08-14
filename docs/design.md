@@ -212,6 +212,81 @@ sequenceDiagram
     Host-->>CLI: events: running → completed / failed
 ```
 
+## 协议演进
+
+CLI 与 host **分开部署**：CLI 从终端装，host 跟着某个接入方发布的 App 走。已经有两个接入方，
+各自 pin 在不同 tag 上（见[兼容矩阵](compat-matrix.md)），所以「两端同版本」从来不是可依赖的
+前提。本节说的是：在不动 `schemaVersion` 的前提下，协议怎么加东西才不打断正在跑的老客户端。
+
+### 两种读面，代价差一个数量级
+
+| 读面 | 谁在读 | 加字段的后果 |
+|---|---|---|
+| **松读面**——identity / catalog / snapshot 这些逐键读的 map | 客户端手写读取，不认识的键直接忽略 | 安全 |
+| **严格解码面**——生成的 `XxxWire.fromJson`，遇未知键即 `FormatException` | 已发布客户端解码请求与信封 | **当场打断老客户端** |
+
+两者在源码里长得一模一样：都是往 `contracts/core_wire.json` 里加一行。所以
+`packages/patchbay/test/protocol_surface_golden_test.dart` 把「契约里每个 wire 类型的形状」和
+「客户端源码里正在严格解码哪些类型」一起钉成 golden——改动不会被阻止，但一定会在 diff 里现形，
+评审时能看出踩的是哪一类。其中 `PatchbayIdentityWire` 另有一条单独断言：一旦有客户端改用生成
+解码器读 identity，新 host 对老 CLI 就从「多几个字段」变成「握手直接失败」。
+
+`schemaVersion` 保持 `1`。它是运行时强校验的兼容边界（对不上即 `schemaVersionMismatch`），只在
+**老客户端再也读不懂**时才该动；为加字段升它，等于把所有老客户端一次性踢下线，换一个没人需要
+的版本号。
+
+### protocol-owned fields always win
+
+`serverVersion`、`features`、`catalogDigest` 由协议层自己写，不接受 consumer 覆盖——consumer 目录
+里的同名键会被 host 覆盖掉。客户端读到 Patchbay 的 identity，就有权假定协议层自己实现的能力是真的；
+这条铁律是「能力声明」能被当成承诺来用的全部前提。
+
+### 三件东西，各答一个问题
+
+**`serverVersion`——我在跟哪个构建说话。** host 把自己编译自的 `patchbay` 版本报在 identity 上。
+Dart 运行时读不到自己的 `pubspec.yaml`，所以这个数字只能靠随包走的常量（`lib/src/version.dart`），
+也因此它是发版要改的第五处；`release_version_parity_test.dart` 把它钉死在四包版本上——常量漂移
+不是印错一份文档，是**全网 App 谎报自己的构建**，而谎报比不报更糟。
+
+**feature capabilities——按声明降级，不靠猜。** 没有它时，「这条应答里没有 `lifecycleState`」和
+「这台 App 的 lifecycle 未知」在客户端眼里一模一样，客户端只能二选一并有一半时间是错的——这正是
+[受理 ≠ 执行](#1-受理--执行)要防的「让人误信」在协议演进上的同一副面孔。
+
+它**声明侧封闭、读取侧开放**：host 只能声明 `PatchbayFeature` 枚举里的名字，所以一个能力不会被
+consumer 生造、也不会在两个 App 里指两件事；客户端则把它当普通字符串读，遇到没见过的名字必须
+降级成「我不用它」，绝不能变成解码失败。这个不对称就是全部机制——读取侧也封闭，就会毁掉它本来
+要提供的前向兼容。
+
+一个名字只有在**真的有客户端按它分支**时才配进枚举；声明一堆没人读的能力，等于把握手变成会漂的
+文档。反过来，声明了却不兑现比不声明更糟：客户端已经停止把缺字段当「老 host」、开始当数据了，
+所以 doctor 把「失约」单列成一条警告，而不是并进正常降级。
+
+**catalog digest——App 声明的能力面变没变。** 手工 diff 两份 catalog 全是噪声（注册顺序、排版
+自己会动），所以摘要算在一份规范化形式上：对象键递归排序，条目各自规范化后按字符串排序。
+
+只覆盖 `commands`。`uiTargets` 是**当前挂载**的目标，导航一下就换一批，与 App 声明的能力面无关
+——摘要要是跟着翻，消费端只会学会忽略它。`schemaVersion` 因相反的理由排除：协议自己拥有且恒定，
+收进来只会让摘要在「什么都没变」的协议升级上动。被拒的 catalog 不带摘要——它根本没有 `commands`，
+没有命令面可描述，也就不生造一个。
+
+`covers` 跟着值上路，正是为了 `catalogDigest` 这个名字不许诺它兑现不了的东西：读者被告知哈希的是
+哪一块，而不必自己假设；后续版本扩大覆盖面时，也不会有读者在悄悄比两个不同的东西。同理，CLI
+**复算**而不是转述——一个消费方验不了的摘要就是个只能信的数字，而「让客户端相信 host 没说过的话」
+正是这套东西要防的那一件事。算不动的（算法或覆盖面超出本版认知）报 `unsupported` 而非 `mismatched`：
+「我查不了」和「这是错的」是两个答案，只有后者是关于 App 的新消息。
+
+### 兼容用例钉的是两个方向
+
+`packages/patchbay_cli/test/protocol_compat_test.dart` 同时钉死：
+
+- **新 CLI ↔ 老 host**——喂**手写冻结**的 v0.2.0 语料（`test/golden/legacy_host_v0_2_0/`）。这些
+  文件描述的 host 已经不在本仓任何一行代码里，只在某个接入方已发布的 App 里跑着，所以**任何情况下
+  都不要用当前实现「重新生成」它们**：那等于把「新 CLI 还能不能对付老 host」改成「新 CLI 能不能
+  对付它自己」，那道闸恒绿且毫无意义。
+- **老 CLI ↔ 新 host**——在用例里**复刻** 0.2.0 客户端的读法（逐键读、多余键忽略、`schemaVersion`
+  必须是 1），拿它去读当前 host 真的吐出来的东西。复刻而不是 import，是因为要测的正是「当年那份
+  代码」的行为，而当年那份代码已经不在树里了。
+
 ## 传输选型
 
 - **主通道 VM Service**：debug/profile 天然存在，零额外监听面，与 DevTools 共用。
