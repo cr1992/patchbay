@@ -18,8 +18,10 @@ void _run(List<String> arguments) {
     throw const FormatException('command contract root must be an object');
   }
   final _Contract contract = _Contract.parse(decoded);
-  final String generated = _formatDart(_render(contract, contractFile.path));
   final File output = File(options.output);
+  final String generated = _formatDart(
+    _render(contract, _headerPath(contractFile, output)),
+  );
   if (options.check) {
     if (!output.existsSync() || output.readAsStringSync() != generated) {
       stderr.writeln(
@@ -37,6 +39,39 @@ void _run(List<String> arguments) {
   output.parent.createSync(recursive: true);
   output.writeAsStringSync(generated);
   stdout.writeln('Generated ${output.path} from ${contractFile.path}');
+}
+
+/// The contract path the generated header records, anchored to the output file.
+///
+/// The header is there so a reader of the generated file can find the contract
+/// behind it. Recording the string the caller happened to type makes that
+/// answer depend on the directory the generator ran from — and because
+/// `--check` compares the whole file, the check then silently requires one
+/// particular working directory and reports a false drift from anywhere else.
+/// The wire generator has that trap and its callers have to know about it.
+///
+/// Anchoring to the output file removes the dependency instead of documenting
+/// it: the contract and its generated file keep the same relationship no matter
+/// where the generator is invoked, so `--check` agrees from any cwd.
+String _headerPath(File contract, File output) {
+  final List<String> target = contract.absolute.uri
+      .normalizePath()
+      .pathSegments;
+  final List<String> base = output.absolute.parent.uri
+      .normalizePath()
+      .pathSegments
+      .where((String segment) => segment.isNotEmpty)
+      .toList(growable: false);
+  var shared = 0;
+  while (shared < base.length &&
+      shared < target.length - 1 &&
+      base[shared] == target[shared]) {
+    shared += 1;
+  }
+  return <String>[
+    ...List<String>.filled(base.length - shared, '..'),
+    ...target.skip(shared),
+  ].join('/');
 }
 
 final class _Options {

@@ -652,10 +652,18 @@ PatchbayDoctorFinding patchbayLifecycleFinding(Map<String, Object?> response) {
 /// reading this while the thing they were doing is blocked, and because the
 /// CLI deliberately runs none of them itself: waking a device is the platform
 /// tooling's job, not Patchbay's.
+///
+/// The iOS half separates two things a single sentence used to conflate. The
+/// screen still has to be woken by hand — no system command controls iOS
+/// power — but an App that merely fell behind another one on an unlocked,
+/// already-paired device does not: `devicectl` foregrounds it.
 const String patchbayWakeAction =
     'Android: `adb shell input keyevent KEYCODE_WAKEUP` then unlock, and '
     '`adb shell svc power stayon usb` to stop it recurring. '
-    'iOS: wake the device by hand (there is no system stay-awake command). '
+    'iOS: wake and unlock the device by hand (there is no system stay-awake '
+    'command); on an unlocked device already paired with this Mac, '
+    '`xcrun devicectl device process launch --device <udid> <bundle-id>` '
+    'brings a backgrounded App back to the foreground. '
     'Desktop: click the App window — an unfocused window is not resumed.';
 
 /// The banner a session prints when it opens against a non-resumed App.

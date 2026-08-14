@@ -164,6 +164,59 @@ void main() {
       64,
     );
   });
+
+  test('--check agrees from any working directory', () async {
+    // The generated header names the contract, and `--check` compares the
+    // whole file — so a header that recorded the caller's spelling of the path
+    // made the check depend on the directory it ran from and report drift that
+    // was not there. Writing from one directory and checking from another is
+    // the whole assertion: the two invocations below name the same two files
+    // by different relative paths on purpose.
+    final File contract = File('${temporary.path}/commands.json')
+      ..writeAsStringSync(jsonEncode(_fixtureContract()));
+    final File output = File('${temporary.path}/commands.g.dart');
+    final String directory = temporary.uri.pathSegments
+        .where((String segment) => segment.isNotEmpty)
+        .last;
+
+    expect(
+      await _run(
+        contract,
+        output,
+        '--write',
+        workingDirectory: temporary.path,
+        contractPath: 'commands.json',
+        outputPath: 'commands.g.dart',
+      ),
+      0,
+    );
+    expect(
+      await _run(
+        contract,
+        output,
+        '--check',
+        workingDirectory: temporary.parent.path,
+        contractPath: '$directory/commands.json',
+        outputPath: '$directory/commands.g.dart',
+      ),
+      0,
+    );
+  });
+
+  test('the committed example contract is still current', () async {
+    // The repo ships one command contract and its generated file so that
+    // `--check` has something to gate in CI. Keeping the assertion here as
+    // well means a generator change that shifts the output is caught by
+    // `dart test`, not only by the pipeline job.
+    expect(
+      await _run(
+        File('contracts/example_commands.json'),
+        File('contracts/example_commands.g.dart'),
+        '--check',
+      ),
+      0,
+    );
+  });
 }
 
 /// Top-level type names the generated file declares.
@@ -221,16 +274,31 @@ Map<String, Object?> _fixtureContract() => <String, Object?>{
   ],
 };
 
-Future<int> _run(File contract, File output, String mode) async {
+/// Runs the generator, by default from the package directory `dart test` uses.
+///
+/// [workingDirectory], [contractPath] and [outputPath] exist for the one case
+/// that has to vary them: proving the result does not depend on where the
+/// generator was invoked. The generator script is named absolutely whenever the
+/// directory moves, so only the two paths under test change.
+Future<int> _run(
+  File contract,
+  File output,
+  String mode, {
+  String? workingDirectory,
+  String? contractPath,
+  String? outputPath,
+}) async {
   final ProcessResult result =
       await Process.run(Platform.resolvedExecutable, <String>[
         'run',
-        'tool/command_codegen.dart',
+        workingDirectory == null
+            ? 'tool/command_codegen.dart'
+            : File('tool/command_codegen.dart').absolute.path,
         '--contract',
-        contract.path,
+        contractPath ?? contract.path,
         '--output',
-        output.path,
+        outputPath ?? output.path,
         mode,
-      ]);
+      ], workingDirectory: workingDirectory);
   return result.exitCode;
 }

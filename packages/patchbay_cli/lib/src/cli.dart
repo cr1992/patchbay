@@ -105,6 +105,12 @@ Future<int> runPatchbayCli(
       PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
       _validateReplShape(parsed);
     }
+    // The manifest is read and parsed before the dial, because it is caller
+    // input and a file the CLI refuses to read is the author's news whether or
+    // not an App happens to be reachable. Dialling first answered a syntax
+    // error with `sessionDirectoryEmpty`, which sends the author to look for a
+    // device when the actual problem is a comma in the file they just wrote.
+    final PatchbayUiManifest? manifest = _preReadUiManifest(parsed);
     // Every wait for the App is bounded from here on, dialling included: a
     // peer that stopped answering must not be able to hold the CLI open, and
     // the discovery handshake is a round trip like any other.
@@ -133,7 +139,11 @@ Future<int> runPatchbayCli(
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
-    final _Outcome outcome = await _executeOnce(connection, parsed);
+    final _Outcome outcome = await _executeOnce(
+      connection,
+      parsed,
+      manifest: manifest,
+    );
     _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
     return outcome.exitCode;
   } on FormatException catch (failure) {
@@ -323,10 +333,15 @@ void _validateReplShape(ArgResults parsed) {
 /// depending on how it was launched.
 Future<_Outcome> _executeOnce(
   PatchbayClient connection,
-  ArgResults parsed,
-) async {
+  ArgResults parsed, {
+  PatchbayUiManifest? manifest,
+}) async {
   try {
-    final _Execution execution = await _execute(connection, parsed);
+    final _Execution execution = await _execute(
+      connection,
+      parsed,
+      manifest: manifest,
+    );
     Map<String, Object?> output = execution.response;
     if (execution.artifact case final _ArtifactRequest artifact) {
       if (patchbayExitCodeFor(output) == PatchbayExitCode.accepted) {
@@ -669,8 +684,9 @@ String _sessionLines(List<PatchbaySessionListing> listings) {
 /// and help at the same time.
 Future<_Execution> _execute(
   PatchbayClient connection,
-  ArgResults parsed,
-) async {
+  ArgResults parsed, {
+  PatchbayUiManifest? manifest,
+}) async {
   final PatchbayFriendlyInvocation? friendly =
       PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
   if (friendly == null) {
@@ -690,12 +706,14 @@ Future<_Execution> _execute(
     case PatchbayCommandTarget.clientFocusTree:
       return _Execution(await connection.focusTree());
     case PatchbayCommandTarget.localManifestVerification:
-      final PatchbayUiManifest manifest = _readUiManifest(
-        friendly.manifestPath!,
-      );
+      // A one-shot invocation parsed this before it dialled; a repl line
+      // arrives with the connection already open and nothing parsed yet, so
+      // this is the only remaining reader rather than a duplicated one.
+      final PatchbayUiManifest verified =
+          manifest ?? _readUiManifest(friendly.manifestPath!);
       final Map<String, Object?> catalog = await connection.catalog();
       String? destination;
-      if (manifest.usesDestinations) {
+      if (verified.usesDestinations) {
         final Map<String, Object?> current = await _invokeAgainstCatalog(
           connection,
           catalog,
@@ -714,7 +732,7 @@ Future<_Execution> _execute(
         destination = _navigationDestination(current);
       }
       final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
-        manifest: manifest,
+        manifest: verified,
         runtime: decodePatchbayCatalogUiTargets(catalog),
         currentDestination: destination,
       );
@@ -842,6 +860,34 @@ String? _navigationDestination(Map<String, Object?> response) {
     );
   }
   return destination as String?;
+}
+
+/// Parses the manifest of a one-shot `ui verify-manifest`, or returns `null`.
+///
+/// Ordering, not convenience: this runs before the dial so that a manifest the
+/// CLI refuses to read is reported as itself. Reading it after the dial made an
+/// offline machine answer every bad manifest with a session error, which is a
+/// true statement about the wrong thing — the file is wrong no matter which
+/// device is plugged in, and only one of those two failures the author can fix
+/// from where they are sitting.
+///
+/// Every other command returns `null` here and is unaffected, including a repl:
+/// its lines are dispatched against a connection that already exists, so there
+/// is no dial left for a parse to precede.
+PatchbayUiManifest? _preReadUiManifest(ArgResults parsed) {
+  if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target !=
+      PatchbayCommandTarget.localManifestVerification) {
+    return null;
+  }
+  // Resolution is what turns argv into the path; it also polices the command's
+  // shape, and doing that before the dial is the same improvement for the same
+  // reason.
+  final PatchbayFriendlyInvocation? friendly =
+      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
+  if (friendly?.manifestPath case final String path) {
+    return _readUiManifest(path);
+  }
+  return null;
 }
 
 /// Reads the manifest file the caller named.

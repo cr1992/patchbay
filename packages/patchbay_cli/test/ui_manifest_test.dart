@@ -150,6 +150,47 @@ void main() {
       );
     });
 
+    test('a bad manifest outranks a machine with no session', () async {
+      // The dial used to come first, so authoring a manifest on a laptop with
+      // no App running answered every mistake in the file with
+      // `sessionDirectoryEmpty`: true about the session, silent about the
+      // thing the author can actually fix from where they are sitting. The
+      // file is wrong regardless of which device happens to be plugged in.
+      final Directory directory = Directory.systemTemp.createTempSync(
+        'patchbay-manifest-offline',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final File file = File('${directory.path}/targets.json')
+        ..writeAsStringSync('{"targets": [{"id": "a.b", "kind": "tap"}]}');
+      var dialled = false;
+      final StringBuffer out = StringBuffer();
+      final StringBuffer err = StringBuffer();
+
+      final int exitCode = await runPatchbayCli(
+        <String>['--json', 'ui', 'verify-manifest', file.path],
+        connect: (_) async {
+          dialled = true;
+          throw const PatchbaySessionException('sessionDirectoryEmpty');
+        },
+        output: out,
+        errorOutput: err,
+      );
+
+      expect(exitCode, PatchbayExitCode.usage);
+      final Map<String, Object?> error =
+          (jsonDecode(out.toString()) as Map<String, Object?>)['error']!
+              as Map<String, Object?>;
+      expect(error['code'], 'manifestInvalid');
+      expect(
+        (error['details']! as Map<String, Object?>)['field'],
+        r'$.targets[0].kind',
+      );
+      expect(err.toString(), isNot(contains('sessionDirectoryEmpty')));
+      // Not merely reported first: the dial never happens at all, so the
+      // ordering cannot regress into "connect, then prefer the parse error".
+      expect(dialled, isFalse);
+    });
+
     test('an undeclared key is refused rather than ignored', () async {
       final CliRun run = await _run(
         _client(),

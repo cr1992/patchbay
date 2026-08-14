@@ -1,0 +1,51 @@
+{
+  "contractVersion": 2,
+  "apiPrefix": "ExamplePatchbay",
+  "descriptorImport": "package:patchbay/patchbay.dart",
+  "permissions": ["readState", "controlDevice"],
+  "cancellations": ["stopRun"],
+  "profiles": {
+    "read": {
+      "mode": "readOnly",
+      "sideEffect": "none",
+      "factSources": ["appRecorded"],
+      "gates": []
+    },
+    "run": {
+      "mode": "job",
+      "sideEffect": "external",
+      "factSources": ["appRecorded", "deviceReported"],
+      "gates": ["example.deviceConnected"]
+    }
+  },
+  "commands": [
+    {
+      "id": "readingGet",
+      "name": "example.reading.get",
+      "summary": "Read the last value the device reported.",
+      "profile": "read",
+      "permissions": ["readState"]
+    },
+    {
+      "id": "runStart",
+      "name": "example.run.start",
+      "summary": "Ask the device to start a run and follow it as a job.",
+      "profile": "run",
+      "permissions": ["controlDevice"],
+      "cancellation": "stopRun",
+      "suggestedWaitTimeoutMs": 30000,
+      "confirmationArgument": "confirmed",
+      "parameters": [
+        {
+          "name": "mode",
+          "type": "enumeration",
+          "allowedValues": ["quick", "full"],
+          "default": "quick"
+        },
+        {"name": "passes", "type": "integer", "default": 1},
+        {"name": "confirmed", "type": "boolean", "required": true},
+        {"name": "deviceSecret", "type": "string", "sensitive": true}
+      ]
+    }
+  ]
+}
