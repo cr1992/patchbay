@@ -1,0 +1,133 @@
+# tag 触发的 CLI 二进制发布：三平台 AOT 产物挂到对应 GitHub Release。
+#
+# 门禁不在这里：`patchbay-v*` tag 指向的 commit 应当已经在 main 上过完 ci.yml 三项
+# （dart_packages / flutter_package / codegen_drift）。本流水线只补一道 analyze，
+# 用来挡住「tag 打在没跑过门禁的树上」，不重复跑跨进程测试——那类用例在三个 OS 的
+# 共享 runner 上抖动，会把发布卡在与产物无关的地方。
+#
+# 编译入口与本地一致：`packages/patchbay_cli/tool/build_cli.dart`。改编译方式改那个
+# 脚本，不要在本文件里另写一条 `dart compile exe`。
+name: Release
+
+on:
+  push:
+    tags: ['patchbay-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的 patchbay-v* tag（仅用于补发产物）'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # 与 .github/workflows/ci.yml 的 FLUTTER_VERSION 保持一致：发布产物必须由跑过门禁的
+  # 同一个 SDK 编出来。
+  FLUTTER_VERSION: '3.44.9'
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos-arm64
+            suffix: ''
+          - os: ubuntu-latest
+            target: linux-x64
+            suffix: ''
+          - os: windows-latest
+            target: windows-x64
+            suffix: '.exe'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: 版本号
+        id: version
+        shell: bash
+        # tag 是 patchbay-v0.3.0，产物名用 0.3.0。
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#patchbay-v}" >> "$GITHUB_OUTPUT"
+
+      - name: analyze
+        shell: bash
+        working-directory: packages/patchbay_cli
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+
+      - name: AOT 编译
+        shell: bash
+        working-directory: packages/patchbay_cli
+        run: |
+          dart run tool/build_cli.dart \
+            --output "$GITHUB_WORKSPACE/dist/patchbay-${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.suffix }}"
+
+      - name: 产物自检
+        shell: bash
+        # 编出来但跑不起来的二进制没有意义；--help 不连 App，三平台都能跑。
+        run: |
+          binary="$GITHUB_WORKSPACE/dist/patchbay-${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.suffix }}"
+          chmod +x "$binary" || true
+          "$binary" --help | head -1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patchbay-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: 挂到 Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 校验和
+        shell: bash
+        working-directory: dist
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          # 先写到 dist 外面：sha256sum 的通配符不能把结果文件本身算进去。
+          sha256sum patchbay-* > "$RUNNER_TEMP/checksums.txt"
+          mv "$RUNNER_TEMP/checksums.txt" "patchbay-${tag#patchbay-v}-checksums.txt"
+          ls -l
+
+      - name: 发布
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Release 可能已由人手先建（写发版说明），所以存在就只补产物，不覆盖正文。
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" \
+              --title "$tag" \
+              --notes "CLI 二进制（AOT，自带运行时，无需装 Dart SDK）。安装与校验见 [使用指南](https://github.com/${GITHUB_REPOSITORY}/blob/${tag}/docs/guide.md#安装)，变更见 [CHANGELOG](https://github.com/${GITHUB_REPOSITORY}/blob/${tag}/CHANGELOG.md)。"
+          fi

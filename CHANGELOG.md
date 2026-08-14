@@ -91,6 +91,34 @@
   schema 与边界见[使用指南](docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件
   [`docs/examples/ui-targets-manifest.json`](docs/examples/ui-targets-manifest.json)。
 
+- **CLI 的 AOT 构建入口 `packages/patchbay_cli/tool/build_cli.dart`。** CLI 每条命令起一个进程，
+  启动开销按条计费；`dart run` 每次都要做一遍 pub 新鲜度检查再 JIT 预热。AOT 产物两样都不付，
+  同机同链路对同一个 example host 实测：启动 + 一次 `catalog` 往返由 `dart run bin/patchbay.dart`
+  的 540 ms 降到 45 ms，纯 `--help` 由 463 ms 降到 21 ms（macOS arm64，各 8 次中位数）。产物落在
+  已 gitignore 的 `packages/patchbay_cli/build/`，编一次约 1.6 秒、7 MiB，放上 PATH 即可任意目录
+  直跑。脚本从脚本位置而非 cwd 解析路径，仓根与包内调用等价；新 clone 缺 package config 时自己
+  先跑 `dart pub get`。
+
+- **tag 触发的 CLI 二进制发布流水线 `.github/workflows/release.yml`。** `patchbay-v*` tag 推送后，
+  在 macOS / Linux / Windows 三个 runner 上经同一个 `tool/build_cli.dart` 编出
+  `macos-arm64` / `linux-x64` / `windows-x64` 产物，附 `checksums.txt` 挂到对应 GitHub Release；
+  产物名带版本与平台后缀。产物自带运行时，**目标机器不需要 Dart SDK**。Release 已存在时只补
+  产物不覆盖正文。首次真实运行在 `0.3.0` tag。
+
+### Changed
+
+- **安装文档改按形态组织（`docs/guide.md` 安装节）。** 原来只给一条 `dart pub global activate`
+  命令，漏掉了两件每个新用户都会踩的事：`$HOME/.pub-cache/bin` 默认不在 PATH 上（装完了
+  `patchbay` 找不到）；以及在**接入方仓目录**里 `dart run patchbay_cli:patchbay` 按当前目录所属
+  的包解析，拿到的是该仓 pin 的那个 tag 而不是手上的 CLI——表现为新命令「不存在」的用法错误
+  （退出码 `64`），容易被误读成 CLI 有 bug。现在三种形态（Release 二进制 / `pub global activate` /
+  仓内 `dart run`）带耗时对比与适用场景并列，坑单独成块。
+
+  同时记入：`dart pub global activate --source path` 每次调用都重新解析依赖，pub 把
+  `Resolving dependencies…` 打在 **stdout** 上，破坏「`--json` 时 stdout 只有一个 JSON 文档」
+  的约定，下游解析器会失败——需要工作树即时生效又要读 `--json` 时，用 AOT 产物或仓内
+  `dart run`，不要用 path 模式。
+
 ### Fixed
 
 - README 的项目状态与安装 tag 跟上四包 `0.2.1`，并新增版本一致性测试，后续四包 version、README

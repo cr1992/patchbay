@@ -13,8 +13,14 @@
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
     --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
+$ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```
+
+三种安装形态的取舍（含 `0.3.0` 起的预编译二进制、启动耗时对比，以及「在接入方仓目录里
+`dart run patchbay_cli:patchbay` 会解析到该仓 pin 的版本」这个坑）见
+[使用指南的安装节](../../docs/guide.md#安装)。改 CLI 本身时，`dart run tool/build_cli.dart`
+把当前工作树编成 AOT 可执行文件，产物落在 `build/`。
 
 以下示例统一写 `dart run bin/patchbay.dart`（包内开发姿势）；全局安装后可等价替换为 `patchbay`。
 
