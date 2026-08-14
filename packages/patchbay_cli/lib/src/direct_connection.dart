@@ -1,6 +1,7 @@
 import 'package:patchbay_transport/patchbay_transport.dart';
 
 import 'client.dart';
+import 'rpc_timeout.dart';
 
 /// Adapts the explicit direct HTTP transport to the same command client used
 /// by the VM Service path. Flutter SDK diagnostic extensions remain VM-only.
@@ -92,6 +93,13 @@ final class PatchbayDirectConnection implements PatchbayClient {
           error.code == 'requestIdMismatch' ||
           error.code == 'responseTooLarge') {
         throw PatchbayProtocolException(error.code);
+      }
+      // The transport package names its own socket budget `timeout`; the CLI
+      // says the same thing about the peer rather than about the socket, and
+      // says it identically on both transports so one code classifies an
+      // unresponsive App however the CLI reached it.
+      if (error.code == 'timeout') {
+        throw const PatchbayTransportException(patchbayAppUnresponsiveCode);
       }
       throw PatchbayTransportException(error.code);
     }

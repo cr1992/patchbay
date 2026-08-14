@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
 import 'frame_observer.dart';
+import 'lifecycle.dart';
 import 'navigation_bridge.dart';
 import 'semantics_bridge.dart';
 import 'ui_wait_bridge.dart';
@@ -222,16 +223,22 @@ final class PatchbayFlutterBridge {
     PatchbayRootController? rootController,
     PatchbayCaptureEncoder? captureEncoder,
     bool Function()? isAppResumed,
+    PatchbayLifecycleStateReader? lifecycleState,
     String Function()? newRequestId,
   }) : _gates = gates,
        _registry = registry ?? PatchbayUiRegistry.instance,
        _newRequestId = newRequestId ?? _defaultRequestId,
        _isAppResumed = isAppResumed ?? _defaultIsAppResumed,
+       _lifecycleState = patchbayLifecycleReaderFor(
+         isAppResumed: isAppResumed,
+         lifecycleState: lifecycleState,
+       ),
        _frames = PatchbayFrameObserver() {
     semantics = PatchbaySemanticsBridge(
       gates: gates,
       actionPolicy: semanticsActionPolicy,
       isAppResumed: _isAppResumed,
+      lifecycleState: _lifecycleState,
       newRequestId: newRequestId,
     );
     navigation = navigationAdapter == null
@@ -241,6 +248,7 @@ final class PatchbayFlutterBridge {
             adapter: navigationAdapter,
             frames: _frames,
             isAppResumed: _isAppResumed,
+            lifecycleState: _lifecycleState,
             newRequestId: newRequestId,
           );
     wait = PatchbayUiWaitBridge(
@@ -248,6 +256,7 @@ final class PatchbayFlutterBridge {
       semantics: semantics,
       frames: _frames,
       isAppResumed: _isAppResumed,
+      lifecycleState: _lifecycleState,
       navigation: navigation,
       newRequestId: newRequestId,
     );
@@ -261,6 +270,7 @@ final class PatchbayFlutterBridge {
             gateIds: captureGates,
             root: rootController,
             isAppResumed: _isAppResumed,
+            lifecycleState: _lifecycleState,
             encoder: captureEncoder,
           );
   }
@@ -270,6 +280,7 @@ final class PatchbayFlutterBridge {
   final PatchbayUiRegistry _registry;
   final String Function() _newRequestId;
   final bool Function() _isAppResumed;
+  final PatchbayLifecycleStateReader _lifecycleState;
   final PatchbayFrameObserver _frames;
   late final PatchbaySemanticsBridge semantics;
   late final PatchbayNavigationBridge? navigation;

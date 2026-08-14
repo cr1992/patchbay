@@ -8,5 +8,6 @@ export 'src/command_registry.dart';
 export 'src/direct_connection.dart';
 export 'src/repl.dart';
 export 'src/result.dart';
+export 'src/rpc_timeout.dart';
 export 'src/session.dart';
 export 'src/sensitive_input.dart';

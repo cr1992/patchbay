@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -12,6 +13,7 @@ import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'repl.dart';
 import 'result.dart';
+import 'rpc_timeout.dart';
 import 'sensitive_input.dart';
 import 'session.dart';
 
@@ -66,7 +68,14 @@ Future<int> runPatchbayCli(
       PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
       _validateReplShape(parsed);
     }
-    connection = await (connect ?? _connect)(parsed);
+    // Every wait for the App is bounded from here on, dialling included: a
+    // peer that stopped answering must not be able to hold the CLI open, and
+    // the discovery handshake is a round trip like any other.
+    final Duration rpcTimeout = _rpcTimeout(parsed);
+    connection = PatchbayTimeoutClient(
+      await _dial(connect ?? _connect, parsed, rpcTimeout),
+      rpcTimeout: rpcTimeout,
+    );
     if (repl) {
       return await PatchbayReplSession(
         parser: parser,
@@ -111,16 +120,28 @@ Future<int> runPatchbayCli(
       error,
       json: json,
       message: 'patchbay protocol error: ${failure.code}',
-      envelope: PatchbayErrorEnvelope(failure.code),
+      // Whatever the host already said about this failure travels with it: a
+      // code alone would send the operator back to re-run the RPC that just
+      // answered.
+      envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.protocol,
     );
   } on PatchbayTransportException catch (failure) {
+    final bool unresponsive = failure.code == patchbayAppUnresponsiveCode;
     return _fail(
       out,
       error,
       json: json,
-      message: 'patchbay transport error: ${failure.code}',
-      envelope: PatchbayErrorEnvelope(failure.code),
+      message: unresponsive
+          ? 'patchbay transport error: ${failure.code}\n'
+                '  $patchbayAppUnresponsiveHint'
+          : 'patchbay transport error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(
+        failure.code,
+        details: unresponsive
+            ? const <String, Object?>{'hint': patchbayAppUnresponsiveHint}
+            : const <String, Object?>{},
+      ),
       exitCode: PatchbayExitCode.transport,
     );
   } on PatchbaySessionException catch (failure) {
@@ -183,7 +204,50 @@ Future<int> runPatchbayCli(
       exitCode: PatchbayExitCode.transport,
     );
   } finally {
-    await connection?.close();
+    await _closeQuietly(connection);
+  }
+}
+
+/// Opens the connection under the RPC budget, leaving nothing behind if the
+/// budget runs out first.
+///
+/// A dial the CLI stopped waiting for may still succeed a moment later. Nobody
+/// will ever read from it, so it is closed rather than left open against an App
+/// nobody is talking to. This is the half that can be cleaned up; the half that
+/// cannot — a WebSocket handshake still stuck inside the transport — is why
+/// `bin/patchbay.dart` ends the process on the command's result instead of
+/// waiting for the event loop to drain.
+Future<PatchbayClient> _dial(
+  Future<PatchbayClient> Function(ArgResults) connect,
+  ArgResults parsed,
+  Duration rpcTimeout,
+) async {
+  final Future<PatchbayClient> dialing = connect(parsed);
+  try {
+    return await awaitPatchbayRpc(dialing, rpcTimeout: rpcTimeout);
+  } on PatchbayTransportException {
+    unawaited(
+      dialing
+          .then((PatchbayClient abandoned) => abandoned.close())
+          // A dial that fails after being abandoned has no one left to tell.
+          .catchError((Object _) {}),
+    );
+    rethrow;
+  }
+}
+
+/// Releases the connection without letting teardown become the thing that hangs.
+///
+/// The command has already produced its result. A peer that stopped answering
+/// must not get a second chance to hold the CLI open while the transport says
+/// goodbye, and a failed goodbye cannot be allowed to replace an outcome that
+/// was already decided and written.
+Future<void> _closeQuietly(PatchbayClient? connection) async {
+  if (connection == null) return;
+  try {
+    await connection.close().timeout(const Duration(seconds: 2));
+  } on Object {
+    // Nothing about this changes what the command answered.
   }
 }
 
@@ -280,10 +344,7 @@ Future<_Outcome> _executeOnce(
   } on PatchbayArtifactRejected catch (rejected) {
     // The App answered; the artifact simply is not downloadable. That is a
     // normal typed response, not a CLI-level error.
-    return _Outcome(
-      rejected.response,
-      patchbayExitCodeFor(rejected.response),
-    );
+    return _Outcome(rejected.response, patchbayExitCodeFor(rejected.response));
   }
 }
 
@@ -319,8 +380,13 @@ ArgParser patchbayCliParser() => ArgParser()
   )
   ..addOption(
     'transport-timeout-ms',
-    defaultsTo: '60000',
-    help: 'Direct transport timeout in milliseconds.',
+    // One source for the number: an option default that drifted from the
+    // documented one would make the exported constant a lie.
+    defaultsTo: '${patchbayDefaultRpcTimeout.inMilliseconds}',
+    help:
+        'Per-RPC timeout in milliseconds, on every transport. A command that '
+        'asks the App to wait (--timeout-ms) extends its own request by this '
+        'much rather than being cut short by it.',
   )
   ..addOption('args', help: 'JSON object passed to a domain command.')
   ..addFlag(
@@ -392,6 +458,17 @@ void _validateGlobalShape(ArgResults parsed) {
   }
 }
 
+/// The per-RPC budget this invocation runs under.
+///
+/// `--transport-timeout-ms` already existed as the direct transport's socket
+/// budget and was silently ignored everywhere else. It is the same quantity —
+/// how long the CLI waits for one answer — so it governs every transport rather
+/// than growing a second switch beside it. `--timeout-ms` keeps its own,
+/// different meaning: the wait the *App* is asked to perform, which is sent on
+/// the wire and which extends this budget instead of competing with it.
+Duration _rpcTimeout(ArgResults parsed) =>
+    Duration(milliseconds: _positiveOption(parsed, 'transport-timeout-ms'));
+
 Future<PatchbayClient> _connect(ArgResults parsed) async {
   final String? directEndpoint = parsed.option('direct-endpoint');
   if (directEndpoint != null) {
@@ -407,14 +484,13 @@ Future<PatchbayClient> _connect(ArgResults parsed) async {
       );
     }
     final int schemaVersion = _positiveOption(parsed, 'direct-schema-version');
-    final int timeoutMs = _positiveOption(parsed, 'transport-timeout-ms');
     return PatchbayDirectConnection(
       endpoint: endpoint,
       bearerToken: readSensitiveStdinLine(),
       schemaVersion: schemaVersion,
       applicationId: parsed.option('direct-application-id')!,
       appInstanceId: parsed.option('direct-app-instance-id')!,
-      timeout: Duration(milliseconds: timeoutMs),
+      timeout: _rpcTimeout(parsed),
     );
   }
 
@@ -634,17 +710,56 @@ Future<Map<String, Object?>> _invokeAgainstCatalog(
     deadline: deadline,
   );
   if (!cataloged && !_isCommandNotRegistered(response)) {
-    throw const PatchbayProtocolException('catalogInvocationDrift');
+    throw PatchbayProtocolException(
+      'catalogInvocationDrift',
+      details: _driftDetails(command, catalog, response),
+    );
   }
   return response;
 }
 
-bool _isCommandNotRegistered(Map<String, Object?> response) {
-  if (response['admission'] != 'rejected') return false;
-  final Object? rejection = response['rejection'];
-  return rejection is Map<Object?, Object?> &&
-      rejection['code'] == 'commandNotRegistered';
+/// What the host already said about the catalog this invoke disagreed with.
+///
+/// `catalogInvocationDrift` means "the command is absent from the catalog and
+/// the App did not answer `commandNotRegistered` either". By far the most
+/// common cause is a catalog the host itself refused to serve — an invalid or
+/// duplicated command name — and the host answers with the precise reason in
+/// `details.catalog`. Throwing a bare code discarded exactly that half, leaving
+/// an operator to re-run `patchbay catalog` to learn what this response already
+/// carried. Everything here is host data passed through unchanged.
+Map<String, Object?> _driftDetails(
+  String command,
+  Map<String, Object?> catalog,
+  Map<String, Object?> response,
+) {
+  final Map<Object?, Object?>? rejection = _rejectionOf(response);
+  final Object? details = rejection?['details'];
+  final Object? reason = details is Map<Object?, Object?>
+      ? details['reason']
+      : null;
+  // The invoke answer describes this request, so it wins. The catalog read is
+  // the fallback for a host that refused the catalog without repeating why in
+  // the invoke response.
+  final Object? violation = details is Map<Object?, Object?>
+      ? details['catalog']
+      : null;
+  final Object? fromCatalog = _rejectionOf(catalog)?['details'];
+  return <String, Object?>{
+    'command': command,
+    if (rejection?['code'] case final String code) 'rejection': code,
+    if (reason case final String value) 'reason': value,
+    if (violation ?? fromCatalog case final Object value) 'catalog': value,
+  };
 }
+
+Map<Object?, Object?>? _rejectionOf(Map<String, Object?> response) {
+  if (response['admission'] != 'rejected') return null;
+  final Object? rejection = response['rejection'];
+  return rejection is Map<Object?, Object?> ? rejection : null;
+}
+
+bool _isCommandNotRegistered(Map<String, Object?> response) =>
+    _rejectionOf(response)?['code'] == 'commandNotRegistered';
 
 /// Waits for an admitted job and returns its terminal response.
 ///

@@ -53,6 +53,7 @@ final class PatchbayCaptureBridge {
     Set<String> gateIds = const <String>{},
     PatchbayRootController? root,
     bool Function()? isAppResumed,
+    PatchbayLifecycleStateReader? lifecycleState,
     PatchbayCaptureEncoder? encoder,
     this.maxPixels = 16 * 1024 * 1024,
     this.maxBytes = 8 * 1024 * 1024,
@@ -69,6 +70,10 @@ final class PatchbayCaptureBridge {
            (() =>
                WidgetsBinding.instance.lifecycleState ==
                AppLifecycleState.resumed),
+       _lifecycleState = patchbayLifecycleReaderFor(
+         isAppResumed: isAppResumed,
+         lifecycleState: lifecycleState,
+       ),
        _encoder = encoder ?? _encode {
     if (maxPixels <= 0 ||
         maxBytes <= 0 ||
@@ -85,6 +90,7 @@ final class PatchbayCaptureBridge {
   final Set<String> _gateIds;
   final PatchbayRootController _root;
   final bool Function() _isAppResumed;
+  final PatchbayLifecycleStateReader _lifecycleState;
   final PatchbayCaptureEncoder _encoder;
   final int maxPixels;
   final int maxBytes;
@@ -101,15 +107,32 @@ final class PatchbayCaptureBridge {
         ? defaultTimeout
         : Duration(milliseconds: request.timeoutMs!);
     final double pixelRatio = request.pixelRatio?.toDouble() ?? 1;
-    if (timeout <= Duration.zero ||
-        timeout > const Duration(seconds: 30) ||
-        !pixelRatio.isFinite ||
-        pixelRatio <= 0 ||
-        pixelRatio > maxPixelRatio) {
-      return _reject(requestId, 'invalidCaptureArguments');
+    final List<String> outOfRange = <String>[
+      if (timeout <= Duration.zero || timeout > const Duration(seconds: 30))
+        'timeoutMs',
+      if (!pixelRatio.isFinite || pixelRatio <= 0 || pixelRatio > maxPixelRatio)
+        'pixelRatio',
+    ];
+    if (outOfRange.isNotEmpty) {
+      // Which bound was crossed, and what the bound is. Both are declared in
+      // the catalog already; repeating them here saves the caller a round trip
+      // through the descriptor to find out why a plausible number was refused.
+      return _reject(
+        requestId,
+        'invalidCaptureArguments',
+        details: <String, Object?>{
+          'invalid': outOfRange,
+          'maxTimeoutMs': const Duration(seconds: 30).inMilliseconds,
+          'maxPixelRatio': maxPixelRatio,
+        },
+      );
     }
     if (!_isAppResumed()) {
-      return _reject(requestId, 'captureLifecycleNotResumed');
+      return _reject(
+        requestId,
+        'captureLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
     final _CaptureResolution before = _resolve(request);
     if (!before.resolved) return _rejectResolution(requestId, before);
@@ -125,14 +148,22 @@ final class PatchbayCaptureBridge {
       );
     }
     if (!_isAppResumed()) {
-      return _reject(requestId, 'captureLifecycleNotResumed');
+      return _reject(
+        requestId,
+        'captureLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
     final DateTime deadline = DateTime.now().add(timeout);
     if (!await _frames.nextFrameBefore(deadline)) {
       return _reject(requestId, 'captureFrameTimeout');
     }
     if (!_isAppResumed()) {
-      return _reject(requestId, 'captureLifecycleNotResumed');
+      return _reject(
+        requestId,
+        'captureLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
     final _CaptureResolution after = _resolve(request);
     if (!after.resolved) return _rejectResolution(requestId, after);

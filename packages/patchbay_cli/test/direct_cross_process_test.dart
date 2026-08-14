@@ -103,7 +103,13 @@ void main() {
         timeoutMs: 20,
       );
       expect(timeout.exitCode, PatchbayExitCode.transport);
-      expect(timeout.stderr.toString(), contains('timeout'));
+      // The direct transport names its own budget `timeout`; the CLI reports
+      // the peer, in the same words the VM Service path uses.
+      expect(
+        timeout.stderr.toString(),
+        contains(patchbayAppUnresponsiveCode),
+      );
+      expect(timeout.stderr.toString(), contains('frozen by the system'));
       expect(timeout.stderr.toString(), isNot(contains(token)));
     },
     timeout: const Timeout(Duration(seconds: 45)),

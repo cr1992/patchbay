@@ -12,7 +12,7 @@
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.1.0 --git-path packages/patchbay_cli
+    --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
 $ patchbay --help
 ```
 
@@ -146,9 +146,14 @@ bearer token 会与命令流抢同一个 stdin。空行与 `#` 开头的行跳�
 传入该命令不接受的选项时以退出码 `64` 报 `--<name> is not valid for <command>`，不静默忽略。
 
 friendly command 只是稳定协议名的通用参数映射，不是另一份 capability 清单。CLI 每次执行仍读取
-App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocationDrift`，缺失命令仍保留 App 的
+App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocationDrift`（`details` 带上 host 自己
+给出的目录违规原因，不必再跑一次 `catalog` 才知道哪条命令名非法），缺失命令仍保留 App 的
 `commandNotRegistered` rejection 和退出码 `4`。CLI 从不按命令数量推断能力。完整命令名仍是协议身份，
 任意 consumer 命令继续使用 `exec <namespace.command>`。
+
+每一次 RPC 往返都有预算，默认 30 秒，由 `--transport-timeout-ms` 调整，两条传输都适用；耗尽时以
+退出码 `3` 和稳定 code `appUnresponsive` 失败并附处置提示。`--timeout-ms` 是发给 App 的业务等待预算，
+声明了它的请求会把本次 RPC 预算放宽成「声明的等待 + 一次往返」，不会被默认预算腰斩。
 
 日志过滤支持 `--cursor`、`--direction`、`--limit`、逗号分隔的 `--levels`/`--categories` 以及
 ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio` 和 `--timeout-ms`。所有 artifact 下载先写同目录

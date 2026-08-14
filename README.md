@@ -52,7 +52,7 @@ dependencies:
   patchbay_flutter:
     git:
       url: https://github.com/cr1992/patchbay.git
-      ref: patchbay-v0.1.0
+      ref: patchbay-v0.2.0
       path: packages/patchbay_flutter
 ```
 
@@ -62,7 +62,7 @@ dependencies:
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.1.0 --git-path packages/patchbay_cli
+    --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
 $ patchbay --help
 ```
 

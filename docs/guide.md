@@ -19,7 +19,7 @@ dependencies:
   patchbay_flutter:
     git:
       url: https://github.com/cr1992/patchbay.git
-      ref: patchbay-v0.1.0
+      ref: patchbay-v0.2.0
       path: packages/patchbay_flutter
 ```
 
@@ -27,7 +27,7 @@ dependencies:
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.1.0 --git-path packages/patchbay_cli
+    --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
 $ patchbay --help
 ```
 
@@ -251,6 +251,32 @@ $ patchbay help <topic>                     # 帮助由声明生成
 校验都在 App 侧完成。`--generation` 可选，传了是你自己的前置围栏；不传时围栏由桥在过门前 pin 的
 generation 提供。同 identifier 挂载多个实例、identifier 不存在、代际过期都是带 details 的稳定拒绝。
 
+> `ui tap` 与 `ui semantics action` 需要 App 侧注入 `PatchbaySemanticsActionPolicy` 才会进 catalog
+> ——默认 deny，没注入时这两条命令根本不出现在 `patchbay catalog` 里，调用得到
+> `commandNotRegistered`（只读的 `ui semantics tree` 不受影响）。接法与 policy 语义见
+> [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。
+
+### 超时与「对端不应答」
+
+CLI 对**每一次** RPC 往返（含发现握手）都有预算，默认 30 秒，由 `--transport-timeout-ms` 调整；
+两条传输都适用。预算耗尽时以退出码 `3` 和稳定 code `appUnresponsive` 失败，并附一句处置提示
+（`--json` 时在 `details.hint`）——最常见的成因是移动端息屏后系统冻结了 App 进程，亮屏解锁即恢复，
+见[边界](#边界)。
+
+预算是**每次往返**的，但一条命令对不应答的对端只花**一个**预算：第一次没等到应答就结束整条命令，
+后面的往返根本不会发出（`exec` 的 catalog 读没回来时，invoke 不会再试）。所以「单条命令的总失败
+时间 ≈ 一个 `--transport-timeout-ms`」，不会按 RPC 段数叠加。判决作出即结束进程——被放弃的连接
+（冻结对端的 WebSocket 握手无法从调用方取消）不会把 CLI 按在那里等操作系统回收。
+
+对端**已死**（进程没了、端口无人监听）与**冻结**不同：内核立刻拒绝连接，CLI 在毫秒级以
+`transportError` 失败，不等预算。把最清楚的失败拖成最不清楚的那一种没有意义，所以这条区分是有意
+保留的。
+
+`--timeout-ms` 是**另一个量**，不要混用：它是请求 App 自己等多久（`ui wait`、`logs tail`、
+`navigation go|push|back`、`capture`），会随请求发到 App 侧。声明了等待预算的请求，其 RPC 预算自动
+放宽成「声明的等待 + 一次往返」，所以 `ui wait --timeout-ms 120000` 不会被 30 秒的默认预算腰斩；
+`--wait` 的 job 长轮询同理。这也是不设「命令级总预算」的原因：那会把这类有意长等的命令一并砍掉。
+
 ### 参数与敏感值
 
 `--args` 传普通结构化参数，`--stdin` 从一行 no-echo stdin 读入。两者可以同时用：stdin 的 JSON
@@ -285,7 +311,7 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
 | 码 | 含义 |
 |---|---|
 | 0 | App 受理，且 snapshot/operation 返回非失败结果——**不代表设备执行成功** |
-| 3 | 无有效会话或连接失败 |
+| 3 | 无有效会话、连接失败，或对端在 RPC 预算内不应答（`appUnresponsive`） |
 | 4 | schema/identity 不兼容，或目录中没有该命令 |
 | 5 | App adapter 或 UI 桥拒绝受理（门、参数、目标歧义…） |
 | 6 | 已受理但业务返回类型化失败 / job 失败 / 等待超时 |
@@ -322,8 +348,8 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
   [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。
 - 移动端息屏同理（Android 真机实测）：息屏后 UI 平面以 `*LifecycleNotResumed` 快速拒绝，
   协议面命令（`identity` / `catalog` / `logs` / `job`）短期内仍可用；息屏一段时间后系统可能
-  冻结 App 进程（实测 MIUI），此时对端停止应答，CLI 请求会长时间等待后以传输错误失败，
-  亮屏解锁即恢复。长会话调试的规避方式，按平台：
+  冻结 App 进程（实测 MIUI），此时对端停止应答，CLI 请求在 RPC 预算（默认 30 秒）耗尽后以
+  `appUnresponsive` 失败并给出处置提示，亮屏解锁即恢复。长会话调试的规避方式，按平台：
   - **Android**：`adb shell svc power stayon usb`（USB 供电期间屏幕常亮，即开发者选项的
     「充电时保持唤醒」），设备实验室标准做法，不改 App 行为。
   - **iOS 真机**：没有系统级等价命令（`devicectl` / libimobiledevice 均无电源控制），设备端
