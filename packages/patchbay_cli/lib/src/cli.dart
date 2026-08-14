@@ -584,15 +584,12 @@ void _validateLocalSessionShape(ArgResults parsed) {
 
 _LocalOutcome _listSessions(PatchbaySessionResolver sessions) {
   final List<PatchbaySessionListing> listings = sessions.inventory();
-  return _LocalOutcome(
-    <String, Object?>{
-      'sessions': <Map<String, Object?>>[
-        for (final PatchbaySessionListing listing in listings) listing.toJson(),
-      ],
-      'selected': _selectedId(listings),
-    },
-    _sessionLines(listings),
-  );
+  return _LocalOutcome(<String, Object?>{
+    'sessions': <Map<String, Object?>>[
+      for (final PatchbaySessionListing listing in listings) listing.toJson(),
+    ],
+    'selected': _selectedId(listings),
+  }, _sessionLines(listings));
 }
 
 _LocalOutcome _pruneSessions(PatchbaySessionResolver sessions) {

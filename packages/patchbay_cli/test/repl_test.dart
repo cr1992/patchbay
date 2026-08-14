@@ -39,8 +39,9 @@ final class _FakeClient implements PatchbayClient {
   }
 
   @override
-  Future<Map<String, Object?>> snapshot() async =>
-      <String, Object?>{'source': 'appRecorded'};
+  Future<Map<String, Object?>> snapshot() async => <String, Object?>{
+    'source': 'appRecorded',
+  };
 
   @override
   Future<Map<String, Object?>> invoke({
@@ -162,43 +163,47 @@ void main() {
     expect(session.client.closed, isTrue);
   });
 
-  test('a rejected line keeps its own exit code and the session alive',
-      () async {
-    final _Session session = await _repl(<String>[
-      'ui tap absent.id',
-      'ui tap login.submit',
-    ]);
+  test(
+    'a rejected line keeps its own exit code and the session alive',
+    () async {
+      final _Session session = await _repl(<String>[
+        'ui tap absent.id',
+        'ui tap login.submit',
+      ]);
 
-    expect(session.connects, 1);
-    expect(session.exitCode, PatchbayExitCode.accepted);
-    expect(session.envelopes[0]['exitCode'], PatchbayExitCode.rejected);
-    expect(session.envelopes[1]['exitCode'], PatchbayExitCode.accepted);
-    // The rejection travels whole, details included.
-    final Map<String, Object?> rejection =
-        ((session.envelopes[0]['response']! as Map<String, Object?>)
-                ['rejection']!)
-            as Map<String, Object?>;
-    expect(rejection['code'], 'uiSemanticsIdentifierNotFound');
-    expect(rejection['details'], isNotEmpty);
-  });
+      expect(session.connects, 1);
+      expect(session.exitCode, PatchbayExitCode.accepted);
+      expect(session.envelopes[0]['exitCode'], PatchbayExitCode.rejected);
+      expect(session.envelopes[1]['exitCode'], PatchbayExitCode.accepted);
+      // The rejection travels whole, details included.
+      final Map<String, Object?> rejection =
+          ((session.envelopes[0]['response']!
+                  as Map<String, Object?>)['rejection']!)
+              as Map<String, Object?>;
+      expect(rejection['code'], 'uiSemanticsIdentifierNotFound');
+      expect(rejection['details'], isNotEmpty);
+    },
+  );
 
-  test('a transport failure ends the session instead of reconnecting',
-      () async {
-    final _FakeClient client = _FakeClient()
-      ..failNextWith = const PatchbayTransportException('socketClosed');
-    final _Session session = await _repl(<String>[
-      'ui semantics tree',
-      'ui tap login.submit',
-    ], client: client);
+  test(
+    'a transport failure ends the session instead of reconnecting',
+    () async {
+      final _FakeClient client = _FakeClient()
+        ..failNextWith = const PatchbayTransportException('socketClosed');
+      final _Session session = await _repl(<String>[
+        'ui semantics tree',
+        'ui tap login.submit',
+      ], client: client);
 
-    expect(session.exitCode, PatchbayExitCode.transport);
-    // The second line must never run: a dead connection may not be silently
-    // replaced by a fresh one the operator did not select.
-    expect(session.connects, 1);
-    expect(session.client.invoked, isEmpty);
-    expect(session.client.closed, isTrue);
-    expect(session.err, contains('socketClosed'));
-  });
+      expect(session.exitCode, PatchbayExitCode.transport);
+      // The second line must never run: a dead connection may not be silently
+      // replaced by a fresh one the operator did not select.
+      expect(session.connects, 1);
+      expect(session.client.invoked, isEmpty);
+      expect(session.client.closed, isTrue);
+      expect(session.err, contains('socketClosed'));
+    },
+  );
 
   test('connection options are refused per line, never reconnected', () async {
     final _Session session = await _repl(<String>[
@@ -267,10 +272,10 @@ void main() {
   });
 
   test('without --json each line still reports its own exit code', () async {
-    final _Session session = await _repl(<String>[
-      'identity',
-      'ui tap absent.id',
-    ], arguments: const <String>['repl']);
+    final _Session session = await _repl(
+      <String>['identity', 'ui tap absent.id'],
+      arguments: const <String>['repl'],
+    );
 
     expect(session.lines, hasLength(2));
     expect(session.lines[0], startsWith('[1] exit=0 '));
@@ -318,10 +323,11 @@ void main() {
         tokenizePatchbayReplLine(r'ui text set f.id 3 "a \"quoted\" word"'),
         <String>['ui', 'text', 'set', 'f.id', '3', 'a "quoted" word'],
       );
-      expect(
-        tokenizePatchbayReplLine('  ui   tap   login.submit  '),
-        <String>['ui', 'tap', 'login.submit'],
-      );
+      expect(tokenizePatchbayReplLine('  ui   tap   login.submit  '), <String>[
+        'ui',
+        'tap',
+        'login.submit',
+      ]);
       expect(tokenizePatchbayReplLine("exec ''"), <String>['exec', '']);
     });
 

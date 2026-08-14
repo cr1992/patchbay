@@ -319,16 +319,13 @@ void main() {
   });
 
   test('--stdin merges over --args and wins on a shared key', () {
-    final PatchbayFriendlyInvocation invocation = _resolve(
-      <String>[
-        '--args',
-        '{"deviceId":"abc","retries":2}',
-        '--stdin',
-        'exec',
-        'fixture.command',
-      ],
-      stdin: () => '{"token":"s3cret","retries":9}',
-    );
+    final PatchbayFriendlyInvocation invocation = _resolve(<String>[
+      '--args',
+      '{"deviceId":"abc","retries":2}',
+      '--stdin',
+      'exec',
+      'fixture.command',
+    ], stdin: () => '{"token":"s3cret","retries":9}');
     expect(invocation.arguments, <String, Object?>{
       'deviceId': 'abc',
       'retries': 9,

@@ -80,10 +80,7 @@ void main() {
     expect(text.out, contains('session use'));
     expect(text.out, contains('emulator-5554'));
     expect(json.document['selected'], isNull);
-    expect(
-      (json.document['sessions']! as List<Object?>).length,
-      2,
-    );
+    expect((json.document['sessions']! as List<Object?>).length, 2);
   });
 
   test('use pins a session and the listing marks it', () async {

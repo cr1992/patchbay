@@ -25,13 +25,13 @@ abstract final class PatchbayCommandHelp {
     // field — a protocol name, not the CLI's own path. Sending that to
     // "unknown help topic" made the catalog and the help two separate maps.
     if (topic.length == 1) {
-      final List<PatchbayFriendlyCommand> byService =
-          PatchbayFriendlyCommand.values
-              .where(
-                (PatchbayFriendlyCommand command) =>
-                    command.serviceCommand == topic.single,
-              )
-              .toList(growable: false);
+      final List<PatchbayFriendlyCommand> byService = PatchbayFriendlyCommand
+          .values
+          .where(
+            (PatchbayFriendlyCommand command) =>
+                command.serviceCommand == topic.single,
+          )
+          .toList(growable: false);
       if (byService.length == 1) return _command(parser, byService.single);
       if (byService.length > 1) {
         return _serviceCommand(parser, topic.single, byService);
@@ -192,7 +192,9 @@ abstract final class PatchbayCommandHelp {
     List<PatchbayFriendlyCommand> commands,
   ) {
     final List<PatchbayFriendlyCommand> conditions = commands
-        .where((PatchbayFriendlyCommand command) => command.waitCondition != null)
+        .where(
+          (PatchbayFriendlyCommand command) => command.waitCondition != null,
+        )
         .toList(growable: false);
     if (conditions.isEmpty) return;
     final int width = conditions.fold<int>(
@@ -204,7 +206,9 @@ abstract final class PatchbayCommandHelp {
     );
     output
       ..writeln()
-      ..writeln('Payload `condition` values (accepted as the command name too):');
+      ..writeln(
+        'Payload `condition` values (accepted as the command name too):',
+      );
     for (final PatchbayFriendlyCommand command in conditions) {
       output.writeln(
         '  ${command.path.join(' ').padRight(width)}  ${command.waitCondition}',

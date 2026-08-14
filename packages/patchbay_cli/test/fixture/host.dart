@@ -202,35 +202,35 @@ void main() {
               // Both arms exist so the cross-process test can prove the CLI
               // carries an identifier through and surfaces a rejection's
               // details instead of flattening it to a bare code.
-              'ui.semantics.tap' => args['identifier'] == 'fixture.absent'
-                  ? PatchbayInvocation.rejected(
-                      requestId: requestId,
-                      rejection: PatchbayRejection(
-                        code: 'uiSemanticsIdentifierNotFound',
-                        details: <String, Object?>{
-                          'identifier': args['identifier'],
-                          'matchCount': 0,
-                          'mountedIdentifiers': const <String>['fixture.tap'],
+              'ui.semantics.tap' =>
+                args['identifier'] == 'fixture.absent'
+                    ? PatchbayInvocation.rejected(
+                        requestId: requestId,
+                        rejection: PatchbayRejection(
+                          code: 'uiSemanticsIdentifierNotFound',
+                          details: <String, Object?>{
+                            'identifier': args['identifier'],
+                            'matchCount': 0,
+                            'mountedIdentifiers': const <String>['fixture.tap'],
+                          },
+                        ),
+                      ).toJson()
+                    : PatchbayInvocation.accepted(
+                        requestId: requestId,
+                        payload: <String, Object?>{
+                          'outcome': 'dispatched',
+                          'source': 'uiObserved',
+                          'arguments': args,
                         },
-                      ),
-                    ).toJson()
-                  : PatchbayInvocation.accepted(
-                      requestId: requestId,
-                      payload: <String, Object?>{
-                        'outcome': 'dispatched',
-                        'source': 'uiObserved',
-                        'arguments': args,
-                      },
-                    ).toJson(),
-              'ui.text.set' || 'ui.text.enter' =>
-                PatchbayInvocation.accepted(
-                  requestId: requestId,
-                  payload: <String, Object?>{
-                    'outcome': 'dispatched',
-                    'source': 'uiObserved',
-                    'arguments': args,
-                  },
-                ).toJson(),
+                      ).toJson(),
+              'ui.text.set' || 'ui.text.enter' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'dispatched',
+                  'source': 'uiObserved',
+                  'arguments': args,
+                },
+              ).toJson(),
               'patchbay.job.get' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: const <String, Object?>{

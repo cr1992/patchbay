@@ -233,17 +233,20 @@ void main() {
       expect(store.readSelection(), 'worktree-b');
     });
 
-    test('the pinned session decides what would otherwise be ambiguous', () async {
-      store.write(_record('worktree-a', workspacePath: '/repo/a'));
-      store.write(_record('worktree-b', workspacePath: '/repo/b'));
-      store.writeSelection('worktree-b');
+    test(
+      'the pinned session decides what would otherwise be ambiguous',
+      () async {
+        store.write(_record('worktree-a', workspacePath: '/repo/a'));
+        store.write(_record('worktree-b', workspacePath: '/repo/b'));
+        store.writeSelection('worktree-b');
 
-      final PatchbayDiscoveredSession resolved = await _resolver(
-        store,
-      ).resolve();
+        final PatchbayDiscoveredSession resolved = await _resolver(
+          store,
+        ).resolve();
 
-      expect(resolved.record.sessionId, 'worktree-b');
-    });
+        expect(resolved.record.sessionId, 'worktree-b');
+      },
+    );
 
     test('a single session still resolves with nothing pinned', () async {
       store.write(_record('only'));
@@ -252,23 +255,26 @@ void main() {
       expect((await _resolver(store).resolve()).record.sessionId, 'only');
     });
 
-    test('a pin with no record left fails closed instead of guessing', () async {
-      store.write(_record('worktree-a', workspacePath: '/repo/a'));
-      store.write(_record('worktree-b', workspacePath: '/repo/b'));
-      store.writeSelection('worktree-gone');
+    test(
+      'a pin with no record left fails closed instead of guessing',
+      () async {
+        store.write(_record('worktree-a', workspacePath: '/repo/a'));
+        store.write(_record('worktree-b', workspacePath: '/repo/b'));
+        store.writeSelection('worktree-gone');
 
-      await expectLater(
-        _resolver(store).resolve(),
-        throwsA(
-          isA<PatchbaySessionException>()
-              .having((error) => error.code, 'code', 'sessionSelectionStale')
-              .having((error) => error.hint, 'hint', contains('prune')),
-        ),
-      );
-      // Neither live session was silently substituted, and the pin is still
-      // there: clearing it here would make the *next* command guess instead.
-      expect(store.readSelection(), 'worktree-gone');
-    });
+        await expectLater(
+          _resolver(store).resolve(),
+          throwsA(
+            isA<PatchbaySessionException>()
+                .having((error) => error.code, 'code', 'sessionSelectionStale')
+                .having((error) => error.hint, 'hint', contains('prune')),
+          ),
+        );
+        // Neither live session was silently substituted, and the pin is still
+        // there: clearing it here would make the *next* command guess instead.
+        expect(store.readSelection(), 'worktree-gone');
+      },
+    );
 
     test('a pinned session whose process died fails closed', () async {
       store.write(_record('alive', workspacePath: '/repo/a'));
@@ -334,7 +340,9 @@ void main() {
         _record('worktree-a', wsUri: 'ws://127.0.0.1:1234/SeCrEt=/ws'),
       );
 
-      final PatchbaySessionListing listing = _resolver(store).inventory().single;
+      final PatchbaySessionListing listing = _resolver(
+        store,
+      ).inventory().single;
 
       expect(listing.status, PatchbaySessionStatus.live);
       // Host and port identify the record; the path is the credential.
@@ -348,7 +356,9 @@ void main() {
     test('a record with no URI yet is listed as pending', () {
       store.write(_record('starting', wsUri: null));
 
-      final PatchbaySessionListing listing = _resolver(store).inventory().single;
+      final PatchbaySessionListing listing = _resolver(
+        store,
+      ).inventory().single;
 
       expect(listing.status, PatchbaySessionStatus.pending);
       expect(listing.toJson()['endpoint'], isNull);

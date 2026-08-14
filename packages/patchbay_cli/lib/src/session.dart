@@ -490,7 +490,8 @@ final class PatchbaySessionResolver {
       store.remove(sessionId);
       throw const PatchbaySessionException(
         'sessionStaleProcess',
-        hint: 'that record has no live process; it has been removed — run '
+        hint:
+            'that record has no live process; it has been removed — run '
             '`patchbay sessions list` and select from what is left',
       );
     }

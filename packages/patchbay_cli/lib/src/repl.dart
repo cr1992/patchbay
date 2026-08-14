@@ -139,7 +139,12 @@ final class PatchbayReplSession {
         parsed = _parser.parse(words);
         _rejectSessionScopedOptions(parsed);
       } on FormatException catch (error) {
-        _writeFailure(number, <String>[], PatchbayExitCode.usage, error.message);
+        _writeFailure(
+          number,
+          <String>[],
+          PatchbayExitCode.usage,
+          error.message,
+        );
         continue;
       }
 
@@ -187,7 +192,12 @@ final class PatchbayReplSession {
         // A file this line could not read says nothing about the connection
         // the session is reusing, so it ends the line the way a usage error
         // does rather than tearing down every command after it.
-        _writeFailure(number, parsed.rest, PatchbayExitCode.usage, error.sentence);
+        _writeFailure(
+          number,
+          parsed.rest,
+          PatchbayExitCode.usage,
+          error.sentence,
+        );
       }
     }
     return PatchbayExitCode.accepted;
