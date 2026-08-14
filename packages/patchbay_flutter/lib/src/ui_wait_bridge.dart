@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:patchbay/patchbay.dart';
 
 import 'frame_observer.dart';
+import 'lifecycle.dart';
 import 'navigation_bridge.dart';
 import 'semantics_bridge.dart';
 
@@ -13,12 +14,14 @@ final class PatchbayUiWaitBridge {
     required PatchbaySemanticsBridge semantics,
     required PatchbayFrameObserver frames,
     required bool Function() isAppResumed,
+    required PatchbayLifecycleStateReader lifecycleState,
     PatchbayNavigationBridge? navigation,
     String Function()? newRequestId,
   }) : _gates = gates,
        _semantics = semantics,
        _frames = frames,
        _isAppResumed = isAppResumed,
+       _lifecycleState = lifecycleState,
        _navigation = navigation,
        _newRequestId = newRequestId ?? _defaultRequestId;
 
@@ -26,6 +29,7 @@ final class PatchbayUiWaitBridge {
   final PatchbaySemanticsBridge _semantics;
   final PatchbayFrameObserver _frames;
   final bool Function() _isAppResumed;
+  final PatchbayLifecycleStateReader _lifecycleState;
   final PatchbayNavigationBridge? _navigation;
   final String Function() _newRequestId;
 
@@ -59,7 +63,11 @@ final class PatchbayUiWaitBridge {
     _WaitProbe? last;
     while (DateTime.now().isBefore(deadline)) {
       if (!_isAppResumed()) {
-        return _rejected(id, 'uiWaitLifecycleNotResumed');
+        return _rejected(
+          id,
+          'uiWaitLifecycleNotResumed',
+          details: patchbayLifecycleDetails(_lifecycleState),
+        );
       }
       final _Timed<_WaitProbe> observed = await _beforeDeadline(
         _probe(request),

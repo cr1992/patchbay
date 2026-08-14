@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show setEquals;
 import 'package:patchbay/patchbay.dart';
 
 import 'frame_observer.dart';
+import 'lifecycle.dart';
 
 typedef PatchbayNavigationRequest = FutureOr<void> Function();
 typedef PatchbayNavigationCatalogSource =
@@ -71,17 +72,20 @@ final class PatchbayNavigationBridge {
     required PatchbayNavigationAdapter adapter,
     required PatchbayFrameObserver frames,
     required bool Function() isAppResumed,
+    required PatchbayLifecycleStateReader lifecycleState,
     String Function()? newRequestId,
   }) : _gates = gates,
        _adapter = adapter,
        _frames = frames,
        _isAppResumed = isAppResumed,
+       _lifecycleState = lifecycleState,
        _newRequestId = newRequestId ?? _defaultRequestId;
 
   final PatchbayGateEvaluator _gates;
   final PatchbayNavigationAdapter _adapter;
   final PatchbayFrameObserver _frames;
   final bool Function() _isAppResumed;
+  final PatchbayLifecycleStateReader _lifecycleState;
   final String Function() _newRequestId;
   Future<void> _tail = Future<void>.value();
 
@@ -215,7 +219,11 @@ final class PatchbayNavigationBridge {
       return _rejected(requestId, 'invalidNavigationArguments');
     }
     if (!_isAppResumed()) {
-      return _rejected(requestId, 'navigationLifecycleNotResumed');
+      return _rejected(
+        requestId,
+        'navigationLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
 
     _ResolvedRequest resolution;
@@ -239,7 +247,11 @@ final class PatchbayNavigationBridge {
     final PatchbayGateRejection? gate = await _gates.evaluate(initialGateIds);
     if (gate != null) return _gateRejected(requestId, gate);
     if (!_isAppResumed()) {
-      return _rejected(requestId, 'navigationLifecycleNotResumed');
+      return _rejected(
+        requestId,
+        'navigationLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
 
     // Gate evaluation may await. Resolve both the destination callback and the
@@ -288,7 +300,11 @@ final class PatchbayNavigationBridge {
     PatchbayNavigationObservation? last;
     while (DateTime.now().isBefore(deadline)) {
       if (!_isAppResumed()) {
-        return _rejected(requestId, 'navigationLifecycleNotResumed');
+        return _rejected(
+          requestId,
+          'navigationLifecycleNotResumed',
+          details: patchbayLifecycleDetails(_lifecycleState),
+        );
       }
       try {
         last = _adapter.current();
@@ -306,7 +322,11 @@ final class PatchbayNavigationBridge {
       if (arrived) {
         if (!await _frames.nextFrameBefore(deadline)) break;
         if (!_isAppResumed()) {
-          return _rejected(requestId, 'navigationLifecycleNotResumed');
+          return _rejected(
+            requestId,
+            'navigationLifecycleNotResumed',
+            details: patchbayLifecycleDetails(_lifecycleState),
+          );
         }
         final PatchbayNavigationObservation confirmed;
         try {

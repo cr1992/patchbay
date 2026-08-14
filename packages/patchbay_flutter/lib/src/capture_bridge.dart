@@ -53,6 +53,7 @@ final class PatchbayCaptureBridge {
     Set<String> gateIds = const <String>{},
     PatchbayRootController? root,
     bool Function()? isAppResumed,
+    PatchbayLifecycleStateReader? lifecycleState,
     PatchbayCaptureEncoder? encoder,
     this.maxPixels = 16 * 1024 * 1024,
     this.maxBytes = 8 * 1024 * 1024,
@@ -69,6 +70,10 @@ final class PatchbayCaptureBridge {
            (() =>
                WidgetsBinding.instance.lifecycleState ==
                AppLifecycleState.resumed),
+       _lifecycleState = patchbayLifecycleReaderFor(
+         isAppResumed: isAppResumed,
+         lifecycleState: lifecycleState,
+       ),
        _encoder = encoder ?? _encode {
     if (maxPixels <= 0 ||
         maxBytes <= 0 ||
@@ -85,6 +90,7 @@ final class PatchbayCaptureBridge {
   final Set<String> _gateIds;
   final PatchbayRootController _root;
   final bool Function() _isAppResumed;
+  final PatchbayLifecycleStateReader _lifecycleState;
   final PatchbayCaptureEncoder _encoder;
   final int maxPixels;
   final int maxBytes;
@@ -109,7 +115,11 @@ final class PatchbayCaptureBridge {
       return _reject(requestId, 'invalidCaptureArguments');
     }
     if (!_isAppResumed()) {
-      return _reject(requestId, 'captureLifecycleNotResumed');
+      return _reject(
+        requestId,
+        'captureLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
     final _CaptureResolution before = _resolve(request);
     if (!before.resolved) return _rejectResolution(requestId, before);
@@ -125,14 +135,22 @@ final class PatchbayCaptureBridge {
       );
     }
     if (!_isAppResumed()) {
-      return _reject(requestId, 'captureLifecycleNotResumed');
+      return _reject(
+        requestId,
+        'captureLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
     final DateTime deadline = DateTime.now().add(timeout);
     if (!await _frames.nextFrameBefore(deadline)) {
       return _reject(requestId, 'captureFrameTimeout');
     }
     if (!_isAppResumed()) {
-      return _reject(requestId, 'captureLifecycleNotResumed');
+      return _reject(
+        requestId,
+        'captureLifecycleNotResumed',
+        details: patchbayLifecycleDetails(_lifecycleState),
+      );
     }
     final _CaptureResolution after = _resolve(request);
     if (!after.resolved) return _rejectResolution(requestId, after);

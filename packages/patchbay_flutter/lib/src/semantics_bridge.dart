@@ -6,6 +6,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
+import 'lifecycle.dart';
+
 /// Stable Patchbay names for the first supported Flutter semantics actions.
 enum PatchbaySemanticsAction {
   tap,
@@ -134,6 +136,7 @@ final class PatchbaySemanticsBridge {
     required PatchbayGateEvaluator gates,
     PatchbaySemanticsActionPolicy? actionPolicy,
     bool Function()? isAppResumed,
+    PatchbayLifecycleStateReader? lifecycleState,
     String Function()? newRequestId,
   }) : _gates = gates,
        _actionPolicy = actionPolicy,
@@ -142,11 +145,16 @@ final class PatchbaySemanticsBridge {
            (() =>
                WidgetsBinding.instance.lifecycleState ==
                AppLifecycleState.resumed),
+       _lifecycleState = patchbayLifecycleReaderFor(
+         isAppResumed: isAppResumed,
+         lifecycleState: lifecycleState,
+       ),
        _newRequestId = newRequestId ?? _defaultRequestId;
 
   final PatchbayGateEvaluator _gates;
   final PatchbaySemanticsActionPolicy? _actionPolicy;
   final bool Function() _isAppResumed;
+  final PatchbayLifecycleStateReader _lifecycleState;
   final String Function() _newRequestId;
 
   SemanticsHandle? _semanticsHandle;
@@ -226,7 +234,10 @@ final class PatchbaySemanticsBridge {
     if (!_isAppResumed()) {
       return PatchbayInvocation.rejected(
         requestId: id,
-        rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
+        rejection: PatchbayRejection(
+          code: 'uiLifecycleNotResumed',
+          details: patchbayLifecycleDetails(_lifecycleState),
+        ),
       );
     }
 
@@ -293,8 +304,7 @@ final class PatchbaySemanticsBridge {
           requestId: id,
           rejection: PatchbayRejection(
             code: 'invalidUiArguments',
-            notice:
-                'identifier must be non-empty and generation non-negative.',
+            notice: 'identifier must be non-empty and generation non-negative.',
             details: <String, Object?>{
               'identifier': identifier,
               'expectedGeneration': ?expectedGeneration,
@@ -344,7 +354,10 @@ final class PatchbaySemanticsBridge {
     if (!_isAppResumed()) {
       return PatchbayInvocation.rejected(
         requestId: id,
-        rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
+        rejection: PatchbayRejection(
+          code: 'uiLifecycleNotResumed',
+          details: patchbayLifecycleDetails(_lifecycleState),
+        ),
       );
     }
 
@@ -387,7 +400,10 @@ final class PatchbaySemanticsBridge {
     if (!_isAppResumed()) {
       return PatchbayInvocation.rejected(
         requestId: id,
-        rejection: const PatchbayRejection(code: 'uiLifecycleNotResumed'),
+        rejection: PatchbayRejection(
+          code: 'uiLifecycleNotResumed',
+          details: patchbayLifecycleDetails(_lifecycleState),
+        ),
       );
     }
 
