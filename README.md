@@ -23,7 +23,7 @@ Patchbay 是一条伸进 Flutter runtime 的类型化控制通道：从终端连
 adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iOS 来说，它补上了
 系统工具无法提供的 App 内部调试面。
 
-> **项目状态：** `v0.1.0`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
+> **项目状态：** `v0.2.0`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
 > Flutter `>=3.38.0`。仅面向 debug / profile，不支持 release。
 
 ## 适合解决什么问题

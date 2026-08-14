@@ -16,7 +16,7 @@ $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
 $ patchbay --help
 ```
 
-在本 package 内开发时，以下文档中的 `patchbay` 都可以替换为 `dart run bin/patchbay.dart`。
+以下示例统一写 `dart run bin/patchbay.dart`（包内开发姿势）；全局安装后可等价替换为 `patchbay`。
 
 ## 命令速查
 

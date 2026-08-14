@@ -8,7 +8,8 @@
 
 | patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） | Flutter（文档最低支持） | 已知 consumer |
 |---|---|---|---|---|---|
-| `patchbay-v0.1.0` | `7c82c68d9dfed4b2a546e81de68b9e0101be4878` | 1 | 3.44.9 | `>=3.38.0` | `moii_app`（pin `v0.1.0`；**交接口径，未在本仓验证，以 moii 仓 pubspec / `PATCHBAY_PINS` 为准**） |
+| `patchbay-v0.2.0` | `4d92ea9d7b0bd19f6ba81880cd411af6659eedd6` | 1 | 3.44.9 | `>=3.38.0` | `hirobot-app`（已收口）；`moii_app`（升级 MR 在途，以其仓 pubspec / `PATCHBAY_PINS` 为准） |
+| `patchbay-v0.1.0` | `7c82c68d9dfed4b2a546e81de68b9e0101be4878` | 1 | 3.44.9 | `>=3.38.0` | `moii_app`（pin `v0.1.0`；以 moii 仓 pubspec / `PATCHBAY_PINS` 为准） |
 
 字段来源：
 
