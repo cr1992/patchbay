@@ -58,7 +58,9 @@ FakePatchbayClient _client({
   );
 }
 
-Future<({int exitCode, Map<String, Object?>? response, FakePatchbayClient client})>
+Future<
+  ({int exitCode, Map<String, Object?>? response, FakePatchbayClient client})
+>
 _run(List<String> arguments, {FakePatchbayClient? client}) async {
   final FakePatchbayClient fake = client ?? _client();
   final StringBuffer out = StringBuffer();
@@ -81,19 +83,22 @@ void main() {
     ('push', <String>['navigation', 'push', 'details']),
     ('back', <String>['navigation', 'back']),
   ]) {
-    test('$name without --revision reads the current one and sends it', () async {
-      final result = await _run(<String>['--json', ...words]);
+    test(
+      '$name without --revision reads the current one and sends it',
+      () async {
+        final result = await _run(<String>['--json', ...words]);
 
-      expect(result.exitCode, PatchbayExitCode.accepted);
-      expect(
-        result.client.calls.map((FakeInvocation call) => call.command),
-        <String>['navigation.current', 'navigation.$name'],
-      );
-      // The fence travels: the App receives the revision it just reported, not
-      // a request without one.
-      expect(result.client.calls.last.arguments['revision'], 7);
-      expect(result.response!['revisionSource'], 'navigation.current');
-    });
+        expect(result.exitCode, PatchbayExitCode.accepted);
+        expect(
+          result.client.calls.map((FakeInvocation call) => call.command),
+          <String>['navigation.current', 'navigation.$name'],
+        );
+        // The fence travels: the App receives the revision it just reported, not
+        // a request without one.
+        expect(result.client.calls.last.arguments['revision'], 7);
+        expect(result.response!['revisionSource'], 'navigation.current');
+      },
+    );
   }
 
   test('an explicit --revision is never second-guessed', () async {
@@ -132,17 +137,15 @@ void main() {
   });
 
   test('a refused revision read is reported as itself', () async {
-    final result = await _run(<String>[
-      '--json',
-      'navigation',
-      'go',
-      'settings',
-    ], client: _client(
-      currentResponse: <String, Object?>{
-        'admission': 'rejected',
-        'rejection': <String, Object?>{'code': 'navigationNotReady'},
-      },
-    ));
+    final result = await _run(
+      <String>['--json', 'navigation', 'go', 'settings'],
+      client: _client(
+        currentResponse: <String, Object?>{
+          'admission': 'rejected',
+          'rejection': <String, Object?>{'code': 'navigationNotReady'},
+        },
+      ),
+    );
 
     expect(result.exitCode, PatchbayExitCode.rejected);
     expect(
@@ -157,24 +160,25 @@ void main() {
     );
   });
 
-  test('a revision-less navigation.current payload is a protocol error', () async {
-    final result = await _run(<String>[
-      '--json',
-      'navigation',
-      'go',
-      'settings',
-    ], client: _client(
-      currentResponse: fakeAccepted(<String, Object?>{
-        'outcome': 'observed',
-        'source': 'appRecorded',
-        'destinationId': 'home',
-      }),
-    ));
+  test(
+    'a revision-less navigation.current payload is a protocol error',
+    () async {
+      final result = await _run(
+        <String>['--json', 'navigation', 'go', 'settings'],
+        client: _client(
+          currentResponse: fakeAccepted(<String, Object?>{
+            'outcome': 'observed',
+            'source': 'appRecorded',
+            'destinationId': 'home',
+          }),
+        ),
+      );
 
-    expect(result.exitCode, PatchbayExitCode.protocol);
-    expect(
-      (result.response!['error']! as Map<String, Object?>)['code'],
-      'navigationRevisionContractViolated',
-    );
-  });
+      expect(result.exitCode, PatchbayExitCode.protocol);
+      expect(
+        (result.response!['error']! as Map<String, Object?>)['code'],
+        'navigationRevisionContractViolated',
+      );
+    },
+  );
 }

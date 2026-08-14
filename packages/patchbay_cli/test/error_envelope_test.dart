@@ -14,14 +14,11 @@ final class _Run {
   final String err;
 
   /// The single JSON document `--json` promises on stdout.
-  Map<String, Object?> get document =>
-      jsonDecode(out) as Map<String, Object?>;
+  Map<String, Object?> get document => jsonDecode(out) as Map<String, Object?>;
 
-  Map<String, Object?> get error =>
-      document['error']! as Map<String, Object?>;
+  Map<String, Object?> get error => document['error']! as Map<String, Object?>;
 
-  Map<String, Object?> get details =>
-      error['details']! as Map<String, Object?>;
+  Map<String, Object?> get details => error['details']! as Map<String, Object?>;
 }
 
 FakePatchbayClient _client() => FakePatchbayClient(
@@ -49,35 +46,48 @@ Future<_Run> _run(
 }
 
 void main() {
-  test('a usage error reaches stdout as JSON when --json is asked for', () async {
-    final _Run result = await _run(<String>['--json', 'identity', 'unexpected']);
+  test(
+    'a usage error reaches stdout as JSON when --json is asked for',
+    () async {
+      final _Run result = await _run(<String>[
+        '--json',
+        'identity',
+        'unexpected',
+      ]);
 
-    expect(result.exitCode, PatchbayExitCode.usage);
-    expect(result.document.keys, <String>['error']);
-    expect(result.error['code'], 'usageError');
-    expect(result.details['message'], contains('unexpected argument'));
-    // The sentence stays where operators already read it.
-    expect(result.err, contains('unexpected argument'));
-  });
+      expect(result.exitCode, PatchbayExitCode.usage);
+      expect(result.document.keys, <String>['error']);
+      expect(result.error['code'], 'usageError');
+      expect(result.details['message'], contains('unexpected argument'));
+      // The sentence stays where operators already read it.
+      expect(result.err, contains('unexpected argument'));
+    },
+  );
 
-  test('logs export without --output is a JSON error, not only prose', () async {
-    final _Run result = await _run(<String>['--json', 'logs', 'export']);
+  test(
+    'logs export without --output is a JSON error, not only prose',
+    () async {
+      final _Run result = await _run(<String>['--json', 'logs', 'export']);
 
-    expect(result.exitCode, PatchbayExitCode.usage);
-    expect(result.error['code'], 'usageError');
-    expect(result.details['message'], contains('--output is required'));
-  });
+      expect(result.exitCode, PatchbayExitCode.usage);
+      expect(result.error['code'], 'usageError');
+      expect(result.details['message'], contains('--output is required'));
+    },
+  );
 
-  test('an argv parse failure is JSON too, before any ArgResults exists', () async {
-    final _Run result = await _run(<String>[
-      '--json',
-      '--not-a-real-option',
-    ], connected: false);
+  test(
+    'an argv parse failure is JSON too, before any ArgResults exists',
+    () async {
+      final _Run result = await _run(<String>[
+        '--json',
+        '--not-a-real-option',
+      ], connected: false);
 
-    expect(result.exitCode, PatchbayExitCode.usage);
-    expect(result.error['code'], 'usageError');
-    expect(result.details['message'], contains('not-a-real-option'));
-  });
+      expect(result.exitCode, PatchbayExitCode.usage);
+      expect(result.error['code'], 'usageError');
+      expect(result.details['message'], contains('not-a-real-option'));
+    },
+  );
 
   test('sessionAmbiguous lists its choices in the JSON envelope', () async {
     final Directory sessions = Directory.systemTemp.createTempSync(

@@ -30,6 +30,12 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+      # 排版门禁从仓根跑一次，覆盖全部四包与 example，故不在 flutter_package 内重复。
+      # 不依赖 pub get：语言版本取各包 pubspec 的 SDK 约束，本仓无 formatter 配置覆盖，
+      # 解析与否结果一致（patchbay_flutter 的 analysis_options include 未解析会打 warning，
+      # 只是提示，不参与判定）。放在 analyze/test 之前是为了快速失败。
+      - name: 排版对齐（全仓 dart format）
+        run: dart format --output=none --set-exit-if-changed .
       - name: analyze + test（三个纯 Dart 包）
         run: |
           # GH 共享 runner 比 GitLab podman runner 慢，VM Service 跨进程测试首跑会顶到

@@ -332,7 +332,7 @@ enum PatchbayFriendlyCommand {
        assert(
          (waitCondition != null) == (serviceCommand == 'ui.wait'),
          'every ui.wait declaration names the condition it sends, and only '
-             'those declarations have one',
+         'those declarations have one',
        );
 
   /// Stable protocol name, or `null` when the target does not declare one:
@@ -639,18 +639,18 @@ abstract final class PatchbayFriendlyCommandRegistry {
         // group an operator wants, so either spelling reaches the declared
         // path. As with every alias here, these expand into paths that already
         // exist and add no command.
-        const _PathAlias(<String>['session', 'list'], <String>[
-          'sessions',
-          'list',
-        ]),
-        const _PathAlias(<String>['session', 'prune'], <String>[
-          'sessions',
-          'prune',
-        ]),
-        const _PathAlias(<String>['sessions', 'use'], <String>[
-          'session',
-          'use',
-        ]),
+        const _PathAlias(
+          <String>['session', 'list'],
+          <String>['sessions', 'list'],
+        ),
+        const _PathAlias(
+          <String>['session', 'prune'],
+          <String>['sessions', 'prune'],
+        ),
+        const _PathAlias(
+          <String>['sessions', 'use'],
+          <String>['session', 'use'],
+        ),
         const _PathAlias(<String>['navigate'], <String>['navigation']),
         const _PathAlias(<String>['nav'], <String>['navigation']),
         const _PathAlias(<String>['wait'], <String>['ui', 'wait']),

@@ -8,7 +8,8 @@
 ## 提交改动
 
 1. 从 `main` 拉分支，改动保持一个可独立评审的单元；
-2. 跑绿再提 PR：四包 `dart test` / `flutter test` 全过，`dart analyze` 无问题；
+2. 跑绿再提 PR：仓根 `dart format --output=none --set-exit-if-changed .` 零改动，
+   四包 `dart test` / `flutter test` 全过，`dart analyze` 无问题；
 3. 生成物改动跑 `dart run packages/patchbay/bin/wire_codegen.dart … --check`
    （**必须从仓根调用**，进包目录会假漂移——header 记录的是仓根相对路径）；
 4. 新增行为必须带测试，且测试要验证过「能红」（打个定向 mutation 确认断言真的红）。

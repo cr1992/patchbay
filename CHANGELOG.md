@@ -60,6 +60,10 @@
   `PatchbaySessionResolver.inventory/prune/select/selection`；启动器可据此自建会话面板。
 - `session` ↔ `sessions` 互为别名拼写（`session list` 与 `sessions list` 等价）。别名只增加拼写，
   不新增命令，也不改任何既有命令名。
+- 排版门禁：CI 的 `dart_packages` job 增加一步仓根 `dart format --output=none --set-exit-if-changed .`
+  （GitLab 与 GitHub Actions 两边同步）。此前排版没有门禁，main 自身也不统一——87 个 Dart 文件里有
+  17 个不合仓库 pin 的 dart_style（Dart 3.12.2）。同批已按该基准机械重排全仓，仅换行/缩进/尾逗号，
+  无语义改动。门禁从仓根跑一次即覆盖四包与 example，`flutter_package` 内不重复。
 - 周期性 Android emulator 冒烟（`.github/workflows/android-emulator-smoke.yml`，每周一 + 手动触发）：
   在真实 Android 上装起 example 并跑通 `identity` → `catalog` → `snapshot` / `ui semantics tree`
   的 CLI 往返。既有门禁全跑在 Ubuntu 上，覆盖不到「App 真的装进设备、VM Service 真的可连」这段；

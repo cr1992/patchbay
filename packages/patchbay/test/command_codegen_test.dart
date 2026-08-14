@@ -167,11 +167,10 @@ void main() {
 }
 
 /// Top-level type names the generated file declares.
-Set<String> _declaredTypes(String generated) =>
-    RegExp(r'^(?:enum|class|extension|mixin) (\w+)', multiLine: true)
-        .allMatches(generated)
-        .map((RegExpMatch match) => match.group(1)!)
-        .toSet();
+Set<String> _declaredTypes(String generated) => RegExp(
+  r'^(?:enum|class|extension|mixin) (\w+)',
+  multiLine: true,
+).allMatches(generated).map((RegExpMatch match) => match.group(1)!).toSet();
 
 /// Command-id enum members the generated file declares. Enum members are the
 /// comma-separated names before the first `;` of the enum body.

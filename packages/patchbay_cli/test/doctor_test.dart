@@ -66,8 +66,7 @@ void main() {
     final int exitCode = await runPatchbayCli(
       <String>['--session-dir', directory.path, ...arguments],
       connect:
-          connect ??
-          (_) async => fail('this run must not need a connection'),
+          connect ?? (_) async => fail('this run must not need a connection'),
       output: out,
       errorOutput: err,
     );
@@ -90,7 +89,6 @@ void main() {
       expect(result.out, contains('skipped catalog'));
       expect(result.out, contains('skipped lifecycle'));
     });
-
 
     test('several selectable sessions warn instead of failing', () async {
       store
@@ -245,7 +243,8 @@ void main() {
       expect(result.exitCode, PatchbayExitCode.accepted);
       expect(result.check('catalog')['verdict'], 'ok');
       expect(
-        (result.check('catalog')['details']! as Map<String, Object?>)['commands'],
+        (result.check('catalog')['details']!
+            as Map<String, Object?>)['commands'],
         1,
       );
     });
@@ -253,10 +252,10 @@ void main() {
     test('a refused catalog is a protocol-class failure', () async {
       store.write(_record('worktree-a'));
 
-      final _Run result = await run(
-        <String>['--json', 'doctor'],
-        connect: (_) async => _RefusedCatalogClient(),
-      );
+      final _Run result = await run(<String>[
+        '--json',
+        'doctor',
+      ], connect: (_) async => _RefusedCatalogClient());
 
       expect(result.exitCode, PatchbayExitCode.protocol);
       expect(result.check('catalog')['verdict'], 'failed');
@@ -314,19 +313,22 @@ void main() {
       expect(lifecycle['action'], contains('Desktop'));
     });
 
-    test('the probe asks for the smallest tree the bridge will build', () async {
-      store.write(_record('worktree-a'));
-      final FakePatchbayClient client = _healthyClient();
+    test(
+      'the probe asks for the smallest tree the bridge will build',
+      () async {
+        store.write(_record('worktree-a'));
+        final FakePatchbayClient client = _healthyClient();
 
-      await run(<String>['doctor'], connect: (_) async => client);
+        await run(<String>['doctor'], connect: (_) async => client);
 
-      expect(client.calls, hasLength(1));
-      expect(client.calls.single.command, patchbayLifecycleProbeCommand);
-      expect(client.calls.single.arguments, <String, Object?>{
-        'maxDepth': 0,
-        'maxNodes': 1,
-      });
-    });
+        expect(client.calls, hasLength(1));
+        expect(client.calls.single.command, patchbayLifecycleProbeCommand);
+        expect(client.calls.single.arguments, <String, Object?>{
+          'maxDepth': 0,
+          'maxNodes': 1,
+        });
+      },
+    );
 
     test('a gate refusal is a warning, not a lifecycle verdict', () async {
       store.write(_record('worktree-a'));
@@ -368,10 +370,7 @@ void main() {
       // what recovery to avoid, not about the CLI being unable to work.
       expect(result.exitCode, PatchbayExitCode.accepted);
       expect(result.warnings, hasLength(1));
-      expect(
-        result.warnings.single['kind'],
-        patchbayActiveSessionWarningKind,
-      );
+      expect(result.warnings.single['kind'], patchbayActiveSessionWarningKind);
       expect(result.warnings.single['path'], 'call.session.active');
       expect(result.warnings.single['message'], contains('force-stop'));
       expect(result.doctor['verdict'], 'warning');
@@ -414,16 +413,15 @@ void main() {
     });
 
     test('sessions carried in a list are found by their index', () {
-      final List<PatchbayDoctorWarning> warnings = patchbayActiveSessionWarnings(
-        const <String, Object?>{
-          'media': <String, Object?>{
-            'streams': <Object?>[
-              <String, Object?>{'active': false},
-              <String, Object?>{'active': true},
-            ],
-          },
-        },
-      );
+      final List<PatchbayDoctorWarning> warnings =
+          patchbayActiveSessionWarnings(const <String, Object?>{
+            'media': <String, Object?>{
+              'streams': <Object?>[
+                <String, Object?>{'active': false},
+                <String, Object?>{'active': true},
+              ],
+            },
+          });
 
       expect(warnings, hasLength(1));
       expect(warnings.single.path, 'media.streams[1].active');
@@ -674,7 +672,8 @@ void main() {
 FakePatchbayClient _healthyClient({Map<String, Object?>? snapshot}) =>
     FakePatchbayClient(
       commands: const <Map<String, Object?>>[_semanticsTreeRow],
-      snapshotData: snapshot ?? const <String, Object?>{'source': 'appRecorded'},
+      snapshotData:
+          snapshot ?? const <String, Object?>{'source': 'appRecorded'},
       handle: (String command, _) async => command == 'ui.semantics.tree'
           ? fakeAccepted(const <String, Object?>{'nodes': <Object?>[]})
           : fakeCommandNotRegistered(),
@@ -700,8 +699,9 @@ final class _RefusedCatalogClient implements PatchbayClient {
   };
 
   @override
-  Future<Map<String, Object?>> snapshot() async =>
-      <String, Object?>{'source': 'appRecorded'};
+  Future<Map<String, Object?>> snapshot() async => <String, Object?>{
+    'source': 'appRecorded',
+  };
 
   @override
   Future<Map<String, Object?>> invoke({

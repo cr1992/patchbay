@@ -151,19 +151,16 @@ void main() {
       // Pin one, then run a command with no --session at all: this is the
       // whole point of the feature, and the only place it is exercised against
       // a real VM Service rather than an injected resolver.
-      final ProcessResult pinCli = await Process.run(
-        Platform.resolvedExecutable,
-        <String>[
-          'run',
-          'bin/patchbay.dart',
-          '--session-dir',
-          sessions.path,
-          'session',
-          'use',
-          'fixture-current',
-        ],
-        workingDirectory: Directory.current.path,
-      );
+      final ProcessResult pinCli =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--session-dir',
+            sessions.path,
+            'session',
+            'use',
+            'fixture-current',
+          ], workingDirectory: Directory.current.path);
       expect(pinCli.exitCode, 0, reason: pinCli.stderr.toString());
       expect(pinCli.stdout.toString(), isNot(contains(uri.toString())));
       final ProcessResult stickyCli = await Process.run(
@@ -185,19 +182,16 @@ void main() {
         'dev.patchbay.fixture',
       );
       // Unpin so the assertions below still describe an unpinned directory.
-      final ProcessResult unpinCli = await Process.run(
-        Platform.resolvedExecutable,
-        <String>[
-          'run',
-          'bin/patchbay.dart',
-          '--session-dir',
-          sessions.path,
-          'session',
-          'use',
-          '--clear',
-        ],
-        workingDirectory: Directory.current.path,
-      );
+      final ProcessResult unpinCli =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--session-dir',
+            sessions.path,
+            'session',
+            'use',
+            '--clear',
+          ], workingDirectory: Directory.current.path);
       expect(unpinCli.exitCode, 0, reason: unpinCli.stderr.toString());
 
       final ProcessResult selectedCli =
@@ -608,7 +602,8 @@ void main() {
               as Map<String, Object?>;
       expect(tapRejection['code'], 'uiSemanticsIdentifierNotFound');
       expect(
-        (tapRejection['details']! as Map<String, Object?>)['mountedIdentifiers'],
+        (tapRejection['details']!
+            as Map<String, Object?>)['mountedIdentifiers'],
         contains('fixture.tap'),
       );
 
@@ -674,8 +669,8 @@ void main() {
       expect(replLines[3]['command'], <String>['ui', 'tap', 'fixture.tap']);
       expect(
         (((replLines[3]['response']! as Map<String, Object?>)['payload']!
-                    as Map<String, Object?>)['arguments']!
-                as Map<String, Object?>)['identifier'],
+                as Map<String, Object?>)['arguments']!
+            as Map<String, Object?>)['identifier'],
         'fixture.tap',
       );
 

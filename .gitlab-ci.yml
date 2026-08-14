@@ -1,4 +1,4 @@
-# Patchbay 独立仓 CI：四包 analyze + test + 生成物零漂移。
+# Patchbay 独立仓 CI：全仓排版 + 四包 analyze + test + 生成物零漂移。
 # 双 CI 并行：GitLab（本文件）+ GitHub Actions（.github/workflows/ci.yml，公开仓协作门禁），
 # 三 job 两边一一对应，改动需同步。
 
@@ -16,6 +16,11 @@ stages: [check]
 dart_packages:
   stage: check
   script:
+    # 排版门禁从仓根跑一次，覆盖全部四包与 example，故不在 flutter_package 内重复。
+    # 不依赖 pub get：语言版本取各包 pubspec 的 SDK 约束，本仓无 formatter 配置覆盖，
+    # 解析与否结果一致（patchbay_flutter 的 analysis_options include 未解析会打 warning，
+    # 只是提示，不参与判定）。放在最前面是为了快速失败。
+    - dart format --output=none --set-exit-if-changed .
     - |
       for p in patchbay patchbay_cli patchbay_transport; do
         echo "== packages/$p =="
