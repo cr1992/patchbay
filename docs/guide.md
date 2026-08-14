@@ -12,7 +12,7 @@
 
 ## 安装
 
-Flutter App 添加：
+### App 依赖
 
 ```yaml
 dependencies:
@@ -23,15 +23,82 @@ dependencies:
       path: packages/patchbay_flutter
 ```
 
-安装 CLI：
+### CLI
+
+CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什么形态直接决定手感。三种形态：
+
+| 形态 | 任意目录可用 | 启动 + 一次 `catalog` 往返 | 适用 |
+|---|---|---|---|
+| Release 预编译二进制（`0.3.0` 起） | 是 | ~45 ms | 只用 CLI；机器上不必有 Dart SDK |
+| `dart pub global activate` | 是 | ~160 ms | 跟着 tag 走的接入方 |
+| 仓内 `dart run bin/patchbay.dart` | 要写全路径 | ~540 ms | 改 CLI 本身 |
+
+> 数字是 macOS arm64 对同一个 example host 各连 8 次的中位数，同机同链路，只用于比较量级；
+> 真机跨 USB 时连接本身的耗时会盖过这段差距。
+
+> **坑：在接入方仓目录里 `dart run patchbay_cli:patchbay` 解析到的是该仓 pin 的版本。**
+> `<包名>:<可执行文件>` 形式按**当前目录所属的包**解析，在接入方仓里那是它 pin 的 tag，不是你
+> 手上的 CLI。表现是新命令「不存在」的用法错误（退出码 `64`），很容易被误读成 CLI 有 bug 或者
+> 没编译。上面前两种形态都不受当前目录影响——这是推荐全局安装的主要理由，快只是附带的。写绝对
+> 路径的 `dart run <仓路径>/bin/patchbay.dart` 同样不受影响，但它长且仍然按条付 JIT 启动。
+
+#### 从 tag 安装（当前形态）
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
     --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
+$ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```
 
+`dart pub global activate` 把可执行文件装进 `$HOME/.pub-cache/bin`，**这个目录默认不在 PATH 上**
+（pub 自己会在安装末尾打这条警告）。把 `export` 那行写进 shell 配置，否则 `patchbay` 会
+「装完了却找不到」。
+
+装好的是一个冻结在该 tag 上的 app snapshot：换 tag 要重新 `activate`，跑起来不会再解析依赖。
 版本升级时同时更新 App 依赖和全局 CLI，避免 schema 或命令面漂移。
+
+`0.3.0` 起 `patchbay_cli` 会发布到 pub.dev，届时 `dart pub global activate patchbay_cli` 即可，
+不再需要 `--source git`。
+
+#### 预编译二进制（`0.3.0` 起）
+
+`patchbay-v0.3.0` 起，每个 tag 的 GitHub Release 附带三平台 AOT 产物
+（`macos-arm64` / `linux-x64` / `windows-x64`）与一份 `checksums.txt`。产物自带运行时，
+**目标机器上不需要 Dart SDK**，这是给「只用 CLI、不写 Dart」的人和 CI 镜像准备的形态：
+
+```console
+$ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
+$ shasum -a 256 patchbay-0.3.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
+$ chmod +x patchbay-0.3.0-macos-arm64
+$ mv patchbay-0.3.0-macos-arm64 ~/.local/bin/patchbay
+```
+
+Release 资产不携带可执行位，`chmod +x` 是必需的一步。用**浏览器**下载的 macOS 产物还会被
+Gatekeeper 隔离，`xattr -d com.apple.quarantine <文件>` 解除；用 `curl` 下载不会。
+
+#### 开发 CLI 本身
+
+改 CLI 时用仓内路径跑，改完即生效：
+
+```console
+$ cd packages/patchbay_cli && dart run bin/patchbay.dart --help
+```
+
+嫌每条命令等半秒，就把当前工作树编成 AOT 可执行文件（约 1.6 秒编一次，产物 7 MiB）：
+
+```console
+$ dart run packages/patchbay_cli/tool/build_cli.dart   # 仓根或包内调用均可
+Built …/packages/patchbay_cli/build/patchbay (7.3 MiB)
+```
+
+产物落在 `packages/patchbay_cli/build/`（已 gitignore），放到 PATH 上即可任意目录直跑。它是
+**当次编译时的工作树快照**，改完源码要重编——需要「改了立刻生效」时用 `dart run`。
+
+`dart pub global activate --source path packages/patchbay_cli` 也能让 `patchbay` 指向工作树，
+但**不要用于任何读 `--json` 输出的场景**：path 模式每次调用都会重新解析依赖，pub 把
+`Resolving dependencies…` 打在 **stdout** 上，破坏了「`--json` 时 stdout 只有一个 JSON 文档」
+这条约定，下游解析器会直接失败。要「任意目录可用」又要读 `--json`，用 AOT 产物。
 
 ## App 接入
 
