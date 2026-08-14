@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 
@@ -230,10 +231,95 @@ void main() {
     });
 
     test(
+      'a dispose while the gate awaited cannot still open the inspector',
+      () async {
+        final _FakeInspectorSurface surface = _FakeInspectorSurface();
+        final Completer<void> gateEntered = Completer<void>();
+        final Completer<void> letGateFinish = Completer<void>();
+        final PatchbayInspectBridge inspect = PatchbayInspectBridge(
+          gates: PatchbayGateEvaluator(
+            baseGate: () => const PatchbayGateDecision.allow(),
+            consumerGate: (_) async {
+              gateEntered.complete();
+              await letGateFinish.future;
+              return const PatchbayGateDecision.allow();
+            },
+          ),
+          policy: const PatchbayInspectPolicy(gates: <String>{'debug.ready'}),
+          surface: surface,
+        );
+
+        final Future<PatchbayInvocation> pending = inspect.select(
+          request: const PatchbayInspectSelectRequestWire(
+            enabled: true,
+            ttlMs: 10000,
+          ),
+          requestId: 'inspect-on',
+        );
+        await gateEntered.future;
+        // The host tears down while the request is parked in the gate. The
+        // continuation must not resume into a bridge that no longer exists:
+        // turning the flag on here leaves the device swallowing taps with
+        // nobody left holding a lease to put it back.
+        inspect.dispose();
+        letGateFinish.complete();
+
+        final Map<String, Object?> response = (await pending).toJson();
+        expect(response['admission'], 'rejected', reason: jsonEncode(response));
+        final Map<String, Object?> rejection = _rejection(response);
+        expect(rejection['code'], 'inspectorUnavailable');
+        expect(
+          (rejection['details']! as Map<String, Object?>)['reason'],
+          'hostDisposed',
+        );
+        // The binding flag is never touched, so a disposed host leaves the
+        // device exactly as it found it.
+        expect(surface.writes, isEmpty);
+        expect(surface.selectMode, isFalse);
+        expect(inspect.managed, isFalse);
+      },
+    );
+
+    test('a disposed bridge refuses later calls instead of acting', () async {
+      final _FakeInspectorSurface surface = _FakeInspectorSurface();
+      final PatchbayInspectBridge inspect = PatchbayInspectBridge(
+        gates: _allowGates,
+        surface: surface,
+      );
+      inspect.dispose();
+
+      for (final Map<String, Object?> response in <Map<String, Object?>>[
+        (await inspect.select(
+          request: const PatchbayInspectSelectRequestWire(
+            enabled: true,
+            ttlMs: null,
+          ),
+          requestId: 'inspect-on',
+        )).toJson(),
+        // Read-only, but answering with a state a torn-down bridge no longer
+        // maintains would be inventing a fact rather than reporting one.
+        (await inspect.status(requestId: 'inspect-status')).toJson(),
+      ]) {
+        final Map<String, Object?> rejection = _rejection(response);
+        expect(rejection['code'], 'inspectorUnavailable');
+        expect(
+          (rejection['details']! as Map<String, Object?>)['reason'],
+          'hostDisposed',
+        );
+      }
+      expect(surface.writes, isEmpty);
+    });
+
+    test(
       'a build that cannot render the overlay is refused, not answered',
       () async {
+        // Only the build-mode reasons come from a surface; `hostDisposed` is a
+        // bridge-lifecycle fact and has its own cases above.
         for (final PatchbayInspectUnavailableWire reason
-            in PatchbayInspectUnavailableWire.values) {
+            in const <PatchbayInspectUnavailableWire>[
+              PatchbayInspectUnavailableWire.notDebugBuild,
+              PatchbayInspectUnavailableWire.rootInspectorExcluded,
+            ]) {
           final PatchbayInspectBridge inspect = PatchbayInspectBridge(
             gates: _allowGates,
             surface: _FakeInspectorSurface(unavailableReason: reason),

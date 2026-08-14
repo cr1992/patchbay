@@ -105,6 +105,11 @@
   **不写标志位、也不问 consumer gate**。响应 `source` 恒为 `appRecorded`：写标志位只排了一次重建，
   不冒充「带 overlay 的那帧到过屏幕」。
 
+  **销毁竞态同样拒绝**（`details.reason` 为 `hostDisposed`）：请求卡在 consumer gate 里等待时 host
+  被销毁，gate 返回后不再继续开启——否则会留下一个开着的 inspector 和一个无人持有的租约，设备从此
+  吞掉每一次点击。gate 恢复点重查 disposed，命中即拒绝且完全不碰 binding 标志位；销毁后再发的调用
+  （含只读的 `status`）按同一 reason 拒绝。
+
   wire 新增 `PatchbayInspectSelectRequestWire` / `PatchbayInspectStateWire` 与
   `PatchbayInspectUnavailableWire` / `PatchbayInspectReleaseWire`；`patchbay_flutter` 公共 API 新增
   `PatchbayInspectPolicy` / `PatchbayInspectBridge` / `PatchbayInspectorSurface`（后者可注入，

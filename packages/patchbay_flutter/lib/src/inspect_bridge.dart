@@ -36,6 +36,12 @@ final class PatchbayInspectPolicy {
 /// rejection without building in profile mode.
 abstract interface class PatchbayInspectorSurface {
   /// `null` when the on-device inspector can actually be shown.
+  ///
+  /// Only the build-mode reasons come from here
+  /// ([PatchbayInspectUnavailableWire.notDebugBuild],
+  /// [PatchbayInspectUnavailableWire.rootInspectorExcluded]).
+  /// [PatchbayInspectUnavailableWire.hostDisposed] is a bridge-lifecycle fact
+  /// the bridge answers on its own; a surface never reports it.
   PatchbayInspectUnavailableWire? get unavailableReason;
 
   bool get selectMode;
@@ -128,6 +134,7 @@ final class PatchbayInspectBridge {
   DateTime? _leaseExpiry;
   bool? _restoresTo;
   PatchbayInspectReleaseWire? _lastRelease;
+  bool _disposed = false;
 
   /// The opt-in the consumer supplied; the catalog descriptor is derived from
   /// it, so the declared gates and the declared `ttlMs` default are the ones
@@ -140,16 +147,24 @@ final class PatchbayInspectBridge {
   /// Whether Patchbay currently owns the flag and holds a live lease.
   bool get managed => _restoresTo != null;
 
+  /// Why the switch cannot be used right now, or `null` when it can.
+  ///
+  /// A disposed bridge outranks the build question: there is no longer anyone
+  /// to hold a lease, so the honest answer is "this bridge is gone" rather than
+  /// a report about the build mode.
+  PatchbayInspectUnavailableWire? get _unavailableNow => _disposed
+      ? PatchbayInspectUnavailableWire.hostDisposed
+      : _surface.unavailableReason;
+
   Future<PatchbayInvocation> status({required String requestId}) async {
-    final PatchbayInspectUnavailableWire? unavailable =
-        _surface.unavailableReason;
-    if (unavailable != null) return _unavailable(requestId, unavailable);
+    if (_unavailableNow case final PatchbayInspectUnavailableWire unavailable) {
+      return _unavailable(requestId, unavailable);
+    }
     // Read-only, so only the non-optional base gate applies; the consumer gates
     // belong to the write.
     final PatchbayGateRejection? gate = await _gates.evaluate(const <String>{});
     if (gate != null) return _gateRejected(requestId, gate);
-    if (_surface.unavailableReason
-        case final PatchbayInspectUnavailableWire after) {
+    if (_unavailableNow case final PatchbayInspectUnavailableWire after) {
       return _unavailable(requestId, after);
     }
     return PatchbayInvocation.accepted(
@@ -162,9 +177,9 @@ final class PatchbayInspectBridge {
     required PatchbayInspectSelectRequestWire request,
     required String requestId,
   }) async {
-    final PatchbayInspectUnavailableWire? unavailable =
-        _surface.unavailableReason;
-    if (unavailable != null) return _unavailable(requestId, unavailable);
+    if (_unavailableNow case final PatchbayInspectUnavailableWire unavailable) {
+      return _unavailable(requestId, unavailable);
+    }
 
     final int? ttlMs = request.ttlMs;
     if (!request.enabled && ttlMs != null) {
@@ -194,11 +209,13 @@ final class PatchbayInspectBridge {
 
     final PatchbayGateRejection? gate = await _gates.evaluate(_policy.gates);
     if (gate != null) return _gateRejected(requestId, gate);
-    // A gate may await, and a build mode cannot change underneath it — but a
-    // consumer that injects its own inspector can, so the availability question
-    // is asked again on this side of the wait rather than assumed.
-    if (_surface.unavailableReason
-        case final PatchbayInspectUnavailableWire after) {
+    // A gate may await, and two things can change underneath it: a consumer
+    // that injects its own inspector can make the overlay unavailable, and the
+    // host can be torn down entirely. Resuming into a disposed bridge would
+    // turn the flag on with nobody left holding a lease to put it back —
+    // the device would keep swallowing taps. So the whole availability
+    // question is asked again on this side of the wait rather than assumed.
+    if (_unavailableNow case final PatchbayInspectUnavailableWire after) {
       return _unavailable(requestId, after);
     }
 
@@ -234,7 +251,14 @@ final class PatchbayInspectBridge {
   }
 
   /// Drops the lease and puts the flag back, for a host that is shutting down.
-  void dispose() => _release(PatchbayInspectReleaseWire.disposed);
+  ///
+  /// The bridge stays disposed: a request already parked in a gate resumes into
+  /// a bridge that refuses rather than one that installs a switch nobody is
+  /// left to release. Idempotent.
+  void dispose() {
+    _disposed = true;
+    _release(PatchbayInspectReleaseWire.disposed);
+  }
 
   void _arm(Duration lease) {
     _lease?.cancel();
@@ -298,6 +322,9 @@ final class PatchbayInspectBridge {
       PatchbayInspectUnavailableWire.rootInspectorExcluded =>
         'This App excludes the root widget inspector, so the flag renders '
             'nothing.',
+      PatchbayInspectUnavailableWire.hostDisposed =>
+        'The Patchbay host was torn down, so the select-mode switch has no '
+            'owner left to release it.',
     },
     details: <String, Object?>{'reason': reason.toJson()},
   );

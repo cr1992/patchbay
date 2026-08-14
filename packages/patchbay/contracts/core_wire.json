@@ -559,7 +559,7 @@
     {
       "kind": "enum",
       "name": "PatchbayInspectUnavailableWire",
-      "values": ["notDebugBuild", "rootInspectorExcluded"]
+      "values": ["notDebugBuild", "rootInspectorExcluded", "hostDisposed"]
     },
     {
       "kind": "enum",

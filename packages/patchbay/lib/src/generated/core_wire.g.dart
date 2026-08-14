@@ -2611,7 +2611,8 @@ final class PatchbaySnapshotWaitWire {
 
 enum PatchbayInspectUnavailableWire {
   notDebugBuild,
-  rootInspectorExcluded;
+  rootInspectorExcluded,
+  hostDisposed;
 
   static PatchbayInspectUnavailableWire fromJson(
     Object? value, {

@@ -740,15 +740,21 @@ Patchbay 的租约到期不该伸手去掀别人刚拨的开关。反过来，`o
 **release 构建如实拒绝，不给一个证明不了任何事的布尔。** 设备端 inspector 的 overlay 由
 `WidgetsApp` 在一句 `assert` 里注入，只有 debug 构建成立；profile / release 下这个标志位写得进去、
 读得回来，却永远不会有任何东西被渲染出来。所以桥在动手之前先问「这个构建能不能真的显示」，
-答不上来就以 `inspectorUnavailable` 拒绝，`details.reason` 二选一：
+答不上来就以 `inspectorUnavailable` 拒绝，`details.reason` 给出哪一种：
 
 | `reason` | 含义 |
 |---|---|
 | `notDebugBuild` | 非 debug 构建，overlay 的注入点根本不执行 |
 | `rootInspectorExcluded` | App 自己设了 `debugExcludeRootWidgetInspector`（通常是它要注入自己的 `WidgetInspector`） |
+| `hostDisposed` | Patchbay host 已销毁，开关没有持租人了 |
 
 被拒时**不写标志位、也不问 consumer gate**——一个永远渲染不出来的构建，用不着先去打扰接入方的
 权限判断。
+
+`hostDisposed` 挡的是一个竞态：请求正卡在 consumer gate 里等待时 host 被销毁。gate 返回后**不能**
+继续把开关打开——那会留下一个开着的 inspector 和一个没人持有的租约，设备从此吞掉每一次点击。
+所以 gate 恢复点会重查一次，已销毁就以 `hostDisposed` 拒绝，并且完全不碰 binding 标志位。销毁后
+再发的调用（含只读的 `status`）同样按这个 reason 拒绝：一座已经拆掉的桥没有状态可报。
 
 响应 payload 的 `source` 恒为 `appRecorded`：写标志位只是排了一次重建，不等于带 overlay 的那一帧
 真的到过屏幕，所以这里不冒充 `uiObserved`。`selectionOnTap` 一并报出来，是为了让「模式开着但点按

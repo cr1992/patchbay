@@ -147,6 +147,10 @@ consumer 可以用一个保守的全局 UI interaction gate 开始接入，无�
 - **构建不支持就拒绝，不返回布尔。** overlay 由 `WidgetsApp` 在 `assert` 内注入，仅 debug 成立；
   profile / release 下标志位可写可读却永不渲染。桥先判 `notDebugBuild` /
   `rootInspectorExcluded`，命中即 `inspectorUnavailable`，**不写标志位、不问 consumer gate**；
+- **销毁后不得复活。** gate 恢复点重查一次 disposed：请求卡在 gate 里等待时 host 被销毁，返回后
+  若继续开启，会留下一个开着的 inspector 和无人持有的租约，设备从此吞掉每一次点击。已销毁即以
+  `inspectorUnavailable` / `hostDisposed` 拒绝且不碰标志位；销毁后再发的调用（含只读的 `status`）
+  同样——一座已拆掉的桥没有状态可报；
 - **事实来源恒为 `appRecorded`。** 写标志位只排了一次重建，不是「带 overlay 的那帧到过屏幕」，
   不冒充 `uiObserved`；`selectionOnTap` 一并报出，区分 App 侧那个独立开关；
 - **不发 DevTools 的 extension state 事件。** 两边写同一标志位，但 DevTools 的按钮不会跟着亮，
