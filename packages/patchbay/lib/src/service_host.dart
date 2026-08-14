@@ -3,9 +3,12 @@ import 'dart:developer';
 import 'dart:isolate';
 import 'dart:math';
 
+import 'catalog_digest.dart';
+import 'features.dart';
 import 'generated/core_wire.g.dart';
 import 'invocation.dart';
 import 'snapshot.dart';
+import 'version.dart';
 
 typedef PatchbayCatalogSource = Future<Map<String, Object?>> Function();
 typedef PatchbaySnapshotSource = Future<Map<String, Object?>> Function();
@@ -27,11 +30,13 @@ final class PatchbayServiceHost {
     required PatchbayInvocationSource invoke,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
+    Set<PatchbayFeature> features = const <PatchbayFeature>{},
   }) : appInstanceId = appInstanceId ?? _nonce(),
        _catalog = catalog,
        _snapshot = snapshot,
        _invoke = invoke,
-       _registrar = registrar ?? registerExtension;
+       _registrar = registrar ?? registerExtension,
+       _declaredFeatures = features;
 
   static const int schemaVersion = 1;
   static const String identityMethod = 'ext.patchbay.identity';
@@ -64,7 +69,25 @@ final class PatchbayServiceHost {
   final PatchbaySnapshotSource _snapshot;
   final PatchbayInvocationSource _invoke;
   final PatchbayExtensionRegistrar _registrar;
+  final Set<PatchbayFeature> _declaredFeatures;
   bool _registered = false;
+
+  /// Capabilities this host declares on the identity plane.
+  ///
+  /// [_coreFeatures] are the ones this class implements itself, so a caller
+  /// cannot fail to declare them and cannot declare them away — a client that
+  /// reads a Patchbay identity is entitled to assume every capability the
+  /// protocol layer provides is really there. Anything a layer above adds —
+  /// the Flutter host's lifecycle reporting, for instance — arrives through
+  /// the constructor.
+  Set<PatchbayFeature> get features => <PatchbayFeature>{
+    ..._coreFeatures,
+    ..._declaredFeatures,
+  };
+
+  static const Set<PatchbayFeature> _coreFeatures = <PatchbayFeature>{
+    PatchbayFeature.catalogDigest,
+  };
 
   /// Transport-neutral dispatch seam used by alternate, explicitly enabled
   /// hosts. VM Service registration and direct transports must call these
@@ -379,15 +402,32 @@ final class PatchbayServiceHost {
     if (method != identityMethod || _hasUserParameters(parameters)) {
       return _invalidParams('identity does not accept parameters');
     }
-    return _result(
-      PatchbayIdentityWire(
-        schemaVersion: schemaVersion,
-        applicationId: applicationId,
-        appInstanceId: appInstanceId,
-        isolateId: Service.getIsolateId(Isolate.current),
-      ).toJson(),
-    );
+    return _result(identityResponse());
   }
+
+  /// The identity answer, without the VM Service response wrapper.
+  ///
+  /// [serverVersion] and [features] are additive fields under the same
+  /// `schemaVersion`: an older client reads identity key by key and ignores
+  /// what it does not know, so gaining them breaks nobody, while a newer
+  /// client that finds them absent learns the host predates them. That is the
+  /// evolution rule this plane exists to demonstrate — see
+  /// `docs/design.md`.
+  Map<String, Object?> identityResponse() => PatchbayIdentityWire(
+    schemaVersion: schemaVersion,
+    serverVersion: patchbayPackageVersion,
+    // Sorted so two hosts declaring the same capabilities produce the same
+    // bytes, and so a diff of two identity answers shows a capability change
+    // rather than a set iteration order.
+    features:
+        features
+            .map((PatchbayFeature feature) => feature.name)
+            .toList(growable: false)
+          ..sort(),
+    applicationId: applicationId,
+    appInstanceId: appInstanceId,
+    isolateId: Service.getIsolateId(Isolate.current),
+  ).toJson();
 
   Future<ServiceExtensionResponse> handleCatalog(
     String method,
@@ -471,9 +511,16 @@ final class PatchbayServiceHost {
     final Map<String, Object?>? violation = _commandsViolation(
       catalog['commands'],
     );
-    return violation == null
-        ? _CatalogRead.valid(catalog)
-        : _CatalogRead.violated(violation);
+    if (violation != null) return _CatalogRead.violated(violation);
+    return _CatalogRead.valid(<String, Object?>{
+      ...catalog,
+      // Protocol-owned, and only ever attached to a catalog that passed
+      // validation: a violated catalog carries no `commands`, so there is no
+      // command surface for a digest to describe and none is invented.
+      'catalogDigest': PatchbayCatalogDigest.ofCommands(
+        catalog['commands'],
+      ).toJson(),
+    });
   }
 
   /// The rejection `details` describing what makes [commands] unusable, or null

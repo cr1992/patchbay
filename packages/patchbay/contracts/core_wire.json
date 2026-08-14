@@ -142,9 +142,20 @@
       "name": "PatchbayIdentityWire",
       "fields": [
         {"name": "schemaVersion", "type": "int"},
+        {"name": "serverVersion", "type": "String"},
+        {"name": "features", "type": "String", "list": true},
         {"name": "applicationId", "type": "String"},
         {"name": "appInstanceId", "type": "String"},
         {"name": "isolateId", "type": "String", "nullable": true, "emitNull": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayCatalogDigestWire",
+      "fields": [
+        {"name": "algorithm", "type": "String"},
+        {"name": "covers", "type": "String", "list": true},
+        {"name": "value", "type": "String"}
       ]
     },
     {
