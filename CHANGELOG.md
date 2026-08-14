@@ -67,6 +67,19 @@
   （GitLab 与 GitHub Actions 两边同步）。此前排版没有门禁，main 自身也不统一——87 个 Dart 文件里有
   17 个不合仓库 pin 的 dart_style（Dart 3.12.2）。同批已按该基准机械重排全仓，仅换行/缩进/尾逗号，
   无语义改动。门禁从仓根跑一次即覆盖四包与 example，`flutter_package` 内不重复。
+
+- **`command_codegen` 进 `codegen_drift` 门禁。** 此前只有 `wire_codegen` 有零漂移检查，
+  `command_codegen` 只被单测按临时 fixture 跑过——而它恰恰是接入方直接消费的那个生成器，
+  输出漂移在本仓无人察觉，要等接入方升级 pin、重新生成、diff 炸开才暴露。现在仓内带一份样例
+  contract 与其生成物（`packages/patchbay/contracts/example_commands.{json,g.dart}`），
+  GitLab 与 GitHub 两边的 codegen job 都对它跑 `--check`，`dart test` 里也有同一条断言。
+  样例本身是中性词表，不描述任何接入方的业务；它同时充当 command contract 唯一的可跑示例。
+
+  **这条 `--check` 没有 cwd 约束**：`command_codegen` 生成物 header 记录的路径改为相对生成物
+  自身，而不是调用者当时敲的那个字符串，所以从仓根还是包目录调用都得到同一份输出。
+  `wire_codegen` 的老约束（必须从仓根调用，否则假漂移）未改动，两者的差异在 CI 注释、
+  [协作约定](CONTRIBUTING.md)与[发版清单](docs/release-checklist.md)里写明。
+
 - 周期性 Android emulator 冒烟（`.github/workflows/android-emulator-smoke.yml`，每周一 + 手动触发）：
   在真实 Android 上装起 example 并跑通 `identity` → `catalog` → `snapshot` / `ui semantics tree`
   的 CLI 往返。既有门禁全跑在 Ubuntu 上，覆盖不到「App 真的装进设备、VM Service 真的可连」这段；

@@ -237,6 +237,23 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
 
 contract 格式与依赖方用法见 [wire-contract-v1.md](contracts/wire-contract-v1.md)。
 
+## Command contract 与生成代码
+
+`command_codegen` 是给**接入方**用的：把自己的命令表写成 contract（`contractVersion: 2`），
+生成 typed 命令 id、参数读取器、descriptor 与 dispatch 面。它不生成本仓自己的任何代码。
+
+仓内带一份可跑的样例 contract 及其生成物，CI 的 `codegen_drift` 对它跑 `--check`——生成器改动
+一旦让输出漂移，在本仓就判红，而不是等接入方升级 pin 之后才发现：
+
+```console
+$ dart run packages/patchbay/bin/command_codegen.dart \
+    --contract packages/patchbay/contracts/example_commands.json \
+    --output packages/patchbay/contracts/example_commands.g.dart --check
+```
+
+与 `wire_codegen` 不同，这条**从哪个目录调用都一样**：生成物 header 记录的是相对生成物自身的
+路径，不是相对调用目录的路径。
+
 ## Release 边界
 
 接入方必须用编译期常量让 host、adapter 和注册调用在 release 不可达，不能只靠运行时 flag 隐藏入口。

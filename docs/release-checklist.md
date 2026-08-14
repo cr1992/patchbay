@@ -11,12 +11,14 @@ GitLab CI（`.gitlab-ci.yml`，`stages: [check]`）三个 job：
       `dart analyze --fatal-infos` + `dart test` 全过
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` +
       `flutter test` 通过
-- [ ] `codegen_drift` —— `wire_codegen.dart --check` 无生成物漂移
+- [ ] `codegen_drift` —— `wire_codegen.dart --check` 与 `command_codegen.dart --check`
+      均无生成物漂移
 - [ ] GitHub Actions 门禁绿（[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)，
       三个 job 与上面一一对应）
 
-验证命令（需从仓根调用，`codegen_drift` 尤其如此——生成物 header 记录的是仓根相对路径，
-进包目录跑会假漂移）：
+验证命令（需从仓根调用，`wire_codegen.dart --check` 尤其如此——它的生成物 header 记录的是
+仓根相对路径，进包目录跑会假漂移；`command_codegen.dart --check` 没有这个约束，它的 header
+记录的是相对生成物自身的路径）：
 
 ```console
 $ for p in patchbay patchbay_cli patchbay_transport; do
@@ -27,6 +29,9 @@ $ (cd packages/patchbay_flutter/example && flutter pub get && flutter test)
 $ dart run packages/patchbay/bin/wire_codegen.dart \
     --contract packages/patchbay/contracts/core_wire.json \
     --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
+$ dart run packages/patchbay/bin/command_codegen.dart \
+    --contract packages/patchbay/contracts/example_commands.json \
+    --output packages/patchbay/contracts/example_commands.g.dart --check
 ```
 
 ## 2. 版本与 CHANGELOG 对账

@@ -10,8 +10,10 @@
 1. 从 `main` 拉分支，改动保持一个可独立评审的单元；
 2. 跑绿再提 PR：仓根 `dart format --output=none --set-exit-if-changed .` 零改动，
    四包 `dart test` / `flutter test` 全过，`dart analyze` 无问题；
-3. 生成物改动跑 `dart run packages/patchbay/bin/wire_codegen.dart … --check`
-   （**必须从仓根调用**，进包目录会假漂移——header 记录的是仓根相对路径）；
+3. 生成物改动跑两个 `--check`：`wire_codegen.dart`（**必须从仓根调用**，进包目录会假漂移
+   ——header 记录的是仓根相对路径）与 `command_codegen.dart`（从哪个目录调用都一样，
+   header 记录的是相对生成物自身的路径）；完整两条命令见
+   [发版清单](docs/release-checklist.md)；
 4. 新增行为必须带测试，且测试要验证过「能红」（打个定向 mutation 确认断言真的红）。
 5. 公共 API、协议字段、默认资源上限或安全行为有变化时，同步更新 README / 对应专题文档和
    [CHANGELOG.md](CHANGELOG.md)；文档、测试与实现必须描述同一契约。
