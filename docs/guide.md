@@ -164,6 +164,92 @@ Semantics(identifier: 'login.submit', child: SubmitButton())
 ID 是 wire 契约：点分、小写、语义化（`<区>.<屏>.<控件>`），不含索引。
 同一 ID 同时挂载多个实例会被 fail-closed 拒绝。
 
+`PatchbayKey` 的注册时机、代际推进规则，以及 `build()` 内裸构造导致丢状态的陷阱，见
+[`patchbay_flutter/README` 的注册与重挂载语义](../packages/patchbay_flutter/README.md#注册与重挂载语义)。
+
+#### ID 命名：三套校验口径不是同一套
+
+标注前先分清三种 ID，它们的校验强度**不同**，混用会在不同的时刻炸：
+
+| ID 种类 | 谁在校验 | 实际规则 | 违反时 |
+|---|---|---|---|
+| UI 目标 ID（`PatchbayKey.text/capture`） | `PatchbayUiTargetDeclaration` 构造函数 | 点分段，段内 `[A-Za-z0-9_-]`，不许空段 | 构造该 Key 时就抛 `ArgumentError`——在 Widget 构建处炸，不是被协议拒绝 |
+| navigation destination ID | 同上，同一条正则 | 同上 | 同上 |
+| 领域命令名（`ns.command`） | host 读 catalog 时 | **至少两段；每段小写字母开头；段内只许字母和数字** | 整份 catalog 作废 |
+| Semantics `identifier` | 只要求非空 | 形状不校验 | —— |
+
+两条要点：
+
+1. **命令名禁连字符，也禁下划线。** `auth.switch-tenant` 不合法，要写成 `auth.tenant.switch`。
+2. **违规的代价是整份目录，不是那一条命令。** host 发现非法或重名的命令名时，应答里干脆没有
+   `commands` 键，`details.violations` 一次列全所有违规项并附上 `commandNamePattern`。
+   于是 CLI 侧表现为"每条命令都找不到"（`catalogInvocationDrift`），而不是"某条命令没注册"。
+   碰到这个码先跑 `patchbay catalog`——违规原因就在它的应答里，不必逐条命令试。
+
+UI 目标 ID 的正则**允许**连字符，但建议直接按命令名的严格口径写（点分、小写、段内不带连字符）：
+一套 ID 常量常常同时被拿来当 UI 目标、destination 和命令名用，按最严的那套写，跨面搬运时不会翻车。
+这是约定，不是本仓的机检项——写了连字符的 UI 目标 ID 现在能跑。
+
+#### 有组件库就把标注收口进组件层
+
+call site 直接贴 `PatchbayKey` / `Semantics` 是**没有组件库时**的姿势。目标散落在各个页面时，
+ID 无人总览、命名各写各的、改名要全仓 grep。有自家组件库的接入方应该往上收一层：
+
+```dart
+// 组件层：一个参数接进去，内部一次性接好两个身份空间
+class AppTextField extends StatefulWidget {
+  const AppTextField({super.key, this.patchbayId, /* … */});
+
+  /// 调试目标 ID；不传即不登记，release 下整段不可达。
+  final String? patchbayId;
+}
+
+class _AppTextFieldState extends State<AppTextField> {
+  // Key 缓存在 State 里，不在 build() 内构造——理由见上面的链接。
+  late final PatchbayKey? _key =
+      (!kMyDebugToolsEnabled || widget.patchbayId == null)
+          ? null
+          : PatchbayKey.text(widget.patchbayId!);
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget field = TextField(key: _key, /* … */);
+    return widget.patchbayId == null
+        ? field
+        : Semantics(identifier: widget.patchbayId!, child: field);
+  }
+}
+```
+
+```dart
+// ID 台账：一处集中，改名有单一改点
+abstract final class DebugIds {
+  static const String loginPhone = 'login.phone';
+  static const String loginSubmit = 'login.submit';
+}
+```
+
+收口之后 call site 只多一个参数：
+
+```dart
+AppTextField(patchbayId: DebugIds.loginPhone, controller: phoneController)
+```
+
+三条落地建议：
+
+- **两个身份空间一起接。** `PatchbayKey` 只换 Widget 的 `key`，**不会**顺带写 Semantics
+  `identifier`；`ui wait semantics-mounted` 和 `ui tap` 走的又都是 Semantics 树。组件层同时接上
+  两者（同一个 ID 字符串），接入方就不必记住"哪个命令认哪种标注"。
+- **敏感性属于目标，不属于调用。** `PatchbayKey.text(..., sensitive: true)` 是**目标级**声明：
+  该目标的所有写操作强制走 `--stdin`，否则以 `sensitiveInputRequiresStdin` 拒绝，回程 payload 只有
+  `valueRedacted: true` 和 `length`，没有明文。正因为它不该由 call site 临时决定，密码、验证码
+  这类组件适合在组件内部固定写死。
+- **`inputWasStdin` 元键在两个平面的命运不同，别照抄。** 领域命令（`plane: domain`）的敏感性写在
+  参数 descriptor 上，host 校验完就把这个元键**剥掉**，手写 adapter 永远看不到它（见
+  [敏感参数由 host 强制](#敏感参数由-host-强制adapter-不用配合)）；UI 平面（`plane: flutterUi`）的敏感性
+  是目标级的、参数 descriptor 表达不了，所以 host **保留**该元键交给桥自己读。写领域 adapter 时
+  不要去读它，写 UI 桥扩展时才需要。
+
 ### 5. 会话自动发现（可选）
 
 自动发现不是 `flutter run` 自带行为，需要一层启动器把 VM Service URI 写成会话记录。推荐让
