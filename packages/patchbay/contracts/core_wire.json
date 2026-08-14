@@ -555,6 +555,40 @@
         {"name": "pollIntervalMs", "type": "int"},
         {"name": "polls", "type": "int"}
       ]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayInspectUnavailableWire",
+      "values": ["notDebugBuild", "rootInspectorExcluded"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayInspectReleaseWire",
+      "values": ["explicitOff", "leaseExpired", "disposed"]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayInspectSelectRequestWire",
+      "fields": [
+        {"name": "enabled", "type": "bool"},
+        {"name": "ttlMs", "type": "int", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayInspectStateWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "selectMode", "type": "bool"},
+        {"name": "selectionOnTap", "type": "bool"},
+        {"name": "managed", "type": "bool"},
+        {"name": "previousSelectMode", "type": "bool", "nullable": true},
+        {"name": "restoresTo", "type": "bool", "nullable": true},
+        {"name": "leaseMs", "type": "int", "nullable": true},
+        {"name": "leaseRemainingMs", "type": "int", "nullable": true},
+        {"name": "lastRelease", "type": "PatchbayInspectReleaseWire", "nullable": true}
+      ]
     }
   ]
 }

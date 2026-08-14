@@ -674,6 +674,52 @@ void main() {
         contains('flutterDiagnosticUnavailable'),
       );
 
+      // The inspect switch end to end over a real VM Service: the CLI path is
+      // two spellings of one protocol command, and the answer must stay
+      // `appRecorded` — a flag the App holds, never a frame anyone observed.
+      final ProcessResult inspectOn =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            'ui',
+            'inspect',
+            'on',
+            '--ttl-ms',
+            '60000',
+          ], workingDirectory: Directory.current.path);
+      expect(
+        inspectOn.exitCode,
+        PatchbayExitCode.accepted,
+        reason: inspectOn.stderr.toString(),
+      );
+      final Map<String, Object?> inspectPayload =
+          (jsonDecode(inspectOn.stdout.toString())
+                  as Map<String, Object?>)['payload']!
+              as Map<String, Object?>;
+      expect(inspectPayload['source'], 'appRecorded');
+      expect(inspectPayload['selectMode'], isTrue);
+      expect(inspectPayload['leaseMs'], 60000);
+
+      final ProcessResult inspectStatus =
+          await Process.run(Platform.resolvedExecutable, <String>[
+            'run',
+            'bin/patchbay.dart',
+            '--ws-uri',
+            uri.toString(),
+            '--json',
+            'ui',
+            'inspect',
+            'status',
+          ], workingDirectory: Directory.current.path);
+      expect(
+        inspectStatus.exitCode,
+        PatchbayExitCode.accepted,
+        reason: inspectStatus.stderr.toString(),
+      );
+
       // One process, one connection, four typed commands. The exact
       // connection count is asserted in repl_test.dart against an injected
       // client; what this proves is that the same loop works over a real VM

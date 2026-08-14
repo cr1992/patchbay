@@ -6,6 +6,7 @@ export 'package:patchbay/patchbay.dart';
 export 'src/flutter_bridge.dart';
 export 'src/flutter_service_host.dart';
 export 'src/frame_observer.dart';
+export 'src/inspect_bridge.dart';
 export 'src/keep_awake_bridge.dart';
 export 'src/lifecycle.dart';
 export 'src/navigation_bridge.dart';
