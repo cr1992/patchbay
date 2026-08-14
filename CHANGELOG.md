@@ -14,6 +14,8 @@
   与 jobId 的条件不变量。
 - Flutter text / Semantics operator 沿用调用方 `requestId`，VM Service 与 direct client 同时验证响应相关性。
 - `retainedJobs` 按已结束任务计数，并在任务进入终态时立即执行淘汰。
+- `cancelAll()` 并行发起全部运行中 job 的取消：每个回调各自受 `cancellationTimeout` 约束，一个卡死或
+  抛错的回调不再阻塞后续 job，也不再中断整批取消。
 
 ### Added
 
@@ -33,3 +35,6 @@
   不谎报底层操作已经停止。
 - 没有 cancellation callback 的 job 不再被标记为 cancelled；`cancel()` 返回 `false` 并保留 running。
 - Job registry 提供 `runningJobs`、`settledJobs` 和 `totalJobs` 只读计数。
+- `PatchbayJobCancelOutcome`；`cancelAll()` 改为返回逐 job 结果（`cancelled` / `notCancellable` /
+  `timedOut` / `callbackFailed` / `alreadySettled`），不用单个结论概括全批，超时、抛错和无回调的 job
+  仍如实保持 running。

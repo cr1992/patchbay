@@ -551,6 +551,187 @@ void main() {
   });
 
   test(
+    'cancelAll invokes every cancellation callback before awaiting',
+    () async {
+      // The rendezvous below can only resolve while both callbacks are in
+      // flight, so a sweep that awaited one job before starting the next would
+      // park on the first callback until its timeout.
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry(
+        cancellationTimeout: const Duration(seconds: 2),
+      );
+      final Completer<Map<String, Object?>> firstBody =
+          Completer<Map<String, Object?>>();
+      final Completer<Map<String, Object?>> secondBody =
+          Completer<Map<String, Object?>>();
+      final Completer<void> bothInvoked = Completer<void>();
+      var invocations = 0;
+      Future<void> rendezvous() {
+        invocations += 1;
+        if (invocations == 2 && !bothInvoked.isCompleted)
+          bothInvoked.complete();
+        return bothInvoked.future;
+      }
+
+      final String first = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        operation: 'fixture.first',
+        body: () => firstBody.future,
+        cancel: rendezvous,
+      );
+      final String second = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        operation: 'fixture.second',
+        body: () => secondBody.future,
+        cancel: rendezvous,
+      );
+
+      final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs
+          .cancelAll(reason: 'sessionClosed');
+
+      expect(invocations, 2);
+      expect(outcomes, <String, PatchbayJobCancelOutcome>{
+        first: PatchbayJobCancelOutcome.cancelled,
+        second: PatchbayJobCancelOutcome.cancelled,
+      });
+      expect(jobs.snapshot(first)?.events.last.reason, 'sessionClosed');
+      expect(jobs.snapshot(second)?.events.last.reason, 'sessionClosed');
+      expect(jobs.runningJobs, 0);
+
+      firstBody.complete(const <String, Object?>{});
+      secondBody.complete(const <String, Object?>{});
+    },
+  );
+
+  test('cancelAll converges per job instead of serialising timeouts', () async {
+    const Duration timeout = Duration(milliseconds: 300);
+    final PatchbayJobRegistry jobs = PatchbayJobRegistry(
+      cancellationTimeout: timeout,
+    );
+    final Completer<Map<String, Object?>> bodies =
+        Completer<Map<String, Object?>>();
+    final Completer<void> neverConfirms = Completer<void>();
+    final String stuckFirst = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+      cancel: () => neverConfirms.future,
+    );
+    final String stuckSecond = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+      cancel: () => neverConfirms.future,
+    );
+    final String confirming = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+      cancel: () {},
+    );
+    final String uncancellable = jobs.start(
+      source: PatchbayFactSource.appRecorded,
+      body: () => bodies.future,
+    );
+
+    final Stopwatch elapsed = Stopwatch()..start();
+    final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs.cancelAll(
+      reason: 'sessionClosed',
+    );
+    elapsed.stop();
+
+    // Serialised cancellation would spend one full timeout per stuck callback.
+    expect(elapsed.elapsed, lessThan(timeout * 2));
+    expect(outcomes, <String, PatchbayJobCancelOutcome>{
+      stuckFirst: PatchbayJobCancelOutcome.timedOut,
+      stuckSecond: PatchbayJobCancelOutcome.timedOut,
+      confirming: PatchbayJobCancelOutcome.cancelled,
+      uncancellable: PatchbayJobCancelOutcome.notCancellable,
+    });
+    // An unanswered callback and a missing callback are both non-evidence, so
+    // those jobs must still read as running.
+    expect(jobs.snapshot(stuckFirst)?.terminal, isFalse);
+    expect(jobs.snapshot(stuckSecond)?.terminal, isFalse);
+    expect(jobs.snapshot(uncancellable)?.terminal, isFalse);
+    expect(
+      jobs.snapshot(confirming)?.events.last.phase,
+      PatchbayJobPhase.cancelled,
+    );
+    expect(jobs.runningJobs, 3);
+
+    neverConfirms.complete();
+    bodies.complete(const <String, Object?>{});
+  });
+
+  test(
+    'cancelAll reports a throwing callback without aborting the sweep',
+    () async {
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+      final Completer<Map<String, Object?>> bodies =
+          Completer<Map<String, Object?>>();
+      final String throwing = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+        cancel: () => throw StateError('controller detached'),
+      );
+      final String confirming = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+        cancel: () {},
+      );
+
+      final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs
+          .cancelAll(reason: 'sessionClosed');
+
+      expect(outcomes[throwing], PatchbayJobCancelOutcome.callbackFailed);
+      expect(outcomes[confirming], PatchbayJobCancelOutcome.cancelled);
+      expect(jobs.snapshot(throwing)?.terminal, isFalse);
+      expect(jobs.snapshot(confirming)?.terminal, isTrue);
+      expect(jobs.runningJobs, 1);
+
+      bodies.complete(const <String, Object?>{});
+    },
+  );
+
+  test(
+    'cancelAll never overwrites a job that reached its own terminal state',
+    () async {
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry();
+      final String settled = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () async => const <String, Object?>{'ok': true},
+        cancel: () {},
+      );
+      await Future<void>.delayed(Duration.zero);
+      final Completer<Map<String, Object?>> racing =
+          Completer<Map<String, Object?>>();
+      final String racingJob = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => racing.future,
+        cancel: () async {
+          racing.complete(const <String, Object?>{'ok': true});
+          // Yield past the microtask queue so the body's own terminal event
+          // lands before this callback confirms the stop.
+          await Future<void>.delayed(Duration.zero);
+        },
+      );
+
+      final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs
+          .cancelAll(reason: 'sessionClosed');
+
+      expect(outcomes.containsKey(settled), isFalse);
+      expect(outcomes[racingJob], PatchbayJobCancelOutcome.alreadySettled);
+      expect(
+        jobs.snapshot(settled)?.events.last.phase,
+        PatchbayJobPhase.completed,
+      );
+      expect(
+        jobs.snapshot(racingJob)?.events.map((PatchbayJobEvent e) => e.phase),
+        <PatchbayJobPhase>[
+          PatchbayJobPhase.running,
+          PatchbayJobPhase.completed,
+        ],
+      );
+    },
+  );
+
+  test(
     'job wait observes changes without polling and returns generated wire',
     () async {
       final PatchbayJobRegistry jobs = PatchbayJobRegistry();
