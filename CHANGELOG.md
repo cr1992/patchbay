@@ -11,7 +11,10 @@
   **它自己拨号**：拨不通正是它被问的那个问题，所以连接失败在它这里是一条 finding 而不是命令终止；
   前一项失败时后面标 `skipped`，会话目录判定失败时连拨都不拨。lifecycle 一项发一条只读 UI 探针
   （`ui.semantics.tree`，`maxDepth 0 / maxNodes 1`），未 resumed 时报出 `lifecycleState` 并给
-  Android / iOS / 桌面三条解法。
+  Android / iOS / 桌面三条解法。iOS 那条把「屏幕黑着」和「App 掉到后台」分开写：前者只能手动唤醒
+  （没有系统级电源命令），后者在已配对且已解锁的设备上用
+  `xcrun devicectl device process launch --device <udid> <bundle-id>` 就能拉回前台（真机实测）。
+  repl 的 lifecycle 横幅与[使用指南](docs/guide.md#边界)同源同文。
 
   **退出码不另立**：取第一处 failed 检查项的类别（会话 / 连接 `3`、catalog `4`、lifecycle `5`），
   即「换成普通命令撞上这一项时会拿到的那个码」；只有 warning（会话不唯一、门未开、App 没注册任何

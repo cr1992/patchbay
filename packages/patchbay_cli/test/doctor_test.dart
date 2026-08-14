@@ -310,6 +310,11 @@ void main() {
       expect(lifecycle['verdict'], 'failed');
       expect(lifecycle['observed'], contains('lifecycleState=paused'));
       expect(lifecycle['action'], contains('KEYCODE_WAKEUP'));
+      // iOS has no power command, but a backgrounded App on an unlocked
+      // device is a separate problem with a command that does solve it —
+      // the remedy has to name it rather than send the operator to the
+      // device for something the Mac can do.
+      expect(lifecycle['action'], contains('xcrun devicectl device process'));
       expect(lifecycle['action'], contains('Desktop'));
     });
 
@@ -568,6 +573,7 @@ void main() {
       expect(result.err, contains('patchbay preflight'));
       expect(result.err, contains('lifecycleState=paused'));
       expect(result.err, contains('KEYCODE_WAKEUP'));
+      expect(result.err, contains('xcrun devicectl device process'));
       expect(result.err, contains('patchbay doctor'));
     });
 

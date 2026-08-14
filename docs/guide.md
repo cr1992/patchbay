@@ -662,9 +662,12 @@ lifecycle `5`），只有 warning 时是 `0`。
   `appUnresponsive` 失败并给出处置提示，亮屏解锁即恢复。长会话调试的规避方式，按平台：
   - **Android**：`adb shell svc power stayon usb`（USB 供电期间屏幕常亮，即开发者选项的
     「充电时保持唤醒」），设备实验室标准做法，不改 App 行为。
-  - **iOS 真机**：没有系统级等价命令（`devicectl` / libimobiledevice 均无电源控制），设备端
+  - **iOS 真机**：没有系统级等价命令（`devicectl` / libimobiledevice 均无**电源**控制），设备端
     只能手动把自动锁定设为「永不」。iOS 18 的 iPhone 镜像声称锁屏状态下可从 Mac 操作 App，
     可能可行，**未实测**。iOS 模拟器不锁屏，不受影响。
+    **「屏幕黑着」和「App 掉到后台」是两回事**：后者不需要碰设备——已配对且屏幕已解锁时，
+    `xcrun devicectl device process launch --device <udid> <bundle-id>` 能把 App 拉回前台
+    （已实测）。`patchbay doctor` 的 lifecycle 解法里同时给这两条。
 - 截图只证明 Flutter 合成树；系统弹窗、PlatformView 可能缺失，结果附能力警告。
 - 系统权限弹窗、装卸包、shell、进程管理：用 adb / xcrun，Patchbay 不做。
 - 直连 HTTP 明文、无 TLS，默认关闭；仅受信网络实验用途，边界见
