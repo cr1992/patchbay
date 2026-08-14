@@ -241,9 +241,9 @@
   版本跳跃。设计取舍见 [design.md 协议演进](docs/design.md#协议演进)。
 
   - **`serverVersion`（identity）**：host 报出自己编译自的 `patchbay` 版本。Dart 运行时读不到
-    自己的 `pubspec.yaml`，所以它是随包走的常量（`patchbayPackageVersion`），也因此成为发版要改
-    的第五处；`release_version_parity_test.dart` 已把它钉死在四包版本上——常量漂移不是印错一份
-    文档，是全网 App 谎报自己的构建。
+    自己的 `pubspec.yaml`，所以它是随包走的常量（`patchbayPackageVersion`），也因此成为发版时除
+    四包 manifest 与两份 README 之外还要再改的一处；`release_version_parity_test.dart` 已把它钉死在
+    四包版本上——常量漂移不是印错一份文档，是全网 App 谎报自己的构建。
   - **feature capabilities（identity `features`）**：host 声明自己支持的能力，客户端**按声明降级
     而不是猜**。`catalogDigest` 由协议层无条件声明，`lifecycleState` 由持有 lifecycle 门的 Flutter
     host 声明。**声明侧封闭、读取侧开放**：host 只能声明 `PatchbayFeature` 枚举里的名字，客户端把

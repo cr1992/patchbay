@@ -245,8 +245,8 @@ CLI 与 host **分开部署**：CLI 从终端装，host 跟着某个接入方发
 
 **`serverVersion`——我在跟哪个构建说话。** host 把自己编译自的 `patchbay` 版本报在 identity 上。
 Dart 运行时读不到自己的 `pubspec.yaml`，所以这个数字只能靠随包走的常量（`lib/src/version.dart`），
-也因此它是发版要改的第五处；`release_version_parity_test.dart` 把它钉死在四包版本上——常量漂移
-不是印错一份文档，是**全网 App 谎报自己的构建**，而谎报比不报更糟。
+也因此它是发版时除四包 manifest 与两份 README 之外还要再改的一处；`release_version_parity_test.dart`
+把它钉死在四包版本上——常量漂移不是印错一份文档，是**全网 App 谎报自己的构建**，而谎报比不报更糟。
 
 **feature capabilities——按声明降级，不靠猜。** 没有它时，「这条应答里没有 `lifecycleState`」和
 「这台 App 的 lifecycle 未知」在客户端眼里一模一样，客户端只能二选一并有一半时间是错的——这正是

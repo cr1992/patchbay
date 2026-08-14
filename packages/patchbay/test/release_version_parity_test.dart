@@ -81,7 +81,10 @@ List<String> checkReleaseVersionParity({
     }
   }
 
-  final String? constant = _firstCapture(_packageVersionConstant, versionSource);
+  final String? constant = _firstCapture(
+    _packageVersionConstant,
+    versionSource,
+  );
   if (constant == null) {
     problems.add('patchbayPackageVersion 常量缺失或抽取式已失效');
   } else if (constant != expected) {
