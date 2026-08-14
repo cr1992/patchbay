@@ -34,6 +34,9 @@
 
 ### Fixed
 
+- README 的项目状态与安装 tag 跟上四包 `0.2.1`，并新增版本一致性测试，后续四包 version、README
+  状态或两处 Git ref 任一漏改都会在 CI 判红；同时澄清 `PatchbayKey` 必须缓存、release 组合边界与
+  generation 围栏适用范围，架构图补双向请求/响应和 direct loopback 边界。
 - `patchbay help <group>` 的可用性说明改为按组内各命令推导，不再对每个组一律打印「Availability is
   still decided by the running App catalog」。`ui` 组因此同时说明 SDK passthrough 那一半，`sessions`
   组说明它根本不需要 App。

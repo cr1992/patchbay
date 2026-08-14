@@ -73,7 +73,7 @@
           <text x="182.5" y="29" text-anchor="middle" fill="#70809f" font-size="11" font-weight="650" letter-spacing="1.5">TERMINAL</text>
           <g font-family="'SFMono-Regular', Consolas, 'Liberation Mono', monospace" font-size="13.5">
             <text x="24" y="83" fill="#58f3c2">$</text><text x="43" y="83" fill="#d8e4fa">patchbay identity</text>
-            <text x="24" y="117" fill="#58f3c2">$</text><text x="43" y="117" fill="#d8e4fa">patchbay snapshot --json</text>
+            <text x="24" y="117" fill="#58f3c2">$</text><text x="43" y="117" fill="#d8e4fa">patchbay --json snapshot</text>
             <text x="24" y="151" fill="#58f3c2">$</text><text x="43" y="151" fill="#d8e4fa">patchbay exec pairing.ble.pair</text>
             <text x="24" y="185" fill="#58f3c2">$</text><text x="43" y="185" fill="#d8e4fa">patchbay capture root</text>
             <text x="24" y="219" fill="#58f3c2">$</text><text x="43" y="219" fill="#d8e4fa">patchbay logs tail</text>

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="680" viewBox="0 0 1280 680" role="img" aria-labelledby="title desc">
   <title id="title">Patchbay architecture</title>
-  <desc id="desc">The Patchbay CLI connects through VM Service or optional direct HTTP to a guarded service host inside a running Flutter app. The host exposes the Flutter bridge, consumer adapter, and artifact services while reusing the app's existing controllers.</desc>
+  <desc id="desc">The Patchbay CLI exchanges typed requests and responses through VM Service or optional direct HTTP with a guarded service host inside a running Flutter app. The host exposes the Flutter bridge, consumer adapter, and artifact services while reusing the app's existing controllers.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop stop-color="#0c111e"/>
@@ -22,6 +22,9 @@
     </marker>
     <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M0 0l10 5-10 5z" fill="#63b8ff"/>
+    </marker>
+    <marker id="arrowViolet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0l10 5-10 5z" fill="#b77cff"/>
     </marker>
     <clipPath id="frame"><rect width="1280" height="680" rx="26"/></clipPath>
   </defs>
@@ -79,8 +82,8 @@
           <rect x="16" y="16" width="78" height="22" rx="11" fill="#b77cff" fill-opacity="0.11"/>
           <text x="55" y="31" text-anchor="middle" fill="#c391ff" font-size="9" font-weight="750" letter-spacing="1">OPTIONAL</text>
           <text x="20" y="72" fill="#eef5ff" font-size="16" font-weight="720">Direct HTTP</text>
-          <text x="20" y="97" fill="#8fa0bf" font-size="11.5">显式启动 · 默认关闭</text>
-          <text x="20" y="119" fill="#8fa0bf" font-size="11.5">受信网络实验用途</text>
+          <text x="20" y="97" fill="#8fa0bf" font-size="11.5">显式启动 · 默认 loopback</text>
+          <text x="20" y="119" fill="#8fa0bf" font-size="11.5">非 loopback 需实验开关</text>
         </g>
       </g>
 
@@ -168,16 +171,16 @@
       </g>
 
       <!-- Flow arrows -->
-      <path d="M216 210H252" stroke="#58f3c2" stroke-width="2" marker-end="url(#arrowMint)"/>
-      <path d="M216 392H252" stroke="#b77cff" stroke-width="2"/>
-      <path d="M448 210H480V226H496" fill="none" stroke="#58f3c2" stroke-width="2" marker-end="url(#arrowMint)"/>
-      <path d="M448 392H480V254H496" fill="none" stroke="#b77cff" stroke-width="2" marker-end="url(#arrowBlue)"/>
-      <path d="M976 332H1008" stroke="#63b8ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <path d="M216 210H252" stroke="#58f3c2" stroke-width="2" marker-start="url(#arrowMint)" marker-end="url(#arrowMint)"/>
+      <path d="M216 392H252" stroke="#b77cff" stroke-width="2" marker-start="url(#arrowViolet)" marker-end="url(#arrowViolet)"/>
+      <path d="M448 210H480V226H496" fill="none" stroke="#58f3c2" stroke-width="2" marker-start="url(#arrowMint)" marker-end="url(#arrowMint)"/>
+      <path d="M448 392H480V254H496" fill="none" stroke="#b77cff" stroke-width="2" marker-start="url(#arrowViolet)" marker-end="url(#arrowViolet)"/>
+      <path d="M976 332H1008" stroke="#63b8ff" stroke-width="2" marker-start="url(#arrowBlue)" marker-end="url(#arrowBlue)"/>
       <path d="M1008 332V238M1008 332V448" fill="none" stroke="#405675" stroke-width="1.4"/>
 
       <!-- Package legend -->
       <g transform="translate(48 587)">
-        <text y="22" fill="#7283a2" font-size="10" font-weight="700" letter-spacing="1.4">PACKAGE MAP</text>
+        <text y="22" fill="#7283a2" font-size="10" font-weight="700" letter-spacing="1.4">PACKAGES</text>
         <g transform="translate(118)">
           <rect width="200" height="42" rx="21" fill="#101b2d" stroke="#58f3c2" stroke-opacity="0.3"/>
           <circle cx="22" cy="21" r="4" fill="#58f3c2"/>
