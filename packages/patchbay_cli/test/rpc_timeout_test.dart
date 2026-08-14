@@ -18,11 +18,15 @@ final class _SlowClient implements PatchbayClient {
     required this.commands,
     this.invokeDelay = _neverAnswers,
     this.answer,
+    this.catalogAnswers = true,
   });
 
   final List<Map<String, Object?>> commands;
   final Duration? Function(String command) invokeDelay;
   final Map<String, Object?> Function(String command)? answer;
+
+  /// Whether the catalog read — the first RPC of every `exec` — comes back.
+  final bool catalogAnswers;
 
   final List<String> invoked = <String>[];
 
@@ -34,10 +38,13 @@ final class _SlowClient implements PatchbayClient {
   Future<Map<String, Object?>> identity() => _never();
 
   @override
-  Future<Map<String, Object?>> catalog() async => <String, Object?>{
-    'commands': commands,
-    'uiTargets': const <Object?>[],
-  };
+  Future<Map<String, Object?>> catalog() async {
+    if (!catalogAnswers) return _never();
+    return <String, Object?>{
+      'commands': commands,
+      'uiTargets': const <Object?>[],
+    };
+  }
 
   @override
   Future<Map<String, Object?>> snapshot() async => <String, Object?>{
@@ -100,6 +107,9 @@ Future<_Run> _run(List<String> arguments, PatchbayClient client) async {
   );
   return _Run(exitCode, out.toString(), err.toString());
 }
+
+/// The budget the multi-RPC timing case runs under.
+const Duration _budget = Duration(milliseconds: 300);
 
 void main() {
   test('the documented default is the option default', () {
@@ -167,6 +177,37 @@ void main() {
       expect(result.err, contains(patchbayAppUnresponsiveCode));
       expect(result.err, contains('frozen by the system'));
       expect(client.invoked, contains('app.slow'));
+    });
+
+    test('costs one budget for the whole command, not one per RPC', () async {
+      // `exec` is a two-RPC command: read the catalog, then invoke. If the
+      // budget were spent per RPC and the command carried on, an unresponsive
+      // peer would cost one budget per leg. It cannot: the first unanswered
+      // RPC ends the command, so the later legs are never attempted — which is
+      // the structural reason the total stays at one budget rather than N.
+      final _SlowClient client = _SlowClient(
+        commands: <Map<String, Object?>>[
+          <String, Object?>{'name': 'app.slow'},
+        ],
+        catalogAnswers: false,
+      );
+
+      final Stopwatch elapsed = Stopwatch()..start();
+      final _Run result = await _run(<String>[
+        '--json',
+        '--transport-timeout-ms',
+        '300',
+        'exec',
+        'app.slow',
+      ], client);
+      elapsed.stop();
+
+      expect(result.error['code'], patchbayAppUnresponsiveCode);
+      expect(client.invoked, isEmpty);
+      expect(elapsed.elapsed, greaterThanOrEqualTo(_budget));
+      // Two budgets would be 600ms. The bound is loose enough for a busy
+      // machine and still far below anything that stacked.
+      expect(elapsed.elapsed, lessThan(const Duration(milliseconds: 550)));
     });
 
     test('bounds the handshake as well, not only domain commands', () async {
