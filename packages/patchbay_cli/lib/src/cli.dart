@@ -342,7 +342,9 @@ ArgParser patchbayCliParser() => ArgParser()
   )
   ..addOption(
     'transport-timeout-ms',
-    defaultsTo: '30000',
+    // One source for the number: an option default that drifted from the
+    // documented one would make the exported constant a lie.
+    defaultsTo: '${patchbayDefaultRpcTimeout.inMilliseconds}',
     help:
         'Per-RPC timeout in milliseconds, on every transport. A command that '
         'asks the App to wait (--timeout-ms) extends its own request by this '

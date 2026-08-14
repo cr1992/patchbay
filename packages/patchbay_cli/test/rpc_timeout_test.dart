@@ -102,6 +102,16 @@ Future<_Run> _run(List<String> arguments, PatchbayClient client) async {
 }
 
 void main() {
+  test('the documented default is the option default', () {
+    // The constant is what the docs and the exported API promise; the option
+    // default is what an invocation without the flag actually gets.
+    expect(
+      patchbayCliParser().defaultFor('transport-timeout-ms'),
+      '${patchbayDefaultRpcTimeout.inMilliseconds}',
+    );
+    expect(patchbayDefaultRpcTimeout, const Duration(seconds: 30));
+  });
+
   group('patchbayRpcBudget', () {
     test('a plain round trip gets the flat budget', () {
       expect(
