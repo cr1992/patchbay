@@ -5,9 +5,19 @@ import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
 final class PatchbayProtocolException implements Exception {
-  const PatchbayProtocolException(this.code);
+  const PatchbayProtocolException(
+    this.code, {
+    this.details = const <String, Object?>{},
+  });
 
   final String code;
+
+  /// What the host already told the CLI about this failure.
+  ///
+  /// The code names the class; this carries whatever the App said that the code
+  /// cannot express — the catalog violation behind a drift, for instance. It is
+  /// host data passed through unchanged, so it never gains a CLI-side meaning.
+  final Map<String, Object?> details;
 }
 
 final class PatchbayTransportException implements Exception {
