@@ -8,6 +8,7 @@
 
 | patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） | Flutter（文档最低支持） | 已知 consumer |
 |---|---|---|---|---|---|
+| `patchbay-v0.2.1` | `d32f45e9d652920902e51f9c3dc25c189d804e46` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2（1 已切至 / 1 在 0.2.0） |
 | `patchbay-v0.2.0` | `4d92ea9d7b0bd19f6ba81880cd411af6659eedd6` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2（1 已收口 / 1 在途） |
 | `patchbay-v0.1.0` | `7c82c68d9dfed4b2a546e81de68b9e0101be4878` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×1（已升级在途） |
 

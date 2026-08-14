@@ -2,3 +2,6 @@
 build/
 *.iml
 pubspec_overrides.yaml
+
+# 本地代码索引（工具生成，勿入库）
+.codegraph/

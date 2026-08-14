@@ -123,9 +123,16 @@ abstract final class PatchbayCommandHelp {
     }
     _writeConditions(output, sorted);
     _writeOptions(output, parser, optionNames);
-    output
-      ..writeln()
-      ..writeln('Availability is still decided by the running App catalog.');
+    // Derived per command rather than asserted once for the page: a group is
+    // not required to be homogeneous, and `sessions` needs no App at all while
+    // `ui` mixes catalog commands with SDK passthrough.
+    output.writeln();
+    for (final String line in <String>{
+      for (final PatchbayFriendlyCommand command in sorted)
+        availabilityLine(command),
+    }) {
+      output.writeln(line);
+    }
     return output.toString();
   }
 
@@ -254,6 +261,8 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientReplSession =>
           'Available on any connected Patchbay transport except direct HTTP, '
               'whose token would have to share stdin with the commands.',
+        PatchbayCommandTarget.localSessionStore =>
+          'Always available: it needs no App, no connection and no catalog.',
       };
 
   /// What the CLI will actually call, phrased per dispatch target.
@@ -277,6 +286,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientReplSession =>
           'Reads command lines from stdin and runs each over one connection; '
               'every line reports its own exit code.',
+        PatchbayCommandTarget.localSessionStore =>
+          'Reads and writes the local launcher session directory '
+              '(--session-dir); it never dials the App.',
       };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[

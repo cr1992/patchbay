@@ -118,7 +118,9 @@ $ patchbay --ws-uri '<VM Service URI>' --json snapshot
 ```
 
 VM Service URI 通常包含认证信息，不要把它写入脚本、日志或提交物。接入 launcher 后可以把
-`--ws-uri` 省略，详见[会话自动发现](docs/guide.md#5-会话自动发现可选)。
+`--ws-uri` 省略，详见[会话自动发现](docs/guide.md#5-会话自动发现可选)。多台设备同时连着时用
+`patchbay sessions list` 看有哪些会话、`patchbay session use <session-id>` 固定一个，之后的命令
+不必再逐条敲 `--session`，详见[会话选择](docs/guide.md#会话选择)。
 
 catalog 中的 UI target 会返回当前 `generation`。写操作必须携带这个值，防止迟到的命令打到
 重挂载后的同名控件：

@@ -144,6 +144,61 @@ void main() {
       expect(ambiguousCli.stderr.toString(), contains('sessionAmbiguous'));
       expect(ambiguousCli.stderr.toString(), contains('fixture-current'));
       expect(ambiguousCli.stderr.toString(), isNot(contains(uri.toString())));
+      // The refusal names the command that settles it, and that command runs
+      // without dialling anything.
+      expect(ambiguousCli.stderr.toString(), contains('session use'));
+
+      // Pin one, then run a command with no --session at all: this is the
+      // whole point of the feature, and the only place it is exercised against
+      // a real VM Service rather than an injected resolver.
+      final ProcessResult pinCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          sessions.path,
+          'session',
+          'use',
+          'fixture-current',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(pinCli.exitCode, 0, reason: pinCli.stderr.toString());
+      expect(pinCli.stdout.toString(), isNot(contains(uri.toString())));
+      final ProcessResult stickyCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          sessions.path,
+          '--json',
+          'identity',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(stickyCli.exitCode, 0, reason: stickyCli.stderr.toString());
+      expect(
+        (jsonDecode(stickyCli.stdout.toString())
+            as Map<String, Object?>)['applicationId'],
+        'dev.patchbay.fixture',
+      );
+      // Unpin so the assertions below still describe an unpinned directory.
+      final ProcessResult unpinCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          sessions.path,
+          'session',
+          'use',
+          '--clear',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(unpinCli.exitCode, 0, reason: unpinCli.stderr.toString());
 
       final ProcessResult selectedCli =
           await Process.run(Platform.resolvedExecutable, <String>[

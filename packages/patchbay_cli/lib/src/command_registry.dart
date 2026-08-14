@@ -45,6 +45,14 @@ enum PatchbayCommandTarget {
   /// derive from the same table as every other path, but it dispatches nothing
   /// itself — `runPatchbayCli` hands the connection to the repl loop.
   clientReplSession,
+
+  /// The local launcher session directory, read and written without dialling.
+  ///
+  /// These commands answer questions *about* sessions — which records exist,
+  /// which one later commands should use — so requiring a connection would
+  /// invert the dependency: the operator reaches for them precisely when the
+  /// CLI cannot pick a session on its own.
+  localSessionStore,
 }
 
 /// Mechanical mapping between CLI-friendly paths and stable protocol names.
@@ -84,6 +92,25 @@ enum PatchbayFriendlyCommand {
     <String>['repl'],
     summary: 'Connect once, then run commands from stdin over that connection.',
     target: PatchbayCommandTarget.clientReplSession,
+  ),
+  sessionsList(
+    null,
+    <String>['sessions', 'list'],
+    summary: 'List launcher session records; * marks the pinned one.',
+    target: PatchbayCommandTarget.localSessionStore,
+  ),
+  sessionsPrune(
+    null,
+    <String>['sessions', 'prune'],
+    summary: 'Remove session records whose App process is gone.',
+    target: PatchbayCommandTarget.localSessionStore,
+  ),
+  sessionUse(
+    null,
+    <String>['session', 'use'],
+    summary: 'Pin one session for commands that pass no --session.',
+    usageSuffix: '<session-id> | --clear',
+    target: PatchbayCommandTarget.localSessionStore,
   ),
   jobGet(
     'patchbay.job.get',
@@ -377,7 +404,13 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiWidgetTree ||
       PatchbayFriendlyCommand.uiRenderTree ||
       PatchbayFriendlyCommand.uiFocusTree ||
-      PatchbayFriendlyCommand.repl => _noTail(tail, const <String, Object?>{}),
+      PatchbayFriendlyCommand.repl ||
+      PatchbayFriendlyCommand.sessionsList ||
+      PatchbayFriendlyCommand.sessionsPrune => _noTail(
+        tail,
+        const <String, Object?>{},
+      ),
+      PatchbayFriendlyCommand.sessionUse => _sessionUseArguments(tail, options),
       // The service command already consumed the single positional above.
       PatchbayFriendlyCommand.exec => _domainArguments(
         options,
@@ -505,6 +538,15 @@ abstract final class PatchbayFriendlyCommandRegistry {
     );
   }
 
+  /// The declaration [words] name, without touching arguments or stdin.
+  ///
+  /// `runPatchbayCli` has to know whether a command needs a connection *before*
+  /// it dials, and the repl has to refuse the ones that do not. Both ask here
+  /// rather than pattern-matching argv, so the answer stays derived from the
+  /// same table as dispatch and help.
+  static PatchbayFriendlyCommand? specFor(List<String> words) =>
+      _match(canonicalPath(words));
+
   /// Rewrites [words] into the declared spelling of the same command.
   ///
   /// Aliases only ever expand into a path that already exists: they add a way
@@ -545,6 +587,22 @@ abstract final class PatchbayFriendlyCommandRegistry {
               ...spec.path.take(spec.path.length - 1),
               condition,
             ], spec.path),
+        // `sessions` and `session` differ by one letter and both read as the
+        // group an operator wants, so either spelling reaches the declared
+        // path. As with every alias here, these expand into paths that already
+        // exist and add no command.
+        const _PathAlias(<String>['session', 'list'], <String>[
+          'sessions',
+          'list',
+        ]),
+        const _PathAlias(<String>['session', 'prune'], <String>[
+          'sessions',
+          'prune',
+        ]),
+        const _PathAlias(<String>['sessions', 'use'], <String>[
+          'session',
+          'use',
+        ]),
         const _PathAlias(<String>['navigate'], <String>['navigation']),
         const _PathAlias(<String>['nav'], <String>['navigation']),
         const _PathAlias(<String>['wait'], <String>['ui', 'wait']),
@@ -605,6 +663,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'pixel-ratio',
       'output',
       'force',
+      'clear',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -635,7 +694,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.blobMetadata ||
     // A repl carries connection options and `--json`, which are global rather
     // than per-command; every command option belongs on the lines it runs.
-    PatchbayFriendlyCommand.repl => const <String>{},
+    PatchbayFriendlyCommand.repl ||
+    // `--session-dir` selects which directory these read, and it is global.
+    PatchbayFriendlyCommand.sessionsList ||
+    PatchbayFriendlyCommand.sessionsPrune => const <String>{},
+    PatchbayFriendlyCommand.sessionUse => const <String>{'clear'},
     PatchbayFriendlyCommand.exec ||
     PatchbayFriendlyCommand.uiSemanticsTree => const <String>{'args', 'stdin'},
     PatchbayFriendlyCommand.uiTextSet ||
@@ -811,6 +874,31 @@ abstract final class PatchbayFriendlyCommandRegistry {
         'text': fromStdin ? readSensitiveInput() : tail.sublist(3).join(' '),
       'inputWasStdin': fromStdin,
     };
+  }
+
+  /// `session use <session-id>` or `session use --clear`, never both.
+  ///
+  /// Pinning and unpinning are opposite intents, so a line that states both is
+  /// refused rather than resolved by precedence: an operator who typed an id
+  /// and a stale `--clear` must not silently end up unpinned.
+  static Map<String, Object?> _sessionUseArguments(
+    List<String> tail,
+    ArgResults options,
+  ) {
+    if (options.flag('clear')) {
+      if (tail.isNotEmpty) {
+        throw const FormatException(
+          'session use --clear takes no <session-id>',
+        );
+      }
+      return const <String, Object?>{'clear': true};
+    }
+    if (tail.length != 1) {
+      throw const FormatException(
+        'session use requires <session-id>, or --clear to unpin',
+      );
+    }
+    return <String, Object?>{'sessionId': tail.single, 'clear': false};
   }
 
   static Map<String, Object?> _logArguments(ArgResults options) =>

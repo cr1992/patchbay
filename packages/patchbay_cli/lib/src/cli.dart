@@ -59,6 +59,19 @@ Future<int> runPatchbayCli(
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
     }
+    // Session bookkeeping answers before any transport exists: these commands
+    // are what an operator reaches for when the CLI cannot pick a session, so
+    // dialling first would make them unavailable exactly when they are needed.
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localSessionStore) {
+      final _LocalOutcome outcome = _runLocalSessionCommand(parsed);
+      out.writeln(
+        json
+            ? const JsonEncoder.withIndent('  ').convert(outcome.response)
+            : outcome.text,
+      );
+      return PatchbayExitCode.accepted;
+    }
     final bool repl = _isRepl(parsed);
     if (repl) {
       // Resolve the declaration purely for its option policing: `repl` accepts
@@ -151,6 +164,7 @@ Future<int> runPatchbayCli(
     for (final String choice in failure.choices) {
       message.write('\n  --session ${choice.split(' ').first}  $choice');
     }
+    if (failure.hint case final String hint) message.write('\n  $hint');
     return _fail(
       out,
       error,
@@ -162,6 +176,7 @@ Future<int> runPatchbayCli(
         failure.code,
         details: <String, Object?>{
           if (failure.choices.isNotEmpty) 'sessions': failure.choices,
+          if (failure.hint case final String hint) 'hint': hint,
         },
       ),
       exitCode: failure.code == 'sessionIdentityMismatch'
@@ -420,7 +435,12 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('ttl-ms', help: 'Artifact lifetime in milliseconds.')
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
   ..addOption('output', help: 'Local artifact output path.')
-  ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.');
+  ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.')
+  ..addFlag(
+    'clear',
+    defaultsTo: false,
+    help: 'Unpin the selected session instead of selecting one.',
+  );
 
 List<String>? _helpTopic(ArgResults parsed) {
   final List<String> words = parsed.rest;
@@ -519,6 +539,129 @@ Future<PatchbayClient> _connect(ArgResults parsed) async {
   }
 }
 
+/// Runs one session-directory command: no transport, no catalog, no App.
+///
+/// The switch has no default arm for the declarations it handles, so a fourth
+/// local command cannot be declared without being wired here.
+_LocalOutcome _runLocalSessionCommand(ArgResults parsed) {
+  _validateLocalSessionShape(parsed);
+  final PatchbayFriendlyInvocation friendly =
+      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+  final PatchbaySessionResolver sessions = PatchbaySessionResolver(
+    store: PatchbaySessionStore(parsed.option('session-dir')),
+  );
+  return switch (friendly.spec) {
+    PatchbayFriendlyCommand.sessionsList => _listSessions(sessions),
+    PatchbayFriendlyCommand.sessionsPrune => _pruneSessions(sessions),
+    PatchbayFriendlyCommand.sessionUse => _useSession(sessions, friendly),
+    _ => throw StateError(
+      'unexpected local session command ${friendly.spec.name}',
+    ),
+  };
+}
+
+/// Refuses the options that would suggest these commands talk to an App.
+///
+/// `--session-dir` is the one connection-shaped option that does apply: it
+/// says *which* directory to read. The rest name a peer, and accepting them
+/// silently would imply the listing came from that peer.
+void _validateLocalSessionShape(ArgResults parsed) {
+  for (final String name in const <String>[
+    'ws-uri',
+    'session',
+    'direct-endpoint',
+    'direct-token-stdin',
+  ]) {
+    if (!parsed.wasParsed(name)) continue;
+    throw FormatException(
+      '--$name does not apply to a session-directory command: it reads the '
+      'local launcher records, not a running App',
+    );
+  }
+}
+
+_LocalOutcome _listSessions(PatchbaySessionResolver sessions) {
+  final List<PatchbaySessionListing> listings = sessions.inventory();
+  return _LocalOutcome(
+    <String, Object?>{
+      'sessions': <Map<String, Object?>>[
+        for (final PatchbaySessionListing listing in listings) listing.toJson(),
+      ],
+      'selected': _selectedId(listings),
+    },
+    _sessionLines(listings),
+  );
+}
+
+_LocalOutcome _pruneSessions(PatchbaySessionResolver sessions) {
+  final PatchbaySessionPruneResult result = sessions.prune();
+  final String removed = result.removed.isEmpty
+      ? 'pruned nothing'
+      : 'pruned ${result.removed.length}: ${result.removed.join(', ')}';
+  return _LocalOutcome(
+    <String, Object?>{
+      'pruned': result.removed,
+      'selectionCleared': result.selectionCleared,
+      'sessions': <Map<String, Object?>>[
+        for (final PatchbaySessionListing listing in result.remaining)
+          listing.toJson(),
+      ],
+      'selected': _selectedId(result.remaining),
+    },
+    <String>[
+      result.selectionCleared
+          ? '$removed (the pinned session was among them and is now unpinned)'
+          : removed,
+      _sessionLines(result.remaining),
+    ].join('\n'),
+  );
+}
+
+_LocalOutcome _useSession(
+  PatchbaySessionResolver sessions,
+  PatchbayFriendlyInvocation friendly,
+) {
+  if (friendly.arguments['clear'] == true) {
+    final String? previous = sessions.selection;
+    sessions.clearSelection();
+    return _LocalOutcome(
+      <String, Object?>{'selected': null, 'previous': previous},
+      previous == null
+          ? 'no session was pinned'
+          : 'unpinned $previous; commands without --session now require a '
+                'single discoverable session',
+    );
+  }
+  final PatchbaySessionListing pinned = sessions.select(
+    friendly.arguments['sessionId']! as String,
+  );
+  return _LocalOutcome(<String, Object?>{
+    'selected': pinned.record.sessionId,
+    'session': pinned.toJson(),
+  }, 'pinned ${pinned.label}');
+}
+
+String? _selectedId(List<PatchbaySessionListing> listings) {
+  for (final PatchbaySessionListing listing in listings) {
+    if (listing.selected) return listing.record.sessionId;
+  }
+  return null;
+}
+
+/// The listing block both `sessions list` and `sessions prune` print.
+String _sessionLines(List<PatchbaySessionListing> listings) {
+  if (listings.isEmpty) return 'no session records';
+  final List<String> lines = <String>[
+    for (final PatchbaySessionListing listing in listings)
+      '${listing.selected ? '*' : ' '} ${listing.label}',
+  ];
+  if (listings.length > 1 &&
+      !listings.any((PatchbaySessionListing listing) => listing.selected)) {
+    lines.add(patchbaySessionAmbiguousHint);
+  }
+  return lines.join('\n');
+}
+
 /// Dispatches one resolved declaration.
 ///
 /// There is deliberately no second command table here: every path the CLI
@@ -552,6 +695,10 @@ Future<_Execution> _execute(
       // the loop refuses a nested `repl` line, so reaching here is a wiring
       // bug rather than caller input.
       throw StateError('repl is a session, not a dispatchable command');
+    case PatchbayCommandTarget.localSessionStore:
+      // Answered before the dial, and refused inside a repl, so this arm is
+      // unreachable for the same reason the one above is.
+      throw StateError('session-directory commands run without a connection');
     case PatchbayCommandTarget.declaredServiceCommand:
     case PatchbayCommandTarget.callerServiceCommand:
       final String command = friendly.serviceCommand!;
@@ -953,6 +1100,18 @@ final class _Outcome {
 
   final Map<String, Object?> response;
   final int exitCode;
+}
+
+/// A session-directory answer, in both the shapes the CLI prints.
+///
+/// It carries its own human rendering instead of going through
+/// `patchbayResponseSummary`: that function summarises one App response into a
+/// single line, and a session listing is a table whose whole value is the rows.
+final class _LocalOutcome {
+  const _LocalOutcome(this.response, this.text);
+
+  final Map<String, Object?> response;
+  final String text;
 }
 
 final class _Execution {

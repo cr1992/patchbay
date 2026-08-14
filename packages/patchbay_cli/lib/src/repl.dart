@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:args/args.dart';
 
 import 'command_help.dart';
+import 'command_registry.dart';
 import 'result.dart';
 
 /// One command's result, classified exactly as the same command would be
@@ -198,6 +199,16 @@ final class PatchbayReplSession {
     }
     if (parsed.rest.isNotEmpty && parsed.rest.first == 'repl') {
       throw const FormatException('a repl session cannot nest another repl');
+    }
+    // Session selection decides which App the *next* process connects to. This
+    // one already holds its connection, so honouring `session use` here would
+    // change nothing about the lines that follow it while reading as if it had.
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localSessionStore) {
+      throw const FormatException(
+        'session-directory commands are unavailable inside a repl session: '
+        'the connection is already chosen; run them as a one-shot instead',
+      );
     }
   }
 
