@@ -32,6 +32,7 @@
 | 条目 | 动机 / 出处 |
 |---|---|
 | guide「UI 目标标注」节补**标注收敛最佳实践**：有组件库的接入方应把 PatchbayKey/Semantics 收口进自家组件层（组件加 semanticsId 参数 + ID 常量台账），call site 直贴是无组件库时的姿势 | 蔡锐 review hirobot 接入指出散落扩散性差；hirobot MR !35 有参考实现（8 行→1 参数）可引用 |
+| 架构总览一页：四包关系图 + 一条请求的完整生命周期（CLI→transport→host→bridge→consumer→回程），新 feature 阶段开工前画 | 新接入方现靠 guide+源码拼；hirobot 全程接入是现成素材 |
 | `PatchbayKey` 语义进 patchbay_flutter README/docs：**构造即注册、弱引用出册、仅同时挂载判歧义**；显式写明 **build() 内裸构造会重挂载丢状态**（应在 State 缓存实例）——接入方靠逆向源码才发现的陷阱 | hirobot consumer 实践反馈 |
 
 ## design-gate（需仓主裁决后动工）
