@@ -132,7 +132,7 @@ packages:
     source: hosted
     version: "1.18.0"
   patchbay:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
       path: "../../patchbay"
       relative: true
