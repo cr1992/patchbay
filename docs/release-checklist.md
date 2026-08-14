@@ -1,8 +1,7 @@
 # 发版检查清单
 
-> 依据 [CONTRIBUTING.md](../CONTRIBUTING.md)、[.gitlab-ci.yml](../.gitlab-ci.yml) 与 GitHub Actions
-> 门禁整理。只由 maintainer 执行：GitHub 合并 → 回推 GitLab → 打 tag → 下游按 pin 升级。
-> 本清单是发版动作的核对表，不改变 CONTRIBUTING.md 定义的权责边界。
+> 只由 maintainer 执行：GitHub 合并 → 回推 GitLab → 打 tag → 下游按 pin 升级。
+> 本清单是发版动作的核对表，不改变 [CONTRIBUTING.md](../CONTRIBUTING.md) 定义的权责边界。
 
 ## 1. 门禁全绿
 
@@ -13,8 +12,8 @@ GitLab CI（`.gitlab-ci.yml`，`stages: [check]`）三个 job：
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` +
       `flutter test` 通过
 - [ ] `codegen_drift` —— `wire_codegen.dart --check` 无生成物漂移
-- [ ] GitHub Actions 门禁绿（对齐 GitLab 三检查项；工作流链接待补——当前分支基线
-      `main@9014725` 不含 `.github/workflows`，以合入时的实际链接为准）
+- [ ] GitHub Actions 门禁绿（[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)，
+      三个 job 与上面一一对应）
 
 验证命令（需从仓根调用，`codegen_drift` 尤其如此——生成物 header 记录的是仓根相对路径，
 进包目录跑会假漂移）：
@@ -33,8 +32,7 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
 ## 2. 版本与 CHANGELOG 对账
 
 - [ ] 四包 `pubspec.yaml` 的 `version` 字段一致，且与拟打的 tag 号（去掉 `patchbay-v` 前缀）一致
-- [ ] CHANGELOG 对账 —— **待补**：本仓当前无 `CHANGELOG.md`，是否建立/在何处维护未见文档定义，
-      发版前由 maintainer 决定
+- [ ] [CHANGELOG.md](../CHANGELOG.md) 的 `Unreleased` 内容已归入拟发布的版本段落
 
 验证命令：
 
@@ -86,8 +84,3 @@ moii 侧口径（**交接口径，未在本仓验证，以 moii 仓 justfile/文
       **不代表**验收通过
 - [ ] 参考 [使用指南「边界」](guide.md#边界)：CLI 结果是调试证据，不是产品验收证据——不证明像素
       正确或设备物理行为，真机验收需另行确认
-
----
-
-清单基于仓内 `CONTRIBUTING.md` / `.gitlab-ci.yml` / `docs/guide.md` 与本地 git remote 配置推导；
-标「待补」的项尚无仓内文档可确认，执行前需人工补齐或向 maintainer 确认。
