@@ -523,8 +523,10 @@ String _render(_Contract contract, String path) {
     ..writeln(
       '  final declared = {for (final parameter in metadata.descriptor.parameters) parameter.name: parameter};',
     )
+    // No meta-key exemption: the host removes `inputWasStdin` before a consumer
+    // sees the arguments, so a strict whitelist is the correct shape here.
     ..writeln(
-      "  final unknown = raw.keys.where((key) => !declared.containsKey(key) && key != 'inputWasStdin').toList()..sort();",
+      '  final unknown = raw.keys.where((key) => !declared.containsKey(key)).toList()..sort();',
     )
     ..writeln(
       "  if (unknown.isNotEmpty) return $decodeResultType.rejected(PatchbayRejection(code: 'invalidArguments', details: {'unknown': unknown}));",
@@ -552,9 +554,9 @@ String _render(_Contract contract, String path) {
     ..writeln(
       "    if (!typeOk || (parameter.allowedValues.isNotEmpty && !parameter.allowedValues.contains(value))) return $decodeResultType.rejected(PatchbayRejection(code: 'invalidArguments', details: {'parameter': parameter.name}));",
     )
-    ..writeln(
-      "    if (parameter.sensitive && raw['inputWasStdin'] != true) return const $decodeResultType.rejected(PatchbayRejection(code: 'sensitiveInputRequiresStdin'));",
-    )
+    // `sensitive` stays in the descriptor — it is what the host reads out of
+    // the catalog — but it is no longer re-checked here. PatchbayServiceHost
+    // enforces the stdin provenance before dispatch.
     ..writeln('    values[parameter.name] = value;')
     ..writeln('  }')
     ..writeln('  final confirmation = metadata.confirmationArgument;')

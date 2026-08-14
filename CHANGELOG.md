@@ -4,8 +4,27 @@
 
 ## Unreleased
 
+### Changed
+
+- `inputWasStdin` 由框架层收编。host 在把 arguments 交给 consumer 之前按 descriptor 的
+  `sensitive` 声明完成校验（任一 sensitive 参数带非空值却缺少该标记时，以
+  `sensitiveInputRequiresStdin` 拒绝，`details.parameters` 列出违规参数名），随后把这个元键剥掉：
+  `domainInvoke` 收到的 arguments 永远不含它。`plane: flutterUi` 的命令例外——其敏感性是目标级
+  而非参数级，元键仍交给 `patchbay_flutter` 的 bridge。command codegen 同步不再豁免、也不再校验
+  该键。catalog 是这条策略的唯一真源，读不到时带参调用 fail-closed
+  （`providerProtocolViolation` / `catalogUnavailable`）。
+
+  **迁移：手写 adapter 升级 pin 后必做两步。**① 删掉 arguments 白名单里对 `inputWasStdin` 的
+  豁免（**不删无害**，只是死代码）；② 删掉 adapter 自实现的 stdin 强制检查（**不删必炸**——host
+  剥键后该判断恒为假，所有合法的敏感调用都会被 App 侧误拒）。规范表述：host 已接管
+  sensitivePolicy 校验，手写 invoke 不得再依赖 `inputWasStdin` 键。用 codegen 的接入方升级 pin
+  后重新生成即可；停留在旧 pin 的接入方不受影响，旧 host 与旧生成代码在旧语义下自洽。
+
 ### Fixed
 
+- `blob.read` 的 `limit` 与 descriptor 对齐：wire 允许缺省，host 补上 catalog 声明的同一个默认值
+  （`PatchbayMemoryBlobStore.maxChunkBytes`）。此前 descriptor 标了默认值但 wire 必填，声明与实际
+  不符。
 - `schemaVersion` 改为 host 保留字段，consumer catalog / snapshot 回调不能覆盖。
 - catalog 拒绝重复或缺少名称的 command，避免目录展示与实际 dispatch 产生歧义。
 - host 严格验证 invocation wire、协议版本和 `requestId`；provider 返回非法信封时转换为
