@@ -316,9 +316,46 @@ $ patchbay sessions prune                 # 删掉进程已经没了的记录
 
 会话选择是「下一个进程连哪」的事，repl 里因此不可用：那条连接已经选定了。
 
+### 体检（doctor）
+
+「连不上 / 没反应 / 命令全被拒」时先跑它，一次把四件事按依赖顺序查完，每项给
+**现象 → 可能原因 → 建议动作**：
+
+```console
+$ patchbay doctor          # 人读
+$ patchbay --json doctor   # 脚本读
+```
+
+| 检查项 | 查什么 |
+|---|---|
+| `session` | 本地会话目录：有几条记录、进程还在不在、不带 `--session` 会选中哪条 |
+| `connection` | 真拨一次号并完成 identity 握手 |
+| `catalog` | App 服不服目录、注册了多少命令与 UI target |
+| `lifecycle` | 发一条只读 UI 探针（`ui.semantics.tree`，`maxDepth 0 / maxNodes 1`），看 UI 面答不答 |
+
+**拨不通正是它被问的那个问题**，所以 doctor 自己拨号：连接失败在它这里是一条 finding，
+不是命令终止。前一项失败时后面的标 `skipped`，报告不谎称查过够不着的东西；会话目录判定失败
+时它连拨都不拨——目录已经说清没东西可拨了。
+
+**退出码取第一处 failed 的类别**：会话 / 连接 `3`、catalog `4`、lifecycle `5`——就是
+「换成普通命令撞上这一项时会拿到的那个码」，脚本判 doctor 与判原命令同构。只有 warning
+（如会话不唯一、门未开）时仍是 `0`。
+
+**活跃业务会话警示。** doctor 会读一次 snapshot，扫各领域里为 `true` 的布尔 `active`
+（自顶层域起最多五层），命中就把路径原样打出来并劝阻 `force-stop` / `kill` / 卸载——
+真机上强杀正在通话 / 配网中的 App，代价远大于等它。这是**结构化读法，不认领域词表**：
+CLI 不认识任何 consumer 的业务名词，路径打出来由你判是不是误报。想让它认出来，把布尔
+`active` 放在会话对象上即可（如 `snapshot.call.session.active`）。
+
+App **连不上**时这条警示照样出，措辞换成「查不出设备上有没有活跃会话，按不安全对待」：
+恰恰是那一刻最容易顺手强杀进程。
+
+doctor 只读，不改会话目录、不删记录、不重连、不替你唤醒设备——解法它只写给你看。
+
 ### 常用命令
 
 ```console
+$ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查
 $ patchbay catalog                          # App 实际注册了什么（唯一真源）
 $ patchbay --json snapshot                  # 状态快照
 $ patchbay --args '{...}' exec <ns.command> # 领域命令
@@ -461,6 +498,9 @@ CLI 对**每一次** RPC 往返（含发现握手）都有预算，默认 30 秒
 对端**已死**（进程没了、端口无人监听）与**冻结**不同：内核立刻拒绝连接，CLI 在毫秒级以
 `transportError` 失败，不等预算。把最清楚的失败拖成最不清楚的那一种没有意义，这条区分是有意的。
 
+分不清是哪一种、或者不确定该不该动设备时，跑 [`patchbay doctor`](#体检doctor)：它把这两种
+分开报，并在动手强杀之前提醒设备上可能有活跃业务会话。
+
 `--timeout-ms` 是**另一个量**，不要混用：它是请求 App 自己等多久（`ui wait`、`logs tail`、
 `navigation go|push|back`、`capture`），会随请求发到 App 侧。声明了等待预算的请求，其 RPC 预算自动
 放宽成「声明的等待 + 一次往返」，所以 `ui wait --timeout-ms 120000` 不会被 30 秒的默认预算腰斩；
@@ -493,7 +533,16 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
 类别）。被拒绝或失败的行不终止会话，连接类错误终止——CLI 不会替你悄悄换一条连接。
 
 连接类参数、`--json` 与 `--stdin` 在 repl 内逐行 fail-closed；敏感输入请用一次性调用。direct HTTP
-不支持 repl（bearer token 会与命令流抢同一个 stdin）。
+不支持 repl（bearer token 会与命令流抢同一个 stdin）。`doctor` 在 repl 内也不可用：它诊断的是
+「连接怎么建立的」，而这条连接已经建立；作为一次性调用跑。
+
+**App 未 resumed 时会话会说出来。** 息屏 / 后台 / 桌面窗口失焦时每行 UI 命令都以
+`*LifecycleNotResumed` 被拒，光看这个 code 猜不出该干什么。所以会话在**第一条**这样的拒绝之后，
+把分平台解法打到 stderr（`--json` 的 stdout 仍然只有命令结果），一个会话只打一次。
+
+这段提示是从 App 已经给出的拒绝里读的，会话**不会**为此额外发命令：唯一受 lifecycle 闸管的
+只读命令会 `ensureSemantics()` 并催帧，等于替你改了被观测的 App——`patchbay doctor` 可以这么做
+（是你点名要的体检），一条只是打开的会话不行。
 
 ### 退出码
 
@@ -508,6 +557,9 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
 | 64 | 命令行用法错误，含拒读的 manifest 文件 |
 
 脚本应同时读 JSON 信封；退出码不承载设备完成性。
+
+`doctor` 不另立码：它报**第一处 failed 检查项**的类别（会话 / 连接 `3`、catalog `4`、
+lifecycle `5`），只有 warning 时是 `0`。
 
 ### 输出
 
@@ -533,6 +585,7 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
   `ui.semantics.*`、`ui.capture`、`ui.wait` 与 `navigation.go|push|back` 都会以
   `*LifecycleNotResumed` 拒绝。这是 fail-closed 设计——未 resumed 的引擎不出帧，请求只会永远等下去，
   拒绝比挂起诚实。无头自动化必须让目标窗口保持聚焦（别在跑用例时切到别的窗口）。
+  `patchbay doctor` 的 `lifecycle` 一项就是查这个，`repl` 会在第一条被拒的行之后打出分平台解法。
   更细粒度的判定（例如区分「失焦但仍在出帧」）是待评估的优化项，不在本版范围内，闸本身不放松；
   各桥的 resumed 要求见
   [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。

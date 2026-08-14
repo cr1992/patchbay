@@ -49,6 +49,18 @@ dart run bin/patchbay.dart --json snapshot
 dart run bin/patchbay.dart --json exec <namespace.command>
 ```
 
+上面任何一步不通时先跑体检——它自己拨号，因此拨不通是它的一条 finding，而不是命令终止：
+
+```text
+dart run bin/patchbay.dart doctor          # 会话 / 连接 / catalog / lifecycle 逐项
+dart run bin/patchbay.dart --json doctor
+```
+
+四项按依赖顺序查，每项给「现象 → 可能原因 → 建议动作」，前一项失败时后面标 `skipped`；退出码取
+第一处 failed 的类别（会话 / 连接 `3`、catalog `4`、lifecycle `5`），只有 warning 时是 `0`。它还会
+读一次 snapshot，扫到为 `true` 的布尔 `active` 就打出路径并劝阻 `force-stop` / `kill`——设备上可能
+有正在进行的业务会话。完整语义见 [`../../docs/guide.md`](../../docs/guide.md)。
+
 多 App 或多 worktree 同时运行时不会按 PID、时间或当前目录猜测。CLI 以
 `sessionAmbiguous` fail-closed，并打印不含 URI 的 session ID；调用方须显式选择：
 
