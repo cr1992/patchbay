@@ -243,6 +243,7 @@ $ patchbay session use <id>|--clear          # 固定 / 取消固定会话
 $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
 $ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
+$ patchbay ui verify-manifest <file>        # 声明 ↔ 运行时挂载对账
 $ patchbay ui widget-tree|render-tree|focus-tree
 $ patchbay --output out.png capture root
 $ patchbay navigation go <dest>             # 不带 --revision 时自动先读当前 revision
@@ -295,6 +296,69 @@ generation 提供。同 identifier 挂载多个实例、identifier 不存在、�
 > ——默认 deny，没注入时这两条命令根本不出现在 `patchbay catalog` 里，调用得到
 > `commandNotRegistered`（只读的 `ui semantics tree` 不受影响）。接法与 policy 语义见
 > [`patchbay_flutter/docs/ui-inspection-and-actions.md`](../packages/patchbay_flutter/docs/ui-inspection-and-actions.md)。
+
+### UI 目标声明对账（ui verify-manifest）
+
+接入方把「这个 App 应该开放哪些 UI 目标」写成一份 manifest，CLI 连上运行中的 App，把它与 catalog
+的 `uiTargets` 对一遍，报三类偏差。**纯 CLI 侧比对**：不新增 wire 命令，App 侧零改动。
+
+```console
+$ patchbay ui verify-manifest ui-targets.json          # 人读：直接列出偏差条目
+$ patchbay --json ui verify-manifest ui-targets.json   # 结构化报告
+```
+
+manifest 是 JSON（v1 只认 JSON），完整示例见
+[`docs/examples/ui-targets-manifest.json`](examples/ui-targets-manifest.json)：
+
+```json
+{
+  "version": 1,
+  "targets": [
+    {"id": "app.shell", "kind": "capture"},
+    {"id": "login.password", "kind": "text", "sensitive": true, "destination": "login"}
+  ]
+}
+```
+
+| 字段 | 必填 | 含义 |
+|---|---|---|
+| `version` | 否 | 只接受 `1`；省略即 `1`，将来的版本号会被拒读，而不是当成 `1` 读 |
+| `targets[].id` | 是 | 稳定 ID，与 catalog `uiTargets[].id` 是同一个 |
+| `targets[].kind` | 是 | `text` / `capture`——词表就是 catalog `uiTargets[].kind` 的取值，不另立新词 |
+| `targets[].sensitive` | 否 | 默认 `false`，对应 catalog 的 `sensitivePolicy`（`redacted` ⇔ `true`） |
+| `targets[].destination` | 否 | 该声明属于哪个屏；v1 只用于过滤，不驱动导航 |
+
+未声明的键、缺失的必填项、非法 `kind`、冲突的重复 ID 一律 fail-closed 拒读：退出码 `64`，
+`--json` 的错误信封给稳定 code（`manifestInvalid` / `manifestUnreadable`）和
+`details.field`，直接指到位置（形如 `$.targets[2].kind`）。文件内容本身不进信封。
+
+三类偏差：
+
+| 组 | 含义 |
+|---|---|
+| `declaredNotMounted` | manifest 有、运行时**此刻**没挂载；`runtime` 区分 `absent`（catalog 里没有这个 ID）与 `unmounted`（注册过但当前没挂载） |
+| `mountedNotDeclared` | 运行时挂载着、manifest 里没有 |
+| `propertyMismatch` | 两边都有但 `kind` / `sensitive` 对不上，逐字段给 `declared` / `runtime` |
+
+**「未挂载」不等于「丢了」。** 对账范围是**当前挂载态**：非常驻控件不在当前屏本来就不该挂载，
+所以输出如实说「当前未挂载」，不替你判成缺失。挂载状态与属性漂移是两个独立的轴，同一个 ID
+可以同时出现在 `declaredNotMounted` 和 `propertyMismatch` 里。
+
+`destination` 在 v1 只做过滤。manifest 里只要有一条写了 `destination`，CLI 就先读一次
+`navigation.current`，然后只对账「没写 `destination`」和「`destination` 等于当前屏」的条目，其余
+计入 `stats.skippedOutOfScope`；出现在别的屏的声明仍然算「已声明」，不会被报成挂载未声明。同一个
+ID 可以在多条上重复，但每条都必须写各自不同的 `destination`——否则同一时刻会有两条声明去对同一个
+运行时目标。逐屏自动巡检要驱动导航，不在 v1 内。
+
+`destination` 与 `destinationSource` 一起读：`destinationSource` 为 `null` 表示 manifest 压根没
+scope、没读过 `navigation.current`；为 `navigation.current` 而 `destination` 是 `null`，表示读了、
+App 当时没有已落定的目的地。`navigation.current` 被拒时按该拒绝本身返回（退出码 `4` / `5`），不会
+把 scope 的那半当成通过。
+
+同一 ID 同时挂载多个实例（catalog 的 `ambiguous`）不算偏差——manifest 声明不了实例数——但桥对这种
+目标拒绝一切操作，所以报告的 `notices` 会点名它，退出码不受影响。
+
+退出码：全部相符 `0`，报告里有任一类偏差 `7`（见[退出码](#退出码)）。
 
 ### 超时与「对端不应答」
 
@@ -354,7 +418,8 @@ repl 只做「连一次、连续执行」，命令语法与一次性调用完全
 | 4 | schema/identity 不兼容，或目录中没有该命令 |
 | 5 | App adapter 或 UI 桥拒绝受理（门、参数、目标歧义…） |
 | 6 | 已受理但业务返回类型化失败 / job 失败 / 等待超时 |
-| 64 | 命令行用法错误 |
+| 7 | 本地对账（`ui verify-manifest`）跑完了，报告里有偏差——App 这边一切正常应答 |
+| 64 | 命令行用法错误，含拒读的 manifest 文件 |
 
 脚本应同时读 JSON 信封；退出码不承载设备完成性。
 
