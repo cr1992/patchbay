@@ -1,14 +1,7 @@
 # Patchbay 独立仓 CI：四包 analyze + test + 生成物零漂移。
 # runner 与镜像沿用 cloud/mobile 组现行约定（同 moii_app / sproboagent）。
-#
-# ⚠️ GitLab 流水线已停用（蔡锐 2026-08-13 拍板）：CI 主通道为 GitHub Actions
-# （.github/workflows/ci.yml，三 job 与本文件一一对应）。停用原因：新拆仓未分配
-# runner，流水线全部 pending 空耗。恢复方法：删除下面 workflow 段，并给项目分配
-# runner（Settings → CI/CD → Runners 启用 ci13-general，或
-# `glab api -X POST "projects/193/runners" -f runner_id=12`）。
-workflow:
-  rules:
-    - when: never
+# 双 CI 并行：GitLab（本文件，内网 runner ci13-general）+ GitHub Actions
+# （.github/workflows/ci.yml，公开仓协作门禁），三 job 两边一一对应，改动需同步。
 
 default:
   tags:
