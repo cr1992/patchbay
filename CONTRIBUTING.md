@@ -15,10 +15,21 @@
    header 记录的是相对生成物自身的路径）；完整两条命令见
    [发版清单](docs/release-checklist.md)；
 4. 新增行为必须带测试，且测试要验证过「能红」（打个定向 mutation 确认断言真的红）。
-5. 公共 API、协议字段、默认资源上限或安全行为有变化时，同步更新 README / 对应专题文档和
-   [CHANGELOG.md](CHANGELOG.md)；文档、测试与实现必须描述同一契约。
+5. 公共 API、协议字段、默认资源上限或安全行为有变化时，同步更新 README / 对应专题文档，并按
+   [CHANGELOG 碎片规范](changelog.d/README.md)新增碎片；日常 PR 不直接修改根或包内 CHANGELOG，
+   文档、测试与实现必须描述同一契约。
 6. 本仓公开：文档与注释不记录内网域名、内部项目与业务线名。需要指代时写「内网主仓」
    「接入方」；内网地址走 CI 变量或 remote 名，不写字面值。
+
+## CHANGELOG 碎片
+
+会影响使用者的 PR 必须在 `changelog.d/` 新增一个独占碎片，文件名绑定版本计划/backlog 编号和
+`added|changed|deprecated|removed|fixed|security` 类型。纯测试、注释、排版或无外部行为变化的
+内部重构可以不写，但要在 PR 模板说明理由。
+
+碎片在功能 PR 合入后继续保留，正式发布时才聚合进根 [CHANGELOG.md](CHANGELOG.md) 并删除；四个包的
+CHANGELOG 仍由根表统一派生，不是独立真源。完整命名、内容、评审和发布规则见
+[changelog.d/README.md](changelog.d/README.md)。
 
 ## 设计红线
 
