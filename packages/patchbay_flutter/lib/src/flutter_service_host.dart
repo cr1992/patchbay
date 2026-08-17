@@ -19,27 +19,16 @@ final class PatchbayFlutterServiceHost {
          applicationId: applicationId,
          appInstanceId: appInstanceId,
          registrar: registrar,
+         registry: PatchbayCommandRegistry.combine(<PatchbayCommandRegistry>[
+           _uiCommandRegistry(bridge),
+           if (bridge.artifacts case final PatchbayArtifactService artifacts)
+             artifacts.registry,
+         ]),
          catalog: () async {
            final Map<String, Object?> domain =
                await domainCatalog?.call() ?? const <String, Object?>{};
            return <String, Object?>{
              ...domain,
-             'commands': <Object?>[
-               for (final PatchbayCommandDescriptor descriptor
-                   in _uiCommandDescriptors(
-                     semanticsActionsEnabled: bridge.semantics.actionsEnabled,
-                     navigationEnabled: bridge.navigation != null,
-                     captureEnabled: bridge.capture != null,
-                     captureGates: bridge.capture?.gateIds ?? const <String>{},
-                     keepAwakeGates: bridge.keepAwake.gateIds,
-                     inspectPolicy: bridge.inspect?.policy,
-                   ))
-                 descriptor.toJson(),
-               ...?bridge.artifacts?.descriptors.map(
-                 (PatchbayCommandDescriptor descriptor) => descriptor.toJson(),
-               ),
-               ...?domain['commands'] as List<Object?>?,
-             ],
              'uiTargets': bridge
                  .catalog()
                  .map((PatchbayUiTargetDescriptor target) => target.toJson())
@@ -47,360 +36,16 @@ final class PatchbayFlutterServiceHost {
            };
          },
          snapshot: snapshot ?? () async => const <String, Object?>{},
-         invoke: (command, arguments, requestId) async {
-           if (bridge.artifacts?.handles(command) == true) {
-             return bridge.artifacts!.invoke(command, arguments, requestId);
-           }
-           if (command == 'ui.capture') {
-             final capture = bridge.capture;
-             if (capture == null) {
-               return PatchbayInvocation.rejected(
-                 requestId: requestId,
-                 rejection: const PatchbayRejection(
-                   code: 'commandNotRegistered',
-                 ),
-               ).toJson();
-             }
-             final PatchbayCaptureRequestWire request;
-             try {
-               request = PatchbayCaptureRequestWire.fromJson(arguments);
-             } on Object catch (failure) {
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-                 reason: _decodeFailureReason(failure),
-               );
-             }
-             return (await capture.capture(
-               request,
-               requestId: requestId,
-             )).toJson();
-           }
-           if (command == 'ui.keepAwake.set') {
-             final PatchbayKeepAwakeRequestWire request;
-             try {
-               request = PatchbayKeepAwakeRequestWire.fromJson(arguments);
-             } on Object catch (failure) {
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-                 reason: _decodeFailureReason(failure),
-               );
-             }
-             return (await bridge.keepAwake.set(
-               request,
-               requestId: requestId,
-             )).toJson();
-           }
-           if (command == 'ui.keepAwake.status') {
-             if (arguments.isNotEmpty) {
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-               );
-             }
-             return (await bridge.keepAwake.status(
-               requestId: requestId,
-             )).toJson();
-           }
-           if (command == 'ui.inspect.status' ||
-               command == 'ui.inspect.select') {
-             final inspect = bridge.inspect;
-             if (inspect == null) {
-               return PatchbayInvocation.rejected(
-                 requestId: requestId,
-                 rejection: const PatchbayRejection(
-                   code: 'commandNotRegistered',
-                 ),
-               ).toJson();
-             }
-             if (command == 'ui.inspect.status') {
-               if (arguments.isNotEmpty) {
-                 return _invalidUiArguments(
-                   requestId,
-                   command,
-                   arguments,
-                   strictKeys: true,
-                 );
-               }
-               return (await inspect.status(requestId: requestId)).toJson();
-             }
-             final PatchbayInspectSelectRequestWire request;
-             try {
-               request = PatchbayInspectSelectRequestWire.fromJson(arguments);
-             } on Object catch (failure) {
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-                 reason: _decodeFailureReason(failure),
-               );
-             }
-             return (await inspect.select(
-               request: request,
-               requestId: requestId,
-             )).toJson();
-           }
-           final bool uiCommand =
-               command == 'ui.text.set' ||
-               command == 'ui.text.enter' ||
-               command == 'ui.semantics.tree' ||
-               command == 'ui.semantics.action' ||
-               command == 'ui.semantics.tap' ||
-               command == 'ui.wait' ||
-               command == 'ui.capture' ||
-               command == 'ui.keepAwake.set' ||
-               command == 'ui.keepAwake.status' ||
-               command.startsWith('navigation.');
-           if (!uiCommand) {
-             if (domainInvoke != null) {
-               return domainInvoke(command, arguments, requestId);
-             }
-             return PatchbayInvocation.rejected(
-               requestId: requestId,
-               rejection: PatchbayRejection(
-                 code: 'commandNotRegistered',
-                 details: <String, Object?>{'command': command},
-               ),
-             ).toJson();
-           }
-           if (command == 'ui.semantics.tree') {
-             final Object? maxDepth = arguments['maxDepth'];
-             final Object? maxNodes = arguments['maxNodes'];
-             if (maxDepth != null && maxDepth is! int ||
-                 maxNodes != null && maxNodes is! int) {
-               // `--args` reaches this command wholesale, so an undeclared key
-               // is not this rejection's business; only the two it reads are.
-               return _invalidUiArguments(requestId, command, arguments);
-             }
-             return (await bridge.semantics.snapshot(
-               maxDepth: maxDepth as int? ?? 64,
-               maxNodes: maxNodes as int? ?? 1000,
-               requestId: requestId,
-             )).toJson();
-           }
-           if (command == 'ui.semantics.action') {
-             if (!bridge.semantics.actionsEnabled) {
-               return PatchbayInvocation.rejected(
-                 requestId: requestId,
-                 rejection: const PatchbayRejection(
-                   code: 'commandNotRegistered',
-                 ),
-               ).toJson();
-             }
-             final Object? nodeId = arguments['nodeId'];
-             final Object? generation = arguments['generation'];
-             final Object? actionName = arguments['action'];
-             final PatchbaySemanticsAction? action = actionName is String
-                 ? PatchbaySemanticsAction.fromWireName(actionName)
-                 : null;
-             final Object? text = arguments['text'];
-             if (nodeId is! int ||
-                 generation is! int ||
-                 action == null ||
-                 text != null && text is! String) {
-               return _invalidUiArguments(requestId, command, arguments);
-             }
-             return (await bridge.semantics.invoke(
-               nodeId: nodeId,
-               generation: generation,
-               action: action,
-               text: text as String?,
-               inputWasStdin: arguments['inputWasStdin'] == true,
-               requestId: requestId,
-             )).toJson();
-           }
-           if (command == 'ui.semantics.tap') {
-             if (!bridge.semantics.actionsEnabled) {
-               return PatchbayInvocation.rejected(
-                 requestId: requestId,
-                 rejection: const PatchbayRejection(
-                   code: 'commandNotRegistered',
-                 ),
-               ).toJson();
-             }
-             final Object? identifier = arguments['identifier'];
-             final Object? generation = arguments['generation'];
-             if (identifier is! String ||
-                 generation != null && generation is! int ||
-                 arguments.keys.any(
-                   (String key) => key != 'identifier' && key != 'generation',
-                 )) {
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-               );
-             }
-             return (await bridge.semantics.tapIdentifier(
-               identifier: identifier,
-               expectedGeneration: generation as int?,
-               requestId: requestId,
-             )).toJson();
-           }
-           if (command == 'ui.wait') {
-             final PatchbayUiWaitRequest request;
-             try {
-               request = PatchbayUiWaitRequest.fromWire(
-                 PatchbayUiWaitRequestWire.fromJson(arguments),
-               );
-             } on Object catch (failure) {
-               // Most `ui.wait` failures are shape rules rather than key
-               // errors — `semanticsValue` needs a companion `value`, revision
-               // waits refuse an identifier — so the declared-key diff alone
-               // would report nothing at all. The decoder already phrases that
-               // rule; carry its sentence.
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-                 reason: _decodeFailureReason(failure),
-               );
-             }
-             return (await bridge.wait.wait(
-               request,
-               requestId: requestId,
-             )).toJson();
-           }
-           if (command.startsWith('navigation.')) {
-             final navigation = bridge.navigation;
-             if (navigation == null) {
-               return PatchbayInvocation.rejected(
-                 requestId: requestId,
-                 rejection: const PatchbayRejection(
-                   code: 'commandNotRegistered',
-                 ),
-               ).toJson();
-             }
-             if (command == 'navigation.catalog') {
-               if (arguments.isNotEmpty) {
-                 return _invalidUiArguments(
-                   requestId,
-                   command,
-                   arguments,
-                   strictKeys: true,
-                 );
-               }
-               return (await navigation.catalog(requestId: requestId)).toJson();
-             }
-             if (command == 'navigation.current') {
-               if (arguments.isNotEmpty) {
-                 return _invalidUiArguments(
-                   requestId,
-                   command,
-                   arguments,
-                   strictKeys: true,
-                 );
-               }
-               return (await navigation.current(requestId: requestId)).toJson();
-             }
-             final Object? revision = arguments['revision'];
-             final Object? timeoutMs = arguments['timeoutMs'];
-             if (revision is! int ||
-                 timeoutMs != null && timeoutMs is! int ||
-                 arguments.keys.any(
-                   (String key) =>
-                       key != 'destinationId' &&
-                       key != 'revision' &&
-                       key != 'timeoutMs',
-                 )) {
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-               );
-             }
-             final Duration timeout = Duration(
-               milliseconds: timeoutMs as int? ?? 5000,
-             );
-             if (command == 'navigation.back') {
-               if (arguments.containsKey('destinationId')) {
-                 // The shared check above accepts the key for `go` / `push`;
-                 // `back` does not declare it, which is what the details say.
-                 return _invalidUiArguments(
-                   requestId,
-                   command,
-                   arguments,
-                   strictKeys: true,
-                 );
-               }
-               return (await navigation.back(
-                 revision: revision,
-                 timeout: timeout,
-                 requestId: requestId,
-               )).toJson();
-             }
-             final Object? destinationId = arguments['destinationId'];
-             if (destinationId is! String) {
-               return _invalidUiArguments(
-                 requestId,
-                 command,
-                 arguments,
-                 strictKeys: true,
-               );
-             }
-             if (command == 'navigation.go') {
-               return (await navigation.go(
-                 destinationId: destinationId,
-                 revision: revision,
-                 timeout: timeout,
-                 requestId: requestId,
-               )).toJson();
-             }
-             if (command == 'navigation.push') {
-               return (await navigation.push(
-                 destinationId: destinationId,
-                 revision: revision,
-                 timeout: timeout,
-                 requestId: requestId,
-               )).toJson();
-             }
-             return PatchbayInvocation.rejected(
-               requestId: requestId,
-               rejection: const PatchbayRejection(code: 'commandNotRegistered'),
-             ).toJson();
-           }
-           final Object? id = arguments['id'];
-           final Object? generation = arguments['generation'];
-           final Object? text = arguments['text'];
-           if (id is! String || generation is! int || text is! String) {
-             return _invalidUiArguments(
-               requestId,
-               command,
-               arguments,
-               notice: 'id, generation and text are required.',
-             );
-           }
-           final bool stdin = arguments['inputWasStdin'] == true;
-           final PatchbayInvocation result = switch (command) {
-             'ui.text.set' => await bridge.setText(
-               id: id,
-               generation: generation,
-               text: text,
-               inputWasStdin: stdin,
-               requestId: requestId,
-             ),
-             'ui.text.enter' => await bridge.enterText(
-               id: id,
-               generation: generation,
-               text: text,
-               inputWasStdin: stdin,
-               requestId: requestId,
-             ),
-             _ => throw StateError('unreachable UI command $command'),
-           };
-           return result.toJson();
-         },
+         invoke:
+             domainInvoke ??
+             (command, arguments, requestId) async =>
+                 PatchbayInvocation.rejected(
+                   requestId: requestId,
+                   rejection: PatchbayRejection(
+                     code: 'commandNotRegistered',
+                     details: <String, Object?>{'command': command},
+                   ),
+                 ).toJson(),
          // The lifecycle gate lives in this package, so this is the layer that
          // can promise a `*LifecycleNotResumed` rejection carries the engine
          // state separating "wake the screen" from "click the window". A pure
@@ -493,6 +138,320 @@ final class PatchbayFlutterServiceHost {
       '$name is out of the accepted range',
     _ => failure.runtimeType.toString(),
   };
+
+  static PatchbayCommandRegistry _uiCommandRegistry(
+    PatchbayFlutterBridge bridge,
+  ) {
+    final Iterator<PatchbayCommandDescriptor> descriptors =
+        _uiCommandDescriptors(
+          semanticsActionsEnabled: true,
+          navigationEnabled: true,
+          captureEnabled: true,
+          captureGates: bridge.capture?.gateIds ?? const <String>{},
+          keepAwakeGates: bridge.keepAwake.gateIds,
+          inspectPolicy:
+              bridge.inspect?.policy ?? const PatchbayInspectPolicy(),
+        ).iterator;
+    PatchbayCommandDescriptor next() {
+      if (!descriptors.moveNext()) {
+        throw StateError('UI command descriptor/handler count mismatch');
+      }
+      return descriptors.current;
+    }
+
+    final registrations = <PatchbayCommandRegistration<Object?>>[
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        _decodeText,
+        (request, requestId) async => (await bridge.setText(
+          id: request['id']! as String,
+          generation: request['generation']! as int,
+          text: request['text']! as String,
+          inputWasStdin: request['inputWasStdin'] == true,
+          requestId: requestId,
+        )).toJson(),
+        notice: 'id, generation and text are required.',
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        _decodeText,
+        (request, requestId) async => (await bridge.enterText(
+          id: request['id']! as String,
+          generation: request['generation']! as int,
+          text: request['text']! as String,
+          inputWasStdin: request['inputWasStdin'] == true,
+          requestId: requestId,
+        )).toJson(),
+        notice: 'id, generation and text are required.',
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        _decodeSemanticsTree,
+        (request, requestId) async => (await bridge.semantics.snapshot(
+          maxDepth: request['maxDepth'] as int? ?? 64,
+          maxNodes: request['maxNodes'] as int? ?? 1000,
+          requestId: requestId,
+        )).toJson(),
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        _decodeSemanticsAction,
+        (request, requestId) async => (await bridge.semantics.invoke(
+          nodeId: request['nodeId']! as int,
+          generation: request['generation']! as int,
+          action: request['decodedAction']! as PatchbaySemanticsAction,
+          text: request['text'] as String?,
+          inputWasStdin: request['inputWasStdin'] == true,
+          requestId: requestId,
+        )).toJson(),
+        available: bridge.semantics.actionsEnabled,
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        _decodeSemanticsTap,
+        (request, requestId) async => (await bridge.semantics.tapIdentifier(
+          identifier: request['identifier']! as String,
+          expectedGeneration: request['generation'] as int?,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        available: bridge.semantics.actionsEnabled,
+      ),
+      _uiRegistration<PatchbayUiWaitRequest>(
+        next(),
+        (arguments) => PatchbayUiWaitRequest.fromWire(
+          PatchbayUiWaitRequestWire.fromJson(arguments),
+        ),
+        (request, requestId) async =>
+            (await bridge.wait.wait(request, requestId: requestId)).toJson(),
+        strictKeys: true,
+        includeReason: true,
+      ),
+      _uiRegistration<PatchbayKeepAwakeRequestWire>(
+        next(),
+        PatchbayKeepAwakeRequestWire.fromJson,
+        (request, requestId) async => (await bridge.keepAwake.set(
+          request,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        _noArguments,
+        (_, requestId) async =>
+            (await bridge.keepAwake.status(requestId: requestId)).toJson(),
+        strictKeys: true,
+      ),
+      _uiRegistration<PatchbayCaptureRequestWire>(
+        next(),
+        PatchbayCaptureRequestWire.fromJson,
+        (request, requestId) async => (await bridge.capture!.capture(
+          request,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.capture != null,
+      ),
+      ...<PatchbayCommandRegistration<Object?>>[
+        _uiRegistration<Map<String, Object?>>(
+          next(),
+          _noArguments,
+          (_, requestId) async =>
+              (await bridge.inspect!.status(requestId: requestId)).toJson(),
+          strictKeys: true,
+          available: bridge.inspect != null,
+        ),
+        _uiRegistration<PatchbayInspectSelectRequestWire>(
+          next(),
+          PatchbayInspectSelectRequestWire.fromJson,
+          (request, requestId) async => (await bridge.inspect!.select(
+            request: request,
+            requestId: requestId,
+          )).toJson(),
+          strictKeys: true,
+          includeReason: true,
+          available: bridge.inspect != null,
+        ),
+      ],
+      ...<PatchbayCommandRegistration<Object?>>[
+        _uiRegistration<Map<String, Object?>>(
+          next(),
+          _noArguments,
+          (_, requestId) async =>
+              (await bridge.navigation!.catalog(requestId: requestId)).toJson(),
+          strictKeys: true,
+          available: bridge.navigation != null,
+        ),
+        _uiRegistration<Map<String, Object?>>(
+          next(),
+          _noArguments,
+          (_, requestId) async =>
+              (await bridge.navigation!.current(requestId: requestId)).toJson(),
+          strictKeys: true,
+          available: bridge.navigation != null,
+        ),
+        _uiRegistration<Map<String, Object?>>(
+          next(),
+          _decodeNavigationDestination,
+          (request, requestId) async => (await bridge.navigation!.go(
+            destinationId: request['destinationId']! as String,
+            revision: request['revision']! as int,
+            timeout: Duration(
+              milliseconds: request['timeoutMs'] as int? ?? 5000,
+            ),
+            requestId: requestId,
+          )).toJson(),
+          strictKeys: true,
+          available: bridge.navigation != null,
+        ),
+        _uiRegistration<Map<String, Object?>>(
+          next(),
+          _decodeNavigationDestination,
+          (request, requestId) async => (await bridge.navigation!.push(
+            destinationId: request['destinationId']! as String,
+            revision: request['revision']! as int,
+            timeout: Duration(
+              milliseconds: request['timeoutMs'] as int? ?? 5000,
+            ),
+            requestId: requestId,
+          )).toJson(),
+          strictKeys: true,
+          available: bridge.navigation != null,
+        ),
+        _uiRegistration<Map<String, Object?>>(
+          next(),
+          _decodeNavigationBack,
+          (request, requestId) async => (await bridge.navigation!.back(
+            revision: request['revision']! as int,
+            timeout: Duration(
+              milliseconds: request['timeoutMs'] as int? ?? 5000,
+            ),
+            requestId: requestId,
+          )).toJson(),
+          strictKeys: true,
+          available: bridge.navigation != null,
+        ),
+      ],
+    ];
+    if (descriptors.moveNext()) {
+      throw StateError('UI command descriptor/handler count mismatch');
+    }
+    return PatchbayCommandRegistry(registrations);
+  }
+
+  static PatchbayCommandRegistration<T> _uiRegistration<T>(
+    PatchbayCommandDescriptor descriptor,
+    PatchbayCommandDecoder<T> decode,
+    PatchbayCommandHandler<T> handle, {
+    bool strictKeys = false,
+    bool includeReason = false,
+    String? notice,
+    bool available = true,
+  }) => PatchbayCommandRegistration<T>(
+    descriptor: descriptor,
+    decode: decode,
+    handle: handle,
+    available: available,
+    onDecodeFailure: (failure, arguments, requestId, descriptor) =>
+        _invalidUiArguments(
+          requestId,
+          descriptor.name,
+          arguments,
+          strictKeys: strictKeys,
+          reason: includeReason ? _decodeFailureReason(failure) : null,
+          notice: notice,
+        ),
+  );
+
+  static Map<String, Object?> _decodeText(Map<String, Object?> arguments) {
+    if (arguments['id'] is! String ||
+        arguments['generation'] is! int ||
+        arguments['text'] is! String) {
+      throw const FormatException('id, generation and text are required');
+    }
+    return arguments;
+  }
+
+  static Map<String, Object?> _decodeSemanticsTree(
+    Map<String, Object?> arguments,
+  ) {
+    if (arguments['maxDepth'] != null && arguments['maxDepth'] is! int ||
+        arguments['maxNodes'] != null && arguments['maxNodes'] is! int) {
+      throw const FormatException('invalid semantics tree bounds');
+    }
+    return arguments;
+  }
+
+  static Map<String, Object?> _decodeSemanticsAction(
+    Map<String, Object?> arguments,
+  ) {
+    final Object? rawAction = arguments['action'];
+    final PatchbaySemanticsAction? action = rawAction is String
+        ? PatchbaySemanticsAction.fromWireName(rawAction)
+        : null;
+    if (arguments['nodeId'] is! int ||
+        arguments['generation'] is! int ||
+        action == null ||
+        arguments['text'] != null && arguments['text'] is! String) {
+      throw const FormatException('invalid semantics action arguments');
+    }
+    return <String, Object?>{...arguments, 'decodedAction': action};
+  }
+
+  static Map<String, Object?> _decodeSemanticsTap(
+    Map<String, Object?> arguments,
+  ) {
+    _rejectUnexpected(arguments, const <String>{'identifier', 'generation'});
+    if (arguments['identifier'] is! String ||
+        arguments['generation'] != null && arguments['generation'] is! int) {
+      throw const FormatException('invalid semantics tap arguments');
+    }
+    return arguments;
+  }
+
+  static Map<String, Object?> _decodeNavigationDestination(
+    Map<String, Object?> arguments,
+  ) {
+    _rejectUnexpected(arguments, const <String>{
+      'destinationId',
+      'revision',
+      'timeoutMs',
+    });
+    if (arguments['destinationId'] is! String ||
+        arguments['revision'] is! int ||
+        arguments['timeoutMs'] != null && arguments['timeoutMs'] is! int) {
+      throw const FormatException('invalid navigation arguments');
+    }
+    return arguments;
+  }
+
+  static Map<String, Object?> _decodeNavigationBack(
+    Map<String, Object?> arguments,
+  ) {
+    _rejectUnexpected(arguments, const <String>{'revision', 'timeoutMs'});
+    if (arguments['revision'] is! int ||
+        arguments['timeoutMs'] != null && arguments['timeoutMs'] is! int) {
+      throw const FormatException('invalid navigation arguments');
+    }
+    return arguments;
+  }
+
+  static Map<String, Object?> _noArguments(Map<String, Object?> arguments) {
+    _rejectUnexpected(arguments, const <String>{});
+    return arguments;
+  }
+
+  static void _rejectUnexpected(
+    Map<String, Object?> arguments,
+    Set<String> keys,
+  ) {
+    if (arguments.keys.any((String key) => !keys.contains(key))) {
+      throw const FormatException('unexpected argument');
+    }
+  }
 
   /// Declared argument shape per UI command, read from the descriptors this
   /// host publishes.
@@ -820,34 +779,56 @@ final class PatchbayFlutterServiceHost {
         sideEffect: PatchbaySideEffect.none,
         factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
       ),
-      for (final String operation in <String>['go', 'push'])
-        PatchbayCommandDescriptor(
-          name: 'navigation.$operation',
-          summary: '$operation to a cataloged consumer destination.',
-          plane: PatchbayPlane.flutterUi,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.appState,
-          factSources: const <PatchbayFactSource>{
-            PatchbayFactSource.uiObserved,
-          },
-          parameters: const <PatchbayParameterDescriptor>[
-            PatchbayParameterDescriptor(
-              name: 'destinationId',
-              type: PatchbayParameterType.string,
-              required: true,
-            ),
-            PatchbayParameterDescriptor(
-              name: 'revision',
-              type: PatchbayParameterType.integer,
-              required: true,
-            ),
-            PatchbayParameterDescriptor(
-              name: 'timeoutMs',
-              type: PatchbayParameterType.integer,
-              defaultValue: 5000,
-            ),
-          ],
-        ),
+      const PatchbayCommandDescriptor(
+        name: 'navigation.go',
+        summary: 'go to a cataloged consumer destination.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.immediate,
+        sideEffect: PatchbaySideEffect.appState,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+        parameters: <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'destinationId',
+            type: PatchbayParameterType.string,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'revision',
+            type: PatchbayParameterType.integer,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'timeoutMs',
+            type: PatchbayParameterType.integer,
+            defaultValue: 5000,
+          ),
+        ],
+      ),
+      const PatchbayCommandDescriptor(
+        name: 'navigation.push',
+        summary: 'push to a cataloged consumer destination.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.immediate,
+        sideEffect: PatchbaySideEffect.appState,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+        parameters: <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'destinationId',
+            type: PatchbayParameterType.string,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'revision',
+            type: PatchbayParameterType.integer,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'timeoutMs',
+            type: PatchbayParameterType.integer,
+            defaultValue: 5000,
+          ),
+        ],
+      ),
       const PatchbayCommandDescriptor(
         name: 'navigation.back',
         summary: 'Navigate back through the consumer adapter.',
