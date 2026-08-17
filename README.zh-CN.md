@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> | 简体中文
+  <a href="https://github.com/cr1992/patchbay/blob/main/README.md">English</a> | 简体中文
 </p>
 
 <p align="center">

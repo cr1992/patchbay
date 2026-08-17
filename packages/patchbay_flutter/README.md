@@ -1,6 +1,6 @@
 # Patchbay Flutter
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/README.zh-CN.md)
 
 `patchbay_flutter` is Patchbay's optional Flutter adapter. Its goal is to provide stable,
 discoverable, fail-closed UI debugging capabilities with minimal widget intrusion — not to

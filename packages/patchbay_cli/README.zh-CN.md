@@ -1,6 +1,6 @@
 # Patchbay CLI
 
-[English](README.md) | 简体中文
+[English](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/README.md) | 简体中文
 
 `patchbay_cli` 是 Patchbay 的 consumer-neutral 命令行客户端。它连接运行中的 Dart/Flutter App，
 根据 App 实际返回的 catalog 调用命令，不依赖 consumer 代码，也不维护业务命令副本。

@@ -1,6 +1,6 @@
 # Patchbay direct transport
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_transport/README.zh-CN.md)
 
 `patchbay_transport` is a consumer-neutral, pure Dart debug transport. It carries `identity`,
 `catalog`, `snapshot`, and `invoke` over a fixed HTTP/JSON protocol, with no dependency on Flutter,

@@ -1,6 +1,6 @@
 # Patchbay CLI
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/README.zh-CN.md)
 
 `patchbay_cli` is Patchbay's consumer-neutral command line client. It connects to a running
 Dart/Flutter app and invokes commands based on the catalog that app actually returns — with no

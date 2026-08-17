@@ -1,6 +1,6 @@
 # patchbay
 
-[English](README.md) | 简体中文
+[English](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/README.md) | 简体中文
 
 `patchbay` 是 Patchbay 的纯 Dart 协议与 host package。它让本机客户端连接正在运行的 Dart / Flutter
 App，读取 runtime identity、catalog 和 snapshot，并调用 App 明确注册的调试命令。

@@ -1,6 +1,6 @@
 # Patchbay Flutter minimal consumer
 
-[English](README.md) | 简体中文
+[English](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/example/README.md) | 简体中文
 
 这个 example 只验证通用接入面，不依赖任何业务 App，也不包含 Android / iOS 平台工程：
 

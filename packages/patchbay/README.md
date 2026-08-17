@@ -1,6 +1,6 @@
 # patchbay
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/README.zh-CN.md)
 
 `patchbay` is Patchbay's pure Dart protocol and host package. It lets a local client connect to a
 running Dart / Flutter app, read the runtime identity, catalog, and snapshot, and invoke the debug

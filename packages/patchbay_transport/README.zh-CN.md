@@ -1,6 +1,6 @@
 # Patchbay direct transport
 
-[English](README.md) | 简体中文
+[English](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_transport/README.md) | 简体中文
 
 `patchbay_transport` 是与业务无关的纯 Dart 调试传输。它用固定 HTTP/JSON 协议承载
 `identity`、`catalog`、`snapshot` 和 `invoke`，不依赖 Flutter、业务 App、plugin、VM Service 或 CLI。
