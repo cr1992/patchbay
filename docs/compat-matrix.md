@@ -8,7 +8,7 @@
 
 | patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） | Flutter（文档最低支持） | 已知 consumer |
 |---|---|---|---|---|---|
-| `patchbay-v0.3.0` | `待回填` | 1 | 3.44.9 | `>=3.38.0` | 待确认 |
+| `patchbay-v0.3.0` | `89574d2a5d28a33caf57b3505100b56dd5276d0a` | 1 | 3.44.9 | `>=3.38.0` | 未上报（本仓不持有该口径，待 consumer 仓核实后补记） |
 | `patchbay-v0.2.1` | `d32f45e9d652920902e51f9c3dc25c189d804e46` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2（1 已切至 / 1 在 0.2.0） |
 | `patchbay-v0.2.0` | `4d92ea9d7b0bd19f6ba81880cd411af6659eedd6` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2（1 已收口 / 1 在途） |
 | `patchbay-v0.1.0` | `7c82c68d9dfed4b2a546e81de68b9e0101be4878` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×1（已升级在途） |
@@ -28,7 +28,9 @@
   当前门禁实际跑过的版本，最低支持版本是文档承诺的下限，二者之间未逐版本回归，出现兼容问题以
   CI 验证版本为准。
 - **已知 consumer**：patchbay 仓不持有 consumer 侧 pin 配置，无法在本仓验证；新增或变更
-  consumer 记录前先向对应 consumer 仓核实。
+  consumer 记录前先向对应 consumer 仓核实。记「未上报」表示 tag 已发布但尚无 consumer 仓回报
+  切版结果，与未打 tag 时的占位符 `待确认` 不是一回事——前者是已定状态，后者会被
+  `release_prep --check` 的 `compat-matrix-backfill` 判红。
 
 ## 维护规则
 
