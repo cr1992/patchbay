@@ -51,6 +51,11 @@ String overridesPathOf(String package) =>
 String packageChangelogPathOf(String package) =>
     'packages/$package/CHANGELOG.md';
 
+/// 公开镜像上「按仓根相对路径取文件」的前缀。
+///
+/// 分支钉 `main` 而不是 tag：与 README 语言切换行同口径（见 !38），也和 dio 等主流包一致。
+const String repoBlobPrefix = 'https://github.com/cr1992/patchbay/blob/main/';
+
 const String changelogPath = 'CHANGELOG.md';
 const String examplePath = 'packages/patchbay_flutter/example';
 const String examplePubspecPath = '$examplePath/pubspec.yaml';
@@ -536,6 +541,79 @@ Map<String, Map<String, String>> expectedOverrides(ReleaseInputs inputs) {
   return result;
 }
 
+// ===== markdown 链接 =====
+//
+// pub.dev 单独渲染发布归档里的 README.md 与 CHANGELOG.md，仓内相对路径在那里没有可解析的
+// 基准；包内 CHANGELOG 又是从仓根那份派生的，根表里 `docs/guide.md` 这样的路径拷进
+// `packages/<包>/CHANGELOG.md` 后连在 GitHub 上都解析不到。两处都靠这里改写成绝对地址。
+
+/// 三种会产生链接的写法，逐行匹配（多行状态由 [_mapRepoLinks] 维护）。
+final RegExp _inlineLinkPattern = RegExp(
+  r'\]\(([^)\s]+)((?:[ \t]+"[^"]*")?)\)',
+);
+final RegExp _refDefPattern = RegExp(r'^(\[[^\]]+\]:[ \t]*)(\S+)');
+final RegExp _htmlHrefPattern = RegExp(r'(href=")([^"]+)(")');
+final RegExp _fencePattern = RegExp(r'^[ \t]*(```|~~~)');
+
+/// 是否是「指向仓内的相对路径」。
+///
+/// 带 scheme 的（`https:` / `mailto:`）、协议相对的（`//host/...`）、纯锚点跳转（`#节`）
+/// 都不算——它们在 pub.dev 上本来就工作。
+bool isRelativeRepoLink(String target) {
+  if (target.isEmpty) return false;
+  if (target.startsWith('#') || target.startsWith('//')) return false;
+  return !RegExp(r'^[A-Za-z][A-Za-z0-9+.\-]*:').hasMatch(target);
+}
+
+/// 逐行遍历 markdown 的链接目标，用 [map] 的返回值替换。围栏代码块内不动。
+String _mapRepoLinks(String markdown, String Function(String target) map) {
+  final List<String> lines = markdown.split('\n');
+  var inFence = false;
+  for (var index = 0; index < lines.length; index += 1) {
+    final String line = lines[index];
+    if (_fencePattern.hasMatch(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    var rewritten = line.replaceAllMapped(
+      _inlineLinkPattern,
+      (match) => '](${map(match.group(1)!)}${match.group(2)})',
+    );
+    rewritten = rewritten.replaceFirstMapped(
+      _refDefPattern,
+      (match) => '${match.group(1)}${map(match.group(2)!)}',
+    );
+    rewritten = rewritten.replaceAllMapped(
+      _htmlHrefPattern,
+      (match) => '${match.group(1)}${map(match.group(2)!)}${match.group(3)}',
+    );
+    lines[index] = rewritten;
+  }
+  return lines.join('\n');
+}
+
+/// markdown 里全部指向仓内的相对链接（按出现顺序，含重复）。
+///
+/// 判定与单测都用它：pub 快照上的文件里出现一条就是一条断链。
+List<String> relativeRepoLinks(String markdown) {
+  final found = <String>[];
+  _mapRepoLinks(markdown, (target) {
+    if (isRelativeRepoLink(target)) found.add(target);
+    return target;
+  });
+  return found;
+}
+
+/// 把 **仓根视角** 的相对链接改写成绝对 GitHub 地址；锚点跟着路径一起带过去。
+///
+/// 只对「相对仓根」的文本成立（仓根 CHANGELOG.md 就是），因此直接拼前缀不做路径归一。
+String absolutizeRepoLinks(String markdown, {String prefix = repoBlobPrefix}) =>
+    _mapRepoLinks(
+      markdown,
+      (target) => isRelativeRepoLink(target) ? '$prefix$target' : target,
+    );
+
 // ===== CHANGELOG =====
 
 /// CHANGELOG 相对某个目标版本的状态。
@@ -614,10 +692,14 @@ bool packageChangelogMentions(String? markdown, String version) =>
       multiLine: true,
     ).hasMatch(markdown);
 
-/// 从仓根 CHANGELOG 派生包内 CHANGELOG：换掉前言，去掉 `## Unreleased` 段，其余原样。
+/// 从仓根 CHANGELOG 派生包内 CHANGELOG：换掉前言，去掉 `## Unreleased` 段，
+/// 把仓内相对链接钉成绝对地址，其余原样。
 ///
 /// 整份重算而不是增量追加：包内那份是根表的投影，重跑 apply 永远能把它拉回一致，
 /// 不会出现「根表改了、包内没跟」的第三份真源。
+///
+/// 链接改写不能省：根表在仓根，`docs/guide.md` 这类路径拷进 `packages/<包>/CHANGELOG.md`
+/// 后就落到了包目录下，GitHub 上 404、pub.dev 的 Changelog tab 上同样解析不到。
 String derivePackageChangelog(String rootChangelog) {
   final List<RegExpMatch> headings = RegExp(
     r'^## ',
@@ -636,7 +718,7 @@ String derivePackageChangelog(String rootChangelog) {
     }
     out
       ..writeln()
-      ..write(section.trimRight())
+      ..write(absolutizeRepoLinks(section).trimRight())
       ..writeln();
   }
   return out.toString();

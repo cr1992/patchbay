@@ -9,7 +9,7 @@
 ## 0.3.0 - 2026-08-17
 
 发布批次：四包首次发到 pub.dev，随版依赖从 path 改成 hosted 约束——**仍用 git pin 的接入方
-不能只改 tag 号**，两条迁移路径见本节 Changed 与[发版清单](docs/release-checklist.md)第 8 节。
+不能只改 tag 号**，两条迁移路径见本节 Changed 与[发版清单](https://github.com/cr1992/patchbay/blob/main/docs/release-checklist.md)第 8 节。
 功能面围绕「App 不配合时也问得出话来」：保持亮屏开关与 repl 的 lifecycle 横幅（息屏即 UI 面
 全拒的解法）、snapshot 字段选择与领域条件等待、widget inspector 开关、体检命令 `doctor`、
 会话粘性、UI 目标声明对账 `ui verify-manifest`。协议侧补齐演进套件（`serverVersion` /
@@ -52,7 +52,7 @@ feature capabilities / catalog digest / 跨版本兼容 golden），工程侧补
   开启中间，此时尚无 hold 可归还，风险全在「挂起的请求随后把已销毁的宿主重新点亮」那一侧；
   gate 与 delegate 两个挂起点恢复后都重查销毁态，delegate 已经拿到 hold 的那种情况先归还再拒绝。
   `doctor` 的 lifecycle 解法在 iOS 一侧改为指向这条命令。接法与语义见
-  [使用指南](docs/guide.md#5-保持亮屏可选不接线就没有这个能力)。
+  [使用指南](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#5-保持亮屏可选不接线就没有这个能力)。
 
 - **snapshot 的字段选择与领域条件等待：`snapshot --path <dot.path>` 与
   `snapshot wait <dot.path> --until exists|absent|equals [<json>]`。** 此前盯一个状态字段只能整树
@@ -136,7 +136,7 @@ feature capabilities / catalog digest / 跨版本兼容 golden），工程侧补
   Android / iOS / 桌面三条解法。iOS 那条把「屏幕黑着」和「App 掉到后台」分开写：前者只能手动唤醒
   （没有系统级电源命令），后者在已配对且已解锁的设备上用
   `xcrun devicectl device process launch --device <udid> <bundle-id>` 就能拉回前台（真机实测）。
-  repl 的 lifecycle 横幅与[使用指南](docs/guide.md#边界)同源同文。
+  repl 的 lifecycle 横幅与[使用指南](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#边界)同源同文。
 
   **退出码不另立**：取第一处 failed 检查项的类别（会话 / 连接 `3`、catalog `4`、lifecycle `5`），
   即「换成普通命令撞上这一项时会拿到的那个码」；只有 warning（会话不唯一、门未开、App 没注册任何
@@ -200,7 +200,7 @@ feature capabilities / catalog digest / 跨版本兼容 golden），工程侧补
   **这条 `--check` 没有 cwd 约束**：`command_codegen` 生成物 header 记录的路径改为相对生成物
   自身，而不是调用者当时敲的那个字符串，所以从仓根还是包目录调用都得到同一份输出。
   `wire_codegen` 的老约束（必须从仓根调用，否则假漂移）未改动，两者的差异在 CI 注释、
-  [协作约定](CONTRIBUTING.md)与[发版清单](docs/release-checklist.md)里写明。
+  [协作约定](https://github.com/cr1992/patchbay/blob/main/CONTRIBUTING.md)与[发版清单](https://github.com/cr1992/patchbay/blob/main/docs/release-checklist.md)里写明。
 
 - 周期性 Android emulator 冒烟（`.github/workflows/android-emulator-smoke.yml`，每周一 + 手动触发）：
   在真实 Android 上装起 example 并跑通 `identity` → `catalog` → `snapshot` / `ui semantics tree`
@@ -230,8 +230,8 @@ feature capabilities / catalog digest / 跨版本兼容 golden），工程侧补
   照样拿到文件本身的错，不会被 `sessionDirectoryEmpty` 之类的会话错盖过——那句话是真的，但说的
   不是作者此刻能改的那件事。repl 内不受影响：那条连接已经建好，这一行没有拨号可言。
 
-  schema 与边界见[使用指南](docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件
-  [`docs/examples/ui-targets-manifest.json`](docs/examples/ui-targets-manifest.json)。
+  schema 与边界见[使用指南](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件
+  [`docs/examples/ui-targets-manifest.json`](https://github.com/cr1992/patchbay/blob/main/docs/examples/ui-targets-manifest.json)。
 
 - **CLI 的 AOT 构建入口 `packages/patchbay_cli/tool/build_cli.dart`。** CLI 每条命令起一个进程，
   启动开销按条计费；`dart run` 每次都要做一遍 pub 新鲜度检查再 JIT 预热。AOT 产物两样都不付，
@@ -251,7 +251,7 @@ feature capabilities / catalog digest / 跨版本兼容 golden），工程侧补
   CLI 与 host 分开部署（CLI 从终端装，host 跟着别人发布的 App 走），已有两个接入方 pin 在不同
   tag 上，「两端同版本」从来不是可依赖的前提。四件东西都是 `schemaVersion` 仍为 `1` 之内的
   **加字段**——identity / catalog 是客户端逐键读的松读面，老客户端忽略不认识的键——不是协议
-  版本跳跃。设计取舍见 [design.md 协议演进](docs/design.md#协议演进)。
+  版本跳跃。设计取舍见 [design.md 协议演进](https://github.com/cr1992/patchbay/blob/main/docs/design.md#协议演进)。
 
   - **`serverVersion`（identity）**：host 报出自己编译自的 `patchbay` 版本。Dart 运行时读不到
     自己的 `pubspec.yaml`，所以它是随包走的常量（`patchbayPackageVersion`），也因此成为发版时除
@@ -321,7 +321,7 @@ feature capabilities / catalog digest / 跨版本兼容 golden），工程侧补
   **对仍用 git pin 的接入方是破坏性变化**：pub 不允许同一个包在一次解析里既来自 git 又来自
   hosted，所以「四包全用 git ref pin」在 `0.3.0` 上会直接版本求解失败。两条路二选一——整体改用
   pub.dev 版本，或在自己仓的**根** pubspec 加 `dependency_overrides` 把四包统一指回同一 git ref。
-  口径见 [docs/release-checklist.md](docs/release-checklist.md) 第 8 节。
+  口径见 [docs/release-checklist.md](https://github.com/cr1992/patchbay/blob/main/docs/release-checklist.md) 第 8 节。
 
 - **安装文档改按形态组织（`docs/guide.md` 安装节）。** 原来只给一条 `dart pub global activate`
   命令，漏掉了两件每个新用户都会踩的事：`$HOME/.pub-cache/bin` 默认不在 PATH 上（装完了
