@@ -64,13 +64,25 @@ dependencies:
 
 ### 2. 安装 CLI
 
+下面以 macOS arm64 为例，默认安装 GitHub Release 提供的原生 AOT 二进制；其他平台及
+`checksums.txt` 校验方式见[使用指南的安装节](docs/guide.md#cli)：
+
 ```console
-$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+$ mkdir -p ~/.local/bin
+$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64 \
+    -o ~/.local/bin/patchbay
+$ chmod +x ~/.local/bin/patchbay
 $ patchbay --help
 ```
 
-如果全局命令不在 `PATH`，按 Dart 提示把 pub cache 的 `bin` 目录加入 `PATH`。
+确保 `~/.local/bin` 在 `PATH`。`dart pub global activate patchbay_cli` 安装的是由 Dart runtime
+加载的 app snapshot，并非独立原生 AOT；它可以作为兼容形态使用，但不应拿它验证 AOT 启动耗时。
+需要该兼容形态时仍按同一 tag 固定安装：
+
+```console
+$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
+    --git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+```
 
 ### 3. 在组合根注册
 
