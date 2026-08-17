@@ -18,15 +18,22 @@
 | 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 接入方真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | **design-gate** |
 | 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 接入方：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | |
 | 屏幕唤醒：会话活跃期间 app 自动 keep-screen-on（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，会话静默自动释放，debug-only） | 真机调试息屏即 UI 面全拒（实测），iOS 无系统级 stay-awake；默认自动还是手动为 **design-gate**（自动会使息屏行为本身的测试失真，需留关闭出口）。同批的 lifecycle 提示与 `patchbay doctor` 已实现 | design-gate |
-| host 侧声明 `snapshotSelectors` capability，CLI 据此判定而非猜测失败形态 | 现状是 CLI 捕获 `invalidParams` / `protocolError` 反推「老 host」，能给出类型化拒绝但属推断；正路是 host 声明能力。等协议演进套件（feature capabilities）落地后跟进 | |
+| host 侧声明 `snapshotSelectors` capability，CLI 据此判定而非猜测失败形态 | 现状是 CLI 捕获 `invalidParams` / `protocolError` 反推「老 host」，能给出类型化拒绝但属推断；正路是 host 声明能力 | 前置已解除：协议演进套件（feature capabilities）已合入（849043a），当前 CLI 侧类型化降级只是临时兜法 |
 | 统一 CommandRegistry：descriptor+decoder+gate+handler+validator 过同一 dispatcher | 第二 consumer 手写 adapter 的元键坑已实证核心不机检 descriptor 语义的风险 | |
+| CLI 注册 / 帮助表改由命令 descriptor 生成 | `packages/patchbay_cli/lib/src/cli.dart` 的手写 switch 臂是 0.3.0 并行开发中最大的一类冲突源——每支加命令都改同一处 | 与上一行的统一 CommandRegistry 捆做 |
+| README / 文档命令参考表由 descriptor / help 输出生成 | 双语 README 与包 README 的命令表靠人肉逐字节核对保持一致 | 依赖上一行的 descriptor 生成落地 |
 | 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe` | dogfood（`doctor` 已实现） | |
-| DevTools 借用剩余两批：perf VM RPC → net 画像（第一批 inspect 开关已完成，随发版移入 CHANGELOG 后本行只剩这两批） | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
+| DevTools 借用剩余两批：perf VM RPC → net 画像 | 规划稿已交仓主；第一批 inspect 开关已合入 main | net 画像 **design-gate**（脱敏评审） |
 | snapshot revision / diff | dogfood（低优先级） | |
 | launcher 监督循环收编：把首个接入方项目级的重连监督（退避策略 + machine-frame 生命周期 + 断连判读）抽为 patchbay_cli 通用 `launch` 能力；会话记录 schema 增显式 pending 状态位（现依赖 consumer 侧以自身 PID 通过探活的巧劲，跨仓契约应显式化） | 首个接入方已落项目级实现并真机验证；第二接入方已集成 session store，其启动器必复踩「断连即退」 | 等首个实现合入烤几天 + 第二试点确认形态 |
 | `ui verify-manifest` 按 destination 逐屏巡检：驱动导航依次落到每个被声明的屏，覆盖非常驻控件 | v1 只对账当前挂载态、`destination` 仅作过滤（已落，见 CHANGELOG Unreleased）；巡检要驱动导航，改变「只读对账」的性质 | |
 | `ui verify-manifest` 接受 YAML manifest | v1 只认 JSON；大清单人手维护 YAML 更省事，但要引入解析依赖 | |
 | `ui verify-manifest` 覆盖 Semantics identifier（`ui tap` 的目标面） | catalog `uiTargets` 只登记 `PatchbayKey` 注册的 text / capture 目标，可点控件的 identifier 不在其中；要取 `ui.semantics.tree`，那是另一个命名空间和另一套挂载语义 | |
+| `ui targets --emit-manifest`：从活体 catalog 生成 expected-targets manifest 初稿 | 真机验收现在要照着 catalog 手抄 `ui verify-manifest` 清单 | |
+| `wire_codegen --write` 顺手刷新协议面 surface golden | golden 重生成是与 codegen 分离的手工步骤（`PATCHBAY_UPDATE_GOLDENS=1 dart test`），哨兵只在聚合 / rebase 期才触发：0.3.0 四支各自绿、合成才红，一次性补进 12 个 wire 类型（7eb6236） | |
+| `release_prep --apply` 时自动冻结本版协议面进兼容语料库 | `packages/patchbay_cli/test/golden/legacy_host_v0_2_0/` 一类的旧版语料是手工冻结的，版本过去后不可再生成 | |
+| command_codegen check 的样例 contract 瘦身 | `packages/patchbay/contracts/example_commands.g.dart` 208 行生成物只为喂 drift 门禁而长期入仓，应改由真实命令声明推导 | |
+| CHANGELOG 碎片化：`changelog.d/` 每 MR 一文件 + `release_prep` 聚合 | 0.3.0 每对并行分支都在根 CHANGELOG 同一处相撞，是结构性冲突源 | |
 
 ## 文档债（快赢，可随任意批次走）
 
