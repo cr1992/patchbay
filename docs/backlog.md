@@ -31,6 +31,7 @@
 | `ui verify-manifest` 覆盖 Semantics identifier（`ui tap` 的目标面） | catalog `uiTargets` 只登记 `PatchbayKey` 注册的 text / capture 目标，可点控件的 identifier 不在其中；要取 `ui.semantics.tree`，那是另一个命名空间和另一套挂载语义 | |
 | `ui targets --emit-manifest`：从活体 catalog 生成 expected-targets manifest 初稿 | 真机验收现在要照着 catalog 手抄 `ui verify-manifest` 清单 | |
 | `wire_codegen --write` 顺手刷新协议面 surface golden | golden 重生成是与 codegen 分离的手工步骤（`PATCHBAY_UPDATE_GOLDENS=1 dart test`），哨兵只在聚合 / rebase 期才触发：0.3.0 四支各自绿、合成才红，一次性补进 12 个 wire 类型（7eb6236） | |
+| `release_prep --apply` 覆盖 `patchbayPackageVersion` 与两份 README 的版本引用 | apply 代改四包 version 却不动这两处，只有 `release_version_parity_test` 事后兜住（0.3.0 定版实撞：apply 后测试红）；该常量被 host 当 `serverVersion` 报给客户端，漂移即全网 App 谎报构建 | |
 | `release_prep --apply` 时自动冻结本版协议面进兼容语料库 | `packages/patchbay_cli/test/golden/legacy_host_v0_2_0/` 一类的旧版语料是手工冻结的，版本过去后不可再生成 | |
 | command_codegen check 的样例 contract 瘦身 | `packages/patchbay/contracts/example_commands.g.dart` 208 行生成物只为喂 drift 门禁而长期入仓，应改由真实命令声明推导 | |
 | CHANGELOG 碎片化：`changelog.d/` 每 MR 一文件 + `release_prep` 聚合 | 0.3.0 每对并行分支都在根 CHANGELOG 同一处相撞，是结构性冲突源 | |
