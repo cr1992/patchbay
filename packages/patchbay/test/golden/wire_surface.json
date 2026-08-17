@@ -4,6 +4,7 @@
     "PatchbayBlobChunkWire",
     "PatchbayBlobMetadataWire",
     "PatchbayJobWaitResultWire",
+    "PatchbaySnapshotRequestWire",
     "PatchbayUiTargetDescriptorWire",
     "PatchbayUiTargetKindWire"
   ],
@@ -169,6 +170,30 @@
         "flutterSubtreeOnly",
         "platformViewsMayBeMissing",
         "systemUiNotIncluded"
+      ]
+    },
+    "PatchbayKeepAwakeReleaseWire": {
+      "kind": "enum",
+      "values": [
+        "operatorRequest",
+        "leaseExpired",
+        "hostDisposed"
+      ]
+    },
+    "PatchbaySnapshotConditionWire": {
+      "kind": "enum",
+      "values": [
+        "exists",
+        "absent",
+        "equals"
+      ]
+    },
+    "PatchbaySnapshotMissWire": {
+      "kind": "enum",
+      "values": [
+        "missingKey",
+        "nullValue",
+        "notAnObject"
       ]
     },
     "PatchbayParameterDescriptorWire": {
@@ -527,6 +552,93 @@
         "pixelRatio",
         "warnings",
         "blob"
+      ]
+    },
+    "PatchbayKeepAwakeRequestWire": {
+      "kind": "object",
+      "fields": [
+        "enabled",
+        "leaseMs"
+      ]
+    },
+    "PatchbayKeepAwakeStateWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "wired",
+        "enabled",
+        "leaseMs",
+        "leaseRemainingMs",
+        "lastRelease",
+        "lastReleaseFailure"
+      ]
+    },
+    "PatchbaySnapshotRequestWire": {
+      "kind": "object",
+      "fields": [
+        "path",
+        "until",
+        "value",
+        "timeoutMs"
+      ]
+    },
+    "PatchbaySnapshotSelectionWire": {
+      "kind": "object",
+      "fields": [
+        "path",
+        "found",
+        "value",
+        "miss"
+      ]
+    },
+    "PatchbaySnapshotWaitWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "condition",
+        "timeoutMs",
+        "elapsedMs",
+        "pollIntervalMs",
+        "polls"
+      ]
+    },
+    "PatchbayInspectUnavailableWire": {
+      "kind": "enum",
+      "values": [
+        "notDebugBuild",
+        "rootInspectorExcluded",
+        "hostDisposed"
+      ]
+    },
+    "PatchbayInspectReleaseWire": {
+      "kind": "enum",
+      "values": [
+        "explicitOff",
+        "leaseExpired",
+        "disposed"
+      ]
+    },
+    "PatchbayInspectSelectRequestWire": {
+      "kind": "object",
+      "fields": [
+        "enabled",
+        "ttlMs"
+      ]
+    },
+    "PatchbayInspectStateWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "selectMode",
+        "selectionOnTap",
+        "managed",
+        "previousSelectMode",
+        "restoresTo",
+        "leaseMs",
+        "leaseRemainingMs",
+        "lastRelease"
       ]
     }
   }
