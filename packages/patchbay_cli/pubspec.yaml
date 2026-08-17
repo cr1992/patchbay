@@ -1,8 +1,7 @@
 name: patchbay_cli
 description: 'Command line client for Patchbay: connect to a running Flutter app over VM Service or direct HTTP, invoke commands, drive UI, pull logs and screenshots.'
 repository: https://github.com/cr1992/patchbay
-version: 0.2.1
-publish_to: none
+version: 0.3.0
 
 environment:
   sdk: '>=3.11.0 <4.0.0'
@@ -10,8 +9,8 @@ environment:
 dependencies:
   args: ^2.7.0
   crypto: ^3.0.6
-  patchbay: ^0.2.1
-  patchbay_transport: ^0.2.1
+  patchbay: ^0.3.0
+  patchbay_transport: ^0.3.0
   vm_service: ^15.0.0
 
 dev_dependencies:
