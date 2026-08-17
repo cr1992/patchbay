@@ -102,7 +102,7 @@ final class PatchbayDirectClient {
       if (deadline != null) {
         request.headers.set(
           PatchbayDirectHost.deadlineHeader,
-          '${deadline.inMilliseconds}',
+          '${wait.inMilliseconds}',
         );
       }
       request.add(utf8.encode(jsonEncode(body)));
