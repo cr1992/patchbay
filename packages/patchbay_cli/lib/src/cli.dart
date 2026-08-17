@@ -5,7 +5,6 @@ import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
-import 'package:vm_service/vm_service.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
@@ -836,32 +835,25 @@ Future<_Execution> _execute(
 const String patchbaySnapshotSelectorUnsupportedCode =
     'snapshotSelectionUnsupportedByHost';
 
-/// One selector-bearing snapshot, with a version skew named rather than guessed.
+/// Sends one selector-bearing snapshot only when the host declared support.
 ///
-/// A host built before selectors existed has no idea what the extra `request`
-/// parameter is and refuses the message at the transport seam: the VM Service
-/// path answers `invalidParams`, the direct path a `protocolError`. Both escape
-/// as bare transport / protocol failures whose codes describe the plumbing
-/// rather than the cause, so the operator sees `exit 3` and goes looking for a
-/// dead socket instead of an App that predates the feature.
-///
-/// Only these two shapes are translated, and only when a selector was actually
-/// sent. Anything else keeps its own classification: a socket that died during
-/// a selector call is not a version skew, and blaming the App would send the
-/// operator to change a command that was never wrong.
+/// Identity capabilities are an open string set on the client: unknown names
+/// remain valid, while the one name this command understands is required. A
+/// missing declaration therefore degrades before the selector reaches the
+/// wire. Once declared, every failure from the snapshot RPC stays exactly what
+/// it was; a real transport or protocol failure must never be rewritten as a
+/// version skew.
 Future<Map<String, Object?>> _selectedSnapshot(
   PatchbayClient connection,
   PatchbaySnapshotRequest request,
 ) async {
-  try {
-    return await connection.snapshot(request: request);
-  } on RPCError catch (failure) {
-    if (failure.code != RPCErrorKind.kInvalidParams.code) rethrow;
-    return _snapshotSelectorUnsupported();
-  } on PatchbayProtocolException catch (failure) {
-    if (failure.code != 'protocolError') rethrow;
+  final Set<String>? features = patchbayDeclaredFeatures(
+    await connection.identity(),
+  );
+  if (!(features?.contains(PatchbayFeature.snapshotSelectors.name) ?? false)) {
     return _snapshotSelectorUnsupported();
   }
+  return connection.snapshot(request: request);
 }
 
 /// The refusal above, in the same typed shape the App's own rejections use.
