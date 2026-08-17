@@ -20,6 +20,7 @@ boundaries, see [`../patchbay/README.md`](../patchbay/README.md).
 | **Semantics** | Container-free normalized tree, node generations, obscured value redaction, and standard actions rejected by policy default |
 | **Navigation and waits** | Composition-root navigation adapter, revision / redirect / timeout semantics, and `ui.wait` conditions |
 | **Capture** | Optional root / target capture, next-frame re-check, pixel and byte limits, and chunked blob output |
+| **Keep awake** | Consumer-injected `keepAwakeDelegate`, off by default, auto-released on lease expiry and host disposal |
 | **Host composition** | `PatchbayFlutterServiceHost` merges the UI and domain catalogs/operators into one service extension |
 
 The logging surface lives in core `patchbay` and only enters this host's catalog when the consumer
@@ -281,6 +282,48 @@ re-checks resumed/target before the call, after the gate `await`, and before enc
 defaults cap at 16 MP, an 8 MiB PNG, and a pixelRatio of at most 3. The PNG goes only into the
 shared blob store, and the response returns dimensions, ratio, SHA-256, TTL, and a blobId, so large
 byte payloads are never stuffed into a single service-extension response.
+
+## Keep Awake (Consumer-Injected)
+
+This is a pure Flutter package: it touches no platform channel, and it does not pull in a wakelock
+dependency for the sake of one debugging switch. The protocol, the bookkeeping, and the lease live
+in the framework; the one line that touches the platform comes from the app:
+
+```dart
+PatchbayFlutterBridge(
+  gates: gates,
+  // Android: FLAG_KEEP_SCREEN_ON; iOS: UIApplication.isIdleTimerDisabled.
+  keepAwakeDelegate: (bool enabled) => myPlatformChannel.setKeepAwake(enabled),
+  keepAwakeGates: const <String>{'my.debug.keepAwake'},
+)
+```
+
+The delegate is called only on an actual transition, never twice in a row with the same value.
+Throwing is a legitimate answer: the request is refused with `keepAwakeDelegateFailed` rather than
+recorded as a hold. **Off by default** — nothing is engaged until an operator asks, because holding
+the screen changes the behaviour of the app being observed, and screen-off behaviour is itself
+something a consumer tests. Every engagement carries a lease (10 minutes by default, 2 hours at
+most), released by the framework when it runs out; `PatchbayFlutterBridge.dispose()` gives it back
+too. Neither transport gives the app a connection lifecycle, so the lease is the only honestly
+observable form of "the operator is gone".
+
+Unlike `capture` / `navigation`, the command **stays in the catalog even with nothing wired**: an
+operator reaches for it exactly when the UI plane has started refusing everything, and
+`commandNotRegistered` says nothing useful at that moment — so it answers `keepAwakeNotWired` and
+names the missing injection point instead. The response `source` is always `appRecorded`: it states
+what the app asked its host to do. This package never reads the platform back and never claims the
+screen is in fact lit.
+
+**A failed release does not commit the bookkeeping.** Recording `enabled: false` while the platform
+has not let go would turn the next `off` into an `unchanged` no-op that never reaches the platform
+again, stranding the screen lit with no way left to ask. So the state is committed only after the
+delegate succeeds: on failure the hold stays, `enabled` remains `true`, `lastReleaseFailure` carries
+the failure type, and the lease is left armed (a lease expiry whose release fails tries again one
+lease later). `dispose()` is synchronous and does not join the request queue, so it can land in the
+middle of an in-flight engagement — both suspended points, the gate and the delegate, re-check the
+disposed state on resume. Any `set` after teardown is refused with `keepAwakeHostDisposed`, and the
+case where the delegate already took the hold hands it back before refusing. **After disposal the
+delegate never receives `true` again.**
 
 ## Semantic Navigation
 

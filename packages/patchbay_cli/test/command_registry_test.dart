@@ -429,6 +429,88 @@ void main() {
     );
   });
 
+  test('keep-awake on and off are two spellings of one command', () {
+    final PatchbayFriendlyInvocation on = _resolve(<String>[
+      'ui',
+      'keep-awake',
+      'on',
+    ]);
+    final PatchbayFriendlyInvocation off = _resolve(<String>[
+      'ui',
+      'keep-awake',
+      'off',
+    ]);
+
+    expect(on.serviceCommand, 'ui.keepAwake.set');
+    expect(off.serviceCommand, 'ui.keepAwake.set');
+    // `enabled` is set by which word was typed, never by an argument, so no
+    // stray flag can turn `off` into an engagement.
+    expect(on.arguments, <String, Object?>{'enabled': true});
+    expect(off.arguments, <String, Object?>{'enabled': false});
+  });
+
+  test('keep-awake omits the lease so the App default is the only copy', () {
+    expect(
+      _resolve(<String>['ui', 'keep-awake', 'on']).arguments,
+      isNot(contains('leaseMs')),
+    );
+    expect(
+      _resolve(<String>[
+        '--lease-ms',
+        '120000',
+        'ui',
+        'keep-awake',
+        'on',
+      ]).arguments,
+      <String, Object?>{'enabled': true, 'leaseMs': 120000},
+    );
+  });
+
+  test('--lease-ms belongs to on alone', () {
+    // A release takes no lease and a read takes nothing at all; accepting the
+    // option would leave the operator to guess what it did.
+    for (final List<String> path in <List<String>>[
+      <String>['ui', 'keep-awake', 'off'],
+      <String>['ui', 'keep-awake', 'status'],
+    ]) {
+      expect(
+        () => _resolve(<String>['--lease-ms', '1000', ...path]),
+        throwsA(isA<FormatException>()),
+        reason: path.join(' '),
+      );
+    }
+    expect(
+      () => _resolve(<String>['--lease-ms', '0', 'ui', 'keep-awake', 'on']),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('keep-awake status is a read that carries no arguments', () {
+    final PatchbayFriendlyInvocation status = _resolve(<String>[
+      'ui',
+      'keep-awake',
+      'status',
+    ]);
+
+    expect(status.serviceCommand, 'ui.keepAwake.status');
+    expect(status.arguments, isEmpty);
+    expect(
+      () => _resolve(<String>['ui', 'keep-awake', 'status', 'extra']),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('keep-awake is reachable without the ui prefix', () {
+    expect(
+      _resolve(<String>['keep-awake', 'on']).spec,
+      _resolve(<String>['ui', 'keep-awake', 'on']).spec,
+    );
+    expect(
+      _resolve(<String>['keep-awake', 'status']).serviceCommand,
+      'ui.keepAwake.status',
+    );
+  });
+
   test('parser has no direct token argv option', () {
     expect(
       () => patchbayCliParser().parse(const <String>[

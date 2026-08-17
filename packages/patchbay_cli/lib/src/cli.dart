@@ -466,6 +466,12 @@ ArgParser patchbayCliParser() => ArgParser()
         'condition to wait for (exists|absent|equals).',
   )
   ..addOption('ttl-ms', help: 'Artifact lifetime in milliseconds.')
+  ..addOption(
+    'lease-ms',
+    help:
+        'Keep-awake lease in milliseconds; the App releases the screen on its '
+        'own when it runs out. Omit to use the App-declared default.',
+  )
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
   ..addOption('output', help: 'Local artifact output path.')
   ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.')

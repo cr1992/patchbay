@@ -255,6 +255,24 @@ enum PatchbayFriendlyCommand {
     summary: 'Resolve a semantics identifier and tap it in one request.',
     usageSuffix: '<identifier> [--generation <generation>]',
   ),
+  uiKeepAwakeOn(
+    'ui.keepAwake.set',
+    <String>['ui', 'keep-awake', 'on'],
+    summary: 'Ask the App to hold the screen awake for one bounded lease.',
+    usageSuffix: '[--lease-ms <ms>]',
+  ),
+  uiKeepAwakeOff(
+    'ui.keepAwake.set',
+    <String>['ui', 'keep-awake', 'off'],
+    summary: 'Release the keep-awake hold now, without waiting for the lease.',
+  ),
+  uiKeepAwakeStatus(
+    'ui.keepAwake.status',
+    <String>['ui', 'keep-awake', 'status'],
+    summary:
+        'Read whether the App is holding the screen awake, and for how '
+        'much longer.',
+  ),
   uiVerifyManifest(
     null,
     <String>['ui', 'verify-manifest'],
@@ -512,6 +530,24 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         _argumentsWithoutPositionals(spec, options),
       ),
+      // `on` and `off` are two spellings of one protocol command, so the flag
+      // is set here rather than typed by the operator: `keep-awake off` cannot
+      // be turned into an accidental engagement by a stray argument.
+      PatchbayFriendlyCommand.uiKeepAwakeOn => _noTail(tail, <String, Object?>{
+        'enabled': true,
+        // Omitted rather than defaulted CLI-side: the lease default is the
+        // App's, published in the catalog descriptor, and a second copy here
+        // would be the one that goes stale.
+        'leaseMs': ?_optionalPositiveInt(options, 'lease-ms'),
+      }),
+      PatchbayFriendlyCommand.uiKeepAwakeOff => _noTail(
+        tail,
+        const <String, Object?>{'enabled': false},
+      ),
+      PatchbayFriendlyCommand.uiKeepAwakeStatus => _noTail(
+        tail,
+        const <String, Object?>{},
+      ),
       // `revision` is left out when the caller omitted it: the dispatcher fills
       // it in from `navigation.current` before the request goes out, so the
       // fence still travels — it is just no longer a manual round trip.
@@ -671,6 +707,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
         const _PathAlias(<String>['nav'], <String>['navigation']),
         const _PathAlias(<String>['wait'], <String>['ui', 'wait']),
         const _PathAlias(<String>['tap'], <String>['ui', 'tap']),
+        const _PathAlias(<String>['keep-awake'], <String>['ui', 'keep-awake']),
         const _PathAlias(<String>['text'], <String>['ui', 'text']),
         const _PathAlias(<String>['semantics'], <String>['ui', 'semantics']),
       ]..sort(
@@ -725,6 +762,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'since',
       'until',
       'ttl-ms',
+      'lease-ms',
       'pixel-ratio',
       'output',
       'force',
@@ -768,7 +806,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
     // Doctor runs a fixed set of checks: there is nothing per-command to
     // configure, and the RPC budget it runs under is the global
     // `--transport-timeout-ms` every other command already uses.
-    PatchbayFriendlyCommand.doctor => const <String>{},
+    PatchbayFriendlyCommand.doctor ||
+    // A release takes no lease, and a read takes nothing at all.
+    PatchbayFriendlyCommand.uiKeepAwakeOff ||
+    PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
+    PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
     PatchbayFriendlyCommand.snapshot => const <String>{'path'},
     PatchbayFriendlyCommand.snapshotWait => const <String>{
       'until',

@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
 import 'frame_observer.dart';
+import 'keep_awake_bridge.dart';
 import 'lifecycle.dart';
 import 'navigation_bridge.dart';
 import 'semantics_bridge.dart';
@@ -220,6 +221,8 @@ final class PatchbayFlutterBridge {
     PatchbayNavigationAdapter? navigationAdapter,
     this.artifacts,
     Set<String> captureGates = const <String>{},
+    PatchbayKeepAwakeDelegate? keepAwakeDelegate,
+    Set<String> keepAwakeGates = const <String>{},
     PatchbayRootController? rootController,
     PatchbayCaptureEncoder? captureEncoder,
     bool Function()? isAppResumed,
@@ -234,6 +237,14 @@ final class PatchbayFlutterBridge {
          lifecycleState: lifecycleState,
        ),
        _frames = PatchbayFrameObserver() {
+    keepAwake = PatchbayKeepAwakeBridge(
+      gates: gates,
+      delegate: keepAwakeDelegate,
+      gateIds: keepAwakeGates,
+      isAppResumed: _isAppResumed,
+      lifecycleState: _lifecycleState,
+      newRequestId: newRequestId,
+    );
     semantics = PatchbaySemanticsBridge(
       gates: gates,
       actionPolicy: semanticsActionPolicy,
@@ -286,6 +297,15 @@ final class PatchbayFlutterBridge {
   late final PatchbayNavigationBridge? navigation;
   late final PatchbayUiWaitBridge wait;
   late final PatchbayCaptureBridge? capture;
+
+  /// Always present, unlike [capture] and [navigation].
+  ///
+  /// Those two are absent from the catalog when a consumer injects nothing,
+  /// which is the right answer for a capability the App simply chose not to
+  /// expose. Keep-awake is the one an operator reaches for *because* the UI
+  /// plane just stopped answering, so it stays cataloged and says `wired:
+  /// false` — a diagnosis instead of a missing row.
+  late final PatchbayKeepAwakeBridge keepAwake;
 
   static int _nextRequest = 0;
   static String _defaultRequestId() => 'patchbay-ui-${++_nextRequest}';
@@ -450,7 +470,12 @@ final class PatchbayFlutterBridge {
     ),
   );
 
-  void dispose() => semantics.dispose();
+  void dispose() {
+    // Before the semantics teardown, so a live hold is given back even if that
+    // one throws: the screen staying lit is the failure a consumer cannot see.
+    keepAwake.dispose();
+    semantics.dispose();
+  }
 }
 
 final class _TextBinding {

@@ -22,6 +22,22 @@ void main() {
     }
   }
 
+  // Just enough keep-awake state for the cross-process test to prove the CLI
+  // carries `enabled` and `leaseMs` through and reads the answer back. The
+  // lease itself is the App's business and is not simulated here.
+  var keepAwakeEnabled = false;
+  int? keepAwakeLeaseMs;
+  String? keepAwakeLastRelease;
+  Map<String, Object?> keepAwakeState(String outcome) => <String, Object?>{
+    'outcome': outcome,
+    'source': 'appRecorded',
+    'wired': true,
+    'enabled': keepAwakeEnabled,
+    'leaseMs': keepAwakeLeaseMs,
+    'leaseRemainingMs': keepAwakeLeaseMs,
+    if (keepAwakeLastRelease != null) 'lastRelease': keepAwakeLastRelease,
+  };
+
   const List<String> commandNames = <String>[
     'fixture.typedFailure',
     'fixture.failedJob',
@@ -42,6 +58,8 @@ void main() {
     'logs.tail',
     'logs.export',
     'ui.capture',
+    'ui.keepAwake.set',
+    'ui.keepAwake.status',
     'blob.metadata',
     'blob.read',
   ];
@@ -168,6 +186,30 @@ void main() {
                       'sha256': List<String>.filled(64, '0').join(),
                   },
                 },
+              ).toJson(),
+              'ui.keepAwake.set' => () {
+                final bool enabled = args['enabled']! as bool;
+                if (!enabled) {
+                  final bool held = keepAwakeEnabled;
+                  keepAwakeEnabled = false;
+                  keepAwakeLeaseMs = null;
+                  if (held) keepAwakeLastRelease = 'operatorRequest';
+                  return PatchbayInvocation.accepted(
+                    requestId: requestId,
+                    payload: keepAwakeState(held ? 'released' : 'unchanged'),
+                  ).toJson();
+                }
+                final bool renewed = keepAwakeEnabled;
+                keepAwakeEnabled = true;
+                keepAwakeLeaseMs = args['leaseMs'] as int? ?? 600000;
+                return PatchbayInvocation.accepted(
+                  requestId: requestId,
+                  payload: keepAwakeState(renewed ? 'renewed' : 'engaged'),
+                ).toJson();
+              }(),
+              'ui.keepAwake.status' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: keepAwakeState('observed'),
               ).toJson(),
               'blob.metadata' => PatchbayInvocation.accepted(
                 requestId: requestId,

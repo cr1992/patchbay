@@ -375,6 +375,27 @@ enum PatchbayCaptureWarningWire {
   String toJson() => name;
 }
 
+enum PatchbayKeepAwakeReleaseWire {
+  operatorRequest,
+  leaseExpired,
+  hostDisposed;
+
+  static PatchbayKeepAwakeReleaseWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayKeepAwakeReleaseWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
 enum PatchbaySnapshotConditionWire {
   exists,
   absent,
@@ -2346,6 +2367,107 @@ final class PatchbayCaptureResultWire {
     'pixelRatio': pixelRatio,
     'warnings': warnings.map((item) => item.toJson()).toList(growable: false),
     'blob': blob.toJson(),
+  };
+}
+
+final class PatchbayKeepAwakeRequestWire {
+  const PatchbayKeepAwakeRequestWire({
+    required this.enabled,
+    required this.leaseMs,
+  });
+
+  final bool enabled;
+  final int? leaseMs;
+
+  factory PatchbayKeepAwakeRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'enabled', 'leaseMs'}, path);
+    return PatchbayKeepAwakeRequestWire(
+      enabled: _wireBool(json['enabled'], '$path.enabled'),
+      leaseMs: json['leaseMs'] == null
+          ? null
+          : _wireInt(json['leaseMs'], '$path.leaseMs'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'enabled': enabled,
+    if (leaseMs != null) 'leaseMs': leaseMs!,
+  };
+}
+
+final class PatchbayKeepAwakeStateWire {
+  const PatchbayKeepAwakeStateWire({
+    required this.outcome,
+    required this.source,
+    required this.wired,
+    required this.enabled,
+    required this.leaseMs,
+    required this.leaseRemainingMs,
+    required this.lastRelease,
+    required this.lastReleaseFailure,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final bool wired;
+  final bool enabled;
+  final int? leaseMs;
+  final int? leaseRemainingMs;
+  final PatchbayKeepAwakeReleaseWire? lastRelease;
+  final String? lastReleaseFailure;
+
+  factory PatchbayKeepAwakeStateWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'wired',
+      'enabled',
+      'leaseMs',
+      'leaseRemainingMs',
+      'lastRelease',
+      'lastReleaseFailure',
+    }, path);
+    return PatchbayKeepAwakeStateWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      wired: _wireBool(json['wired'], '$path.wired'),
+      enabled: _wireBool(json['enabled'], '$path.enabled'),
+      leaseMs: json['leaseMs'] == null
+          ? null
+          : _wireInt(json['leaseMs'], '$path.leaseMs'),
+      leaseRemainingMs: json['leaseRemainingMs'] == null
+          ? null
+          : _wireInt(json['leaseRemainingMs'], '$path.leaseRemainingMs'),
+      lastRelease: json['lastRelease'] == null
+          ? null
+          : PatchbayKeepAwakeReleaseWire.fromJson(
+              json['lastRelease'],
+              path: '$path.lastRelease',
+            ),
+      lastReleaseFailure: json['lastReleaseFailure'] == null
+          ? null
+          : _wireString(json['lastReleaseFailure'], '$path.lastReleaseFailure'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'wired': wired,
+    'enabled': enabled,
+    'leaseMs': leaseMs == null ? null : leaseMs!,
+    'leaseRemainingMs': leaseRemainingMs == null ? null : leaseRemainingMs!,
+    if (lastRelease != null) 'lastRelease': lastRelease!.toJson(),
+    if (lastReleaseFailure != null) 'lastReleaseFailure': lastReleaseFailure!,
   };
 }
 

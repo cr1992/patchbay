@@ -6,6 +6,41 @@
 
 ### Added
 
+- **跨平台「保持亮屏」开关 `patchbay ui keep-awake on|off|status`（`ui.keepAwake.set` /
+  `ui.keepAwake.status`）。** 设备中途息屏会把整个 UI 面带走：`ui.*` / `navigation.*` 全部开始回
+  `*LifecycleNotResumed`，随后系统冻结进程、CLI 只看得到 `appUnresponsive`。Android 有不碰 App 的
+  外部解法（`adb shell svc power stayon usb`），**iOS 真机没有**——这条命令是长时间手动联调 iOS
+  真机时唯一能让设备别睡的杠杆。
+
+  **默认关、显式开、会话断开自动还原。** 押住屏幕会改变被观察 App 的行为（息屏行为本身也是接入方
+  要测的东西），所以没人开口就什么都不做。两种 transport 都不给 App 连接生命周期——VM Service
+  扩展不知道 CLI 死没死，终端被杀也不会道别——所以每次开启都带一条租约（默认 10 分钟，上限 2 小时，
+  `--lease-ms` 可显式给），到期由 App 自己释放：人还在就续租，人走了就不再续，**断开**和**租约到期**
+  因此是同一件事。App 销毁 debug 面时也归还。`on` / `off` 是同一条协议命令的两种拼法，`enabled` 由
+  敲的词决定而不是参数，`off` 不可能被多余的 flag 变成一次开启；`--lease-ms` 只属于 `on`。
+
+  **`patchbay_flutter` 仍是纯 Flutter 包**：不转 plugin，也不引第三方 wakelock 依赖——那会改变每个
+  接入方 release 构建链接的东西。碰平台的那一行由接入方在组合根注入
+  `PatchbayFlutterBridge(keepAwakeDelegate: ...)`（Android `FLAG_KEEP_SCREEN_ON`、iOS
+  `UIApplication.isIdleTimerDisabled`），框架只拿协议、记账和租约。**没接线时命令仍留在 catalog 里**
+  ——与 `ui.capture` / `navigation.*` 的「没注入就不出现」相反，因为操作者伸手找它正是在屏幕刚黑、
+  UI 面刚开始全拒的时候，此刻回 `commandNotRegistered` 等于什么都没说；改回 `keepAwakeNotWired`
+  并点名缺的参数，`status` 用 `wired: false` 报同一件事。
+
+  响应 `source` 恒为 `appRecorded`：它说的是 App 让宿主做了什么，Patchbay 不回读平台，绝不宣称
+  屏幕确实亮着。delegate 抛异常是合法回答——开启时以 `keepAwakeDelegateFailed` 拒绝且不记成 hold；
+  **释放失败时 hold 不落账、保持可重试**：平台没松手就把 `enabled` 记成 `false`，会让下一次 `off`
+  变成 `unchanged` 空转、再也不碰平台，屏幕永久亮着且没有补救入口。所以记账只在 delegate 成功后
+  才落，失败时 `enabled` 保持 `true`、`lastReleaseFailure` 带失败类型，再敲一次 `off` 会真的重试；
+  租约也不撤，到期释放失败会在一个租约之后再试（没人在场时它是唯一会重试的东西）。
+  后台 `on` 以 `keepAwakeLifecycleNotResumed` 拒绝并带 `lifecycleState`（iOS 在后台设
+  `isIdleTimerDisabled` 无效，记下来等于记一件没发生的事），`off` 永远允许。debug 面销毁后 `set`
+  以 `keepAwakeHostDisposed` 拒绝——`dispose()` 是同步的、无法排进请求队列，可能落在一次进行中的
+  开启中间，此时尚无 hold 可归还，风险全在「挂起的请求随后把已销毁的宿主重新点亮」那一侧；
+  gate 与 delegate 两个挂起点恢复后都重查销毁态，delegate 已经拿到 hold 的那种情况先归还再拒绝。
+  `doctor` 的 lifecycle 解法在 iOS 一侧改为指向这条命令。接法与语义见
+  [使用指南](docs/guide.md#5-保持亮屏可选不接线就没有这个能力)。
+
 - **snapshot 的字段选择与领域条件等待：`snapshot --path <dot.path>` 与
   `snapshot wait <dot.path> --until exists|absent|equals [<json>]`。** 此前盯一个状态字段只能整树
   反复拉，每轮一次完整往返；现在选择在 App 侧完成，等待也在 App 侧完成（长轮询，间隔 100ms，

@@ -607,6 +607,53 @@ void main() {
         contains('fixture.tap'),
       );
 
+      // Keep-awake over a real connection: `on` carries the lease the operator
+      // typed, `status` reads the App's own bookkeeping back without changing
+      // it, and `off` gives the screen back.
+      final ProcessResult keepAwakeOn = await _runCli(uri, <String>[
+        '--lease-ms',
+        '120000',
+        'ui',
+        'keep-awake',
+        'on',
+      ]);
+      expect(keepAwakeOn.exitCode, 0, reason: keepAwakeOn.stderr);
+      final Map<String, Object?> keepAwakeOnPayload =
+          (jsonDecode(keepAwakeOn.stdout.toString())
+                  as Map<String, Object?>)['payload']!
+              as Map<String, Object?>;
+      expect(keepAwakeOnPayload['outcome'], 'engaged');
+      expect(keepAwakeOnPayload['enabled'], isTrue);
+      expect(keepAwakeOnPayload['leaseMs'], 120000);
+      expect(keepAwakeOnPayload['source'], 'appRecorded');
+
+      final ProcessResult keepAwakeStatus = await _runCli(uri, <String>[
+        'keep-awake',
+        'status',
+      ]);
+      expect(keepAwakeStatus.exitCode, 0, reason: keepAwakeStatus.stderr);
+      final Map<String, Object?> keepAwakeStatusPayload =
+          (jsonDecode(keepAwakeStatus.stdout.toString())
+                  as Map<String, Object?>)['payload']!
+              as Map<String, Object?>;
+      expect(keepAwakeStatusPayload['outcome'], 'observed');
+      expect(keepAwakeStatusPayload['enabled'], isTrue);
+      expect(keepAwakeStatusPayload['leaseMs'], 120000);
+
+      final ProcessResult keepAwakeOff = await _runCli(uri, <String>[
+        'ui',
+        'keep-awake',
+        'off',
+      ]);
+      expect(keepAwakeOff.exitCode, 0, reason: keepAwakeOff.stderr);
+      final Map<String, Object?> keepAwakeOffPayload =
+          (jsonDecode(keepAwakeOff.stdout.toString())
+                  as Map<String, Object?>)['payload']!
+              as Map<String, Object?>;
+      expect(keepAwakeOffPayload['outcome'], 'released');
+      expect(keepAwakeOffPayload['enabled'], isFalse);
+      expect(keepAwakeOffPayload['lastRelease'], 'operatorRequest');
+
       final ProcessResult unavailableFlutterTree =
           await Process.run(Platform.resolvedExecutable, <String>[
             'run',

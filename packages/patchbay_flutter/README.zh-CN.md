@@ -18,6 +18,7 @@ consumer 指接入 Patchbay 的 App。
 | **Semantics** | 无容器的规范化树、节点 generation、obscured value 脱敏，以及 policy 默认拒绝的标准 action |
 | **导航与等待** | composition-root navigation adapter、revision / redirect / timeout 语义和 `ui.wait` 条件 |
 | **截图** | 可选 root / target capture、下一帧复核、像素与字节上限、chunked blob 输出 |
+| **保持亮屏** | consumer 注入的 `keepAwakeDelegate`、默认关、租约到期与 host 销毁自动还原 |
 | **Host 组合** | `PatchbayFlutterServiceHost` 把 UI 与领域 catalog/operator 合并到同一 service extension |
 
 日志面位于 core `patchbay`，只有 consumer 显式注入 `PatchbayArtifactService` 时才进入本 host 的
@@ -238,6 +239,38 @@ root bridge 只负责确实需要根渲染上下文的截图与帧调度。它�
 `systemUiNotIncluded` warning，不能冒充完整物理屏幕截图。capture 等待下一帧，调用前、gate await 后及
 编码前复核 resumed/target；默认限制 16 MP、8 MiB PNG、pixelRatio 不超过 3。PNG 只进入共享 blob
 store，响应返回尺寸、ratio、SHA-256、TTL 和 blobId，大字节不塞进单个 service-extension 响应。
+
+## 保持亮屏（consumer 注入）
+
+本包是纯 Flutter 包，不碰 platform channel，也不为一个调试开关引入 wakelock 依赖。协议、记账和
+租约在框架侧，碰平台的那一行由 App 出：
+
+```dart
+PatchbayFlutterBridge(
+  gates: gates,
+  // Android: FLAG_KEEP_SCREEN_ON；iOS: UIApplication.isIdleTimerDisabled。
+  keepAwakeDelegate: (bool enabled) => myPlatformChannel.setKeepAwake(enabled),
+  keepAwakeGates: const <String>{'my.debug.keepAwake'},
+)
+```
+
+delegate 只在状态真正翻转时被调用，不会连着两次收到同一个值；抛异常是合法回答，请求以
+`keepAwakeDelegateFailed` 拒绝而不记成 hold。**默认关**：没人开口就什么都不做——押住屏幕会改变被
+观察 App 的行为，而息屏行为本身也是接入方要测的东西。每次开启带一条租约（默认 10 分钟、上限
+2 小时），到期由框架自己释放；`PatchbayFlutterBridge.dispose()` 也会归还。两种 transport 都不给
+App 连接生命周期，租约是「操作者已经走了」唯一能被诚实观察到的形式。
+
+与 `capture` / `navigation` 不同，命令**不接线也留在 catalog 里**：操作者伸手找它正是在 UI 面
+刚开始全拒的时候，`commandNotRegistered` 在那一刻等于什么都没说，所以改回 `keepAwakeNotWired`
+并点名缺的注入点。响应 `source` 恒为 `appRecorded`——它说的是 App 让宿主做了什么，本包不回读平台，
+不宣称屏幕确实亮着。
+
+**delegate 释放失败时 hold 不落账。** 平台没松手却把 `enabled` 记成 `false`，会让下一次 `off` 变成
+`unchanged` 空转、再也不碰平台，屏幕永久亮着且没有补救入口。所以记账只在 delegate 成功后才落：
+失败时保持 `enabled: true` 并带上 `lastReleaseFailure`，租约也不撤（到期释放失败会在一个租约之后
+再试）。`dispose()` 是同步的、不排进请求队列，因此可能落在一次进行中的开启中间——gate 与 delegate
+两个挂起点恢复后都会重查销毁态，销毁后的 `set` 一律以 `keepAwakeHostDisposed` 拒绝，delegate 已经
+拿到 hold 的那种情况先归还再拒绝。**销毁之后 delegate 不会再收到 `true`。**
 
 ## 语义导航
 

@@ -1,6 +1,7 @@
 import 'package:patchbay/patchbay.dart';
 
 import 'flutter_bridge.dart';
+import 'keep_awake_bridge.dart';
 import 'semantics_bridge.dart';
 
 /// Registers the Flutter UI catalog and operators on the generic host.
@@ -29,6 +30,7 @@ final class PatchbayFlutterServiceHost {
                      navigationEnabled: bridge.navigation != null,
                      captureEnabled: bridge.capture != null,
                      captureGates: bridge.capture?.gateIds ?? const <String>{},
+                     keepAwakeGates: bridge.keepAwake.gateIds,
                    ))
                  descriptor.toJson(),
                ...?bridge.artifacts?.descriptors.map(
@@ -74,6 +76,37 @@ final class PatchbayFlutterServiceHost {
                requestId: requestId,
              )).toJson();
            }
+           if (command == 'ui.keepAwake.set') {
+             final PatchbayKeepAwakeRequestWire request;
+             try {
+               request = PatchbayKeepAwakeRequestWire.fromJson(arguments);
+             } on Object catch (failure) {
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+                 reason: _decodeFailureReason(failure),
+               );
+             }
+             return (await bridge.keepAwake.set(
+               request,
+               requestId: requestId,
+             )).toJson();
+           }
+           if (command == 'ui.keepAwake.status') {
+             if (arguments.isNotEmpty) {
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+               );
+             }
+             return (await bridge.keepAwake.status(
+               requestId: requestId,
+             )).toJson();
+           }
            final bool uiCommand =
                command == 'ui.text.set' ||
                command == 'ui.text.enter' ||
@@ -82,6 +115,8 @@ final class PatchbayFlutterServiceHost {
                command == 'ui.semantics.tap' ||
                command == 'ui.wait' ||
                command == 'ui.capture' ||
+               command == 'ui.keepAwake.set' ||
+               command == 'ui.keepAwake.status' ||
                command.startsWith('navigation.');
            if (!uiCommand) {
              if (domainInvoke != null) {
@@ -426,6 +461,7 @@ final class PatchbayFlutterServiceHost {
               navigationEnabled: true,
               captureEnabled: true,
               captureGates: const <String>{},
+              keepAwakeGates: const <String>{},
             ))
           descriptor.name: _UiArgumentShape(descriptor.parameters),
       };
@@ -435,6 +471,7 @@ final class PatchbayFlutterServiceHost {
     required bool navigationEnabled,
     required bool captureEnabled,
     required Set<String> captureGates,
+    required Set<String> keepAwakeGates,
   }) => <PatchbayCommandDescriptor>[
     const PatchbayCommandDescriptor(
       name: 'ui.text.set',
@@ -609,6 +646,44 @@ final class PatchbayFlutterServiceHost {
           type: PatchbayParameterType.integer,
         ),
       ],
+    ),
+    // Cataloged whether or not a delegate is wired — see
+    // `PatchbayFlutterBridge.keepAwake` for why this one does not follow the
+    // "absent until injected" rule the two below do.
+    PatchbayCommandDescriptor(
+      name: 'ui.keepAwake.set',
+      summary: 'Hold the screen awake under a bounded lease, or release it.',
+      plane: PatchbayPlane.flutterUi,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.appState,
+      // The App's own bookkeeping of what it asked its host to do. Patchbay
+      // never reads the platform back, so this is not a device report and must
+      // not be mistaken for one.
+      factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      gates: keepAwakeGates,
+      parameters: <PatchbayParameterDescriptor>[
+        const PatchbayParameterDescriptor(
+          name: 'enabled',
+          type: PatchbayParameterType.boolean,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'leaseMs',
+          type: PatchbayParameterType.integer,
+          defaultValue: PatchbayKeepAwakeBridge.defaultLease.inMilliseconds,
+          summary:
+              'Lease for this engagement; the App releases on its own when it '
+              'runs out. Only valid with enabled: true.',
+        ),
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: 'ui.keepAwake.status',
+      summary: 'Read the keep-awake hold the App is currently bookkeeping.',
+      plane: PatchbayPlane.flutterUi,
+      mode: PatchbayCommandMode.readOnly,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
     ),
     if (captureEnabled)
       PatchbayCommandDescriptor(

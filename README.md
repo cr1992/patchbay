@@ -138,7 +138,7 @@ $ patchbay --ws-uri '<VM Service URI>' --json snapshot
 
 A VM Service URI usually carries authentication material — keep it out of scripts, logs, and
 anything you commit. Once the launcher is wired up you can drop `--ws-uri` entirely; see
-[automatic session discovery](docs/guide.md#5-会话自动发现可选). With several devices connected at
+[automatic session discovery](docs/guide.md#6-会话自动发现可选). With several devices connected at
 once, use `patchbay sessions list` to see the available sessions and `patchbay session use
 <session-id>` to pin one, so later commands no longer need `--session`; see
 [session selection](docs/guide.md#会话选择).
