@@ -42,7 +42,10 @@
 | PB-040-21 | 统一执行证据模型：区分未发送、已发送未确认、同值无变化、设备已确认 | DP 同值写入时设备不回报，已造成回归误判 | 0.4.0 | 待裁决 | [命令契约](proposals/0.4.0/command-contracts.md)；DG-040-05 |
 | PB-040-22 | command/job 响应 schema | `--json` 只稳定外层信封，自由 `Map` 仍迫使脚本到处判空 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | PB-040-23 | 调试轨迹持久化：以 traceId 记录跨命令 session、请求/响应、job、执行证据、人工标记与 artifact，支持查看、导出和 diff | 一次调试的细节目前散落在终端历史、临时 JSON 和 App 内存中，无法复盘或比较回归 | 0.4.0 | 已排期 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
-| PB-040-24 | 从调试轨迹生成 scenario 并受控回放 | 跑通的操作链需要沉淀为自动化，但原样复用旧 session、generation 和敏感参数存在误操作风险 | 0.4.0 | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md)；DG-040-06 |
+| PB-040-24 | 从调试轨迹生成 scenario 并受控回放 | 跑通的操作链需要沉淀为自动化，但应等待 recorder、权限 driver 和真实轨迹 schema 稳定 | — | 待排期 | [未来回放](proposals/future/trace-replay.md)；DG-040-06 |
+| PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 normalize/exercise/fail 策略建立权限前置条件 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 待裁决 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07 |
+| PB-040-26 | 系统权限弹窗 driver 与恢复协议：Android adb/UiAutomator、iOS simctl/XCUITest，处理后重新握手和解析目标 | Patchbay 只能观察 Flutter UI；系统弹窗会遮挡目标或改变 lifecycle，当前只能超时或等待人工处理 | 0.4.0 | 待裁决 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07 |
+| PB-040-27 | HarmonyOS 兼容验证与 permission driver：OpenHarmony Flutter、VM attach、Semantics/lifecycle、hdc + UiTest/Hypium | 架构可接入，但当前 Flutter 3.44.9 CI 与真机均未覆盖 HarmonyOS，不能直接宣称支持 | 0.4.0 | 待裁决 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07 |
 
 ## 文档债（快赢，可随任意批次走）
 
@@ -59,7 +62,8 @@
 | DG-040-02 | 自动 keep-screen-on：默认行为、关闭出口与静默释放 | 0.4.0 | 待裁决 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
 | DG-040-03 | DevTools net 画像的采集前脱敏口径 | 0.4.0 | 待裁决 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md) |
 | DG-040-05 | 执行证据词表、job 终态和 CLI 退出码的边界 | 0.4.0 | 待裁决 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| DG-040-06 | 轨迹 recorder 与实际回放的交付边界；写操作确认、目标重解析、敏感值重新注入和失败停止语义 | 0.4.0 | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
+| DG-040-06 | 轨迹回放的写操作确认、目标重解析、敏感值重新注入和失败停止语义 | — | 待裁决 | [未来回放](proposals/future/trace-replay.md) |
+| DG-040-07 | platform driver 的信任边界、`exercise allow` 确认模型、Android/iOS P0 权限集合与 HarmonyOS 验证基线 | 0.4.0 | 待裁决 | [平台权限](proposals/0.4.0/platform-permissions.md) |
 
 ## 维护规则
 

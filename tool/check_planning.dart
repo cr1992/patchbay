@@ -213,15 +213,20 @@ void _validateProposalDirectory({
   required Map<String, List<String>> dgRows,
   required List<String> failures,
 }) {
-  final directory = Directory('docs/proposals/0.4.0');
+  final directory = Directory('docs/proposals');
   if (!directory.existsSync()) {
-    failures.add('missing docs/proposals/0.4.0 directory');
+    failures.add('missing docs/proposals directory');
     return;
   }
 
-  final files = directory.listSync().whereType<File>().where(
-    (file) => file.path.endsWith('.md'),
-  );
+  final files = directory
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((file) => file.path.endsWith('.md'))
+      .where((file) {
+        final name = file.uri.pathSegments.last;
+        return name != 'README.md' && name != '_template.md';
+      });
   for (final file in files) {
     final content = file.readAsStringSync();
     final status = RegExp(

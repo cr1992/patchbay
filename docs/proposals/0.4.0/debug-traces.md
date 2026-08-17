@@ -1,10 +1,10 @@
-# 0.4.0 调试轨迹持久化与受控回放
+# 0.4.0 调试轨迹持久化
 
 > 状态：提案中
 >
-> 关联：PB-040-23、PB-040-24
+> 关联：PB-040-23
 >
-> 设计闸门：DG-040-06
+> 设计闸门：无
 
 ## 问题
 
@@ -19,15 +19,13 @@ Patchbay 能为单条请求提供 requestId、JSON 信封、job events 和 artif
 - 用一个 `traceId` 关联多条 CLI 命令、session 变化、job events、执行证据、人工标记和 artifact。
 - 使用 append-only 事件流持久化，进程崩溃后仍能读取已经写入的部分。
 - 提供 `start/mark/stop/show/export/diff/prune`，先把“发生过什么”记录准确。
-- 从轨迹生成可编辑 scenario，并在重新解析目标、重新过门后受控回放。
 - 默认脱敏、有限保留，不把 trace 变成凭据仓库或无限增长的日志目录。
 
 ### 非目标
 
 - 不录制任意 shell、adb、网络抓包或 App 内部所有日志。
 - 不保证 UI 像素、设备物理行为或业务成功；只保存 Patchbay 可证明的事实。
-- 不直接重放旧 session、nodeId、generation、requestId 或 jobId。
-- 不用录制时的响应替代回放时的实时观察和断言。
+- 不在 0.4.0 提供 scenario 或 replay；回放保留为 PB-040-24，等待 recorder 与平台权限 driver 稳定。
 
 ## CLI 体验
 
@@ -43,7 +41,6 @@ $ patchbay trace stop
 $ patchbay trace show tr_01...
 $ patchbay trace export tr_01... --output pairing-debug.patchbay-trace
 $ patchbay trace diff tr_before tr_after
-$ patchbay trace replay tr_01... --plan
 ```
 
 所有可执行命令增加全局 `--trace <traceId>`；自动化和并行终端应显式传入。`--activate` 只在当前
@@ -103,20 +100,11 @@ portable export 是带 manifest、events 和可选 artifacts 的版本化 bundle
 hash chain 和 schema。`trace diff` 先按命令名、descriptor digest 和相对顺序对齐，再比较 admission、稳定
 code、执行分类、factSource、耗时区间和 artifact 摘要；不逐字节比较时间戳、requestId 或自由文本。
 
-## Scenario 与受控回放
+## 回放边界
 
-PB-040-24 不直接“播放事件”。`trace replay --plan` 先从可执行 command events 生成 scenario：
-
-- 旧 requestId/jobId/sessionId/generation 只作历史证据，不进入新请求；
-- identifier 在当前 session 重新解析，并重新读取 generation；
-- capability、descriptor digest 和 gate 在每一步实时复核；
-- sensitive 字段变成必填 placeholder，回放时通过 stdin/环境注入；
-- 只读命令可在 plan 通过后执行；写命令默认阻断，必须显式 `--allow-write`；
-- 每一步有 `continueOnFailure: false` 默认值，失败不会静默跳到下一写操作；
-- 断言使用稳定 code、schema 字段和执行证据，不匹配整段历史 payload。
-
-`--plan` 只输出将执行的步骤、当前目标、缺失能力、敏感占位符和副作用等级，绝不调用 host 写命令。
-DG-040-06 未裁决前，0.4.0 可以交付 start/show/export/diff，但不得开放实际 replay 执行。
+PB-040-24 继续保留在 backlog，但不进入 0.4.0。具体前置与候选边界见
+[未来回放 Proposal](../future/trace-replay.md)。0.4 CLI 不注册 `trace replay`，也不提供把历史事件直接
+转换成写命令的隐藏入口。
 
 ## 预算与生命周期
 
@@ -129,6 +117,8 @@ DG-040-06 未裁决前，0.4.0 可以交付 start/show/export/diff，但不得�
 
 - PB-040-23 可先记录 0.3.x host，但只得到 legacy payload 形状；稳定语义依赖 PB-040-22。
 - session 跨断连延续依赖 PB-040-11；执行分类依赖 PB-040-21。
+- 权限状态与系统弹窗只有在 PB-040-25/26 落地后才能形成完整 interruption 事件；此前 trace 必须标记
+  `externalInterruptionUnknown`，不能把普通超时当成权限结论。
 - audit sink 与 trace 共用事件投递接口：audit 是脱敏摘要投影，trace 是由操作者显式开启的详细时间线，
   两者不能各自拦截 CLI 再形成两套事实。
 - VM/direct 写入相同事件 schema；transport 只作为事件字段，不改变命令结果。
@@ -140,12 +130,10 @@ DG-040-06 未裁决前，0.4.0 可以交付 start/show/export/diff，但不得�
 - 敏感值 mutation 测试证明 stdin、token、wsUri 和 legacy payload 默认不落盘、不进入 export。
 - 0.3.x fixture 验证 legacy 形状；0.4 fixture 验证 response schema 与执行证据完整记录。
 - launcher 断连/重连后 trace 连续，且 session 变化可见。
-- replay 失败注入覆盖 capability 漂移、descriptor 漂移、identifier 换代、gate 拒绝和敏感占位符缺失。
 - 两个接入方分别完成一次真机轨迹导出与 diff；实际写回放需另做专项真机验收。
 
 ## 待裁决
 
-- DG-040-06：0.4.0 是否只交付 recorder/diff，还是同时开放带 `--allow-write` 的实际 replay。
 - 默认保留天数、trace 数、总字节、单 artifact 与 bundle 上限。
 - portable bundle 使用 zip 还是目录；无论选择哪种都必须保持同一逻辑 schema。
 
