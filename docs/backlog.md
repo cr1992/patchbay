@@ -20,7 +20,6 @@
 | 屏幕唤醒：会话活跃期间 app 自动 keep-screen-on（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，会话静默自动释放，debug-only） | 真机调试息屏即 UI 面全拒（实测），iOS 无系统级 stay-awake；默认自动还是手动为 **design-gate**（自动会使息屏行为本身的测试失真，需留关闭出口）。同批的 lifecycle 提示与 `patchbay doctor` 已实现 | design-gate |
 | host 侧声明 `snapshotSelectors` capability，CLI 据此判定而非猜测失败形态 | 现状是 CLI 捕获 `invalidParams` / `protocolError` 反推「老 host」，能给出类型化拒绝但属推断；正路是 host 声明能力。等协议演进套件（feature capabilities）落地后跟进 | |
 | 统一 CommandRegistry：descriptor+decoder+gate+handler+validator 过同一 dispatcher | 第二 consumer 手写 adapter 的元键坑已实证核心不机检 descriptor 语义的风险 | |
-| 协议演进套件：serverVersion / feature capabilities / catalog digest / 兼容 golden | 多 consumer 生态前的地基 | |
 | 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe` | dogfood（`doctor` 已实现） | |
 | DevTools 借用剩余两批：perf VM RPC → net 画像（第一批 inspect 开关已完成，随发版移入 CHANGELOG 后本行只剩这两批） | 规划稿已交仓主 | net 画像 **design-gate**（脱敏评审） |
 | snapshot revision / diff | dogfood（低优先级） | |

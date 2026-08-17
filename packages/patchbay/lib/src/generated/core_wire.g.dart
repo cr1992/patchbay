@@ -507,12 +507,16 @@ final class PatchbayParameterDescriptorWire {
 final class PatchbayIdentityWire {
   const PatchbayIdentityWire({
     required this.schemaVersion,
+    required this.serverVersion,
+    required this.features,
     required this.applicationId,
     required this.appInstanceId,
     required this.isolateId,
   });
 
   final int schemaVersion;
+  final String serverVersion;
+  final List<String> features;
   final String applicationId;
   final String appInstanceId;
   final String? isolateId;
@@ -523,12 +527,18 @@ final class PatchbayIdentityWire {
   }) {
     _wireKeys(json, const <String>{
       'schemaVersion',
+      'serverVersion',
+      'features',
       'applicationId',
       'appInstanceId',
       'isolateId',
     }, path);
     return PatchbayIdentityWire(
       schemaVersion: _wireInt(json['schemaVersion'], '$path.schemaVersion'),
+      serverVersion: _wireString(json['serverVersion'], '$path.serverVersion'),
+      features: _wireList(json['features'], '$path.features')
+          .map((item) => _wireString(item, '$path.features[]'))
+          .toList(growable: false),
       applicationId: _wireString(json['applicationId'], '$path.applicationId'),
       appInstanceId: _wireString(json['appInstanceId'], '$path.appInstanceId'),
       isolateId: json['isolateId'] == null
@@ -539,9 +549,43 @@ final class PatchbayIdentityWire {
 
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
+    'serverVersion': serverVersion,
+    'features': features.map((item) => item).toList(growable: false),
     'applicationId': applicationId,
     'appInstanceId': appInstanceId,
     'isolateId': isolateId == null ? null : isolateId!,
+  };
+}
+
+final class PatchbayCatalogDigestWire {
+  const PatchbayCatalogDigestWire({
+    required this.algorithm,
+    required this.covers,
+    required this.value,
+  });
+
+  final String algorithm;
+  final List<String> covers;
+  final String value;
+
+  factory PatchbayCatalogDigestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'algorithm', 'covers', 'value'}, path);
+    return PatchbayCatalogDigestWire(
+      algorithm: _wireString(json['algorithm'], '$path.algorithm'),
+      covers: _wireList(json['covers'], '$path.covers')
+          .map((item) => _wireString(item, '$path.covers[]'))
+          .toList(growable: false),
+      value: _wireString(json['value'], '$path.value'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'algorithm': algorithm,
+    'covers': covers.map((item) => item).toList(growable: false),
+    'value': value,
   };
 }
 

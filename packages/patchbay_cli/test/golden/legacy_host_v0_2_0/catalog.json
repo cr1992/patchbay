@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "commands": [
+    {
+      "name": "ui.semantics.tree",
+      "summary": "Observe the current Flutter Semantics tree.",
+      "plane": "flutterUi",
+      "mode": "readOnly",
+      "sideEffect": "none",
+      "factSources": ["uiObserved"],
+      "gates": [],
+      "parameters": []
+    }
+  ],
+  "uiTargets": []
+}

@@ -9,6 +9,13 @@
 /// only one would let the other drift silently, which is exactly the failure
 /// this guard exists to prevent. The status line is the only language-dependent
 /// anchor, so it is passed in per file; the two Git refs are language-neutral.
+///
+/// `patchbayPackageVersion` is the repetition with teeth. The others misprint a
+/// document when they drift; this one is served to clients as `serverVersion`,
+/// so a stale constant makes every App in the field report a build it is not —
+/// and a host lying about itself is worse than one that never reported. Like
+/// the Git refs it is language-neutral, so it is checked on every call rather
+/// than per README.
 library;
 
 import 'dart:io';
@@ -28,6 +35,9 @@ final RegExp _readmeFlutterRef = RegExp(
   multiLine: true,
 );
 final RegExp _readmeCliRef = RegExp(r'--git-ref\s+patchbay-v([^\s]+)');
+final RegExp _packageVersionConstant = RegExp(
+  r"const\s+String\s+patchbayPackageVersion\s*=\s*'([^']+)'",
+);
 
 String? _firstCapture(RegExp pattern, String source) =>
     pattern.firstMatch(source)?.group(1);
@@ -35,6 +45,7 @@ String? _firstCapture(RegExp pattern, String source) =>
 List<String> checkReleaseVersionParity({
   required Map<String, String> pubspecs,
   required String readme,
+  required String versionSource,
   RegExp? statusPattern,
 }) {
   final Map<String, String> versions = <String, String>{};
@@ -69,6 +80,19 @@ List<String> checkReleaseVersionParity({
       problems.add('README ${entry.key} 为 ${entry.value}，四包版本为 $expected');
     }
   }
+
+  final String? constant = _firstCapture(
+    _packageVersionConstant,
+    versionSource,
+  );
+  if (constant == null) {
+    problems.add('patchbayPackageVersion 常量缺失或抽取式已失效');
+  } else if (constant != expected) {
+    problems.add(
+      'patchbayPackageVersion 为 $constant，四包版本为 $expected；'
+      'host 把它当 serverVersion 报给客户端，漂移即全网 App 谎报自己的构建',
+    );
+  }
   return problems;
 }
 
@@ -84,6 +108,8 @@ final Map<String, RegExp> _readmePaths = <String, RegExp>{
   '../../README.md': _readmeStatusVersionEn,
   '../../README.zh-CN.md': _readmeStatusVersionZh,
 };
+
+const String _versionSourcePath = 'lib/src/version.dart';
 
 void main() {
   const String version = 'version: 1.2.3';
@@ -103,6 +129,8 @@ void main() {
       ref: patchbay-v1.2.3
     --git-ref patchbay-v1.2.3 --git-path packages/patchbay_cli
 ''';
+  const String alignedVersionSource =
+      "const String patchbayPackageVersion = '1.2.3';";
 
   group('checkReleaseVersionParity', () {
     test('四包与 README 三处版本一致时通过', () {
@@ -110,6 +138,7 @@ void main() {
         checkReleaseVersionParity(
           pubspecs: alignedPubspecs,
           readme: alignedReadme,
+          versionSource: alignedVersionSource,
         ),
         isEmpty,
       );
@@ -120,6 +149,7 @@ void main() {
         checkReleaseVersionParity(
           pubspecs: alignedPubspecs,
           readme: alignedReadmeEn,
+          versionSource: alignedVersionSource,
           statusPattern: _readmeStatusVersionEn,
         ),
         isEmpty,
@@ -131,6 +161,7 @@ void main() {
         checkReleaseVersionParity(
           pubspecs: alignedPubspecs,
           readme: alignedReadmeEn.replaceFirst('`v1.2.3`', '`v1.2.2`'),
+          versionSource: alignedVersionSource,
           statusPattern: _readmeStatusVersionEn,
         ),
         contains(contains('项目状态')),
@@ -143,6 +174,7 @@ void main() {
         checkReleaseVersionParity(
           pubspecs: alignedPubspecs,
           readme: alignedReadmeEn,
+          versionSource: alignedVersionSource,
           statusPattern: _readmeStatusVersionZh,
         ),
         contains(contains('项目状态')),
@@ -157,6 +189,7 @@ void main() {
             'patchbay_cli': 'version: 1.2.4',
           },
           readme: alignedReadme,
+          versionSource: alignedVersionSource,
         ),
         contains(contains('四包版本不一致')),
       );
@@ -165,6 +198,7 @@ void main() {
     test('README 状态或任一安装 ref 漂移时逐项报出', () {
       final List<String> problems = checkReleaseVersionParity(
         pubspecs: alignedPubspecs,
+        versionSource: alignedVersionSource,
         readme: alignedReadme
             .replaceFirst('`v1.2.3`', '`v1.2.2`')
             .replaceFirst('ref: patchbay-v1.2.3', 'ref: patchbay-v1.2.1')
@@ -188,6 +222,7 @@ void main() {
             'patchbay': 'name: patchbay',
           },
           readme: alignedReadme,
+          versionSource: alignedVersionSource,
         ),
         contains(contains('version 字段缺失')),
       );
@@ -195,17 +230,54 @@ void main() {
         checkReleaseVersionParity(
           pubspecs: alignedPubspecs,
           readme: '# Patchbay',
+          versionSource: alignedVersionSource,
         ),
         hasLength(3),
       );
     });
+
+    test('patchbayPackageVersion 漂移时判红', () {
+      expect(
+        checkReleaseVersionParity(
+          pubspecs: alignedPubspecs,
+          readme: alignedReadme,
+          versionSource: "const String patchbayPackageVersion = '1.2.2';",
+        ),
+        contains(contains('patchbayPackageVersion 为 1.2.2')),
+      );
+    });
+
+    test('patchbayPackageVersion 抽取式失效判红而不是恒绿', () {
+      expect(
+        checkReleaseVersionParity(
+          pubspecs: alignedPubspecs,
+          readme: alignedReadme,
+          versionSource: '// 常量被改名或删了',
+        ),
+        contains(contains('patchbayPackageVersion 常量缺失')),
+      );
+    });
+
+    test('README 与常量同时漂移时两条都报出，不互相掩盖', () {
+      // 两个维度各自独立：README 判红不能让常量检查被提前 return 跳过，反之亦然。
+      // 合并两个扩展时最容易在这里出错，所以单独钉一条。
+      final List<String> problems = checkReleaseVersionParity(
+        pubspecs: alignedPubspecs,
+        readme: alignedReadme.replaceFirst('`v1.2.3`', '`v1.2.2`'),
+        versionSource: "const String patchbayPackageVersion = '1.2.1';",
+      );
+
+      expect(problems, contains(contains('项目状态')));
+      expect(problems, contains(contains('patchbayPackageVersion 为 1.2.1')));
+    });
   });
 
-  group('真仓文件：四包 version 与两份 README 的状态及安装 refs 一致', () {
+  group('真仓文件：四包 version 与两份 README、serverVersion 常量一致', () {
     final Map<String, String> pubspecs = <String, String>{
       for (final String path in _pubspecPaths)
         path: File(path).readAsStringSync(),
     };
+    final String versionSource = File(_versionSourcePath).readAsStringSync();
 
     for (final MapEntry<String, RegExp> entry in _readmePaths.entries) {
       test(entry.key, () {
@@ -220,10 +292,13 @@ void main() {
           checkReleaseVersionParity(
             pubspecs: pubspecs,
             readme: readme.readAsStringSync(),
+            versionSource: versionSource,
             statusPattern: entry.value,
           ),
           isEmpty,
-          reason: 'pubspec.yaml 是版本真源；${entry.key} 的状态与可复制 Git ref 必须随发版同改',
+          reason:
+              'pubspec.yaml 是版本真源；${entry.key} 的状态与可复制 Git ref、以及 host 报给'
+              '客户端的 patchbayPackageVersion 必须随发版同改',
         );
       });
     }

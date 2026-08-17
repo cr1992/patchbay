@@ -234,6 +234,47 @@
   产物名带版本与平台后缀。产物自带运行时，**目标机器不需要 Dart SDK**。Release 已存在时只补
   产物不覆盖正文。首次真实运行在 `0.3.0` tag。
 
+- **协议演进套件：`serverVersion` / feature capabilities / catalog digest / 跨版本兼容 golden。**
+  CLI 与 host 分开部署（CLI 从终端装，host 跟着别人发布的 App 走），已有两个接入方 pin 在不同
+  tag 上，「两端同版本」从来不是可依赖的前提。四件东西都是 `schemaVersion` 仍为 `1` 之内的
+  **加字段**——identity / catalog 是客户端逐键读的松读面，老客户端忽略不认识的键——不是协议
+  版本跳跃。设计取舍见 [design.md 协议演进](docs/design.md#协议演进)。
+
+  - **`serverVersion`（identity）**：host 报出自己编译自的 `patchbay` 版本。Dart 运行时读不到
+    自己的 `pubspec.yaml`，所以它是随包走的常量（`patchbayPackageVersion`），也因此成为发版时除
+    四包 manifest 与两份 README 之外还要再改的一处；`release_version_parity_test.dart` 已把它钉死在
+    四包版本上——常量漂移不是印错一份文档，是全网 App 谎报自己的构建。
+  - **feature capabilities（identity `features`）**：host 声明自己支持的能力，客户端**按声明降级
+    而不是猜**。`catalogDigest` 由协议层无条件声明，`lifecycleState` 由持有 lifecycle 门的 Flutter
+    host 声明。**声明侧封闭、读取侧开放**：host 只能声明 `PatchbayFeature` 枚举里的名字，客户端把
+    它当普通字符串读，遇到没见过的名字降级成「我不用它」而不是解码失败。缺这个键（老 host）与
+    `[]`（声明为空）是两个答案，全链路不得抹平。
+  - **`catalogDigest`（catalog）**：`commands` 的稳定摘要（sha256，对象键递归排序 + 条目排序），
+    用于回答「App 声明的能力面变没变」。只覆盖 `commands`：`uiTargets` 是当前挂载态，导航一下就换
+    一批，摘要跟着翻消费端只会学会忽略它。自带 `algorithm` / `covers`，读者被告知哈希的是哪一块
+    而不是自己假设。协议自己写，consumer 目录里的同名键会被覆盖。读取端**容忍多出来的字段，但不
+    容忍读不懂的条目**：`covers` 里混进本版读不懂的条目时整份覆盖按畸形处理、降级为不可复算，绝不
+    把那一项丢掉后接着算——丢完剩下的可能恰好就是本版认得的覆盖面，那样「只读懂一部分」会被伪装成
+    「全读懂了」，对着一个并非按此口径算出来的值说 `verified`。它降级成「验不了」而非「没有摘要」，
+    否则上层会反过来报一条并不存在的能力失约。
+  - **跨版本兼容 golden**：`patchbay_cli/test/protocol_compat_test.dart` 双向钉死——新 CLI 拿
+    **手写冻结**的 v0.2.0 语料（缺上述全部字段）跑完整 doctor；老 CLI 的读法在用例里**复刻**后去读
+    当前 host 真的吐出来的东西。`patchbay/test/protocol_surface_golden_test.dart` 另把「契约 wire 面」
+    与「客户端正在严格解码哪些类型」一起钉成 golden：往松读面加字段安全，往生成的
+    `XxxWire.fromJson` 解码面加字段会当场打断已发布的老 CLI，两者在源码里长得一模一样，golden 让
+    它在 diff 里现形。
+
+- **doctor 报出 host 版本、能力与摘要核验。** `connection` 一项打出 `serverVersion` 与 `features`
+  ——CLI 与 host 版本错配解释掉的故障比其它任何一项都多；老 host 明说「不报自己的 patchbay 版本」，
+  不留空让人猜。`catalog` 一项**自己复算**摘要再给 `catalogDigestCheck`（`verified` / `mismatched` /
+  `unsupported`）：摘要要是消费方验不了，那就是个只能信的数字。算不动的报 `unsupported` 而不是
+  `mismatched`——「我查不了」和「这是错的」是两个答案；覆盖面里有读不懂的条目时另附
+  `catalogDigestCoversUnreadable`，说明同处打印的 `catalogDigestCovers` 只是能读懂的那部分、比 host
+  声明的窄。`lifecycle` 一项新增 `lifecycleStateSource`
+  （`hostReported` / `featureUndeclared` / `capabilityNotHonoured`），此前三种情况一律印
+  `lifecycleState=unknown`，读起来像是关于设备的结论，而它只在中间那种情况下为真。host 声明了能力
+  却不兑现，单列 `capabilityNotHonoured` 警告——要归档的 host bug，不是停止调试的理由，退出码仍是 `0`。
+
 ### Changed
 
 - **`PatchbayDirectSnapshotSource` 改为接受一个可选位置参数**（`Future<Map<String, Object?>>

@@ -401,6 +401,13 @@ final class PatchbayFlutterServiceHost {
            };
            return result.toJson();
          },
+         // The lifecycle gate lives in this package, so this is the layer that
+         // can promise a `*LifecycleNotResumed` rejection carries the engine
+         // state separating "wake the screen" from "click the window". A pure
+         // Dart host has no such gate and declares nothing, which is what lets
+         // a client tell "this host does not report it" apart from "this App
+         // reported unknown".
+         features: const <PatchbayFeature>{PatchbayFeature.lifecycleState},
        );
 
   final PatchbayServiceHost _host;

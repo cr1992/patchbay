@@ -1,4 +1,5 @@
 import 'package:args/args.dart';
+import 'package:patchbay/patchbay.dart';
 
 import 'client.dart';
 import 'result.dart';
@@ -257,6 +258,9 @@ Future<PatchbayDoctorReport> runPatchbayDoctor({
   }
 
   PatchbayClient? connection;
+  // What the host said about itself, so the checks after the handshake can
+  // degrade against a declaration instead of guessing from a missing field.
+  Map<String, Object?> identity = const <String, Object?>{};
   try {
     connection = PatchbayTimeoutClient(
       await dialPatchbayUnderBudget(
@@ -265,7 +269,7 @@ Future<PatchbayDoctorReport> runPatchbayDoctor({
       ),
       rpcTimeout: rpcTimeout,
     );
-    final Map<String, Object?> identity = await connection.identity();
+    identity = await connection.identity();
     findings.add(patchbayIdentityFinding(identity));
   } on Object catch (failure) {
     findings.add(
@@ -293,8 +297,13 @@ Future<PatchbayDoctorReport> runPatchbayDoctor({
   try {
     final Map<String, Object?> catalog = await connection.catalog();
     findings.add(patchbayCatalogFinding(catalog));
+    warnings.addAll(
+      patchbayCapabilityWarnings(identity: identity, catalog: catalog),
+    );
     warnings.addAll(await _readSnapshotWarnings(connection));
-    findings.add(await probePatchbayLifecycle(connection, catalog));
+    findings.add(
+      await probePatchbayLifecycle(connection, catalog, identity: identity),
+    );
   } on Object catch (failure) {
     // Reaching here means an RPC after the handshake stopped answering. The
     // check that was in flight is unknown to this frame, so the failure is
@@ -478,6 +487,12 @@ PatchbayDoctorFinding _statusFinding(
 }
 
 /// The connection verdict for a completed identity handshake.
+///
+/// Also the one place doctor reports *which build* it is talking to. That is
+/// the fact an operator needs first when a command behaves differently than
+/// the CLI's own help says it should: the two are separately deployed — the
+/// CLI from a terminal, the host from an App build someone else shipped — and
+/// a mismatch between them explains more failures than anything else here.
 PatchbayDoctorFinding patchbayIdentityFinding(Map<String, Object?> identity) {
   final Object? applicationId = identity['applicationId'];
   final Object? appInstanceId = identity['appInstanceId'];
@@ -491,15 +506,57 @@ PatchbayDoctorFinding patchbayIdentityFinding(Map<String, Object?> identity) {
       details: <String, Object?>{'code': 'identityValidationFailed'},
     );
   }
+  final String? serverVersion;
+  final Set<String>? features;
+  try {
+    serverVersion = patchbayReportedServerVersion(identity);
+    features = patchbayDeclaredFeatures(identity);
+  } on PatchbayProtocolException catch (failure) {
+    // Present but malformed. The handshake itself succeeded, so this is not a
+    // failed connection — but a host that puts a wrong-typed value in a
+    // protocol-owned field is broken in a way an operator wants named, not
+    // silently rounded down to "does not report it".
+    return PatchbayDoctorFinding(
+      check: PatchbayDoctorCheck.connection,
+      verdict: PatchbayCheckVerdict.warning,
+      observed:
+          'connected to $applicationId (instance $appInstanceId), but the '
+          'identity answer carries a malformed serverVersion or features',
+      cause:
+          'the host writes those protocol-owned fields itself; a wrong type '
+          'there is a host bug, not a version difference',
+      action:
+          'read `patchbay --json identity` and compare it with the wire '
+          'contract',
+      details: <String, Object?>{
+        'applicationId': applicationId,
+        'appInstanceId': appInstanceId,
+        'code': failure.code,
+      },
+    );
+  }
   return PatchbayDoctorFinding(
     check: PatchbayDoctorCheck.connection,
     verdict: PatchbayCheckVerdict.ok,
-    observed: 'connected to $applicationId (instance $appInstanceId)',
+    observed: serverVersion == null
+        ? 'connected to $applicationId (instance $appInstanceId); the host '
+              'does not report its patchbay version'
+        : 'connected to $applicationId (instance $appInstanceId) running '
+              'patchbay $serverVersion',
+    cause: serverVersion == null
+        ? 'the App is built against a patchbay older than the one that '
+              'introduced serverVersion'
+        : null,
     details: <String, Object?>{
       'applicationId': applicationId,
       'appInstanceId': appInstanceId,
       if (identity['schemaVersion'] case final int schema)
         'schemaVersion': schema,
+      if (serverVersion != null) 'serverVersion': serverVersion,
+      // Emitted only when the host declared something, so a script can tell an
+      // empty declaration from no declaration at all — the two mean different
+      // things and doctor must not flatten them.
+      if (features != null) 'features': (features.toList()..sort()),
     },
   );
 }
@@ -547,6 +604,7 @@ PatchbayDoctorFinding patchbayCatalogFinding(Map<String, Object?> catalog) {
   final Map<String, Object?> details = <String, Object?>{
     'commands': commands.length,
     'uiTargets': targets,
+    ...patchbayCatalogDigestDetails(catalog),
   };
   if (commands.isEmpty) {
     return PatchbayDoctorFinding(
@@ -569,6 +627,90 @@ PatchbayDoctorFinding patchbayCatalogFinding(Map<String, Object?> catalog) {
   );
 }
 
+/// Stable warning kind: the host declared a capability its answers do not
+/// honour.
+const String patchbayCapabilityNotHonouredWarningKind = 'capabilityNotHonoured';
+
+/// What the catalog finding says about the digest the host attached.
+///
+/// The CLI recomputes it rather than reprinting it. A digest a consumer cannot
+/// verify is a number it has to take on faith, and the one failure this whole
+/// suite exists to prevent is a client believing something the host did not
+/// actually say. Recomputation is possible here for free: the algorithm lives
+/// in `patchbay`, which the CLI already depends on, so both sides run the same
+/// code rather than two descriptions of it.
+///
+/// A digest computed with an algorithm or over a coverage this version does
+/// not know is reported as `unsupported`, never as a mismatch: "I cannot check
+/// this" and "this is wrong" are different answers, and only the second one is
+/// news about the App.
+Map<String, Object?> patchbayCatalogDigestDetails(
+  Map<String, Object?> catalog,
+) {
+  final PatchbayCatalogDigest? digest = PatchbayCatalogDigest.fromJson(
+    catalog['catalogDigest'],
+  );
+  if (digest == null) return const <String, Object?>{};
+  if (!digest.isRecomputable) {
+    return <String, Object?>{
+      'catalogDigest': digest.value,
+      'catalogDigestAlgorithm': digest.algorithm,
+      'catalogDigestCovers': digest.covers,
+      'catalogDigestCheck': 'unsupported',
+      // Without this an operator reads `covers: ["commands"]` next to
+      // `unsupported` and cannot tell why a coverage this CLI obviously knows
+      // got refused. The answer is that the list printed is only the part that
+      // was readable — the host claimed more than it shows.
+      if (!digest.coversFullyRead) 'catalogDigestCoversUnreadable': true,
+    };
+  }
+  final String recomputed = PatchbayCatalogDigest.ofCommands(
+    catalog['commands'],
+  ).value;
+  return <String, Object?>{
+    'catalogDigest': digest.value,
+    'catalogDigestCheck': digest.value == recomputed
+        ? 'verified'
+        : 'mismatched',
+    if (digest.value != recomputed) 'catalogDigestRecomputed': recomputed,
+  };
+}
+
+/// Capabilities the host declared but did not deliver in this exchange.
+///
+/// A declaration is a promise a client is allowed to plan around, so an
+/// unkept one is worse than never declaring: the client stops treating the
+/// missing field as "old host" and starts treating it as data. Reported as a
+/// warning rather than a failed check because the App is still usable — this
+/// is a host bug to file, not a reason to stop debugging.
+List<PatchbayDoctorWarning> patchbayCapabilityWarnings({
+  required Map<String, Object?> identity,
+  required Map<String, Object?> catalog,
+}) {
+  final Set<String>? features;
+  try {
+    features = patchbayDeclaredFeatures(identity);
+  } on PatchbayProtocolException {
+    // A malformed declaration is already reported by the connection check;
+    // reading it as a promise here would report the same bug twice.
+    return const <PatchbayDoctorWarning>[];
+  }
+  if (features == null) return const <PatchbayDoctorWarning>[];
+  return <PatchbayDoctorWarning>[
+    if (features.contains(PatchbayFeature.catalogDigest.name) &&
+        PatchbayCatalogDigest.fromJson(catalog['catalogDigest']) == null &&
+        catalog['admission'] != 'rejected')
+      const PatchbayDoctorWarning(
+        kind: patchbayCapabilityNotHonouredWarningKind,
+        path: 'catalogDigest',
+        message:
+            'the host declares the catalogDigest capability but its catalog '
+            'carries no digest, so a consumer cannot tell whether the '
+            'declared command surface changed',
+      ),
+  ];
+}
+
 /// The protocol name doctor sends to find out whether the UI plane answers.
 ///
 /// It is the cheapest read-only command the Flutter bridge gates on the
@@ -580,10 +722,15 @@ PatchbayDoctorFinding patchbayCatalogFinding(Map<String, Object?> catalog) {
 const String patchbayLifecycleProbeCommand = 'ui.semantics.tree';
 
 /// Sends the probe and turns its answer into the lifecycle verdict.
+///
+/// [identity] is what the host said about itself, and is used for exactly one
+/// thing: deciding whether a missing `lifecycleState` is a host that never
+/// reports one or a host that promised to and did not.
 Future<PatchbayDoctorFinding> probePatchbayLifecycle(
   PatchbayClient connection,
-  Map<String, Object?> catalog,
-) async {
+  Map<String, Object?> catalog, {
+  Map<String, Object?> identity = const <String, Object?>{},
+}) async {
   if (!_catalogDeclares(catalog, patchbayLifecycleProbeCommand)) {
     return _skipped(
       PatchbayDoctorCheck.lifecycle,
@@ -595,17 +742,42 @@ Future<PatchbayDoctorFinding> probePatchbayLifecycle(
     command: patchbayLifecycleProbeCommand,
     arguments: const <String, Object?>{'maxDepth': 0, 'maxNodes': 1},
   );
-  return patchbayLifecycleFinding(response);
+  return patchbayLifecycleFinding(response, identity: identity);
 }
 
+/// Where the `lifecycleState` in a refusal came from — a closed vocabulary,
+/// because the three cases call for three different next actions.
+///
+/// - `hostReported`: the host declared the capability and sent a state.
+/// - `featureUndeclared`: the host declares no lifecycle reporting, so nothing
+///   may be concluded about the engine. This is what a pre-capability host and
+///   a pure Dart host both look like, and it is *not* a statement about the
+///   App.
+/// - `capabilityNotHonoured`: the host declared the capability and sent a
+///   refusal without a state. A host bug.
+///
+/// Before this existed all three printed `lifecycleState=unknown`, which reads
+/// as a fact about the device and is only ever true in the middle case.
+const String patchbayLifecycleStateHostReported = 'hostReported';
+const String patchbayLifecycleStateFeatureUndeclared = 'featureUndeclared';
+const String patchbayLifecycleStateNotHonoured = 'capabilityNotHonoured';
+
 /// The lifecycle verdict for one probe response.
-PatchbayDoctorFinding patchbayLifecycleFinding(Map<String, Object?> response) {
+PatchbayDoctorFinding patchbayLifecycleFinding(
+  Map<String, Object?> response, {
+  Map<String, Object?> identity = const <String, Object?>{},
+}) {
   if (response['admission'] != 'rejected') {
     return const PatchbayDoctorFinding(
       check: PatchbayDoctorCheck.lifecycle,
       verdict: PatchbayCheckVerdict.ok,
       observed: 'the App answered a read-only UI probe, so it is resumed',
-      details: <String, Object?>{'lifecycleState': 'resumed'},
+      details: <String, Object?>{
+        'lifecycleState': 'resumed',
+        // The probe was answered, so this is the CLI's own observation rather
+        // than something the host had to report.
+        'lifecycleStateSource': patchbayLifecycleStateHostReported,
+      },
     );
   }
   final Object? rejection = response['rejection'];
@@ -618,12 +790,18 @@ PatchbayDoctorFinding patchbayLifecycleFinding(Map<String, Object?> response) {
       ? rejectionDetails['lifecycleState']
       : null;
   if (code is String && code.endsWith('LifecycleNotResumed')) {
+    final String source = state is String
+        ? patchbayLifecycleStateHostReported
+        : _lifecycleFeatureDeclared(identity)
+        ? patchbayLifecycleStateNotHonoured
+        : patchbayLifecycleStateFeatureUndeclared;
     return PatchbayDoctorFinding(
       check: PatchbayDoctorCheck.lifecycle,
       verdict: PatchbayCheckVerdict.failed,
       observed:
           'the UI plane refused the probe with $code '
-          '(lifecycleState=${state is String ? state : 'unknown'})',
+          '(lifecycleState=${state is String ? state : 'unknown'})'
+          '${_lifecycleSourceSuffix(source)}',
       cause:
           'a non-resumed engine produces no frames, so every ui.* and '
           'navigation write is refused fail-closed',
@@ -631,6 +809,7 @@ PatchbayDoctorFinding patchbayLifecycleFinding(Map<String, Object?> response) {
       details: <String, Object?>{
         'code': code,
         'lifecycleState': state is String ? state : 'unknown',
+        'lifecycleStateSource': source,
       },
     );
   }
@@ -644,6 +823,31 @@ PatchbayDoctorFinding patchbayLifecycleFinding(Map<String, Object?> response) {
     action: 'read the gates this command declares in `patchbay --json catalog`',
     details: <String, Object?>{if (code is String) 'code': code},
   );
+}
+
+/// Why the state is missing, appended to [PatchbayDoctorFinding.observed] only
+/// when it is — a reported state needs no explanation of where it came from.
+String _lifecycleSourceSuffix(String source) => switch (source) {
+  patchbayLifecycleStateFeatureUndeclared =>
+    ' — this host declares no lifecycle reporting, so the state is not '
+        'something it withheld',
+  patchbayLifecycleStateNotHonoured =>
+    ' — the host declares lifecycle reporting but sent no state, which is a '
+        'host bug',
+  _ => '',
+};
+
+bool _lifecycleFeatureDeclared(Map<String, Object?> identity) {
+  try {
+    return patchbayDeclaredFeatures(
+          identity,
+        )?.contains(PatchbayFeature.lifecycleState.name) ??
+        false;
+  } on PatchbayProtocolException {
+    // Reported by the connection check; a malformed declaration is not a
+    // promise, so nothing is concluded from it here.
+    return false;
+  }
 }
 
 /// What to do about an App that is not resumed, per platform.

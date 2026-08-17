@@ -17,7 +17,26 @@ final class FakePatchbayClient implements PatchbayClient {
     required this.handle,
     this.uiTargets = const <Object?>[],
     this.snapshotData = const <String, Object?>{'source': 'appRecorded'},
+    this.identityData = legacyFakeIdentity,
+    this.catalogExtras = const <String, Object?>{},
   });
+
+  /// What the identity handshake answers.
+  ///
+  /// The default is deliberately a *pre-capability* host: it reports no
+  /// `serverVersion` and declares no features, which is what the App an
+  /// operator is most likely to be holding actually looks like. Every test
+  /// that does not care therefore keeps exercising the degradation path rather
+  /// than the happy one.
+  final Map<String, Object?> identityData;
+
+  /// Extra top-level catalog keys — `catalogDigest`, for instance.
+  ///
+  /// Kept separate from [commands] because they are protocol-owned: a real
+  /// host attaches them itself, and a test that wants to model one host
+  /// version or another sets them here rather than by rewriting the command
+  /// list.
+  final Map<String, Object?> catalogExtras;
 
   /// Catalog rows exactly as an App would publish them.
   final List<Map<String, Object?>> commands;
@@ -47,17 +66,16 @@ final class FakePatchbayClient implements PatchbayClient {
   bool closed = false;
 
   @override
-  Future<Map<String, Object?>> identity() async => <String, Object?>{
-    'schemaVersion': 1,
-    'applicationId': 'dev.patchbay.fake',
-    'appInstanceId': 'fake-instance',
-    'isolateId': 'isolates/1',
-  };
+  Future<Map<String, Object?>> identity() async => identityData;
 
   @override
   Future<Map<String, Object?>> catalog() async {
     catalogReads += 1;
-    return <String, Object?>{'commands': commands, 'uiTargets': uiTargets};
+    return <String, Object?>{
+      'commands': commands,
+      'uiTargets': uiTargets,
+      ...catalogExtras,
+    };
   }
 
   @override
@@ -109,6 +127,14 @@ final class FakePatchbayClient implements PatchbayClient {
   @override
   Future<void> close() async => closed = true;
 }
+
+/// The identity a host that predates the capability handshake answers with.
+const Map<String, Object?> legacyFakeIdentity = <String, Object?>{
+  'schemaVersion': 1,
+  'applicationId': 'dev.patchbay.fake',
+  'appInstanceId': 'fake-instance',
+  'isolateId': 'isolates/1',
+};
 
 /// A `commandNotRegistered` rejection, the shape a host returns for an unknown
 /// name. Fakes use it so an unexpected call fails the same way a real App does.

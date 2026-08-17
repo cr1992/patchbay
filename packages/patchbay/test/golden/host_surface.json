@@ -1,0 +1,30 @@
+{
+  "identity": {
+    "schemaVersion": 1,
+    "serverVersion": "<patchbayPackageVersion>",
+    "features": [
+      "catalogDigest",
+      "lifecycleState"
+    ],
+    "applicationId": "dev.patchbay.golden",
+    "appInstanceId": "golden-instance",
+    "isolateId": "<runtime>"
+  },
+  "catalog": {
+    "commands": [
+      {
+        "name": "domain.ping",
+        "summary": "ping"
+      }
+    ],
+    "uiTargets": [],
+    "schemaVersion": 1,
+    "catalogDigest": {
+      "algorithm": "sha256",
+      "covers": [
+        "commands"
+      ],
+      "value": "9e62663aded36224d5956648c5333315d7e0e7219792f1f3a00db9703d45a996"
+    }
+  }
+}

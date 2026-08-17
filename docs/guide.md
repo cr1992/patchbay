@@ -436,8 +436,8 @@ $ patchbay --json doctor   # 脚本读
 | 检查项 | 查什么 |
 |---|---|
 | `session` | 本地会话目录：有几条记录、进程还在不在、不带 `--session` 会选中哪条 |
-| `connection` | 真拨一次号并完成 identity 握手 |
-| `catalog` | App 服不服目录、注册了多少命令与 UI target |
+| `connection` | 真拨一次号并完成 identity 握手，报出 host 的 patchbay 版本与它声明的能力 |
+| `catalog` | App 服不服目录、注册了多少命令与 UI target、命令面摘要复算得对不对 |
 | `lifecycle` | 发一条只读 UI 探针（`ui.semantics.tree`，`maxDepth 0 / maxNodes 1`），看 UI 面答不答 |
 
 **拨不通正是它被问的那个问题**，所以 doctor 自己拨号：连接失败在它这里是一条 finding，
@@ -447,6 +447,54 @@ $ patchbay --json doctor   # 脚本读
 **退出码取第一处 failed 的类别**：会话 / 连接 `3`、catalog `4`、lifecycle `5`——就是
 「换成普通命令撞上这一项时会拿到的那个码」，脚本判 doctor 与判原命令同构。只有 warning
 （如会话不唯一、门未开）时仍是 `0`。
+
+**它在跟哪个构建说话。** `connection` 一项报出 host 编译自的 patchbay 版本（`serverVersion`）
+与它声明的能力（`features`）。CLI 和 host 是分开部署的——CLI 从终端装，host 跟着别人发布的
+App 走——版本错配解释掉的故障比这里其它任何一项都多：
+
+```console
+$ patchbay --json doctor | jq '.doctor.checks[] | select(.check=="connection").details'
+{
+  "applicationId": "com.example.app",
+  "appInstanceId": "a1b2c3",
+  "schemaVersion": 1,
+  "serverVersion": "0.2.1",
+  "features": ["catalogDigest", "lifecycleState"]
+}
+```
+
+老 host 不报版本时它明说「这个 host 不报自己的 patchbay 版本」，不留空让你猜。`features` 是
+host 声明的能力，CLI 按声明降级而不是猜；**没有这个键**和 **`[]`** 是两个答案：前者是老 host
+（关于它的能力什么都不能断言），后者是它说「我一个都没有」。所以 lifecycle 一项缺
+`lifecycleState` 时，doctor 用 `lifecycleStateSource` 说清是哪一种，而不是一律印 `unknown`：
+
+| `lifecycleStateSource` | 含义 |
+|---|---|
+| `hostReported` | host 报了状态，或探针被答复、CLI 自己看到了 |
+| `featureUndeclared` | 这个 host 不声明 lifecycle 上报——**不是**关于 App 状态的结论 |
+| `capabilityNotHonoured` | 声明了却没带，host bug |
+
+**catalog 摘要。** host 服务的 catalog 带一份 `commands` 的稳定摘要，用来回答「App 声明的
+能力面到底变没变」——注册顺序和排版不影响它，`uiTargets` 那种挂载态也不进摘要。CLI **自己
+复算一遍**再给结论，不照抄 host 的说法：
+
+| `catalogDigestCheck` | 含义 |
+|---|---|
+| `verified` | 复算一致 |
+| `mismatched` | 对不上，另附 `catalogDigestRecomputed` |
+| `unsupported` | 算法或覆盖面超出本版 CLI 认知，查不了——不等于「错了」 |
+
+`unsupported` 时若还带 `catalogDigestCoversUnreadable: true`，说明 host 声明的覆盖面里有本版 CLI
+读不懂的条目：同一份 details 里的 `catalogDigestCovers` 因此只是**能读懂的那部分**，比 host 实际
+声明的要窄。CLI 不会把读不懂的条目丢掉后接着复算——丢完剩下的可能**恰好**是它认得的覆盖面，那样
+就会对着一个并非按此口径算出来的值说 `verified`。
+
+换个 App 构建后拿两次 `catalogDigest` 比一下，就知道命令面动没动。老 host 不带摘要不算问题，
+CLI 也不会生造一个。
+
+**能力失约单列警告。** host 声明了某能力却不兑现（如声明 `catalogDigest` 却不带摘要），
+doctor 打一条 `capabilityNotHonoured` 警告——这是要归档的 host bug，不是停止调试的理由，
+退出码仍是 `0`。
 
 **活跃业务会话警示。** doctor 会读一次 snapshot，扫各领域里为 `true` 的布尔 `active`
 （自顶层域起最多五层），命中就把路径原样打出来并劝阻 `force-stop` / `kill` / 卸载——

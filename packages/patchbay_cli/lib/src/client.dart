@@ -32,8 +32,19 @@ final class PatchbayRuntimeIdentity {
     required this.applicationId,
     required this.appInstanceId,
     required this.isolateId,
+    this.serverVersion,
+    this.features,
   });
 
+  /// Reads one identity answer.
+  ///
+  /// [serverVersion] and [features] are read *leniently* while the four
+  /// original fields stay strict, and the difference is deliberate: a host
+  /// that predates them is a supported peer, not a broken one, so their
+  /// absence has to survive validation and reach the caller as "not reported".
+  /// A present-but-wrong-typed value is the opposite — nothing in the wire
+  /// contract can produce it, so it is a host bug and fails closed like any
+  /// other malformed identity.
   factory PatchbayRuntimeIdentity.fromJson(Map<String, Object?> json) {
     final schemaVersion = json['schemaVersion'];
     final applicationId = json['applicationId'];
@@ -53,6 +64,8 @@ final class PatchbayRuntimeIdentity {
       applicationId: applicationId,
       appInstanceId: appInstanceId,
       isolateId: isolateId,
+      serverVersion: patchbayReportedServerVersion(json),
+      features: patchbayDeclaredFeatures(json),
     );
   }
 
@@ -60,6 +73,47 @@ final class PatchbayRuntimeIdentity {
   final String applicationId;
   final String appInstanceId;
   final String isolateId;
+
+  /// The `patchbay` package version the host was built from, or null when the
+  /// host does not report one.
+  final String? serverVersion;
+
+  /// The capabilities the host declares, or null when it declares nothing at
+  /// all.
+  ///
+  /// Null and empty are different answers and must stay different: an empty
+  /// set is a host saying "I have none of them", null is a host that predates
+  /// the declaration and about which nothing may be concluded.
+  final Set<String>? features;
+}
+
+/// Reads `serverVersion` out of an identity answer.
+///
+/// Returns null when the host does not report one. Throws only for a value
+/// that is present and not a string, because no version of this protocol can
+/// produce that.
+String? patchbayReportedServerVersion(Map<String, Object?> identity) {
+  final Object? value = identity['serverVersion'];
+  if (value == null) return null;
+  if (value is! String || value.isEmpty) {
+    throw const PatchbayProtocolException('identityValidationFailed');
+  }
+  return value;
+}
+
+/// Reads the declared capability set out of an identity answer.
+///
+/// Unknown names are kept rather than dropped: a client that meets a newer
+/// host must be able to say *which* capability it does not use, and the whole
+/// reason capabilities are read as strings is that a newer name is normal
+/// traffic, not a decode failure.
+Set<String>? patchbayDeclaredFeatures(Map<String, Object?> identity) {
+  final Object? value = identity['features'];
+  if (value == null) return null;
+  if (value is! List<Object?> || value.any((Object? name) => name is! String)) {
+    throw const PatchbayProtocolException('identityValidationFailed');
+  }
+  return <String>{for (final Object? name in value) name! as String};
 }
 
 abstract interface class PatchbayClient {
