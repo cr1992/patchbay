@@ -451,6 +451,33 @@ echo "[发版清单](docs/release-checklist.md)"
       final String once = absolutizeRepoLinks(markdown);
       expect(absolutizeRepoLinks(once), once);
     });
+
+    // 棘轮：pub.dev 只渲染发布归档里的这几份 README，相对路径在那里一条都解析不到。
+    // 仓根 README 与 docs/ 内部互链不在快照上，故不在此列——它们保持相对，仓内阅读不绑线上。
+    test('pub 快照可见的 README 里没有仓内相对链接', () {
+      const List<String> pubVisible = <String>[
+        'packages/patchbay/README.md',
+        'packages/patchbay/README.zh-CN.md',
+        'packages/patchbay_cli/README.md',
+        'packages/patchbay_cli/README.zh-CN.md',
+        'packages/patchbay_flutter/README.md',
+        'packages/patchbay_flutter/README.zh-CN.md',
+        'packages/patchbay_transport/README.md',
+        'packages/patchbay_transport/README.zh-CN.md',
+        'packages/patchbay_flutter/example/README.md',
+        'packages/patchbay_flutter/example/README.zh-CN.md',
+      ];
+      final String root = _repoRoot();
+      for (final String relative in pubVisible) {
+        final File file = File('$root/$relative');
+        expect(file.existsSync(), isTrue, reason: '缺 $relative');
+        expect(
+          relativeRepoLinks(file.readAsStringSync()),
+          isEmpty,
+          reason: '$relative 的相对链接在 pub.dev 上解析不到，请改成 $repoBlobPrefix 开头的绝对地址',
+        );
+      }
+    });
   });
 
   group('example/pubspec.lock', () {

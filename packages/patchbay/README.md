@@ -10,9 +10,9 @@ This package knows nothing about pages, device SDKs, routing, or business domain
 Patchbay (the "consumer" below) is responsible for domain type conversion, gate decisions,
 concurrency ownership, redaction, and fact adjudication in its own adapter.
 
-For the full getting-started flow, see the [repository README](../../README.md#quick-start). For
-Flutter UI integration see [`patchbay_flutter`](../patchbay_flutter/README.md); for CLI usage see
-[`patchbay_cli`](../patchbay_cli/README.md).
+For the full getting-started flow, see the [repository README](https://github.com/cr1992/patchbay/blob/main/README.md#quick-start). For
+Flutter UI integration see [`patchbay_flutter`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/README.md); for CLI usage see
+[`patchbay_cli`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/README.md).
 
 ## Package Boundaries
 
@@ -281,7 +281,7 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
 ```
 
 For the contract format and how dependents use it, see
-[wire-contract-v1.md](contracts/wire-contract-v1.md) (currently in Chinese).
+[wire-contract-v1.md](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/contracts/wire-contract-v1.md) (currently in Chinese).
 
 ## Command Contract and Generated Code
 

@@ -6,8 +6,8 @@
 可发现、fail-closed 的 UI 调试能力，而不是实现一套坐标驱动的黑盒自动化框架。本文中的
 consumer 指接入 Patchbay 的 App。
 
-快速安装和首次连接见[仓库 README](../../README.zh-CN.md#快速开始)，通用协议和传输边界见
-[`../patchbay/README.zh-CN.md`](../patchbay/README.zh-CN.md)。
+快速安装和首次连接见[仓库 README](https://github.com/cr1992/patchbay/blob/main/README.zh-CN.md#快速开始)，通用协议和传输边界见
+[`../patchbay/README.zh-CN.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/README.zh-CN.md)。
 
 ## 当前能力
 
@@ -27,7 +27,7 @@ catalog。Widget/Render/Focus 诊断树由
 `patchbay_cli` 直接代理 Flutter 运行时 extension，不经过本包复制协议。
 
 Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 DevTools 诊断代理的契约
-见 [`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md)。该文档明确树驱动 action
+见 [`doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。该文档明确树驱动 action
 是默认低侵入路径，语义导航只作稳定增强。
 
 ## 低侵入分级
@@ -173,7 +173,7 @@ class _LoginFormState extends State<LoginForm> {
 需要"等它出现再操作"的控件，标 Semantics `identifier`（或两个都标）。
 
 `ui wait` 的完整条件表、CLI 子命令与 wire 值的对应关系见
-[使用指南的 `ui wait` 一节](../../docs/guide.md#ui-wait-的-condition-名)。
+[使用指南的 `ui wait` 一节](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#ui-wait-的-condition-名)。
 
 ### requestId
 
@@ -214,7 +214,7 @@ expected/current generation），obscured 节点的 label 在 details 中脱敏�
 第二个绕过树上限的观察面。
 
 详细协议、隐私边界和分批退出条件见
-[`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md)。
+[`doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。
 
 ## Optional root bridge 与 capture
 
