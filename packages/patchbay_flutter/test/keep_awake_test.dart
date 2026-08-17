@@ -379,6 +379,43 @@ void main() {
       expect(delegate.calls, <bool>[true, false]);
     });
 
+    testWidgets('dispose queues behind an in-flight operator release', (
+      WidgetTester tester,
+    ) async {
+      final Completer<void> releaseEntered = Completer<void>();
+      final Completer<void> releaseHeld = Completer<void>();
+      var releaseCalls = 0;
+      final _RecordingDelegate delegate = _RecordingDelegate(
+        before: (bool enabled) async {
+          if (enabled) return;
+          releaseCalls += 1;
+          if (releaseCalls == 1) {
+            releaseEntered.complete();
+            await releaseHeld.future;
+          }
+        },
+      );
+      final PatchbayKeepAwakeBridge bridge = _bridge(delegate: delegate);
+
+      await bridge.set(
+        const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
+      );
+      final Future<PatchbayInvocation> pending = bridge.set(
+        const PatchbayKeepAwakeRequestWire(enabled: false, leaseMs: null),
+      );
+      await releaseEntered.future;
+
+      bridge.dispose();
+      await tester.pump();
+      expect(releaseCalls, 1);
+
+      releaseHeld.complete();
+      await pending;
+      await tester.pump();
+      expect(releaseCalls, 1);
+      expect(delegate.calls, <bool>[true, false]);
+    });
+
     testWidgets('a request that arrives after teardown is refused outright', (
       WidgetTester tester,
     ) async {
