@@ -5,8 +5,8 @@
 `patchbay_cli` 是 Patchbay 的 consumer-neutral 命令行客户端。它连接运行中的 Dart/Flutter App，
 根据 App 实际返回的 catalog 调用命令，不依赖 consumer 代码，也不维护业务命令副本。
 
-协议、生命周期和传输边界见 [`../patchbay/README.zh-CN.md`](../patchbay/README.zh-CN.md)，Flutter UI 控制面见
-[`../patchbay_flutter/README.zh-CN.md`](../patchbay_flutter/README.zh-CN.md)。
+协议、生命周期和传输边界见 [`../patchbay/README.zh-CN.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/README.zh-CN.md)，Flutter UI 控制面见
+[`../patchbay_flutter/README.zh-CN.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/README.zh-CN.md)。
 
 ## 安装与运行
 
@@ -21,7 +21,7 @@ $ patchbay --help
 
 三种安装形态的取舍（含 `0.3.0` 起的预编译二进制、启动耗时对比，以及「在接入方仓目录里
 `dart run patchbay_cli:patchbay` 会解析到该仓 pin 的版本」这个坑）见
-[使用指南的安装节](../../docs/guide.md#安装)。改 CLI 本身时，`dart run tool/build_cli.dart`
+[使用指南的安装节](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)。改 CLI 本身时，`dart run tool/build_cli.dart`
 把当前工作树编成 AOT 可执行文件，产物落在 `build/`。
 
 以下示例统一写 `dart run bin/patchbay.dart`（包内开发姿势）；全局安装后可等价替换为 `patchbay`。
@@ -67,7 +67,7 @@ dart run bin/patchbay.dart --json doctor
 四项按依赖顺序查，每项给「现象 → 可能原因 → 建议动作」，前一项失败时后面标 `skipped`；退出码取
 第一处 failed 的类别（会话 / 连接 `3`、catalog `4`、lifecycle `5`），只有 warning 时是 `0`。它还会
 读一次 snapshot，扫到为 `true` 的布尔 `active` 就打出路径并劝阻 `force-stop` / `kill`——设备上可能
-有正在进行的业务会话。完整语义见 [`../../docs/guide.md`](../../docs/guide.md)。
+有正在进行的业务会话。完整语义见 [`../../docs/guide.md`](https://github.com/cr1992/patchbay/blob/main/docs/guide.md)。
 
 多 App 或多 worktree 同时运行时不会按 PID、时间或当前目录猜测。CLI 以
 `sessionAmbiguous` fail-closed，并打印不含 URI 的 session ID；调用方须显式选择：
@@ -141,8 +141,8 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 `declaredNotMounted` / `mountedNotDeclared` / `propertyMismatch` 三类偏差。比对完全在 CLI 侧完成：
 不新增 wire 命令，只用 catalog；manifest 里出现 `destination` 时额外读一次 `navigation.current`
 做范围过滤。schema、字段语义、`destination` 过滤口径与「未挂载 ≠ 丢失」的边界见
-[使用指南](../../docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件在
-[`docs/examples/ui-targets-manifest.json`](../../docs/examples/ui-targets-manifest.json)。
+[使用指南](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#ui-目标声明对账ui-verify-manifest)，示例文件在
+[`docs/examples/ui-targets-manifest.json`](https://github.com/cr1992/patchbay/blob/main/docs/examples/ui-targets-manifest.json)。
 
 全部相符退出 `0`，报告里有任一类偏差退出 `7`——App 侧一切正常应答，所以它既不是拒绝（`5`）也不是
 类型化失败（`6`）。manifest 读不了或不合法时 fail-closed 退出 `64`，`--json` 给 `manifestInvalid` /
@@ -312,4 +312,4 @@ navigation、wait、capture、结构化日志与 direct 仅在运行时 catalog/
 bearer。日志是 consumer 已脱敏的 App 记录；capture 只证明 Flutter repaint boundary 的合成结果，不含
 系统权限弹窗，PlatformView 也可能缺失。
 三树与 action 的稳定命令、passthrough 边界和退出条件见
-[`../patchbay_flutter/doc/ui-inspection-and-actions.md`](../patchbay_flutter/doc/ui-inspection-and-actions.md)。
+[`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。

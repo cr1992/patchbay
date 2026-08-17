@@ -343,6 +343,141 @@ dependencies:
       expect(packageChangelogMentions(markdown, '0.3.10'), isTrue);
       expect(packageChangelogMentions(null, '0.3.0'), isFalse);
     });
+
+    // 派生产物落在 packages/<包>/ 下，根表里的仓根相对路径在那儿一条都解析不到；
+    // pub.dev 的 Changelog tab 读的正是这份文件。
+    test('派生产物不留仓内相对链接，锚点跟着路径带走', () {
+      const String withLinks = '''
+# Changelog
+
+## 0.3.0 - 2026-08-20
+
+- 口径见[发版清单](docs/release-checklist.md)与[协作约定](CONTRIBUTING.md)。
+- 锚点也要带走：[使用指南](docs/guide.md#边界)。
+- 外链与纯锚点不动：[pub](https://pub.dev)、[本页](#0.3.0---2026-08-20)。
+- 围栏里的不是链接：
+
+```sh
+echo "[发版清单](docs/release-checklist.md)"
+```
+''';
+      final String derived = derivePackageChangelog(withLinks);
+      expect(relativeRepoLinks(derived), isEmpty);
+      expect(
+        derived,
+        contains(
+          '[发版清单](https://github.com/cr1992/patchbay/blob/main/'
+          'docs/release-checklist.md)',
+        ),
+      );
+      expect(
+        derived,
+        contains(
+          '[使用指南](https://github.com/cr1992/patchbay/blob/main/'
+          'docs/guide.md#边界)',
+        ),
+      );
+      expect(derived, contains('[pub](https://pub.dev)'));
+      expect(derived, contains('[本页](#0.3.0---2026-08-20)'));
+      expect(derived, contains('echo "[发版清单](docs/release-checklist.md)"'));
+    });
+
+    // 存量护栏：四包那四份必须是仓根表的当前派生结果，否则 pub 页上又会挂断链。
+    test('仓内四包 CHANGELOG 与根表派生一致，且零相对链接', () {
+      final String root = _repoRoot();
+      final String expected = derivePackageChangelog(
+        File('$root/$changelogPath').readAsStringSync(),
+      );
+      expect(relativeRepoLinks(expected), isEmpty);
+      for (final String name in releasePackages) {
+        final File file = File('$root/${packageChangelogPathOf(name)}');
+        expect(file.existsSync(), isTrue, reason: '$name 缺 CHANGELOG.md');
+        final String actual = file.readAsStringSync();
+        expect(
+          relativeRepoLinks(actual),
+          isEmpty,
+          reason: '$name 的 CHANGELOG 仍有仓内相对链接，pub.dev 上是断链',
+        );
+        expect(actual, expected, reason: '$name 的 CHANGELOG 与根表派生不一致');
+      }
+    });
+  });
+
+  group('markdown 链接', () {
+    test('相对仓内链接的判别边界', () {
+      expect(isRelativeRepoLink('docs/guide.md'), isTrue);
+      expect(isRelativeRepoLink('../../README.md#quick-start'), isTrue);
+      expect(isRelativeRepoLink('CONTRIBUTING.md'), isTrue);
+      expect(isRelativeRepoLink('https://pub.dev'), isFalse);
+      expect(isRelativeRepoLink('mailto:a@b.c'), isFalse);
+      expect(isRelativeRepoLink('//cdn.example.com/x.png'), isFalse);
+      expect(isRelativeRepoLink('#锚点'), isFalse);
+      expect(isRelativeRepoLink(''), isFalse);
+    });
+
+    test('三种写法都改写：inline、引用式定义、HTML href', () {
+      const String markdown = '''
+[内联](docs/guide.md) 与 <a href="CONTRIBUTING.md">HTML</a>。
+
+[ref]: docs/design.md#协议演进
+''';
+      final String out = absolutizeRepoLinks(markdown);
+      expect(relativeRepoLinks(out), isEmpty);
+      expect(
+        out,
+        contains(
+          '[内联](https://github.com/cr1992/patchbay/blob/main/'
+          'docs/guide.md)',
+        ),
+      );
+      expect(
+        out,
+        contains(
+          'href="https://github.com/cr1992/patchbay/blob/main/'
+          'CONTRIBUTING.md"',
+        ),
+      );
+      expect(
+        out,
+        contains(
+          '[ref]: https://github.com/cr1992/patchbay/blob/main/'
+          'docs/design.md#协议演进',
+        ),
+      );
+    });
+
+    test('改写幂等：跑两遍不叠前缀', () {
+      const String markdown = '[x](docs/guide.md)\n';
+      final String once = absolutizeRepoLinks(markdown);
+      expect(absolutizeRepoLinks(once), once);
+    });
+
+    // 棘轮：pub.dev 只渲染发布归档里的这几份 README，相对路径在那里一条都解析不到。
+    // 仓根 README 与 docs/ 内部互链不在快照上，故不在此列——它们保持相对，仓内阅读不绑线上。
+    test('pub 快照可见的 README 里没有仓内相对链接', () {
+      const List<String> pubVisible = <String>[
+        'packages/patchbay/README.md',
+        'packages/patchbay/README.zh-CN.md',
+        'packages/patchbay_cli/README.md',
+        'packages/patchbay_cli/README.zh-CN.md',
+        'packages/patchbay_flutter/README.md',
+        'packages/patchbay_flutter/README.zh-CN.md',
+        'packages/patchbay_transport/README.md',
+        'packages/patchbay_transport/README.zh-CN.md',
+        'packages/patchbay_flutter/example/README.md',
+        'packages/patchbay_flutter/example/README.zh-CN.md',
+      ];
+      final String root = _repoRoot();
+      for (final String relative in pubVisible) {
+        final File file = File('$root/$relative');
+        expect(file.existsSync(), isTrue, reason: '缺 $relative');
+        expect(
+          relativeRepoLinks(file.readAsStringSync()),
+          isEmpty,
+          reason: '$relative 的相对链接在 pub.dev 上解析不到，请改成 $repoBlobPrefix 开头的绝对地址',
+        );
+      }
+    });
   });
 
   group('example/pubspec.lock', () {
@@ -1082,6 +1217,24 @@ ReleaseInputs _inputs({
         '}\n',
     workflow: "env:\n  FLUTTER_VERSION: '3.44.9'\n",
   );
+}
+
+/// 从当前目录向上找仓根（CHANGELOG.md + packages/patchbay/pubspec.yaml）。
+///
+/// `dart test` 在包目录跑、CI 也可能从仓根跑，两种 cwd 都要能定位到真实仓库。
+String _repoRoot() {
+  var directory = Directory.current.absolute;
+  while (true) {
+    if (File('${directory.path}/$changelogPath').existsSync() &&
+        File('${directory.path}/${pubspecPathOf('patchbay')}').existsSync()) {
+      return directory.path;
+    }
+    final Directory parent = directory.parent;
+    if (parent.path == directory.path) {
+      throw StateError('找不到仓根（从 ${Directory.current.path} 向上）');
+    }
+    directory = parent;
+  }
 }
 
 void _materialize(Directory repo, ReleaseInputs inputs) {

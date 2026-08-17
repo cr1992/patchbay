@@ -8,9 +8,9 @@ App，读取 runtime identity、catalog 和 snapshot，并调用 App 明确注�
 本 package 不认识页面、设备 SDK、路由或业务领域。使用 Patchbay 的 App（下文称“接入方”）需要在
 自己的 adapter 中完成领域类型转换、门禁判断、并发所有权、脱敏和事实裁决。
 
-完整上手流程见[仓库 README](../../README.zh-CN.md#快速开始)。Flutter UI 接入见
-[`patchbay_flutter`](../patchbay_flutter/README.zh-CN.md)，CLI 用法见
-[`patchbay_cli`](../patchbay_cli/README.zh-CN.md)。
+完整上手流程见[仓库 README](https://github.com/cr1992/patchbay/blob/main/README.zh-CN.md#快速开始)。Flutter UI 接入见
+[`patchbay_flutter`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/README.zh-CN.md)，CLI 用法见
+[`patchbay_cli`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/README.zh-CN.md)。
 
 ## Package 边界
 
@@ -237,7 +237,7 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
     --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
 ```
 
-contract 格式与依赖方用法见 [wire-contract-v1.md](contracts/wire-contract-v1.md)。
+contract 格式与依赖方用法见 [wire-contract-v1.md](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/contracts/wire-contract-v1.md)。
 
 ## Command contract 与生成代码
 

@@ -8,8 +8,8 @@ implement yet another coordinate-driven black-box automation framework. "Consume
 app integrating Patchbay.
 
 For quick installation and a first connection, see the
-[repository README](../../README.md#quick-start); for the general protocol and transport
-boundaries, see [`../patchbay/README.md`](../patchbay/README.md).
+[repository README](https://github.com/cr1992/patchbay/blob/main/README.md#quick-start); for the general protocol and transport
+boundaries, see [`../patchbay/README.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/README.md).
 
 ## Current Capabilities
 
@@ -31,7 +31,7 @@ duplicating the protocol.
 
 The contracts for the Widget/Render/Semantics trees, standard actions, node generations,
 redaction, and the DevTools diagnostic proxy are in
-[`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md) (currently in Chinese).
+[`doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md) (currently in Chinese).
 That document makes it explicit that tree-driven actions are the default low-intrusion path, and
 semantic navigation is only a stable enhancement on top.
 
@@ -197,7 +197,7 @@ target labelled only with a `PatchbayKey`. For widgets you need to "wait for, th
 label a Semantics `identifier` (or both).
 
 For `ui wait`'s full condition table and the correspondence between CLI subcommands and wire
-values, see [the `ui wait` section of the usage guide](../../docs/guide.md#ui-wait-的-condition-名)
+values, see [the `ui wait` section of the usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#ui-wait-的-condition-名)
 (currently in Chinese).
 
 ### requestId
@@ -250,7 +250,7 @@ a rejection must be actionable without becoming a second observation surface tha
 tree limits.
 
 For the detailed protocol, privacy boundaries, and staged exit conditions, see
-[`doc/ui-inspection-and-actions.md`](doc/ui-inspection-and-actions.md) (currently in Chinese).
+[`doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md) (currently in Chinese).
 
 ## Optional Root Bridge and Capture
 

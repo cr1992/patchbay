@@ -7,8 +7,8 @@ Dart/Flutter app and invokes commands based on the catalog that app actually ret
 dependency on consumer code and no local copy of the domain commands.
 
 For the protocol, lifecycle, and transport boundaries see
-[`../patchbay/README.md`](../patchbay/README.md); for the Flutter UI control plane see
-[`../patchbay_flutter/README.md`](../patchbay_flutter/README.md).
+[`../patchbay/README.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/README.md); for the Flutter UI control plane see
+[`../patchbay_flutter/README.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/README.md).
 
 ## Install and Run
 
@@ -24,7 +24,7 @@ $ patchbay --help
 For the trade-offs between the three installation forms — including the prebuilt binaries from
 `0.3.0` onward, a startup-time comparison, and the trap that running
 `dart run patchbay_cli:patchbay` inside a consumer's repository directory resolves to the version
-that repo pins — see [the installation section of the usage guide](../../docs/guide.md#安装)
+that repo pins — see [the installation section of the usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)
 (currently in Chinese). When changing the CLI itself, `dart run tool/build_cli.dart` compiles the
 current working tree into an AOT executable, with the output landing in `build/`.
 
@@ -77,7 +77,7 @@ action", and once one fails the rest are marked `skipped`. The exit code takes t
 first failure (session / connection `3`, catalog `4`, lifecycle `5`); with warnings only it is `0`.
 It also reads a snapshot once, and on finding any boolean `active` set to `true` it prints the path
 and advises against `force-stop` / `kill` — there may be a live business session on the device. For
-the full semantics see [`../../docs/guide.md`](../../docs/guide.md) (currently in Chinese).
+the full semantics see [`../../docs/guide.md`](https://github.com/cr1992/patchbay/blob/main/docs/guide.md) (currently in Chinese).
 
 With several apps or worktrees running at once, it does not guess by PID, timestamp, or current
 directory. The CLI fails closed with `sessionAmbiguous` and prints the session IDs without URIs;
@@ -161,9 +161,9 @@ against the catalog's `uiTargets`, reporting three classes of discrepancy: `decl
 adds no wire command and uses only the catalog; when a `destination` appears in the manifest, it
 additionally reads `navigation.current` once for scope filtering. For the schema, field semantics,
 `destination` filtering rules, and the "not mounted ≠ missing" boundary, see the
-[usage guide](../../docs/guide.md#ui-目标声明对账ui-verify-manifest) (currently in Chinese); the
+[usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#ui-目标声明对账ui-verify-manifest) (currently in Chinese); the
 example file is at
-[`docs/examples/ui-targets-manifest.json`](../../docs/examples/ui-targets-manifest.json).
+[`docs/examples/ui-targets-manifest.json`](https://github.com/cr1992/patchbay/blob/main/docs/examples/ui-targets-manifest.json).
 
 Full agreement exits `0`; any class of discrepancy in the report exits `7` — the app side answered
 everything normally, so it is neither a rejection (`5`) nor a typed failure (`6`). An unreadable or
@@ -385,5 +385,5 @@ capture proves only the composited result of Flutter repaint boundaries, exclude
 dialogs, and may be missing PlatformViews.
 For the stable commands, passthrough boundaries, and exit conditions of the three trees and
 actions, see
-[`../patchbay_flutter/doc/ui-inspection-and-actions.md`](../patchbay_flutter/doc/ui-inspection-and-actions.md)
+[`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)
 (currently in Chinese).
