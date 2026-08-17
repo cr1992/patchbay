@@ -492,6 +492,40 @@ void main() {
     await host.stop();
   });
 
+  test('client deadline leaves transport headroom on the host', () async {
+    const Map<String, Object?> typedTimeout = <String, Object?>{
+      'schemaVersion': 1,
+      'rejection': <String, Object?>{'code': 'snapshotWaitTimeout'},
+    };
+    final PatchbayDirectHost host = _host(
+      identity: identity,
+      config: PatchbayDirectHostConfig(
+        requestTimeout: const Duration(milliseconds: 20),
+        maxRequestTimeout: const Duration(seconds: 1),
+      ),
+      snapshot: ([_]) => Future<Map<String, Object?>>.delayed(
+        const Duration(milliseconds: 120),
+        () => typedTimeout,
+      ),
+    );
+    final PatchbayDirectSession session = await host.start();
+    final PatchbayDirectClient client = PatchbayDirectClient(
+      session: session,
+      timeout: const Duration(seconds: 1),
+    );
+
+    // The operation is allowed to consume its entire declared deadline. The
+    // host therefore needs the same round-trip headroom the client gives its
+    // socket, or its HTTP 504 races the application-level timeout response.
+    expect(
+      await client.snapshot(deadline: const Duration(milliseconds: 120)),
+      typedTimeout,
+    );
+
+    client.close();
+    await host.stop();
+  });
+
   test('declared deadline cannot exceed the configured ceiling', () async {
     final PatchbayDirectHost host = _host(
       identity: identity,
