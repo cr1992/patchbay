@@ -1,6 +1,6 @@
 # Patchbay Flutter minimal consumer
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/example/README.zh-CN.md)
 
 This example exercises only the general-purpose integration surface. It depends on no business app
 and contains no Android / iOS platform projects:

@@ -1,6 +1,6 @@
 # Patchbay Flutter
 
-[English](README.md) | 简体中文
+[English](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/README.md) | 简体中文
 
 `patchbay_flutter` 是 Patchbay 的可选 Flutter adapter。它的目标是用最小 Widget 侵入提供稳定、
 可发现、fail-closed 的 UI 调试能力，而不是实现一套坐标驱动的黑盒自动化框架。本文中的
