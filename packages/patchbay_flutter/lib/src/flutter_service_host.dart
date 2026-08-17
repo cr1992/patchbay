@@ -1,6 +1,7 @@
 import 'package:patchbay/patchbay.dart';
 
 import 'flutter_bridge.dart';
+import 'inspect_bridge.dart';
 import 'keep_awake_bridge.dart';
 import 'semantics_bridge.dart';
 
@@ -31,6 +32,7 @@ final class PatchbayFlutterServiceHost {
                      captureEnabled: bridge.capture != null,
                      captureGates: bridge.capture?.gateIds ?? const <String>{},
                      keepAwakeGates: bridge.keepAwake.gateIds,
+                     inspectPolicy: bridge.inspect?.policy,
                    ))
                  descriptor.toJson(),
                ...?bridge.artifacts?.descriptors.map(
@@ -104,6 +106,45 @@ final class PatchbayFlutterServiceHost {
                );
              }
              return (await bridge.keepAwake.status(
+               requestId: requestId,
+             )).toJson();
+           }
+           if (command == 'ui.inspect.status' ||
+               command == 'ui.inspect.select') {
+             final inspect = bridge.inspect;
+             if (inspect == null) {
+               return PatchbayInvocation.rejected(
+                 requestId: requestId,
+                 rejection: const PatchbayRejection(
+                   code: 'commandNotRegistered',
+                 ),
+               ).toJson();
+             }
+             if (command == 'ui.inspect.status') {
+               if (arguments.isNotEmpty) {
+                 return _invalidUiArguments(
+                   requestId,
+                   command,
+                   arguments,
+                   strictKeys: true,
+                 );
+               }
+               return (await inspect.status(requestId: requestId)).toJson();
+             }
+             final PatchbayInspectSelectRequestWire request;
+             try {
+               request = PatchbayInspectSelectRequestWire.fromJson(arguments);
+             } on Object catch (failure) {
+               return _invalidUiArguments(
+                 requestId,
+                 command,
+                 arguments,
+                 strictKeys: true,
+                 reason: _decodeFailureReason(failure),
+               );
+             }
+             return (await inspect.select(
+               request: request,
                requestId: requestId,
              )).toJson();
            }
@@ -462,6 +503,7 @@ final class PatchbayFlutterServiceHost {
               captureEnabled: true,
               captureGates: const <String>{},
               keepAwakeGates: const <String>{},
+              inspectPolicy: const PatchbayInspectPolicy(),
             ))
           descriptor.name: _UiArgumentShape(descriptor.parameters),
       };
@@ -472,6 +514,7 @@ final class PatchbayFlutterServiceHost {
     required bool captureEnabled,
     required Set<String> captureGates,
     required Set<String> keepAwakeGates,
+    required PatchbayInspectPolicy? inspectPolicy,
   }) => <PatchbayCommandDescriptor>[
     const PatchbayCommandDescriptor(
       name: 'ui.text.set',
@@ -715,6 +758,44 @@ final class PatchbayFlutterServiceHost {
           ),
         ],
       ),
+    if (inspectPolicy != null) ...<PatchbayCommandDescriptor>[
+      const PatchbayCommandDescriptor(
+        name: 'ui.inspect.status',
+        summary: 'Read the on-device widget inspector select-mode switch.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.readOnly,
+        sideEffect: PatchbaySideEffect.none,
+        // The App's own record of a flag it holds, not a frame anyone watched
+        // arrive: `uiObserved` would claim the overlay reached the screen.
+        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      ),
+      PatchbayCommandDescriptor(
+        name: 'ui.inspect.select',
+        summary:
+            'Turn the widget inspector select mode on or off, under a lease.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.immediate,
+        sideEffect: PatchbaySideEffect.appState,
+        factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+        gates: inspectPolicy.gates,
+        parameters: <PatchbayParameterDescriptor>[
+          const PatchbayParameterDescriptor(
+            name: 'enabled',
+            type: PatchbayParameterType.boolean,
+            required: true,
+            summary: 'Whether taps on the device select widgets.',
+          ),
+          PatchbayParameterDescriptor(
+            name: 'ttlMs',
+            type: PatchbayParameterType.integer,
+            defaultValue: inspectPolicy.defaultLease.inMilliseconds,
+            summary:
+                'Lease for an enable; the App restores the switch when it '
+                'expires without a renewal. Only valid with enabled=true.',
+          ),
+        ],
+      ),
+    ],
     if (navigationEnabled) ...<PatchbayCommandDescriptor>[
       const PatchbayCommandDescriptor(
         name: 'navigation.catalog',

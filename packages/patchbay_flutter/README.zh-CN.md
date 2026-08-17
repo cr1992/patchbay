@@ -19,6 +19,7 @@ consumer 指接入 Patchbay 的 App。
 | **导航与等待** | composition-root navigation adapter、revision / redirect / timeout 语义和 `ui.wait` 条件 |
 | **截图** | 可选 root / target capture、下一帧复核、像素与字节上限、chunked blob 输出 |
 | **保持亮屏** | consumer 注入的 `keepAwakeDelegate`、默认关、租约到期与 host 销毁自动还原 |
+| **Inspector 开关** | `PatchbayInspectPolicy` opt-in 的设备端选择模式：租约到期自还原、非 debug 构建拒绝 |
 | **Host 组合** | `PatchbayFlutterServiceHost` 把 UI 与领域 catalog/operator 合并到同一 service extension |
 
 日志面位于 core `patchbay`，只有 consumer 显式注入 `PatchbayArtifactService` 时才进入本 host 的
@@ -371,4 +372,5 @@ Flutter bridge 不获取 consumer 的领域锁，也不提供绕过 controller �
 - registry、descriptor、operator 和 consumer callback 必须不可达；
 - Key 类型、相等性和 State 保留语义保持不变；
 - root bridge 在 release 只透传 child；
+- 设备端 inspector 选择模式在非 debug 构建以 `inspectorUnavailable` 拒绝，不写标志位；
 - 不提供运行时配置重新开启 Patchbay。

@@ -465,7 +465,10 @@ ArgParser patchbayCliParser() => ArgParser()
         'logs query|export: ISO-8601 upper time bound. snapshot wait: the '
         'condition to wait for (exists|absent|equals).',
   )
-  ..addOption('ttl-ms', help: 'Artifact lifetime in milliseconds.')
+  ..addOption(
+    'ttl-ms',
+    help: 'Artifact lifetime, or inspect select-mode lease, in milliseconds.',
+  )
   ..addOption(
     'lease-ms',
     help:

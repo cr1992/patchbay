@@ -476,6 +476,7 @@ $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
 $ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
 $ patchbay ui verify-manifest <file>        # 声明 ↔ 运行时挂载对账
+$ patchbay ui inspect on|off|status         # 设备端 widget inspector 选择模式（带租约，自动还原）
 $ patchbay ui widget-tree|render-tree|focus-tree
 $ patchbay --output out.png capture root
 $ patchbay navigation go <dest>             # 不带 --revision 时自动先读当前 revision
@@ -709,6 +710,82 @@ App 当时没有已落定的目的地。`navigation.current` 被拒时按该拒�
 目标拒绝一切操作，所以报告的 `notices` 会点名它，退出码不受影响。
 
 退出码：全部相符 `0`，报告里有任一类偏差 `7`（见[退出码](#退出码)）。
+
+### widget inspector 开关（ui inspect）
+
+用 CLI 开关 Flutter 自带的**设备端 widget inspector 选择模式**——就是 DevTools 上那个「圈一下看
+这块是什么 widget」。开着的时候设备上的点按会被 inspector 吃掉（不再传给 App），所以这条命令改的
+是 **App 状态**（`sideEffect: appState`），不是一次观察。
+
+```console
+$ patchbay ui inspect on                 # 开，按 App 声明的默认租约
+$ patchbay ui inspect on --ttl-ms 60000  # 开，租约 60 秒
+$ patchbay ui inspect off                # 关，并释放租约
+$ patchbay ui inspect status             # 只读：当前开关、租约剩余、上次释放原因
+```
+
+`on` / `off` 是同一条协议命令 `ui.inspect.select` 的两种拼法（布尔是参数，路径是给人敲的），
+`status` 是另一条只读命令 `ui.inspect.status`。`--ttl-ms` 只跟 `on` 走：给 `off` 或 `status` 带上
+是用法错误（退出码 `2`），因为租约是「开着的时候才会到期」的东西。
+
+**租约到期自动还原，这是安全出口而不是便利功能。** 会话断开时 App 侧观察不到（两条传输都是
+请求/响应，没有断连事件），所以「断开自动还原」在 App 侧只能表达成「静默即还原」：`on` 发出的每次
+启用都带租约，租约走完没人续，桥就把开关放回**它接手前的值**。续租不会把 Patchbay 自己装上去的
+`true` 当成基线。host 销毁（`dispose`）同样还原。
+
+还原是有条件的：只有开关**仍是 Patchbay 装上去的那个值**时才回退。DevTools 写的是同一个标志位，
+Patchbay 的租约到期不该伸手去掀别人刚拨的开关。反过来，`off` 是操作者的明确指令，即使接手前
+本来就是开的也照关不误。
+
+**release 构建如实拒绝，不给一个证明不了任何事的布尔。** 设备端 inspector 的 overlay 由
+`WidgetsApp` 在一句 `assert` 里注入，只有 debug 构建成立；profile / release 下这个标志位写得进去、
+读得回来，却永远不会有任何东西被渲染出来。所以桥在动手之前先问「这个构建能不能真的显示」，
+答不上来就以 `inspectorUnavailable` 拒绝，`details.reason` 给出哪一种：
+
+| `reason` | 含义 |
+|---|---|
+| `notDebugBuild` | 非 debug 构建，overlay 的注入点根本不执行 |
+| `rootInspectorExcluded` | App 自己设了 `debugExcludeRootWidgetInspector`（通常是它要注入自己的 `WidgetInspector`） |
+| `hostDisposed` | Patchbay host 已销毁，开关没有持租人了 |
+
+被拒时**不写标志位、也不问 consumer gate**——一个永远渲染不出来的构建，用不着先去打扰接入方的
+权限判断。
+
+`hostDisposed` 挡的是一个竞态：请求正卡在 consumer gate 里等待时 host 被销毁。gate 返回后**不能**
+继续把开关打开——那会留下一个开着的 inspector 和一个没人持有的租约，设备从此吞掉每一次点击。
+所以 gate 恢复点会重查一次，已销毁就以 `hostDisposed` 拒绝，并且完全不碰 binding 标志位。销毁后
+再发的调用（含只读的 `status`）同样按这个 reason 拒绝：一座已经拆掉的桥没有状态可报。
+
+响应 payload 的 `source` 恒为 `appRecorded`：写标志位只是排了一次重建，不等于带 overlay 的那一帧
+真的到过屏幕，所以这里不冒充 `uiObserved`。`selectionOnTap` 一并报出来，是为了让「模式开着但点按
+没反应」不被误读成 Patchbay 的故障——那是 App 侧另一个开关。
+
+> **默认关，要接入方显式打开。** App 不注入 `PatchbayInspectPolicy` 时，`ui.inspect.*` 根本不进
+> catalog，调用得到 `commandNotRegistered`——与 `PatchbaySemanticsActionPolicy` 同一口径：「App 没
+> 开这个」和「App 拒绝这次请求」是两个不同的答案。接法：
+>
+> ```dart
+> PatchbayFlutterBridge(
+>   registry: registry,
+>   gates: gates,
+>   inspectPolicy: const PatchbayInspectPolicy(
+>     gates: {'debug.ready'},                 // 每次开/关都过这些 consumer 门
+>     defaultLease: Duration(minutes: 5),     // 请求不带 --ttl-ms 时的租约
+>     maxLease: Duration(minutes: 30),        // 请求带了也不许超过的上限
+>   ),
+> )
+> ```
+>
+> 声明的 `defaultLease` 就是 catalog 里 `ttlMs` 的 `default`，也是这个桥真正发放的租约——文档、
+> descriptor 与实现是同一个数。超上限的 `--ttl-ms` 以 `invalidInspectArguments` 拒绝，
+> `details.maxTtlMs` 告诉你上限是多少。
+
+同时开着 DevTools 时：两边写的是同一个标志位，但 Patchbay 直接写 binding，不会去发 DevTools 那条
+extension state 变更事件，所以 DevTools 的按钮状态不会跟着 Patchbay 亮。以哪边为准看
+`ui inspect status`。
+
+perf 与 net 两批（VM RPC 性能面、请求画像）不在本批范围内，见
+[台账](backlog.md)——net 画像还是 `design-gate`。
 
 ### 超时与「对端不应答」
 

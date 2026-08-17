@@ -280,6 +280,27 @@ enum PatchbayFriendlyCommand {
     usageSuffix: '<manifest-file>',
     target: PatchbayCommandTarget.localManifestVerification,
   ),
+  // `on` and `off` are two spellings of one protocol command, exactly as
+  // `ui wait <condition>` is six spellings of `ui.wait`: the boolean is the
+  // argument, and the CLI path is what an operator types. `status` is a
+  // separate declaration because it is a separate command — a read-only one
+  // that changes nothing, which a shared descriptor could not honestly say.
+  uiInspectOn(
+    'ui.inspect.select',
+    <String>['ui', 'inspect', 'on'],
+    summary: 'Turn widget select mode on for a lease, then it restores itself.',
+    usageSuffix: '[--ttl-ms <ms>]',
+  ),
+  uiInspectOff(
+    'ui.inspect.select',
+    <String>['ui', 'inspect', 'off'],
+    summary: 'Turn widget select mode off and release the lease.',
+  ),
+  uiInspectStatus(
+    'ui.inspect.status',
+    <String>['ui', 'inspect', 'status'],
+    summary: 'Read the widget select-mode switch and its lease.',
+  ),
   uiWidgetTree(
     null,
     <String>['ui', 'widget-tree'],
@@ -505,6 +526,21 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiVerifyManifest => _oneTail(
         tail,
         (String _) => const <String, Object?>{},
+      ),
+      // `ttlMs` travels only with the enable: it is the lease on a switch that
+      // is on, so sending it alongside `enabled: false` is a request the App
+      // refuses rather than a value it would have to ignore.
+      PatchbayFriendlyCommand.uiInspectOn => _noTail(tail, <String, Object?>{
+        'enabled': true,
+        'ttlMs': ?_optionalPositiveInt(options, 'ttl-ms'),
+      }),
+      PatchbayFriendlyCommand.uiInspectOff => _noTail(
+        tail,
+        const <String, Object?>{'enabled': false},
+      ),
+      PatchbayFriendlyCommand.uiInspectStatus => _noTail(
+        tail,
+        const <String, Object?>{},
       ),
       PatchbayFriendlyCommand.uiSemanticsAction => _semanticsActionArguments(
         tail,
@@ -793,6 +829,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiFocusTree ||
     PatchbayFriendlyCommand.navigationCatalog ||
     PatchbayFriendlyCommand.navigationCurrent ||
+    PatchbayFriendlyCommand.uiInspectOff ||
+    PatchbayFriendlyCommand.uiInspectStatus ||
     PatchbayFriendlyCommand.blobMetadata ||
     // Nothing about the comparison is tunable: the manifest is the whole
     // request, and the current destination comes from the App, not a flag.
@@ -823,6 +861,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiTextEnter ||
     PatchbayFriendlyCommand.uiSemanticsAction => const <String>{'stdin'},
     PatchbayFriendlyCommand.uiTap => const <String>{'generation'},
+    PatchbayFriendlyCommand.uiInspectOn => const <String>{'ttl-ms'},
     PatchbayFriendlyCommand.navigationGo ||
     PatchbayFriendlyCommand.navigationPush ||
     PatchbayFriendlyCommand.navigationBack => const <String>{

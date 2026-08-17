@@ -2609,6 +2609,161 @@ final class PatchbaySnapshotWaitWire {
   };
 }
 
+enum PatchbayInspectUnavailableWire {
+  notDebugBuild,
+  rootInspectorExcluded,
+  hostDisposed;
+
+  static PatchbayInspectUnavailableWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayInspectUnavailableWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
+enum PatchbayInspectReleaseWire {
+  explicitOff,
+  leaseExpired,
+  disposed;
+
+  static PatchbayInspectReleaseWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayInspectReleaseWire: $wire',
+    );
+  }
+
+  String toJson() => name;
+}
+
+final class PatchbayInspectSelectRequestWire {
+  const PatchbayInspectSelectRequestWire({
+    required this.enabled,
+    required this.ttlMs,
+  });
+
+  final bool enabled;
+  final int? ttlMs;
+
+  factory PatchbayInspectSelectRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'enabled', 'ttlMs'}, path);
+    return PatchbayInspectSelectRequestWire(
+      enabled: _wireBool(json['enabled'], '$path.enabled'),
+      ttlMs: json['ttlMs'] == null
+          ? null
+          : _wireInt(json['ttlMs'], '$path.ttlMs'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'enabled': enabled,
+    if (ttlMs != null) 'ttlMs': ttlMs!,
+  };
+}
+
+final class PatchbayInspectStateWire {
+  const PatchbayInspectStateWire({
+    required this.outcome,
+    required this.source,
+    required this.selectMode,
+    required this.selectionOnTap,
+    required this.managed,
+    required this.previousSelectMode,
+    required this.restoresTo,
+    required this.leaseMs,
+    required this.leaseRemainingMs,
+    required this.lastRelease,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final bool selectMode;
+  final bool selectionOnTap;
+  final bool managed;
+  final bool? previousSelectMode;
+  final bool? restoresTo;
+  final int? leaseMs;
+  final int? leaseRemainingMs;
+  final PatchbayInspectReleaseWire? lastRelease;
+
+  factory PatchbayInspectStateWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'selectMode',
+      'selectionOnTap',
+      'managed',
+      'previousSelectMode',
+      'restoresTo',
+      'leaseMs',
+      'leaseRemainingMs',
+      'lastRelease',
+    }, path);
+    return PatchbayInspectStateWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      selectMode: _wireBool(json['selectMode'], '$path.selectMode'),
+      selectionOnTap: _wireBool(json['selectionOnTap'], '$path.selectionOnTap'),
+      managed: _wireBool(json['managed'], '$path.managed'),
+      previousSelectMode: json['previousSelectMode'] == null
+          ? null
+          : _wireBool(json['previousSelectMode'], '$path.previousSelectMode'),
+      restoresTo: json['restoresTo'] == null
+          ? null
+          : _wireBool(json['restoresTo'], '$path.restoresTo'),
+      leaseMs: json['leaseMs'] == null
+          ? null
+          : _wireInt(json['leaseMs'], '$path.leaseMs'),
+      leaseRemainingMs: json['leaseRemainingMs'] == null
+          ? null
+          : _wireInt(json['leaseRemainingMs'], '$path.leaseRemainingMs'),
+      lastRelease: json['lastRelease'] == null
+          ? null
+          : PatchbayInspectReleaseWire.fromJson(
+              json['lastRelease'],
+              path: '$path.lastRelease',
+            ),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'selectMode': selectMode,
+    'selectionOnTap': selectionOnTap,
+    'managed': managed,
+    if (previousSelectMode != null) 'previousSelectMode': previousSelectMode!,
+    if (restoresTo != null) 'restoresTo': restoresTo!,
+    if (leaseMs != null) 'leaseMs': leaseMs!,
+    if (leaseRemainingMs != null) 'leaseRemainingMs': leaseRemainingMs!,
+    if (lastRelease != null) 'lastRelease': lastRelease!.toJson(),
+  };
+}
+
 Map<String, Object?> _wireMap(Object? value, String path) {
   if (value is! Map) throw FormatException('$path must be an object');
   try {

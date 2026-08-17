@@ -132,6 +132,34 @@ Semantics action 是“沿 Flutter 已公开辅助功能 action 分派了一次�
 consumer 可以用一个保守的全局 UI interaction gate 开始接入，无须逐页面登记；高风险或敏感节点应
 通过 Semantics identifier、`PatchbayKey` declaration 或 consumer policy 细分。
 
+## 设备端 inspector 选择模式（`ui.inspect.*`）
+
+`ui.inspect.select` 开关的是 Flutter 自带的设备端 widget inspector 选择模式——三棵树是**观察**，
+这一条是**改 App 状态**：模式开着时设备上的点按被 inspector 消费，不再抵达 App。因此它按
+`sideEffect: appState` 声明，并且是 Patchbay 里唯一一条会自己撤销自己的命令。
+
+- **默认关。** consumer 不注入 `PatchbayInspectPolicy` 时两条命令不进 catalog，调用得
+  `commandNotRegistered`——与 action policy 同一口径；
+- **每次启用带租约。** 两条传输都是请求/响应，App 侧观察不到断连，所以「断开还原」只能表达成
+  「静默还原」：租约到期无人续约即回退。续约不改写基线，`dispose()` 同样回退；
+- **还原是有条件的。** 只在开关仍为 Patchbay 装上去的值时回退，避免掀掉 DevTools 期间拨的开关；
+  显式 `off` 则是操作者指令，即使基线为开也照关；
+- **构建不支持就拒绝，不返回布尔。** overlay 由 `WidgetsApp` 在 `assert` 内注入，仅 debug 成立；
+  profile / release 下标志位可写可读却永不渲染。桥先判 `notDebugBuild` /
+  `rootInspectorExcluded`，命中即 `inspectorUnavailable`，**不写标志位、不问 consumer gate**；
+- **销毁后不得复活。** gate 恢复点重查一次 disposed：请求卡在 gate 里等待时 host 被销毁，返回后
+  若继续开启，会留下一个开着的 inspector 和无人持有的租约，设备从此吞掉每一次点击。已销毁即以
+  `inspectorUnavailable` / `hostDisposed` 拒绝且不碰标志位；销毁后再发的调用（含只读的 `status`）
+  同样——一座已拆掉的桥没有状态可报；
+- **事实来源恒为 `appRecorded`。** 写标志位只排了一次重建，不是「带 overlay 的那帧到过屏幕」，
+  不冒充 `uiObserved`；`selectionOnTap` 一并报出，区分 App 侧那个独立开关；
+- **不发 DevTools 的 extension state 事件。** 两边写同一标志位，但 DevTools 的按钮不会跟着亮，
+  以 `ui.inspect.status` 为准。
+
+`ttlMs` 只跟启用一起走：与 `enabled: false` 同发是 `invalidInspectArguments`，而不是被悄悄忽略；
+超出 policy 的 `maxLease` 同样拒绝，`details.maxTtlMs` 给出上限。policy 声明的 `defaultLease`
+就是 catalog 里 `ttlMs` 的 `default`，descriptor 与实现是同一个数。
+
 ## CLI 面
 
 当前稳定命令：
@@ -145,6 +173,9 @@ patchbay ui tap <identifier> --generation <generation>
 patchbay ui widget-tree
 patchbay ui render-tree
 patchbay ui focus-tree
+patchbay ui inspect on [--ttl-ms <ms>]
+patchbay ui inspect off
+patchbay ui inspect status
 ```
 
 `widget-tree`、`render-tree` 与 `focus-tree` 是 Flutter 诊断扩展的只读代理：CLI 必须先检查当前 isolate
@@ -198,6 +229,8 @@ obscured value 不读取，每次调用必须显式给出 timeout。
 - release 不因 Patchbay 改变 Semantics、Element、RenderObject 或导航行为；
 - Android、iOS、HarmonyOS/CPF 都只依赖 Flutter 公开 API，不新增原生 plugin；
 - Inspector passthrough 是否存在由运行时 catalog 决定，profile 与不同 Flutter SDK 可返回 unavailable；
+- 设备端 inspector 选择模式只在 debug 成立，profile / release 以 `inspectorUnavailable` 拒绝，
+  不返回一个渲染不出任何东西的布尔；
 - PlatformView 只作为边界节点报告，不能遍历其原生内部树；
 - 系统权限弹窗不属于 Flutter 树，不在本 package 的能力范围内。
 

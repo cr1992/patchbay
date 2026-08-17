@@ -60,6 +60,8 @@ void main() {
     'ui.capture',
     'ui.keepAwake.set',
     'ui.keepAwake.status',
+    'ui.inspect.status',
+    'ui.inspect.select',
     'blob.metadata',
     'blob.read',
   ];
@@ -211,6 +213,47 @@ void main() {
                 requestId: requestId,
                 payload: keepAwakeState('observed'),
               ).toJson(),
+              // Both inspect arms answer the shape the Flutter bridge answers,
+              // so the cross-process test proves the CLI carries `enabled` and
+              // `ttlMs` through and reads back an `appRecorded` state — not a
+              // `uiObserved` one, which would claim a rendered overlay.
+              'ui.inspect.status' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: const <String, Object?>{
+                  'outcome': 'observed',
+                  'source': 'appRecorded',
+                  'selectMode': false,
+                  'selectionOnTap': true,
+                  'managed': false,
+                },
+              ).toJson(),
+              'ui.inspect.select' =>
+                args['enabled'] == true
+                    ? PatchbayInvocation.accepted(
+                        requestId: requestId,
+                        payload: <String, Object?>{
+                          'outcome': 'applied',
+                          'source': 'appRecorded',
+                          'selectMode': true,
+                          'selectionOnTap': true,
+                          'managed': true,
+                          'previousSelectMode': false,
+                          'restoresTo': false,
+                          'leaseMs': args['ttlMs'] ?? 300000,
+                        },
+                      ).toJson()
+                    : PatchbayInvocation.accepted(
+                        requestId: requestId,
+                        payload: const <String, Object?>{
+                          'outcome': 'applied',
+                          'source': 'appRecorded',
+                          'selectMode': false,
+                          'selectionOnTap': true,
+                          'managed': false,
+                          'previousSelectMode': true,
+                          'lastRelease': 'explicitOff',
+                        },
+                      ).toJson(),
               'blob.metadata' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: artifact().toJson(),

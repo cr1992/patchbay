@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
 import 'frame_observer.dart';
+import 'inspect_bridge.dart';
 import 'keep_awake_bridge.dart';
 import 'lifecycle.dart';
 import 'navigation_bridge.dart';
@@ -219,6 +220,8 @@ final class PatchbayFlutterBridge {
     PatchbayUiRegistry? registry,
     PatchbaySemanticsActionPolicy? semanticsActionPolicy,
     PatchbayNavigationAdapter? navigationAdapter,
+    PatchbayInspectPolicy? inspectPolicy,
+    PatchbayInspectorSurface? inspectorSurface,
     this.artifacts,
     Set<String> captureGates = const <String>{},
     PatchbayKeepAwakeDelegate? keepAwakeDelegate,
@@ -271,6 +274,13 @@ final class PatchbayFlutterBridge {
       navigation: navigation,
       newRequestId: newRequestId,
     );
+    inspect = inspectPolicy == null
+        ? null
+        : PatchbayInspectBridge(
+            gates: gates,
+            policy: inspectPolicy,
+            surface: inspectorSurface,
+          );
     capture = artifacts == null
         ? null
         : PatchbayCaptureBridge(
@@ -306,6 +316,9 @@ final class PatchbayFlutterBridge {
   /// plane just stopped answering, so it stays cataloged and says `wired:
   /// false` — a diagnosis instead of a missing row.
   late final PatchbayKeepAwakeBridge keepAwake;
+
+  /// Non-null only when the consumer opted into the widget inspector switch.
+  late final PatchbayInspectBridge? inspect;
 
   static int _nextRequest = 0;
   static String _defaultRequestId() => 'patchbay-ui-${++_nextRequest}';
@@ -474,6 +487,9 @@ final class PatchbayFlutterBridge {
     // Before the semantics teardown, so a live hold is given back even if that
     // one throws: the screen staying lit is the failure a consumer cannot see.
     keepAwake.dispose();
+    // The inspector switch is App state Patchbay installed, so tearing the
+    // bridge down puts it back rather than leaving the device in select mode.
+    inspect?.dispose();
     semantics.dispose();
   }
 }

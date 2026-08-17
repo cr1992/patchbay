@@ -21,6 +21,7 @@ boundaries, see [`../patchbay/README.md`](../patchbay/README.md).
 | **Navigation and waits** | Composition-root navigation adapter, revision / redirect / timeout semantics, and `ui.wait` conditions |
 | **Capture** | Optional root / target capture, next-frame re-check, pixel and byte limits, and chunked blob output |
 | **Keep awake** | Consumer-injected `keepAwakeDelegate`, off by default, auto-released on lease expiry and host disposal |
+| **Inspector switch** | `PatchbayInspectPolicy` opt-in on-device select mode: self-restoring lease, refused on non-debug builds |
 | **Host composition** | `PatchbayFlutterServiceHost` merges the UI and domain catalogs/operators into one service extension |
 
 The logging surface lives in core `patchbay` and only enters this host's catalog when the consumer
@@ -443,4 +444,6 @@ only for verifying UI wiring and standard widget semantics.
 - the registry, descriptors, operators, and consumer callbacks must be unreachable;
 - Key types, equality, and State preservation semantics stay unchanged;
 - the root bridge passes the child straight through in release;
+- the on-device inspector select mode is refused with `inspectorUnavailable` on non-debug builds,
+  and the binding flag is never written;
 - there is no runtime configuration that re-enables Patchbay.
