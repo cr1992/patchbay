@@ -37,7 +37,7 @@
 | PB-040-17 | `release_prep --apply` 覆盖 `patchbayPackageVersion` 与两份 README 的版本引用 | apply 代改四包 version 却不动这两处，只有 `release_version_parity_test` 事后兜住（0.3.0 定版实撞：apply 后测试红）；该常量被 host 当 `serverVersion` 报给客户端，漂移即全网 App 谎报构建 | 0.4.0 | 已排期（P0） |
 | PB-040-18 | `release_prep --apply` 时自动冻结本版协议面进兼容语料库 | `packages/patchbay_cli/test/golden/legacy_host_v0_2_0/` 一类的旧版语料是手工冻结的，版本过去后不可再生成 | 0.4.0 | 已排期（P0） |
 | PB-040-19 | command_codegen check 的样例 contract 瘦身 | `packages/patchbay/contracts/example_commands.g.dart` 208 行生成物只为喂 drift 门禁而长期入仓，应改由真实命令声明推导 | 0.4.0 | 已排期（P2）；依赖 PB-040-05 |
-| PB-040-20 | CHANGELOG 碎片化：`changelog.d/` 每 MR 一文件 + `release_prep` 聚合 | 0.3.0 每对并行分支都在根 CHANGELOG 同一处相撞，是结构性冲突源 | 0.4.0 | 实现中（P0）：规范与 PR 流程已落地，自动聚合待实现 |
+| PB-040-20 | CHANGELOG 碎片化：`changelog.d/` 每 MR 一文件 + `release_prep` 聚合 | 0.3.0 每对并行分支都在根 CHANGELOG 同一处相撞，是结构性冲突源 | 0.4.0 | 实现中（P0）：规范与 MR 流程已落地，自动聚合待实现 |
 
 ## 文档债（快赢，可随任意批次走）
 

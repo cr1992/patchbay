@@ -1411,7 +1411,7 @@ List<String> manualSteps(String version, ReleaseInputs inputs) {
   final String tag = '$tagPrefix$version';
   return <String>[
     '给 CHANGELOG 的 `## $version` 段补一句批次摘要（体例见 0.2.1 段）。',
-    '门禁全绿后按 CONTRIBUTING.md「发版」顺序走：GitHub 合并 → 回推 GitLab → 再打 tag。',
+    '门禁全绿后按 CONTRIBUTING.md「发版」顺序走：内网主仓 MR 合并 → 同步同一 SHA 到 GitHub → 再打 tag。',
     '打 tag（origin 已配双推，一条命令同时到 GitLab 与 GitHub）：\n'
         '      git tag -a $tag -m \'patchbay $version\'\n'
         '      git push origin $tag',

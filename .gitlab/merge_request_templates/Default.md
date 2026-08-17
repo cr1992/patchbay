@@ -17,7 +17,7 @@
 
 ## CHANGELOG
 
-- [ ] 已按 [`changelog.d/README.md`](https://github.com/cr1992/patchbay/blob/main/changelog.d/README.md) 添加碎片
+- [ ] 已按 `changelog.d/README.md` 添加碎片
 - [ ] 本 MR 无需碎片，理由：<!-- 纯测试/注释/内部重构/规划等 -->
 
 <!-- 上面两项二选一；删除不适用项，避免两个框同时勾选。 -->
