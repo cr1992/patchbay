@@ -152,11 +152,10 @@ final class PatchbayKeepAwakeBridge {
 
   /// Releases a live hold as the App tears the debug surface down.
   ///
-  /// Synchronous like every other `dispose` here, so the release request is
-  /// issued but not awaited: a slow consumer implementation must not be able to
-  /// hold up host teardown. The delegate call itself is still made before this
-  /// returns, and its failure is recorded rather than thrown at a caller that
-  /// is on its way out.
+  /// Synchronous like every other `dispose` here: the release is queued but not
+  /// awaited, so a slow consumer implementation cannot hold up host teardown.
+  /// It uses the same queue as operator requests so teardown cannot overlap an
+  /// in-flight release and call a non-reentrant delegate twice.
   ///
   /// Releasing what is held is only half of it. Nothing is held yet during the
   /// window between a request arriving and its gate returning, so a `dispose`
@@ -167,8 +166,12 @@ final class PatchbayKeepAwakeBridge {
   void dispose() {
     _disposed = true;
     _cancelLease();
-    if (!_enabled) return;
-    unawaited(_release(PatchbayKeepAwakeReleaseWire.hostDisposed));
+    unawaited(
+      _enqueue(() async {
+        if (!_enabled) return;
+        await _release(PatchbayKeepAwakeReleaseWire.hostDisposed);
+      }),
+    );
   }
 
   Future<PatchbayInvocation> _apply(
