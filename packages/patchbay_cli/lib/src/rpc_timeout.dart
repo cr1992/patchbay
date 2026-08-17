@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:patchbay/patchbay.dart';
+
 import 'client.dart';
 
 /// Budget for one RPC round trip against a running App, when the caller names
@@ -133,9 +135,17 @@ final class PatchbayTimeoutClient implements PatchbayClient {
   Future<Map<String, Object?>> catalog() =>
       awaitPatchbayRpc(_inner.catalog(), rpcTimeout: rpcTimeout);
 
+  /// A snapshot request that declares a wait extends this budget the same way
+  /// an `invoke` deadline does: the answer cannot arrive before the App has
+  /// finished waiting, so the flat default would abandon a request the App is
+  /// still legitimately serving.
   @override
-  Future<Map<String, Object?>> snapshot() =>
-      awaitPatchbayRpc(_inner.snapshot(), rpcTimeout: rpcTimeout);
+  Future<Map<String, Object?>> snapshot({PatchbaySnapshotRequest? request}) =>
+      awaitPatchbayRpc(
+        _inner.snapshot(request: request),
+        rpcTimeout: rpcTimeout,
+        deadline: request?.timeout,
+      );
 
   @override
   Future<Map<String, Object?>> invoke({

@@ -15,7 +15,7 @@ Future<void> main() async {
       catalog: () async => <String, Object?>{
         'commands': <Object?>['fixture.echo'],
       },
-      snapshot: () async => <String, Object?>{
+      snapshot: ([_]) async => <String, Object?>{
         'pid': pid,
         'source': 'child-process',
       },

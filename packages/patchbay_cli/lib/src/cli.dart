@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
+import 'package:vm_service/vm_service.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
@@ -420,6 +421,12 @@ ArgParser patchbayCliParser() => ArgParser()
         'asks the App to wait (--timeout-ms) extends its own request by this '
         'much rather than being cut short by it.',
   )
+  ..addOption(
+    'path',
+    help:
+        'Dot path into the snapshot (a.b.c); answers that field or subtree '
+        'instead of the whole snapshot.',
+  )
   ..addOption('args', help: 'JSON object passed to a domain command.')
   ..addFlag(
     'stdin',
@@ -448,7 +455,16 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('levels', help: 'Comma-separated log levels.')
   ..addOption('categories', help: 'Comma-separated log categories.')
   ..addOption('since', help: 'ISO-8601 lower log time bound.')
-  ..addOption('until', help: 'ISO-8601 upper log time bound.')
+  // One option, two commands, never both at once: `_validateOptions` refuses
+  // it for every command that does not list it, so the two readings can never
+  // meet. The help says both because a shared option that documents only one
+  // of them is the kind of lie an operator finds out about at the prompt.
+  ..addOption(
+    'until',
+    help:
+        'logs query|export: ISO-8601 upper time bound. snapshot wait: the '
+        'condition to wait for (exists|absent|equals).',
+  )
   ..addOption('ttl-ms', help: 'Artifact lifetime in milliseconds.')
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
   ..addOption('output', help: 'Local artifact output path.')
@@ -698,7 +714,12 @@ Future<_Execution> _execute(
     case PatchbayCommandTarget.clientCatalog:
       return _Execution(await connection.catalog());
     case PatchbayCommandTarget.clientSnapshot:
-      return _Execution(await connection.snapshot());
+      final PatchbaySnapshotRequest? selection = _selection(friendly);
+      return _Execution(
+        selection == null
+            ? await connection.snapshot()
+            : await _selectedSnapshot(connection, selection),
+      );
     case PatchbayCommandTarget.clientWidgetTree:
       return _Execution(await connection.widgetTree());
     case PatchbayCommandTarget.clientRenderTree:
@@ -800,6 +821,75 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+/// Stable code for "this App is too old to understand a snapshot selector".
+const String patchbaySnapshotSelectorUnsupportedCode =
+    'snapshotSelectionUnsupportedByHost';
+
+/// One selector-bearing snapshot, with a version skew named rather than guessed.
+///
+/// A host built before selectors existed has no idea what the extra `request`
+/// parameter is and refuses the message at the transport seam: the VM Service
+/// path answers `invalidParams`, the direct path a `protocolError`. Both escape
+/// as bare transport / protocol failures whose codes describe the plumbing
+/// rather than the cause, so the operator sees `exit 3` and goes looking for a
+/// dead socket instead of an App that predates the feature.
+///
+/// Only these two shapes are translated, and only when a selector was actually
+/// sent. Anything else keeps its own classification: a socket that died during
+/// a selector call is not a version skew, and blaming the App would send the
+/// operator to change a command that was never wrong.
+Future<Map<String, Object?>> _selectedSnapshot(
+  PatchbayClient connection,
+  PatchbaySnapshotRequest request,
+) async {
+  try {
+    return await connection.snapshot(request: request);
+  } on RPCError catch (failure) {
+    if (failure.code != RPCErrorKind.kInvalidParams.code) rethrow;
+    return _snapshotSelectorUnsupported();
+  } on PatchbayProtocolException catch (failure) {
+    if (failure.code != 'protocolError') rethrow;
+    return _snapshotSelectorUnsupported();
+  }
+}
+
+/// The refusal above, in the same typed shape the App's own rejections use.
+///
+/// A rejection rather than an error envelope because that is what happened —
+/// the request was refused, by a peer that cannot serve it — and it lets a
+/// script that already branches on `admission` classify a version skew without
+/// learning a second shape. The notice carries the fallback that does work, so
+/// the answer itself says what to run next.
+Map<String, Object?> _snapshotSelectorUnsupported() {
+  const String notice =
+      'This App does not support snapshot field selection or waits. Run '
+      '`patchbay snapshot` for the whole snapshot, or update the App to a '
+      'Patchbay version that serves selectors.';
+  return <String, Object?>{
+    'schemaVersion': PatchbayServiceHost.schemaVersion,
+    'admission': 'rejected',
+    'notice': notice,
+    'rejection': PatchbayRejection(
+      code: patchbaySnapshotSelectorUnsupportedCode,
+      notice: notice,
+    ).toJson(),
+  };
+}
+
+/// The snapshot selection this invocation asks for, or null for the whole
+/// snapshot.
+///
+/// The declaration already produced the wire object; decoding it through the
+/// same request type the App validates is what keeps the CLI from having a
+/// second, looser opinion about what a selector may say. A malformed one is a
+/// usage error here rather than a round trip that comes back rejected.
+PatchbaySnapshotRequest? _selection(PatchbayFriendlyInvocation friendly) {
+  if (friendly.arguments.isEmpty) return null;
+  return PatchbaySnapshotRequest.fromWire(
+    PatchbaySnapshotRequestWire.fromJson(friendly.arguments),
+  );
 }
 
 /// The `blob.read` chunk size this host will actually accept.

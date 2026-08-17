@@ -42,6 +42,7 @@ void main() {
             'tap',
           ],
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
+          PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
           PatchbayFriendlyCommand.navigationGo ||
@@ -71,6 +72,10 @@ void main() {
         if (spec.artifact != PatchbayArtifactDisposition.none) ...<String>[
           '--output',
           '/tmp/output',
+        ],
+        if (spec == PatchbayFriendlyCommand.snapshotWait) ...<String>[
+          '--until',
+          'exists',
         ],
         ...words,
       ];

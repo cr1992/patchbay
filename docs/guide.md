@@ -425,6 +425,8 @@ doctor 只读，不改会话目录、不删记录、不重连、不替你唤醒�
 $ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查
 $ patchbay catalog                          # App 实际注册了什么（唯一真源）
 $ patchbay --json snapshot                  # 状态快照
+$ patchbay snapshot --path call.session      # 只取一个字段 / 子树
+$ patchbay snapshot wait <dot.path> --until exists|absent|equals [<json>]
 $ patchbay --args '{...}' exec <ns.command> # 领域命令
 $ patchbay --wait exec <ns.command>         # job 命令等终态
 $ patchbay job get|cancel <job-id>
@@ -449,6 +451,89 @@ $ patchbay help <topic>                     # 帮助由声明生成
 `navigation.go` 或响应里的 `ui.semantics.tap` 就能直接查，不必先反推 CLI 路径。多个 CLI 命令共用
 一个协议名（`ui.wait`、`blob.metadata`）时列出它们。`navigate` / `nav` / `wait` / `tap` / `text` /
 `semantics`，以及 `session` ↔ `sessions` 的互换，都是既有路径的别名拼写，不是新命令。
+
+### snapshot 的字段选择与条件等待
+
+`snapshot` 不带选项时仍是整树读，行为一个字没变。要盯一个字段时有两条：
+
+```console
+$ patchbay --json snapshot --path call.session.active
+{"schemaVersion":1,"selection":{"path":"call.session.active","found":true,"value":true}}
+
+$ patchbay snapshot wait call.session.active --until equals true
+path=call.session.active found=true value=true wait=observed
+```
+
+`--path` 是**点路径**，段字符集与稳定 destination id 同一套（`[A-Za-z0-9_-]`）。取到什么就原样答什么
+——叶子字段、整棵子树都一样，**不重塑、不汇总**；含点或其它字符的键无法被点路径无歧义寻址，那种
+键仍然走整树读。路径写错（空段、空格、结尾的点）在 CLI 本地就以用法错误 `64` 挡下，不发请求。
+
+**寻址根是 App 交出来的那张快照本身**，不是 CLI 打印的那个响应信封。两者只差协议自己盖上去的
+`schemaVersion`——它不可寻址，否则 host 的字段会冒充成 App 发布的状态，操作者分辨不出来。
+
+推论是：**App 自己怎么套，路径就得怎么写。** 本仓 `example/` 的参考接入方把状态平铺在顶层
+（`--path counter`），而有的接入方会在自己的快照里再包一层：
+
+```jsonc
+// 某接入方的 snapshot 回调返回值
+{"admission": "accepted", "source": "appRecorded", "snapshot": {"call": {…}}}
+```
+
+这时正确写法是 `--path snapshot.call.session.active`，`--path call.session.active` 取不到——那层
+`snapshot` 是**该接入方自己的键**，不是协议字段，host 不会替谁拆包（拆了，平铺的接入方就全取不到
+了）。拿不准就先跑一次不带 `--path` 的整树读，照着实际形状写路径；`patchbay doctor` 打印的活跃
+会话路径也是同一套写法。
+
+**取不到不是失败。** `selection.found: false` 时退出码仍是 `0`，并带一个 `miss` 说明取不到的原因
+——整树读同样只是"没这个键"，一次读取不该因为答案是"没有"而变成错误：
+
+| `miss` | 含义 | 该做什么 |
+|---|---|---|
+| `missingKey` | 某段的键不存在 | 等它出现，或核对键名 |
+| `nullValue` | 某段是 JSON null | 同上；`null` 在本协议里等同"不在" |
+| `notAnObject` | 中间段是个非对象值，后面的段无处可索引 | **改路径**——它与快照的形状矛盾 |
+
+**只有等待会失败。** `snapshot wait` 由 App 侧长轮询（间隔 100ms，第一次探测不等待，所以条件已成立
+就立刻答），条件在预算内没出现时以 `snapshotWaitTimeout` 拒绝，退出码 `5`——与 `ui wait` 超时同一
+口径，脚本已有的分支照用。拒绝的 `details` 里带 `path` / `condition` / `timeoutMs` / `elapsedMs` /
+`polls` 和 `observed`（最后一次解析结果），「等 `equals true`，一直看到 `false`」这半句才是决定
+再等还是改路径的依据。观察到时响应里的 `wait.outcome` 是 `observed`。
+
+条件是**闭合词表**，不是表达式语言：
+
+| `--until` | 成立条件 |
+|---|---|
+| `exists` | 路径解析到非 null 值 |
+| `absent` | 路径解析不到：键不存在或值为 null |
+| `equals` | 解析到的值与声明值**结构相等**（`{"a":1}` 按内容比，不按引用） |
+
+`absent` **不吃 `notAnObject`**：路径与快照形状矛盾时不算"字段不在"，否则一个写错的路径会安静地
+报成功。`equals` 的比较值按 **JSON 字面量**读——`true` 是布尔，字符串要写成 `'"ready"'`；裸词会被
+拒绝并把该加的引号写给你看。`null` 不接受，那是 `--until absent` 的事。
+
+等待预算用 `--timeout-ms`（默认 5000，上限 2 分钟，与 `ui.wait` 家族同一上限）。**不必同时调
+`--transport-timeout-ms`**：声明的等待会自动加进 CLI 的 RPC 预算，与 `--wait` 的做法一致——一次
+有意的等待不是"对端不应答"。
+
+**路径根本不存在时，超时会把可用的顶层键报给你。** 第一段就不存在的路径，等待表现和"字段还没来"
+一模一样——白等满预算再超时，最容易被读成"条件还没发生"。所以这种情形下拒绝的 `details` 会多一个
+`availableKeys`（App 快照的顶层键，排序），一眼就能看出是路径写错而不是等得不够久；路径解析到一半
+才断的（真的在等某个字段）不会带这个键，免得指错方向。
+
+**打到不认识选择器的老 App 时**，答复是稳定的 `snapshotSelectionUnsupportedByHost` 拒绝
+（退出码 `5`），notice 里写明退路：改用不带 `--path` 的整树 `snapshot`，或把 App 侧 patchbay 升级到
+支持选择器的版本。这是版本错配，不是连接故障——此前它表现为裸 `transportError`（退出码 `3`），
+会把人引去查网络。
+
+**预算是对答案的硬顶，不是探测的时间表。** 条件成立、但拿到它的那次读取已经越过预算时，答复仍是
+`snapshotWaitTimeout`——超预算才拿到的成功，调用方已经不在等它了。墙上时间还可能再多出**一次快照
+读取**的长度：consumer 的回调一旦在飞就没法中止。因此 App 侧 snapshot 回调本身慢过预算时，拒绝里的
+`elapsedMs` 会明显大于 `timeoutMs`，那正是「慢的是快照源本身」的读法——该改的是那个回调，不是加大
+预算。
+
+App 的 snapshot 回调自己抛错时，答复是 `providerProtocolViolation` +
+`details.reason: snapshotSourceFailed`，只带**异常类型**不带消息：那串消息是 consumer 的自由文本，
+不该跟着协议信封出去。等待中途抛错直接以它收尾，不重试——读不出来的源不是等待能观察到的状态。
 
 ### navigation 的 revision 围栏
 

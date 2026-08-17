@@ -1,3 +1,4 @@
+import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 
 /// One recorded call against the fake connection.
@@ -35,6 +36,13 @@ final class FakePatchbayClient implements PatchbayClient {
   handle;
 
   final List<FakeInvocation> calls = <FakeInvocation>[];
+
+  /// Every snapshot request that reached the wire; null for a whole-snapshot
+  /// read. A `--path` / `snapshot wait` test asserts on these, because the
+  /// CLI's job ends at the wire and only what went out proves the option
+  /// arrived in the declared shape.
+  final List<PatchbaySnapshotRequest?> snapshotRequests =
+      <PatchbaySnapshotRequest?>[];
   int catalogReads = 0;
   bool closed = false;
 
@@ -53,7 +61,22 @@ final class FakePatchbayClient implements PatchbayClient {
   }
 
   @override
-  Future<Map<String, Object?>> snapshot() async => snapshotData;
+  Future<Map<String, Object?>> snapshot({
+    PatchbaySnapshotRequest? request,
+  }) async {
+    snapshotRequests.add(request);
+    if (request == null) return snapshotData;
+    // The real selection resolver, not a re-implementation: a CLI test asserts
+    // how the answer is rendered and classified, and it can only do that
+    // against the shape the host actually serves.
+    return <String, Object?>{
+      'schemaVersion': 1,
+      'selection': PatchbaySnapshotSelection.resolve(
+        snapshotData,
+        request.path,
+      ).toJson(),
+    };
+  }
 
   @override
   Future<Map<String, Object?>> invoke({

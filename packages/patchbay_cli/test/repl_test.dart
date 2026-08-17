@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:test/test.dart';
 
@@ -39,9 +40,9 @@ final class _FakeClient implements PatchbayClient {
   }
 
   @override
-  Future<Map<String, Object?>> snapshot() async => <String, Object?>{
-    'source': 'appRecorded',
-  };
+  Future<Map<String, Object?>> snapshot({
+    PatchbaySnapshotRequest? request,
+  }) async => <String, Object?>{'source': 'appRecorded'};
 
   @override
   Future<Map<String, Object?>> invoke({

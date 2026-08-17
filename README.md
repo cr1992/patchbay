@@ -156,7 +156,7 @@ $ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '138
 
 | Capability | What Patchbay provides |
 |---|---|
-| **State** | Typed `snapshot`, every value carrying its fact source (app-recorded / command echo / device-reported / UI-observed) |
+| **State** | Typed `snapshot`, every value carrying its fact source (app-recorded / command echo / device-reported / UI-observed); select one field by dot path, or have the app wait until a field meets a condition |
 | **Domain commands** | Consumer-registered domain commands call existing controllers directly; long flows run as jobs (admission / events / terminal state) |
 | **UI operations** | Text input, Semantics actions, three diagnostic trees, capture, and conditional waits — only against explicitly opened targets |
 | **Logs** | query / tail / export, redacted uniformly at every exit |

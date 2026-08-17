@@ -34,8 +34,16 @@ final class PatchbayDirectClient {
   Future<Map<String, Object?>> catalog() =>
       _call('catalog', _expectedIdentity.toJson());
 
-  Future<Map<String, Object?>> snapshot() =>
-      _call('snapshot', _expectedIdentity.toJson());
+  /// [request] is the optional selection / wait object, forwarded verbatim.
+  /// [deadline] carries the wait budget the same way [invoke] does, so a
+  /// server-side snapshot wait is not cut short by the ordinary socket budget.
+  Future<Map<String, Object?>> snapshot({
+    Map<String, Object?>? request,
+    Duration? deadline,
+  }) => _call('snapshot', <String, Object?>{
+    ..._expectedIdentity.toJson(),
+    if (request != null) 'request': request,
+  }, deadline: deadline);
 
   /// [deadline] declares how long the caller is prepared to wait for a
   /// long-poll command. The host clamps it to its own ceiling; the socket wait

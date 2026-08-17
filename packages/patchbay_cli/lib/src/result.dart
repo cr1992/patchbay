@@ -89,6 +89,24 @@ String patchbayResponseSummary(Map<String, Object?> value) {
     return 'artifact=${artifact['path']} length=${artifact['length']} '
         'verified=true';
   }
+  // A selected snapshot, matched on its own shape rather than on the key
+  // alone: the whole-snapshot read is consumer JSON, and a consumer free to
+  // publish a `selection` key must not be able to make this line lie.
+  if (value['selection'] case {
+    'path': final String path,
+    'found': final bool found,
+  }) {
+    final StringBuffer line = StringBuffer('path=$path found=$found');
+    if (found) {
+      line.write(' value=${jsonEncode((value['selection']! as Map)['value'])}');
+    } else {
+      line.write(' miss=${(value['selection']! as Map)['miss']}');
+    }
+    if (value['wait'] case {'outcome': final Object outcome}) {
+      line.write(' wait=$outcome');
+    }
+    return line.toString();
+  }
   if (value case {
     'applicationId': final Object app,
     'appInstanceId': final Object instance,
