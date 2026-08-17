@@ -59,7 +59,7 @@ warning，`--dry-run` 就退 65，和 error 一样发不出去；排版则是 CI
 脚本只在本地判排版，analyze / test / codegen 仍看 CI。GitLab（`.gitlab-ci.yml`）与 GitHub
 Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
 
-- [ ] `dart_packages` —— 排版门禁 + 三个纯 Dart 包 `dart analyze --fatal-infos` + `dart test`
+- [ ] `dart_packages` —— 排版与规划一致性门禁 + 三个纯 Dart 包 `dart analyze --fatal-infos` + `dart test`
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` + `flutter test`
 - [ ] `codegen_drift` —— `wire_codegen.dart --check` 与 `command_codegen.dart --check` 均无生成物漂移
 - [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，三个 job 与上面一一对应）
@@ -73,6 +73,7 @@ Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
 $ for p in patchbay patchbay_cli patchbay_transport; do
     (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test)
   done
+$ dart run tool/check_planning.dart
 $ (cd packages/patchbay_flutter && flutter pub get && flutter analyze && flutter test)
 $ (cd packages/patchbay_flutter/example && flutter pub get && flutter test)
 $ dart run packages/patchbay/bin/wire_codegen.dart \

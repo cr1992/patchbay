@@ -21,6 +21,7 @@ dart_packages:
     # 解析与否结果一致（patchbay_flutter 的 analysis_options include 未解析会打 warning，
     # 只是提示，不参与判定）。放在最前面是为了快速失败。
     - dart format --output=none --set-exit-if-changed .
+    - dart run tool/check_planning.dart
     - |
       for p in patchbay patchbay_cli patchbay_transport; do
         echo "== packages/$p =="
