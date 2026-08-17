@@ -11,8 +11,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  patchbay:
-    path: ../patchbay
+  patchbay: ^0.2.1
 
 dev_dependencies:
   flutter_test:

@@ -275,6 +275,21 @@
   `lifecycleState=unknown`，读起来像是关于设备的结论，而它只在中间那种情况下为真。host 声明了能力
   却不兑现，单列 `capabilityNotHonoured` 警告——要归档的 host bug，不是停止调试的理由，退出码仍是 `0`。
 
+- **定版脚本 `release_prep`（`dart run packages/patchbay/bin/release_prep.dart`）。** 把定版四件套
+  ——四包 `version` 一致 bump、根 CHANGELOG 落款、`example/pubspec.lock` 刷版本、兼容矩阵新行
+  ——加上 pub 发布链的静态门，做成两个模式：`--check` 只读幂等、红绿即结论，`--apply` 只改文件、
+  **不打 tag、不推送、不发布**，改完自动重跑判定并打印人工清单与按包间依赖推导出的发布顺序。
+
+  硬检查是有来历的：`example/pubspec.lock` 是 `0.2.0` 定版漏刷的那一项，兼容矩阵行是 `0.2.1`
+  打完 tag 忘了回填的那一项，两项都不降级成提示。pub 侧各项按实测定级——`dart pub publish
+  --dry-run` **只要有一条 warning 就退 65**，所以缺 README / CHANGELOG / repository、
+  description 不在 60–180 字符，一律按「挡发布」对待。发布开关 `publish_to: none` 单列一项，
+  默认不动，只有显式 `--apply --enable-publish` 才删。
+
+- **四包各留一份 `CHANGELOG.md` 与 `LICENSE`。** pub.dev 每个包页的 Changelog tab 读的是包内那份，
+  仓根这份它看不到。包内 CHANGELOG 由 `release_prep --apply` 从本文件派生（已发布版本段原样拷贝，
+  `Unreleased` 段不带过来），正文仍只在本文件维护一份，不要手改包内那份。
+
 ### Changed
 
 - **`PatchbayDirectSnapshotSource` 改为接受一个可选位置参数**（`Future<Map<String, Object?>>
@@ -283,6 +298,17 @@
   不改则在此处编译失败，不会静默改变行为。`PatchbayDirectHost` 只校验选择器是不是 JSON 对象，
   不解释其内容——选择器的形状是协议包的规则，传输层再解一遍就是第二个可以与 VM Service 路径
   各说各话的解码器。snapshot 消息多出的 `request` 是唯一可选键，其余未知键照旧 fail-closed。
+
+- **`0.3.0` 起四包发布到 pub.dev（`0.x` 语义：`^0.3.0` 接纳 `0.3.x`，不跨 minor）。** 为此四包
+  互相之间的 path 依赖改成 hosted 约束（`patchbay_flutter` 依赖 `patchbay: ^0.x.y`），仓内解析
+  靠随包提交的 `pubspec_overrides.yaml` 落到工作树——两处一致由 `release_prep` 的
+  `internal-dep-constraints` / `local-overrides` 兜住，`pubspec_overrides.yaml` 因此从
+  `.gitignore` 里放了出来（它不会进发布包）。
+
+  **对仍用 git pin 的接入方是破坏性变化**：pub 不允许同一个包在一次解析里既来自 git 又来自
+  hosted，所以「四包全用 git ref pin」在 `0.3.0` 上会直接版本求解失败。两条路二选一——整体改用
+  pub.dev 版本，或在自己仓的**根** pubspec 加 `dependency_overrides` 把四包统一指回同一 git ref。
+  口径见 [docs/release-checklist.md](docs/release-checklist.md) 第 8 节。
 
 - **安装文档改按形态组织（`docs/guide.md` 安装节）。** 原来只给一条 `dart pub global activate`
   命令，漏掉了两件每个新用户都会踩的事：`$HOME/.pub-cache/bin` 默认不在 PATH 上（装完了
