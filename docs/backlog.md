@@ -41,6 +41,8 @@
 | PB-040-20 | CHANGELOG 碎片化：每 MR 一文件 + `release_prep` 聚合 | 0.3.0 并行分支持续冲突根 CHANGELOG | 0.4.0 | 实现中 | 规范与 MR 流程已落地，自动聚合待实现 |
 | PB-040-21 | 统一执行证据模型：区分未发送、已发送未确认、同值无变化、设备已确认 | DP 同值写入时设备不回报，已造成回归误判 | 0.4.0 | 待裁决 | [命令契约](proposals/0.4.0/command-contracts.md)；DG-040-05 |
 | PB-040-22 | command/job 响应 schema | `--json` 只稳定外层信封，自由 `Map` 仍迫使脚本到处判空 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
+| PB-040-23 | 调试轨迹持久化：以 traceId 记录跨命令 session、请求/响应、job、执行证据、人工标记与 artifact，支持查看、导出和 diff | 一次调试的细节目前散落在终端历史、临时 JSON 和 App 内存中，无法复盘或比较回归 | 0.4.0 | 已排期 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
+| PB-040-24 | 从调试轨迹生成 scenario 并受控回放 | 跑通的操作链需要沉淀为自动化，但原样复用旧 session、generation 和敏感参数存在误操作风险 | 0.4.0 | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md)；DG-040-06 |
 
 ## 文档债（快赢，可随任意批次走）
 
@@ -57,6 +59,7 @@
 | DG-040-02 | 自动 keep-screen-on：默认行为、关闭出口与静默释放 | 0.4.0 | 待裁决 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
 | DG-040-03 | DevTools net 画像的采集前脱敏口径 | 0.4.0 | 待裁决 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md) |
 | DG-040-05 | 执行证据词表、job 终态和 CLI 退出码的边界 | 0.4.0 | 待裁决 | [命令契约](proposals/0.4.0/command-contracts.md) |
+| DG-040-06 | 轨迹 recorder 与实际回放的交付边界；写操作确认、目标重解析、敏感值重新注入和失败停止语义 | 0.4.0 | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
 
 ## 维护规则
 

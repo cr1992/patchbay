@@ -23,6 +23,7 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 - [Manifest 与逐屏巡检](0.4.0/manifest-navigation.md)
 - [Capture、snapshot revision 与 diff](0.4.0/visual-evidence.md)
 - [DevTools perf 与 net 画像](0.4.0/devtools-profiling.md)
+- [调试轨迹持久化与受控回放](0.4.0/debug-traces.md)
 
 新增提案从 [`_template.md`](_template.md) 复制。Proposal 被接受后，将跨版本仍有效的结论同步进
 `docs/design.md`；版本特有的取舍继续留在 Proposal 中。
