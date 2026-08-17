@@ -1,6 +1,6 @@
 # 0.4.0 命令契约与执行证据
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-040-05、PB-040-06、PB-040-07、PB-040-08、PB-040-21、PB-040-22
 >
@@ -48,11 +48,31 @@ name + sideEffects + gates + requestSchema + responseSchema
 - `terminal`：job 终态返回；按 `completed/failed/cancelled` 分别声明 payload；
 - 未声明字段默认拒绝。确需开放扩展时必须显式声明 `additionalProperties`，不能靠 validator 漏检；
 - “字段不适用”用变体表达，“值未知”用显式可空表达，禁止二者都退化成缺字段；
-- schema 本身进入 catalog digest，调用前目录复核继续覆盖请求和响应两面。
+- schema 作为 descriptor 的一部分进入 catalog digest，调用前目录复核继续覆盖请求和响应两面。
+
+`catalogDigest` 的 `covers` **保持 `["commands"]` 不变**。摘要是对 `commands` 数组逐条递归规范化后
+算出来的，未知嵌套字段照样参与计算，两端都拿收到的目录原文重算，所以 `responseSchema` 天然被覆盖，
+老 CLI 复算仍得同一个值。反过来，`isRecomputable` 要求 `covers` 恰好是 `["commands"]`——新增一个
+covers 条目才会让老 CLI 整份降级 `unsupported`。只有将来摘要要覆盖 `commands` 以外的区域时，才新增
+covers 项。
+
+`schemaMode` 是**逐命令**而不是逐 host 的：新 host 上仍会有没声明 `responseSchema` 的接入方命令，
+这些命令即使在新 host 上也是 `legacyUnvalidated`。否则 `responseSchemas` capability 就变成协议层
+替接入方的每条命令背书。
 
 host 在 adapter 回程、写入 job ledger 前校验；CLI 在收到信封后按同一 descriptor 表面复核。任一层
 发现必填字段缺失、类型错误、未知变体或额外字段，返回 `providerProtocolViolation`，`details.reason`
 使用封闭值：`missingField`、`unexpectedNull`、`wrongType`、`unknownVariant`、`unknownField`。
+
+## CLI 生成面的边界（PB-040-06、PB-040-07）
+
+CLI 与 host **分开部署**，CLI 不可能从运行时 catalog 生成自己的解析表——它必须在拨号之前就能解析
+argv，也必须能对着一个从没见过的接入方目录工作。所以“由 descriptor 生成”只覆盖**协议自有命令**：
+`ui.*`、`navigation.*`、`patchbay.*` 这些由本仓四个包定义的命令，从仓内 descriptor 源生成 CLI 注册、
+帮助与文档表。接入方命令继续走 `exec <service-command>`，运行时可用性仍由 catalog 决定。
+
+CLI 侧的命令表因此仍然是**语法**，不是能力清单；本提案消除的是同一份语法在多处手写，不是把语法
+和能力合并成一张表。
 
 ## 执行证据
 
@@ -71,12 +91,36 @@ host 在 adapter 回程、写入 job ledger 前校验；CLI 在收到信封后�
 
 - `notSent`：有证据表明发送动作未发生；终态必须为 `failed`。
 - `sentUnconfirmed`：发送动作已发生，但确认预算内未观察到设备事实；要求确认的命令必须 `failed`，
-  允许弱确认的命令可 `completed`，但 descriptor 必须显式声明该策略。
+  允许弱确认的命令可 `completed`，但 descriptor 必须显式声明 `weakConfirmationCompletes: true`，
+  默认为否。
 - `unchanged`：发送前已有可信的同值证据，且发送后没有相反设备事实；可以 `completed`。
 - `deviceConfirmed`：存在 `deviceReported` 或 descriptor 明示可接受的更强观测；可以 `completed`。
 
 `observedAtMs` 只在确有观测时间时出现，否则为 `null`。`reasonCode` 是命令 schema 声明的封闭值，
 不得塞自由文本。CLI 退出码由 job 终态决定，不能只看 `classification` 猜成功。
+
+### `unchanged` 的前置证据必须可判定
+
+“可信的同值证据”若不给形状，就是一句谁都可以说的话——而同值写入设备不回报，正是已经造成回归
+误判的那个场景。所以判定 `unchanged` 的 payload 必须同时给出：
+
+- `priorValueSource`：封闭值 `deviceReported | appRecorded`；
+- `priorObservedAtMs`：该同值证据的观测时刻。
+
+且 `priorObservedAtMs` 必须落在 descriptor 声明的 `unchangedEvidenceMaxAgeMs` 之内。任一条不满足，
+host 按 `providerProtocolViolation` 拒绝，`details.reason` 用既有封闭值。
+
+### 确认预算属于 descriptor，不是等待预算
+
+需要确认的命令在 descriptor 上声明 `confirmationBudgetMs`。它与 CLI `--wait` 的等待预算是两件事：
+前者是“多久没看到设备事实就判 `sentUnconfirmed`”，后者是“调用方还愿意等多久”。两者混用会让
+“确认失败”和“我等得不够久”重新变得不可区分，而这正是本提案要消除的那类歧义。
+
+### 与既有 `payload.dispatched` 的关系
+
+0.3.x 已有接入方用 `payload.dispatched: false` 表达“没发出去”，CLI 也已按它判类型化失败。它是
+`notSent` 的遗留投影，本版不移除。两者同时出现且矛盾时，**以 `execution` 为准**，并在 `details` 里
+记 `legacyDispatchedConflict`；退出码语义不变。不写这条，同一份 payload 会有两套事实。
 
 ## 兼容与降级
 
@@ -90,24 +134,43 @@ host 在 adapter 回程、写入 job ledger 前校验；CLI 在收到信封后�
 - validator 错误只返回字段路径、reason 和期望类型，不回显 sensitive 值。
 - retry 仅适用于 descriptor 标记幂等的 external 命令，并按 requestId 去重。
 - audit sink 只记录命令名、requestId、参数形状、门结果和执行分类；默认不记录原值。
-- schema 深度、字段数和错误条数必须有固定上限，避免恶意 payload 放大内存与输出。
+- schema 最大嵌套深度为 12、单份 schema 最多 256 个字段、一次校验最多返回 20 条错误；超过上限在注册
+  或校验边界稳定拒绝，避免恶意 payload 放大内存与输出。
+- 允许 `unchanged` 的 descriptor 必须显式声明 `unchangedEvidenceMaxAgeMs`，没有全局默认值；合法范围为
+  `1..300000`。需要设备确认的 descriptor 同样必须显式声明 `confirmationBudgetMs`，合法范围为
+  `1..120000`。把这两个时间预算省略或写出范围都属于 descriptor 无效，不能拖到运行时猜默认值。
 
 ## 验证
 
-- registry 单测证明目录、dispatcher、CLI/help/docs 来自同一注册单元。
+- registry 单测证明目录、dispatcher、CLI/help/docs 来自同一注册单元；并断言生成面只包含协议自有
+  命令，接入方命令不进 CLI 语法表。
 - 对必填缺失、可空、未知字段、未知变体、敏感值和资源上限逐项失败注入。
-- 0.3.x fixture 覆盖新 CLI 的 `legacyUnvalidated`；0.4 host fixture 覆盖老 CLI 松读。
+- `unchanged` 缺 `priorObservedAtMs`、或 `priorObservedAtMs` 超出 `unchangedEvidenceMaxAgeMs` 时，
+  各有一条 `providerProtocolViolation` 用例，`details.field` 指到具体路径。
+- 同一 payload 同时带 `execution.classification` 与矛盾的 `dispatched` 时，断言以 `execution` 为准
+  且 `details` 出现 `legacyDispatchedConflict`。
+- 0.3.x fixture 覆盖新 CLI 的 `legacyUnvalidated`，并断言混合目录里逐命令 `schemaMode` 两种值并存；
+  0.4 host fixture 覆盖老 CLI 松读。
+- **catalog digest 透明性四条**（复刻老客户端读法，不 import 当前实现）：
+  1. `covers` 恒为 `["commands"]`；
+  2. command 条目含未知嵌套字段时，两侧复算得同一摘要；
+  3. 带 `responseSchema` 的 0.4 目录喂给复刻的 0.3 reader，结果为 `verified`；
+  4. **负向**：人为多加一个 covers 条目时，复刻 reader 必须得 `unsupported`——这条把“为什么不扩
+     covers”变成会红的闸，而不是一句注释。
 - VM/direct 对同一请求返回相同 schemaMode、稳定 code、requestId 和执行证据。
 - 两个接入方各验证 `notSent/unchanged/sentUnconfirmed/deviceConfirmed`，至少一个覆盖 DP 同值写入。
 
-## 待裁决
+## 已裁决补充
 
-- descriptor 如何声明“允许弱确认完成”，默认必须为否。
-- `uiObserved` 是否允许某些命令归类为 `deviceConfirmed`，还是只能作为领域成功证据。
-- schema 资源上限的具体数值。
+- 0.4.0 中 `uiObserved` **不能**把执行分类升级为 `deviceConfirmed`，只能作为领域成功证据；设备确认必须
+  来自 `deviceReported`。未来若出现必须放宽的真实用例，先修改本 Proposal 并重新评审。
+- schema 与时间预算已经在“安全与资源”冻结；实现只能提供更小的接入方配置，不能突破协议上限。
 
 ## 被否决方案
 
 - 把 `sentUnconfirmed` 新增为 job phase：phase 与事实强度混在一起，旧客户端也无法解释。
 - 等 TTL 到期一律报普通 timeout：丢失“已经发送”的关键事实。
 - 让 CLI 用字段是否存在推断 provider 版本：继续制造不可区分的缺失语义。
+- 为 `responseSchema` 新增 `catalogDigest` 的 covers 条目：摘要本来就递归覆盖 command 条目的全部
+  内容，新增覆盖项反而会让老 CLI 整份降级 `unsupported`——正是它想避免的后果。
+- 从活体 catalog 生成 CLI 命令表：CLI 需要在拨号前解析 argv，也要能对陌生接入方目录工作。

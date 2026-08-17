@@ -1,6 +1,6 @@
 # 0.4.0 调试轨迹持久化
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-040-23
 >
@@ -67,9 +67,12 @@ artifacts/
 - `type`、`requestId?`、`sessionRef?`、`jobId?`；
 - `factSource`、`payload`、`previousEventHash`。
 
-事件类型首版封闭为：`trace.started`、`session.observed`、`command.started`、`command.admission`、
-`job.event`、`artifact.attached`、`note.added`、`command.finished`、`trace.finished`。未知事件类型在读取侧
-保留但不解释，导出时不得丢失。
+事件类型**写入侧封闭、读取侧开放**，与 feature capability 的不对称同构：本版 writer 只能产出下列
+类型，而 reader 遇到没见过的类型必须保留但不解释、导出时不得丢失。这样后续版本（例如
+PB-040-25/26 的权限事件）新增类型时，老 reader 降级成“我不解释它”，而不是解析失败。
+
+首版写入侧封闭表：`trace.started`、`session.observed`、`command.started`、`command.admission`、
+`job.event`、`artifact.attached`、`note.added`、`command.finished`、`trace.finished`。
 
 `artifacts/` 使用 sha256 内容寻址，事件只保存摘要、长度、contentType、原 blob 元数据和相对路径。
 同一内容不重复落盘；过期 App blob 被导出前必须明确报告缺失，不能留下看似有效的空引用。
@@ -87,7 +90,11 @@ artifacts/
 - 请求参数按 descriptor 处理：sensitive 字段只记 `{redacted: true, source: stdin}`，不保存值或摘要。
 - PB-040-22 响应 schema 增加可持久化/敏感元数据；未声明字段默认不落盘。
 - 老 host 的自由 payload 默认只保存 admission、字段名集合、类型形状和 `legacyUnvalidated: true`；必须
-  显式 `--include-legacy-payload` 才能保存值，并在终端二次提示。
+  显式 `--include-legacy-payload` 才能保存值，并在终端二次提示。**非 TTY 环境下该标志直接拒绝**，
+  需要额外的显式开关才能生效——自动化和 CI 里没有终端可提示，让它静默降级成允许，等于把一条脱敏
+  边界建立在一个不会执行的确认上。
+- `ui.gesture.*` 只记录局部坐标与 generation，**转换后的全局坐标不落盘**。这条同时是未来回放的一道
+  前置闸：轨迹里没有绝对坐标，回放就不可能退化成坐标回放。
 - 网络认证头、query、body、wsUri 和本机绝对 workspace 路径永不进入 portable export。
 - `trace export` 重新执行脱敏，而不是假定本地 trace 已经适合分享。
 
@@ -96,9 +103,14 @@ artifacts/
 `trace show` 默认展示命令级时间线，可展开 request/job/artifact。`--json` 输出稳定 trace envelope；
 中断或缺失 artifact 必须显式呈现。
 
-portable export 是带 manifest、events 和可选 artifacts 的版本化 bundle，导入时校验路径穿越、大小上限、
-hash chain 和 schema。`trace diff` 先按命令名、descriptor digest 和相对顺序对齐，再比较 admission、稳定
-code、执行分类、factSource、耗时区间和 artifact 摘要；不逐字节比较时间戳、requestId 或自由文本。
+portable export 是带 manifest、events 和可选 artifacts 的版本化 bundle，**默认为目录**，打包为可选：
+导入 zip 要校验路径穿越，默认目录直接少掉这一整类攻击面。无论哪种形态都保持同一逻辑 schema。
+导入时校验路径穿越、大小上限、hash chain 和 schema。
+
+`trace diff` 先按命令名、descriptor digest 和相对顺序对齐，再比较 admission、稳定 code、执行分类、
+factSource、耗时区间和 artifact 摘要；不逐字节比较时间戳、requestId 或自由文本。**同名命令按出现
+序号配对**，多出来的记为 added/removed，不做模糊匹配——一个会猜的对齐算法会让同两条轨迹的两次
+diff 得出不同结果。
 
 ## 回放边界
 
@@ -108,9 +120,10 @@ PB-040-24 继续保留在 backlog，但不进入 0.4.0。具体前置与候选�
 
 ## 预算与生命周期
 
-- 默认按 trace 数、总字节和最长保留天数三重限制；达到上限先拒绝新 trace，不自动删除未导出的轨迹。
+- 默认最多保留 50 条 trace、30 天、合计 2 GiB，任一上限先到即拒绝新 trace，不自动删除未导出的轨迹。
 - `trace prune` 默认只删超过策略且已结束的轨迹，支持 `--dry-run`；活动轨迹和显式 pin 的轨迹不删。
-- 单事件、单 artifact、单 bundle 和导入解压后的总大小均有硬上限。
+- 单事件编码后最大 256 KiB；单 artifact 沿用 CLI 既有 64 MiB 下载上限；单 bundle 及导入解压后的总
+  大小最大 2 GiB。配置只能收紧这些数值，不能放宽。
 - trace owner 锁带 PID 与创建时间，但 PID 存活只证明 writer 可能存在；过期锁需显式 recover。
 
 ## 兼容与依赖
@@ -120,22 +133,28 @@ PB-040-24 继续保留在 backlog，但不进入 0.4.0。具体前置与候选�
 - 权限状态与系统弹窗只有在 PB-040-25/26 落地后才能形成完整 interruption 事件；此前 trace 必须标记
   `externalInterruptionUnknown`，不能把普通超时当成权限结论。
 - audit sink 与 trace 共用事件投递接口：audit 是脱敏摘要投影，trace 是由操作者显式开启的详细时间线，
-  两者不能各自拦截 CLI 再形成两套事实。
+  两者不能各自拦截 CLI 再形成两套事实。“投影”是可测的关系而不是措辞：audit 从同一个 emit 点取脱敏
+  子集，测试断言**任何一条 audit 记录都能在同一 traceId 的事件流里找到对应事件**。否则两者会各自
+  演化，最后谁也不知道哪一份是真的。
 - VM/direct 写入相同事件 schema；transport 只作为事件字段，不改变命令结果。
 
 ## 验证
 
 - 单测覆盖并发 writer、序号、原子 manifest、尾部半行、hash chain、资源上限和 prune dry-run。
+- 断言每条 audit 记录都能在同一 traceId 的事件流中找到对应事件（投影关系，不是两套事实）。
+- 断言非 TTY 下 `--include-legacy-payload` 被拒绝，而不是静默按允许处理。
+- 断言 `ui.gesture.*` 事件里没有全局坐标。
+- 断言 reader 遇到未知事件类型时保留原样且导出不丢失。
+- 同名命令重复出现时 diff 结果可复现（同一对轨迹跑两次得同一结果）。
 - golden 覆盖 start → 多命令 → job → artifact → stop 的完整 NDJSON 与 portable export。
 - 敏感值 mutation 测试证明 stdin、token、wsUri 和 legacy payload 默认不落盘、不进入 export。
 - 0.3.x fixture 验证 legacy 形状；0.4 fixture 验证 response schema 与执行证据完整记录。
 - launcher 断连/重连后 trace 连续，且 session 变化可见。
 - 两个接入方分别完成一次真机轨迹导出与 diff；实际写回放需另做专项真机验收。
 
-## 待裁决
+## 已裁决预算
 
-- 默认保留天数、trace 数、总字节、单 artifact 与 bundle 上限。
-- portable bundle 使用 zip 还是目录；无论选择哪种都必须保持同一逻辑 schema。
+- 保留天数、trace 数、总字节、单事件、单 artifact 与 bundle 上限已经在“预算与生命周期”冻结。
 
 ## 被否决方案
 
@@ -143,3 +162,6 @@ PB-040-24 继续保留在 backlog，但不进入 0.4.0。具体前置与候选�
 - host 侧作为唯一持久化位置：App 重启即丢失，且无法覆盖 session 切换和 CLI 本地失败。
 - 默认保存所有自由 payload：在 response schema 和敏感元数据稳定前风险不可接受。
 - 原样重放录制请求：旧 generation/session/requestId 会误击或制造假幂等。
+- 靠终端二次提示兜住 legacy payload 的脱敏边界：自动化环境里那个提示根本不会执行。
+- 事件类型读写两侧都封闭：后续版本加类型会让老 reader 解析失败，而不是降级成不解释。
+- 把全局坐标写进手势事件：等于给未来的回放留一个绝对坐标入口。
