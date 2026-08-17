@@ -2,7 +2,16 @@
 
 本文件记录尚未发布和已发布版本中会影响接入方、协议行为或安全边界的变化。
 
-## Unreleased
+## 0.3.0 - 2026-08-17
+
+发布批次：四包首次发到 pub.dev，随版依赖从 path 改成 hosted 约束——**仍用 git pin 的接入方
+不能只改 tag 号**，两条迁移路径见本节 Changed 与[发版清单](docs/release-checklist.md)第 8 节。
+功能面围绕「App 不配合时也问得出话来」：保持亮屏开关与 repl 的 lifecycle 横幅（息屏即 UI 面
+全拒的解法）、snapshot 字段选择与领域条件等待、widget inspector 开关、体检命令 `doctor`、
+会话粘性、UI 目标声明对账 `ui verify-manifest`。协议侧补齐演进套件（`serverVersion` /
+feature capabilities / catalog digest / 跨版本兼容 golden），工程侧补上定版脚本 `release_prep`
+与 tag 触发的 CLI 二进制发布流水线。含行为变更：`PatchbayDirectSnapshotSource` 的构造签名，
+迁移说明见本节 Changed。
 
 ### Added
 
