@@ -22,6 +22,21 @@
 6. 本仓公开：文档与注释不记录内网域名、内部项目与业务线名。需要指代时写「内网主仓」
    「接入方」；内网地址走 CI 变量或 remote 名，不写字面值。
 
+## 规划与技术方案
+
+[backlog](docs/backlog.md)、版本计划和 [Proposal](docs/proposals/README.md) 分别维护事项、排期和技术
+契约，不重复维护同一字段。范围或方案 MR 必须遵循[规划与交付治理](docs/planning.md)：涉及公共 API、
+协议/JSON、状态机、跨包边界、默认安全行为或 design-gate 的条目，正式实现前必须有已接受 Proposal。
+
+修改规划文档后运行：
+
+```console
+$ dart run tool/check_planning.dart
+```
+
+CI 会阻止 backlog 与版本范围不一致、重复编号、非法状态、悬空 Proposal/design-gate，以及待裁决条目
+没有方案入口。实现偏离已接受 Proposal 时，先修改方案并重新评审，不能只在实现 MR 中口头解释。
+
 ## CHANGELOG 碎片
 
 会影响使用者的 MR 必须在 `changelog.d/` 新增一个独占碎片，文件名绑定版本计划/backlog 编号和

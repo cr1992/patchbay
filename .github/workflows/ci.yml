@@ -36,6 +36,8 @@ jobs:
       # 只是提示，不参与判定）。放在 analyze/test 之前是为了快速失败。
       - name: 排版对齐（全仓 dart format）
         run: dart format --output=none --set-exit-if-changed .
+      - name: 规划文档一致性
+        run: dart run tool/check_planning.dart
       - name: analyze + test（三个纯 Dart 包）
         run: |
           # GH 共享 runner 比 GitLab podman runner 慢，VM Service 跨进程测试首跑会顶到

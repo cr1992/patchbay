@@ -30,7 +30,7 @@ CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什
 | 形态 | 任意目录可用 | 启动 + 一次 `catalog` 往返 | 适用 |
 |---|---|---|---|
 | Release 预编译二进制（`0.3.0` 起） | 是 | ~45 ms | 只用 CLI；机器上不必有 Dart SDK |
-| `dart pub global activate` | 是 | ~160 ms | 跟着 tag 走的接入方 |
+| `dart pub global activate` app snapshot | 是 | ~160 ms | 需要 Dart SDK 的兼容形态 |
 | 仓内 `dart run bin/patchbay.dart` | 要写全路径 | ~540 ms | 改 CLI 本身 |
 
 > 数字是 macOS arm64 对同一个 example host 各连 8 次的中位数，同机同链路，只用于比较量级；
@@ -42,7 +42,7 @@ CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什
 > 没编译。上面前两种形态都不受当前目录影响——这是推荐全局安装的主要理由，快只是附带的。写绝对
 > 路径的 `dart run <仓路径>/bin/patchbay.dart` 同样不受影响，但它长且仍然按条付 JIT 启动。
 
-#### 从 tag 安装（当前形态）
+#### pub global app snapshot（兼容形态）
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
@@ -55,8 +55,10 @@ $ patchbay --help
 （pub 自己会在安装末尾打这条警告）。把 `export` 那行写进 shell 配置，否则 `patchbay` 会
 「装完了却找不到」。
 
-装好的是一个冻结在该 tag 上的 app snapshot：换 tag 要重新 `activate`，跑起来不会再解析依赖。
-版本升级时同时更新 App 依赖和全局 CLI，避免 schema 或命令面漂移。
+装好的是一个冻结在该 tag 上、由 `dart` runtime 加载的 app snapshot：换 tag 要重新
+`activate`，跑起来不会再解析依赖。它不是 `dart compile exe` 生成的独立原生 AOT 二进制；
+不要把这条形态的耗时当作原生 AOT 基准。版本升级时同时更新 App 依赖和全局 CLI，避免 schema
+或命令面漂移。
 
 `0.3.0` 起 `patchbay_cli` 会发布到 pub.dev，届时 `dart pub global activate patchbay_cli` 即可，
 不再需要 `--source git`。
@@ -71,11 +73,16 @@ $ patchbay --help
 $ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
 $ shasum -a 256 patchbay-0.3.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
 $ chmod +x patchbay-0.3.0-macos-arm64
+$ mkdir -p ~/.local/bin
 $ mv patchbay-0.3.0-macos-arm64 ~/.local/bin/patchbay
 ```
 
 Release 资产不携带可执行位，`chmod +x` 是必需的一步。用**浏览器**下载的 macOS 产物还会被
 Gatekeeper 隔离，`xattr -d com.apple.quarantine <文件>` 解除；用 `curl` 下载不会。
+
+如果目标是消除 Dart runtime 启动并验证 AOT 性能，必须使用本节产物。仅看到一个名为
+`patchbay` 的全局命令并不能证明它是 AOT：`~/.pub-cache/bin/patchbay` 通常是启动 app snapshot
+的 shell wrapper。
 
 #### 开发 CLI 本身
 

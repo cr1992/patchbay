@@ -69,14 +69,27 @@ instead.
 
 ### 2. Install the CLI
 
+The following installs the native AOT GitHub Release artifact on macOS arm64. See the
+[installation guide](docs/guide.md#cli) for other platforms and checksum verification:
+
 ```console
-$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+$ mkdir -p ~/.local/bin
+$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64 \
+    -o ~/.local/bin/patchbay
+$ chmod +x ~/.local/bin/patchbay
 $ patchbay --help
 ```
 
-If the global command is not on your `PATH`, add the pub cache `bin` directory to `PATH` as Dart
-instructs.
+Make sure `~/.local/bin` is on `PATH`. `dart pub global activate patchbay_cli` remains a compatible
+alternative, but it installs an app snapshot loaded by the Dart runtime, not a standalone native
+AOT executable; do not use it to measure native AOT startup.
+
+When that compatibility form is required, keep it pinned to the same tag:
+
+```console
+$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
+    --git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+```
 
 ### 3. Register at the composition root
 
