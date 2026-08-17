@@ -27,7 +27,15 @@ final class PatchbayDirectIdentity {
 typedef PatchbayDirectIdentitySource =
     Future<PatchbayDirectIdentity> Function();
 typedef PatchbayDirectCatalogSource = Future<Map<String, Object?>> Function();
-typedef PatchbayDirectSnapshotSource = Future<Map<String, Object?>> Function();
+
+/// Serves the snapshot RPC, including the optional selection / wait request.
+///
+/// The raw wire object is forwarded rather than decoded here: the shape belongs
+/// to the protocol package, and a transport that parsed its own copy would be a
+/// second decoder free to disagree with the VM Service path about what a
+/// selector means. Null is the plain "whole snapshot" read.
+typedef PatchbayDirectSnapshotSource =
+    Future<Map<String, Object?>> Function([Map<String, Object?>? request]);
 typedef PatchbayDirectInvocationSource =
     Future<Map<String, Object?>> Function(
       String command,

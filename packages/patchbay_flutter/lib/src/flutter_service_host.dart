@@ -372,7 +372,9 @@ final class PatchbayFlutterServiceHost {
 
   Future<Map<String, Object?>> dispatchCatalog() => _host.dispatchCatalog();
 
-  Future<Map<String, Object?>> dispatchSnapshot() => _host.dispatchSnapshot();
+  Future<Map<String, Object?>> dispatchSnapshot([
+    Map<String, Object?>? request,
+  ]) => _host.dispatchSnapshot(request);
 
   Future<Map<String, Object?>> dispatchInvoke(
     String command,

@@ -94,6 +94,14 @@ enum PatchbayFriendlyCommand {
     null,
     <String>['snapshot'],
     summary: 'Read the transport-level Patchbay snapshot.',
+    usageSuffix: '[--path <dot.path>]',
+    target: PatchbayCommandTarget.clientSnapshot,
+  ),
+  snapshotWait(
+    null,
+    <String>['snapshot', 'wait'],
+    summary: 'Wait App-side for a condition on one snapshot field.',
+    usageSuffix: '<dot.path> --until <condition> [<json-value>]',
     target: PatchbayCommandTarget.clientSnapshot,
   ),
   exec(
@@ -455,7 +463,6 @@ abstract final class PatchbayFriendlyCommandRegistry {
     final Map<String, Object?> arguments = switch (spec) {
       PatchbayFriendlyCommand.identity ||
       PatchbayFriendlyCommand.catalog ||
-      PatchbayFriendlyCommand.snapshot ||
       PatchbayFriendlyCommand.uiWidgetTree ||
       PatchbayFriendlyCommand.uiRenderTree ||
       PatchbayFriendlyCommand.uiFocusTree ||
@@ -465,6 +472,15 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.sessionsPrune => _noTail(
         tail,
         const <String, Object?>{},
+      ),
+      // An omitted `--path` produces no arguments at all, which is what makes
+      // the whole-snapshot read stay exactly the request it always was.
+      PatchbayFriendlyCommand.snapshot => _noTail(tail, <String, Object?>{
+        if (options.option('path') case final String path) 'path': path,
+      }),
+      PatchbayFriendlyCommand.snapshotWait => _snapshotWaitArguments(
+        tail,
+        options,
       ),
       PatchbayFriendlyCommand.sessionUse => _sessionUseArguments(tail, options),
       // The service command already consumed the single positional above.
@@ -734,6 +750,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     const Set<String> friendlyOptions = <String>{
       'args',
       'stdin',
+      'path',
       'revision',
       'generation',
       'timeout-ms',
@@ -769,7 +786,6 @@ abstract final class PatchbayFriendlyCommandRegistry {
   ) => switch (spec) {
     PatchbayFriendlyCommand.identity ||
     PatchbayFriendlyCommand.catalog ||
-    PatchbayFriendlyCommand.snapshot ||
     PatchbayFriendlyCommand.jobGet ||
     PatchbayFriendlyCommand.jobCancel ||
     PatchbayFriendlyCommand.uiWidgetTree ||
@@ -795,6 +811,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
     PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
+    PatchbayFriendlyCommand.snapshot => const <String>{'path'},
+    PatchbayFriendlyCommand.snapshotWait => const <String>{
+      'until',
+      'timeout-ms',
+    },
     PatchbayFriendlyCommand.sessionUse => const <String>{'clear'},
     PatchbayFriendlyCommand.exec ||
     PatchbayFriendlyCommand.uiSemanticsTree => const <String>{'args', 'stdin'},
@@ -971,6 +992,65 @@ abstract final class PatchbayFriendlyCommandRegistry {
         'text': fromStdin ? readSensitiveInput() : tail.sublist(3).join(' '),
       'inputWasStdin': fromStdin,
     };
+  }
+
+  /// `snapshot wait <dot.path> --until <condition> [<json-value>]`.
+  ///
+  /// The condition is a flag rather than a subcommand because it is not the
+  /// thing being addressed — the path is — and only `equals` carries a value.
+  /// The value is read as a **JSON literal**, so `true` is a boolean and a
+  /// string has to be quoted: a snapshot field is typed JSON, and guessing that
+  /// a bare word means a string would silently answer a different question than
+  /// the one asked against a field that really does hold `"true"`.
+  static Map<String, Object?> _snapshotWaitArguments(
+    List<String> tail,
+    ArgResults options,
+  ) {
+    final String? until = options.option('until');
+    if (until == null) {
+      throw const FormatException(
+        'snapshot wait requires --until <exists|absent|equals>',
+      );
+    }
+    final bool comparing = until == 'equals';
+    if (tail.length != (comparing ? 2 : 1)) {
+      throw FormatException(
+        comparing
+            ? 'snapshot wait --until equals requires <dot.path> <json-value>'
+            : 'snapshot wait --until $until requires only <dot.path>',
+      );
+    }
+    return <String, Object?>{
+      'path': tail.first,
+      'until': until,
+      if (comparing) 'value': _jsonLiteral(tail[1]),
+      'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
+    };
+  }
+
+  /// One JSON literal from the command line, refused rather than guessed at.
+  ///
+  /// The error names the fix because the failing case is always the same one:
+  /// an unquoted word that JSON reads as nothing.
+  static Object? _jsonLiteral(String encoded) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(encoded);
+    } on FormatException {
+      throw FormatException(
+        'the compared value must be a JSON literal (true, 42, "text", '
+        '[…], {…}); for the string $encoded write \'"$encoded"\'',
+      );
+    }
+    if (decoded == null) {
+      // JSON has no way to say "explicitly absent", and the whole protocol
+      // reads a null as a value that is not there — which is what `absent`
+      // already asks about, without pretending null is a value to match.
+      throw const FormatException(
+        'the compared value must not be null: use --until absent instead',
+      );
+    }
+    return decoded;
   }
 
   /// `session use <session-id>` or `session use --clear`, never both.

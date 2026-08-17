@@ -106,6 +106,66 @@ void main() {
     });
 
     test(
+      'the snapshot selector is forwarded verbatim and fails closed',
+      () async {
+        client.close(force: true);
+        await host.stop();
+        Map<String, Object?>? received;
+        var reads = 0;
+        host = _host(
+          identity: identity,
+          snapshot: ([Map<String, Object?>? request]) async {
+            reads += 1;
+            received = request;
+            return _snapshotBody;
+          },
+        );
+        session = await host.start();
+        client = PatchbayDirectClient(session: session);
+
+        expect(await client.snapshot(), _snapshotBody);
+        expect(
+          received,
+          isNull,
+          reason: 'a plain read must still arrive as no selector at all',
+        );
+
+        // Verbatim, not decoded: the selector's shape is the protocol package's
+        // rule, and a transport that parsed its own copy would be a second
+        // decoder free to disagree with the VM Service path.
+        const Map<String, Object?> selector = <String, Object?>{
+          'path': 'call.session.active',
+          'until': 'equals',
+          'value': true,
+          'timeoutMs': 400,
+        };
+        expect(await client.snapshot(request: selector), _snapshotBody);
+        expect(received, selector);
+
+        final Uri uri = session.endpoint.resolve(
+          '${session.endpoint.path}/snapshot',
+        );
+        final List<_WireResponse> refused = <_WireResponse>[
+          // The one shape rule this host does keep: a selector is an object.
+          await _post(uri, <String, Object?>{
+            ...identity.toJson(),
+            'request': 'call.session',
+          }, token: session.bearerToken),
+          // An optional field does not open the message up.
+          await _post(uri, <String, Object?>{
+            ...identity.toJson(),
+            'depth': 2,
+          }, token: session.bearerToken),
+        ];
+        expect(
+          refused.map((_WireResponse response) => response.errorCode),
+          everyElement(PatchbayDirectErrorCode.protocolError.name),
+        );
+        expect(reads, 2, reason: 'a refused message must not reach the App');
+      },
+    );
+
+    test(
       'client rejects an invoke response with a different requestId',
       () async {
         client.close(force: true);
@@ -310,7 +370,7 @@ void main() {
       final Completer<void> release = Completer<void>();
       final PatchbayDirectHost host = _host(
         identity: identity,
-        snapshot: () async {
+        snapshot: ([_]) async {
           entered.complete();
           await release.future;
           return <String, Object?>{'released': true};
@@ -338,7 +398,7 @@ void main() {
     final PatchbayDirectHost host = _host(
       identity: identity,
       config: PatchbayDirectHostConfig(maxResponseBodyBytes: 128),
-      snapshot: () async => <String, Object?>{'value': 'x' * 256},
+      snapshot: ([_]) async => <String, Object?>{'value': 'x' * 256},
     );
     final PatchbayDirectSession session = await host.start();
     final _WireResponse response = await _post(
@@ -360,7 +420,7 @@ void main() {
       config: PatchbayDirectHostConfig(
         requestTimeout: const Duration(milliseconds: 100),
       ),
-      snapshot: () => pending ? never.future : Future.value(_snapshotBody),
+      snapshot: ([_]) => pending ? never.future : Future.value(_snapshotBody),
     );
     final PatchbayDirectSession session = await host.start();
     final _WireResponse response = await _post(
@@ -404,7 +464,7 @@ void main() {
         requestTimeout: const Duration(milliseconds: 100),
         maxRequestTimeout: const Duration(seconds: 30),
       ),
-      snapshot: () => Future<Map<String, Object?>>.delayed(
+      snapshot: ([_]) => Future<Map<String, Object?>>.delayed(
         const Duration(milliseconds: 400),
         () => _snapshotBody,
       ),
@@ -439,7 +499,7 @@ void main() {
         requestTimeout: const Duration(milliseconds: 50),
         maxRequestTimeout: const Duration(milliseconds: 200),
       ),
-      snapshot: () => Completer<Map<String, Object?>>().future,
+      snapshot: ([_]) => Completer<Map<String, Object?>>().future,
     );
     final PatchbayDirectSession session = await host.start();
     final Stopwatch elapsed = Stopwatch()..start();
@@ -533,7 +593,7 @@ PatchbayDirectHost _host({
     catalog: () async => <String, Object?>{
       'commands': <Object?>['probe.read'],
     },
-    snapshot: snapshot ?? () async => <String, Object?>{'state': 'ready'},
+    snapshot: snapshot ?? ([_]) async => <String, Object?>{'state': 'ready'},
     invoke:
         invoke ??
         (

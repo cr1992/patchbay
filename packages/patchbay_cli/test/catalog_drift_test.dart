@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:test/test.dart';
 
@@ -62,7 +63,9 @@ final class _ViolatedCatalogClient implements PatchbayClient {
   Future<Map<String, Object?>> identity() async => <String, Object?>{};
 
   @override
-  Future<Map<String, Object?>> snapshot() async => <String, Object?>{};
+  Future<Map<String, Object?>> snapshot({
+    PatchbaySnapshotRequest? request,
+  }) async => <String, Object?>{};
 
   @override
   Future<Map<String, Object?>> widgetTree() async => <String, Object?>{};

@@ -1,3 +1,4 @@
+import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_transport/patchbay_transport.dart';
 
 import 'client.dart';
@@ -40,7 +41,13 @@ final class PatchbayDirectConnection implements PatchbayClient {
   Future<Map<String, Object?>> catalog() => _translate(_client.catalog);
 
   @override
-  Future<Map<String, Object?>> snapshot() => _translate(_client.snapshot);
+  Future<Map<String, Object?>> snapshot({PatchbaySnapshotRequest? request}) =>
+      _translate(
+        () => _client.snapshot(
+          request: request?.toWire().toJson(),
+          deadline: request?.timeout,
+        ),
+      );
 
   @override
   Future<Map<String, Object?>> invoke({
