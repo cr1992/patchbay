@@ -25,7 +25,7 @@
 | PB-040-05 | 统一 CommandRegistry：descriptor+decoder+gate+handler+validator 过同一 dispatcher | 第二 consumer 手写 adapter 的元键坑已实证核心不机检 descriptor 语义的风险 | 0.4.0 | 已排期（P0） |
 | PB-040-06 | CLI 注册 / 帮助表改由命令 descriptor 生成 | `packages/patchbay_cli/lib/src/cli.dart` 的手写 switch 臂是 0.3.0 并行开发中最大的一类冲突源——每支加命令都改同一处 | 0.4.0 | 已排期（P0）；依赖 PB-040-05 |
 | PB-040-07 | README / 文档命令参考表由 descriptor / help 输出生成 | 双语 README 与包 README 的命令表靠人肉逐字节核对保持一致 | 0.4.0 | 已排期（P0）；依赖 PB-040-06 |
-| PB-040-08 | 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe` | dogfood（`doctor` 已实现） | 0.4.0 | 已排期（P1）；依赖 PB-040-05 |
+| PB-040-08 | 幂等 retryPolicy（external 命令按 requestId 去重）；审计 sink（可注入、记脱敏参数形状）；CLI `describe` | dogfood（`doctor` 已实现） | 0.4.0 | 已排期（P1）；依赖 PB-040-05、PB-040-22 |
 | PB-040-09 | DevTools 借用剩余两批：perf VM RPC → net 画像 | 规划稿已交仓主；第一批 inspect 开关已合入 main | 0.4.0 | perf 已排期（P1）；net **待裁决**：DG-040-03 |
 | PB-040-10 | snapshot revision / diff | dogfood（低优先级） | 0.4.0 | 已排期（P2） |
 | PB-040-11 | launcher 监督循环收编：把首个接入方项目级的重连监督（退避策略 + machine-frame 生命周期 + 断连判读）抽为 patchbay_cli 通用 `launch` 能力；会话记录 schema 增显式 pending 状态位（现依赖 consumer 侧以自身 PID 通过探活的巧劲，跨仓契约应显式化） | 首个接入方已落项目级实现并真机验证；第二接入方已集成 session store，其启动器必复踩「断连即退」 | 0.4.0 | 已排期（P0）；待首个实现烤稳与第二试点确认形态 |
@@ -38,6 +38,8 @@
 | PB-040-18 | `release_prep --apply` 时自动冻结本版协议面进兼容语料库 | `packages/patchbay_cli/test/golden/legacy_host_v0_2_0/` 一类的旧版语料是手工冻结的，版本过去后不可再生成 | 0.4.0 | 已排期（P0） |
 | PB-040-19 | command_codegen check 的样例 contract 瘦身 | `packages/patchbay/contracts/example_commands.g.dart` 208 行生成物只为喂 drift 门禁而长期入仓，应改由真实命令声明推导 | 0.4.0 | 已排期（P2）；依赖 PB-040-05 |
 | PB-040-20 | CHANGELOG 碎片化：`changelog.d/` 每 MR 一文件 + `release_prep` 聚合 | 0.3.0 每对并行分支都在根 CHANGELOG 同一处相撞，是结构性冲突源 | 0.4.0 | 实现中（P0）：规范与 MR 流程已落地，自动聚合待实现 |
+| PB-040-21 | 统一执行证据模型：区分未发送、已发送未确认、同值无变化、设备已确认，不再把“等待不到设备回报”压成一个超时 | 重度 dogfood：DP 同值写入时设备不回报，调用方无法区分“发送成功但无变化”和“根本没发出去”，已造成回归误判 | 0.4.0 | **待裁决**（P1）：DG-040-05；依赖 PB-040-22 |
+| PB-040-22 | command/job 响应 schema：descriptor 声明 accepted payload 与终态 event payload 的必填、可空和变体字段，host 与 CLI 校验 provider 返回 | 重度 dogfood：job snapshot 的 `session` 等字段时有时无；`--json` 只稳定外层信封，自由 `Map` 仍迫使脚本到处判空 | 0.4.0 | 已排期（P0）；依赖 PB-040-05 |
 
 ## 文档债（快赢，可随任意批次走）
 
@@ -53,6 +55,7 @@
 | DG-040-01 | 锚定式手势：相对比例坐标手势与「不做坐标定位」立场的边界划法 | 0.4.0 | 待裁决 |
 | DG-040-02 | 自动 keep-screen-on：默认自动还是手动，以及关闭出口与静默释放语义 | 0.4.0 | 待裁决 |
 | DG-040-03 | DevTools net 画像：请求画像的脱敏口径 | 0.4.0 | 待裁决 |
+| DG-040-05 | 执行证据模型：通用闭合词表与领域 payload 的边界；“已发送未确认”和“同值无变化”如何映射 job 终态与 CLI 退出码 | 0.4.0 | 待裁决 |
 
 ## 维护规则
 
