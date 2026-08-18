@@ -4,6 +4,7 @@
     "PatchbayBlobChunkWire",
     "PatchbayBlobMetadataWire",
     "PatchbayJobWaitResultWire",
+    "PatchbayNavigationCatalogWire",
     "PatchbaySemanticsSnapshotWire",
     "PatchbaySnapshotRequestWire",
     "PatchbayUiTargetDescriptorWire",

@@ -713,7 +713,16 @@ generation 提供。同 identifier 挂载多个实例、identifier 不存在、�
 $ patchbay ui verify-manifest ui-targets.json          # 人读：直接列出偏差条目
 $ patchbay --json ui verify-manifest ui-targets.json   # 结构化报告
 $ patchbay --json ui verify-manifest ui-targets.yaml   # 同一 schema、同一校验路径
+$ patchbay --json ui verify-manifest ui-targets.json --navigate # 明示副作用：按清单顺序逐屏巡检
 ```
+
+逐屏模式只接受 manifest 与 `navigation.catalog` 共同声明的 destination id，不接收任意 route 或
+readiness probe；每屏导航后用既有 `ui.wait navigationDestination` 封闭条件确认稳定，再读取活体 catalog /
+Semantics 对账。单屏预算默认 5 秒（`--screen-timeout-ms`，最大 120 秒），总预算默认 120 秒
+（`--total-timeout-ms`，最大 10 分钟）。默认首个失败即停止，`--continue-on-error` 才继续收集；输出始终
+保留 `visited/passed/failed/skipped` 和每屏 `reasonCode`。`--restore` 会在预算内尽力回到起始屏，恢复失败
+只增加 notice 与 `finalDestination`，不覆盖巡检本身的退出码。完整导航能力未声明时不试探，退回当前
+挂载态校验并标记 `navigationMode: unavailable`。
 
 manifest 可用 JSON 或 YAML 表达同一个 v1/v2 schema，完整 JSON 示例见
 [`docs/examples/ui-targets-manifest.json`](examples/ui-targets-manifest.json)：

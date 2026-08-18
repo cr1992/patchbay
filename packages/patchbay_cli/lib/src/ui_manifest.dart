@@ -136,6 +136,7 @@ final class PatchbayUiManifest {
   const PatchbayUiManifest(
     this.entries, {
     this.semanticsEntries = const <PatchbayUiManifestSemanticsEntry>[],
+    this.destinations = const <String>[],
   });
 
   /// Reads one manifest document, fail-closed.
@@ -216,6 +217,10 @@ final class PatchbayUiManifest {
     ]);
     return PatchbayUiManifest(
       List<PatchbayUiManifestEntry>.unmodifiable(entries),
+      destinations: List<String>.unmodifiable(<String>{
+        for (final PatchbayUiManifestEntry entry in entries)
+          if (entry.destination case final String destination) destination,
+      }),
     );
   }
 
@@ -343,11 +348,19 @@ final class PatchbayUiManifest {
       semanticsEntries: List<PatchbayUiManifestSemanticsEntry>.unmodifiable(
         semanticsEntries,
       ),
+      destinations: List<String>.unmodifiable(destinationIds),
     );
   }
 
   final List<PatchbayUiManifestEntry> entries;
   final List<PatchbayUiManifestSemanticsEntry> semanticsEntries;
+
+  /// Destination declaration order, preserved exactly for opt-in walkthroughs.
+  ///
+  /// v2 contributes every destination, including an intentionally empty one;
+  /// v1 contributes the first occurrence of each legacy destination filter.
+  /// The default single-screen verifier does not consult this list.
+  final List<String> destinations;
 
   static Object? _decodeJson(String source) {
     try {

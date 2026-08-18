@@ -318,7 +318,8 @@ enum PatchbayFriendlyCommand {
     null,
     <String>['ui', 'verify-manifest'],
     summary: 'Reconcile a declared UI target manifest against the runtime.',
-    usageSuffix: '<manifest-file>',
+    usageSuffix:
+        '<manifest-file> [--navigate] [--continue-on-error] [--restore]',
     target: PatchbayCommandTarget.localManifestVerification,
   ),
   uiTargets(
@@ -886,6 +887,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'decision',
       'confirm-system-permission',
       'emit-manifest',
+      'navigate',
+      'continue-on-error',
+      'restore',
+      'screen-timeout-ms',
+      'total-timeout-ms',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -896,6 +902,17 @@ abstract final class PatchbayFriendlyCommandRegistry {
     }
     if (options.flag('force') && options.option('output') == null) {
       throw const FormatException('--force requires --output');
+    }
+    if (spec == PatchbayFriendlyCommand.uiVerifyManifest &&
+        !options.flag('navigate') &&
+        (options.flag('continue-on-error') ||
+            options.flag('restore') ||
+            options.wasParsed('screen-timeout-ms') ||
+            options.wasParsed('total-timeout-ms'))) {
+      throw const FormatException(
+        '--continue-on-error, --restore and walkthrough timeouts require '
+        '--navigate',
+      );
     }
   }
 
@@ -923,9 +940,6 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiInspectOff ||
     PatchbayFriendlyCommand.uiInspectStatus ||
     PatchbayFriendlyCommand.blobMetadata ||
-    // Nothing about the comparison is tunable: the manifest is the whole
-    // request, and the current destination comes from the App, not a flag.
-    PatchbayFriendlyCommand.uiVerifyManifest ||
     // A repl carries connection options and `--json`, which are global rather
     // than per-command; every command option belongs on the lines it runs.
     PatchbayFriendlyCommand.repl ||
@@ -939,6 +953,13 @@ abstract final class PatchbayFriendlyCommandRegistry {
     // A release takes no lease, and a read takes nothing at all.
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
+    PatchbayFriendlyCommand.uiVerifyManifest => const <String>{
+      'navigate',
+      'continue-on-error',
+      'restore',
+      'screen-timeout-ms',
+      'total-timeout-ms',
+    },
     PatchbayFriendlyCommand.uiTargets => const <String>{'emit-manifest'},
     PatchbayFriendlyCommand.permissionCapabilities ||
     PatchbayFriendlyCommand.permissionStatus => const <String>{

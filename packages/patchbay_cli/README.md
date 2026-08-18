@@ -177,6 +177,18 @@ echoing file content. Human-readable output
 lists the discrepancy entries directly; inside `repl` each line takes only one line and reports
 counts.
 
+`--navigate` is the explicit side-effecting walkthrough mode. It visits v2 destinations in manifest
+order, asks only for destination ids declared by `navigation.catalog`, confirms each arrival with the
+closed `ui.wait navigationDestination` condition, and then runs the same reconciliation. Per-screen
+and total budgets default to 5 s and 120 s (`--screen-timeout-ms`, max 120 s;
+`--total-timeout-ms`, max 10 min). It stops after the first failure unless
+`--continue-on-error` is present. `--restore` makes a bounded best-effort return to the initial
+destination; a restore failure is a machine-readable notice and never replaces the walkthrough exit
+code. The JSON report preserves `visited`, `passed`, `failed`, `skipped`, per-screen `reasonCode`, and
+`finalDestination`. Hosts without the complete declared navigation surface retain current-screen
+verification and report `navigationMode: unavailable`; the CLI never probes support by interpreting
+an error shape.
+
 Manifest v2 keeps the namespaces independent: `kind` / `sensitive` are valid only for
 `catalogTarget`, while `semanticsIdentifier` stores only its stable identifier. A unique live match
 reports the observed `nodeId`, `generation`, and tree revision; no match is `declaredNotMounted`, and

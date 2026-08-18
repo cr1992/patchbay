@@ -547,6 +547,32 @@ ArgParser patchbayCliParser() => ArgParser()
     defaultsTo: false,
     negatable: false,
     help: 'Emit a v2 draft covering only targets mounted right now.',
+  )
+  ..addFlag(
+    'navigate',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Opt in to navigation side effects and verify every destination.',
+  )
+  ..addFlag(
+    'continue-on-error',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Continue the destination walkthrough after a screen fails.',
+  )
+  ..addFlag(
+    'restore',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Try to restore the initial destination after a walkthrough.',
+  )
+  ..addOption(
+    'screen-timeout-ms',
+    help: 'Per-destination walkthrough budget (default 5000, max 120000).',
+  )
+  ..addOption(
+    'total-timeout-ms',
+    help: 'Whole walkthrough budget (default 120000, max 600000).',
   );
 
 List<String>? _helpTopic(ArgResults parsed) {
@@ -807,6 +833,9 @@ Future<_Execution> _execute(
       final PatchbayUiManifest verified =
           manifest ?? _readUiManifest(friendly.manifestPath!);
       final Map<String, Object?> catalog = await connection.catalog();
+      if (parsed.flag('navigate')) {
+        return _walkUiManifest(connection, catalog, verified, parsed);
+      }
       String? destination;
       if (verified.usesDestinations) {
         final Map<String, Object?> current = await _invokeAgainstCatalog(
@@ -981,6 +1010,720 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+const String _manifestWalkthroughSchema = 'uiManifestWalkthroughReport';
+const Duration _defaultManifestScreenBudget = Duration(seconds: 5);
+const Duration _maximumManifestScreenBudget = Duration(minutes: 2);
+const Duration _defaultManifestTotalBudget = Duration(minutes: 2);
+const Duration _maximumManifestTotalBudget = Duration(minutes: 10);
+
+/// Runs the explicitly side-effecting, destination-ordered manifest audit.
+///
+/// Navigation admission remains consumer-owned: this code only asks for ids
+/// that appeared in both the manifest and `navigation.catalog`. A successful
+/// `navigation.go` is followed by the closed `navigationDestination` wait;
+/// arbitrary readiness expressions never enter the request.
+Future<_Execution> _walkUiManifest(
+  PatchbayClient connection,
+  Map<String, Object?> initialCatalog,
+  PatchbayUiManifest manifest,
+  ArgResults parsed,
+) async {
+  final Duration screenBudget = _manifestWalkthroughBudget(
+    parsed,
+    'screen-timeout-ms',
+    fallback: _defaultManifestScreenBudget,
+    maximum: _maximumManifestScreenBudget,
+  );
+  final Duration totalBudget = _manifestWalkthroughBudget(
+    parsed,
+    'total-timeout-ms',
+    fallback: _defaultManifestTotalBudget,
+    maximum: _maximumManifestTotalBudget,
+  );
+  final bool continueOnError = parsed.flag('continue-on-error');
+  final bool restoreRequested = parsed.flag('restore');
+  const Set<String> requiredCommands = <String>{
+    'navigation.catalog',
+    'navigation.current',
+    'navigation.go',
+    'ui.wait',
+  };
+  final Set<String> missingCommands = <String>{
+    for (final String command in requiredCommands)
+      if (_CatalogCommand.find(initialCatalog, command) == null) command,
+  };
+
+  // An older host is not probed for a request it never declared. If it can
+  // still name the current destination, preserve the existing one-screen
+  // verifier; otherwise only an unscoped v1 manifest can be truthfully
+  // reconciled without inventing which destination is mounted.
+  if (missingCommands.isNotEmpty || manifest.destinations.isEmpty) {
+    if (_CatalogCommand.find(initialCatalog, 'navigation.current') != null ||
+        !manifest.usesDestinations) {
+      final _Execution current = await _verifyManifestCurrent(
+        connection,
+        initialCatalog,
+        manifest,
+      );
+      return _Execution(
+        <String, Object?>{
+          ...current.response,
+          'navigationMode': 'unavailable',
+          'navigationUnavailableReason': manifest.destinations.isEmpty
+              ? 'manifestDestinationsUnavailable'
+              : 'navigationCapabilityUnavailable',
+          if (missingCommands.isNotEmpty)
+            'missingCommands': missingCommands.toList()..sort(),
+        },
+        catalog: initialCatalog,
+        exitCode: current.exitCode,
+        summary:
+            'navigation unavailable; ${current.summary ?? 'current-screen verification only'}',
+      );
+    }
+    return _Execution(
+      <String, Object?>{
+        'schema': _manifestWalkthroughSchema,
+        'navigationMode': 'unavailable',
+        'reasonCode': 'navigationCapabilityUnavailable',
+        'missingCommands': missingCommands.toList()..sort(),
+        'visited': const <String>[],
+        'passed': const <String>[],
+        'failed': const <String>[],
+        'skipped': manifest.destinations,
+        'destinations': <Map<String, Object?>>[
+          for (final String destination in manifest.destinations)
+            <String, Object?>{
+              'destinationId': destination,
+              'status': 'skipped',
+              'reasonCode': 'navigationCapabilityUnavailable',
+            },
+        ],
+        'restore': <String, Object?>{
+          'requested': restoreRequested,
+          'attempted': false,
+        },
+        'finalDestination': null,
+      },
+      catalog: initialCatalog,
+      exitCode: PatchbayExitCode.typedFailure,
+      summary: 'navigation unavailable; no destination-scoped verdict emitted',
+    );
+  }
+
+  final Stopwatch total = Stopwatch()..start();
+  final List<String> visited = <String>[];
+  final List<String> passed = <String>[];
+  final List<String> failed = <String>[];
+  final List<String> skipped = <String>[];
+  final List<Map<String, Object?>> destinations = <Map<String, Object?>>[];
+  final List<Map<String, Object?>> notices = <Map<String, Object?>>[];
+  int primaryExitCode = PatchbayExitCode.accepted;
+
+  final Map<String, Object?> navigationCatalogResponse =
+      await _invokeWalkthroughWait(
+        connection,
+        initialCatalog,
+        'navigation.catalog',
+        const <String, Object?>{},
+        deadline: totalBudget - total.elapsed,
+        total: total,
+        totalBudget: totalBudget,
+        timeoutCode: 'manifestWalkthroughTotalTimeout',
+      );
+  if (patchbayExitCodeFor(navigationCatalogResponse) !=
+      PatchbayExitCode.accepted) {
+    return _walkthroughPreludeRejected(
+      manifest,
+      initialCatalog,
+      restoreRequested,
+      navigationCatalogResponse,
+      'navigationCatalogRejected',
+    );
+  }
+  final PatchbayNavigationCatalogWire navigationCatalog =
+      _decodeNavigationCatalog(navigationCatalogResponse);
+  final Map<String, PatchbayDestinationDescriptorWire> descriptors =
+      <String, PatchbayDestinationDescriptorWire>{
+        for (final PatchbayDestinationDescriptorWire descriptor
+            in navigationCatalog.destinations)
+          descriptor.id: descriptor,
+      };
+
+  final Map<String, Object?> initialCurrent = await _invokeWalkthroughWait(
+    connection,
+    initialCatalog,
+    'navigation.current',
+    const <String, Object?>{},
+    deadline: totalBudget - total.elapsed,
+    total: total,
+    totalBudget: totalBudget,
+    timeoutCode: 'manifestWalkthroughTotalTimeout',
+  );
+  if (patchbayExitCodeFor(initialCurrent) != PatchbayExitCode.accepted) {
+    return _walkthroughPreludeRejected(
+      manifest,
+      initialCatalog,
+      restoreRequested,
+      initialCurrent,
+      'navigationCurrentRejected',
+    );
+  }
+  final String? initialDestination = _navigationDestination(initialCurrent);
+
+  var stopped = false;
+  for (var index = 0; index < manifest.destinations.length; index += 1) {
+    final String destination = manifest.destinations[index];
+    if (stopped) {
+      skipped.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'skipped',
+        'reasonCode': 'stoppedAfterFailure',
+      });
+      continue;
+    }
+    if (total.elapsed >= totalBudget) {
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': 'manifestWalkthroughTotalTimeout',
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        PatchbayExitCode.typedFailure,
+      );
+      stopped = true;
+      continue;
+    }
+
+    final PatchbayDestinationDescriptorWire? descriptor =
+        descriptors[destination];
+    final String? descriptorFailure = descriptor == null
+        ? 'manifestDestinationNotDeclared'
+        : descriptor.ambiguous
+        ? 'navigationDestinationAmbiguous'
+        : !descriptor.operations.contains(PatchbayNavigationOperationWire.go)
+        ? 'navigationGoUnsupported'
+        : null;
+    if (descriptorFailure != null) {
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': descriptorFailure,
+        if (descriptor != null) 'descriptorGates': descriptor.gates,
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        PatchbayExitCode.rejected,
+      );
+      stopped = !continueOnError;
+      continue;
+    }
+
+    final Stopwatch screen = Stopwatch()..start();
+    final Duration currentTimeout = _remainingWalkthroughBudget(
+      screenBudget,
+      screen.elapsed,
+      totalBudget,
+      total.elapsed,
+    );
+    final Map<String, Object?> current = await _invokeWalkthroughWait(
+      connection,
+      initialCatalog,
+      'navigation.current',
+      const <String, Object?>{},
+      deadline: currentTimeout,
+      total: total,
+      totalBudget: totalBudget,
+    );
+    Map<String, Object?>? failure;
+    if (patchbayExitCodeFor(current) != PatchbayExitCode.accepted) {
+      failure = current;
+    } else {
+      final Duration navigationTimeout = _remainingWalkthroughBudget(
+        screenBudget,
+        screen.elapsed,
+        totalBudget,
+        total.elapsed,
+      );
+      if (navigationTimeout <= Duration.zero) {
+        failure = _localWalkthroughFailure('manifestWalkthroughScreenTimeout');
+      } else {
+        final Map<String, Object?> navigation = await _invokeWalkthroughWait(
+          connection,
+          initialCatalog,
+          'navigation.go',
+          <String, Object?>{
+            'destinationId': destination,
+            'revision': _navigationRevision(current),
+            'timeoutMs': navigationTimeout.inMilliseconds,
+          },
+          deadline: navigationTimeout,
+          total: total,
+          totalBudget: totalBudget,
+        );
+        if (patchbayExitCodeFor(navigation) != PatchbayExitCode.accepted) {
+          failure = navigation;
+        } else {
+          final Duration stableTimeout = _remainingWalkthroughBudget(
+            screenBudget,
+            screen.elapsed,
+            totalBudget,
+            total.elapsed,
+          );
+          if (stableTimeout <= Duration.zero) {
+            failure = _localWalkthroughFailure(
+              'manifestWalkthroughScreenTimeout',
+            );
+          } else {
+            final Map<String, Object?> stable = await _invokeWalkthroughWait(
+              connection,
+              initialCatalog,
+              'ui.wait',
+              <String, Object?>{
+                'condition': 'navigationDestination',
+                'timeoutMs': stableTimeout.inMilliseconds,
+                'destinationId': destination,
+              },
+              deadline: stableTimeout,
+              total: total,
+              totalBudget: totalBudget,
+            );
+            if (patchbayExitCodeFor(stable) != PatchbayExitCode.accepted) {
+              failure = stable;
+            }
+          }
+        }
+      }
+    }
+
+    if (failure == null && total.elapsed >= totalBudget) {
+      failure = _localWalkthroughFailure('manifestWalkthroughTotalTimeout');
+    } else if (failure == null && screen.elapsed >= screenBudget) {
+      failure = _localWalkthroughFailure('manifestWalkthroughScreenTimeout');
+    }
+
+    if (failure != null) {
+      final String reason = _walkthroughFailureCode(failure);
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': reason,
+        'descriptorGates': descriptor!.gates,
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        patchbayExitCodeFor(failure),
+      );
+      stopped = reason == 'manifestWalkthroughTotalTimeout' || !continueOnError;
+      continue;
+    }
+
+    visited.add(destination);
+    PatchbayUiManifestSemanticsRuntime? semantics;
+    Map<String, Object?>? verificationFailure;
+    Map<String, Object?>? screenCatalog;
+    final Duration catalogTimeout = _remainingWalkthroughBudget(
+      screenBudget,
+      screen.elapsed,
+      totalBudget,
+      total.elapsed,
+    );
+    if (catalogTimeout.inMilliseconds < 1) {
+      verificationFailure = _localWalkthroughFailure(
+        total.elapsed >= totalBudget
+            ? 'manifestWalkthroughTotalTimeout'
+            : 'manifestWalkthroughScreenTimeout',
+      );
+    } else {
+      try {
+        screenCatalog = await connection.catalog().timeout(catalogTimeout);
+      } on TimeoutException {
+        verificationFailure = _localWalkthroughFailure(
+          total.elapsed >= totalBudget
+              ? 'manifestWalkthroughTotalTimeout'
+              : 'manifestWalkthroughScreenTimeout',
+        );
+      }
+    }
+    if (verificationFailure == null &&
+        manifest.requiresSemanticsAt(destination)) {
+      if (_CatalogCommand.find(screenCatalog!, 'ui.semantics.tree') == null) {
+        verificationFailure = _localWalkthroughFailure(
+          'manifestSemanticsUnavailable',
+        );
+      } else {
+        final Duration semanticsTimeout = _remainingWalkthroughBudget(
+          screenBudget,
+          screen.elapsed,
+          totalBudget,
+          total.elapsed,
+        );
+        final Map<String, Object?> observed = await _invokeWalkthroughWait(
+          connection,
+          screenCatalog,
+          'ui.semantics.tree',
+          const <String, Object?>{},
+          deadline: semanticsTimeout,
+          total: total,
+          totalBudget: totalBudget,
+        );
+        if (patchbayExitCodeFor(observed) != PatchbayExitCode.accepted) {
+          verificationFailure = observed;
+        } else {
+          semantics = _manifestSemanticsRuntime(observed);
+        }
+      }
+    }
+    if (verificationFailure != null) {
+      final String reason = _walkthroughFailureCode(verificationFailure);
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': reason,
+        'descriptorGates': descriptor!.gates,
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        patchbayExitCodeFor(verificationFailure),
+      );
+      stopped = reason == 'manifestWalkthroughTotalTimeout' || !continueOnError;
+      continue;
+    }
+    final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
+      manifest: manifest,
+      runtime: decodePatchbayCatalogUiTargets(screenCatalog!),
+      currentDestination: destination,
+      semantics: semantics,
+    );
+    if (report.hasDeviation) {
+      failed.add(destination);
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        PatchbayExitCode.verificationDeviation,
+      );
+      stopped = !continueOnError;
+    } else {
+      passed.add(destination);
+    }
+    destinations.add(<String, Object?>{
+      'destinationId': destination,
+      'status': report.hasDeviation ? 'failed' : 'passed',
+      'reasonCode': report.hasDeviation ? 'manifestDeviation' : 'verified',
+      'descriptorGates': descriptor!.gates,
+      'report': report.toJson(),
+    });
+  }
+
+  final Map<String, Object?> restore = <String, Object?>{
+    'requested': restoreRequested,
+    'attempted': false,
+  };
+  String? finalDestination;
+  Map<String, Object?>? finalCurrent;
+  try {
+    finalCurrent = await _invokeWalkthroughWait(
+      connection,
+      initialCatalog,
+      'navigation.current',
+      const <String, Object?>{},
+      deadline: totalBudget - total.elapsed,
+      total: total,
+      totalBudget: totalBudget,
+    );
+    if (patchbayExitCodeFor(finalCurrent) == PatchbayExitCode.accepted) {
+      finalDestination = _navigationDestination(finalCurrent);
+    }
+  } on Object {
+    // The primary walkthrough result remains authoritative; the notice below
+    // names that final position could not be observed without exposing a URI.
+  }
+  if (restoreRequested &&
+      initialDestination != null &&
+      finalDestination != initialDestination) {
+    final Duration remaining = _remainingWalkthroughBudget(
+      screenBudget,
+      Duration.zero,
+      totalBudget,
+      total.elapsed,
+    );
+    if (remaining.inMilliseconds < 1 ||
+        finalCurrent == null ||
+        patchbayExitCodeFor(finalCurrent) != PatchbayExitCode.accepted) {
+      restore['reasonCode'] = 'manifestRestoreBudgetUnavailable';
+      notices.add(const <String, Object?>{
+        'code': 'manifestRestoreFailed',
+        'reasonCode': 'manifestRestoreBudgetUnavailable',
+      });
+    } else {
+      restore['attempted'] = true;
+      final Map<String, Object?> response = await _invokeWalkthroughWait(
+        connection,
+        initialCatalog,
+        'navigation.go',
+        <String, Object?>{
+          'destinationId': initialDestination,
+          'revision': _navigationRevision(finalCurrent),
+          'timeoutMs': remaining.inMilliseconds,
+        },
+        deadline: remaining,
+        total: total,
+        totalBudget: totalBudget,
+      );
+      if (patchbayExitCodeFor(response) != PatchbayExitCode.accepted) {
+        final String reason = _walkthroughFailureCode(response);
+        restore['reasonCode'] = reason;
+        notices.add(<String, Object?>{
+          'code': 'manifestRestoreFailed',
+          'reasonCode': reason,
+        });
+      } else {
+        restore['outcome'] = 'restored';
+        finalDestination = initialDestination;
+      }
+      final Map<String, Object?> observed = await _invokeWalkthroughWait(
+        connection,
+        initialCatalog,
+        'navigation.current',
+        const <String, Object?>{},
+        deadline: totalBudget - total.elapsed,
+        total: total,
+        totalBudget: totalBudget,
+      );
+      if (patchbayExitCodeFor(observed) == PatchbayExitCode.accepted) {
+        finalDestination = _navigationDestination(observed);
+      }
+    }
+  }
+
+  final Map<String, Object?> response = <String, Object?>{
+    'schema': _manifestWalkthroughSchema,
+    'navigationMode': 'walkthrough',
+    'visited': visited,
+    'passed': passed,
+    'failed': failed,
+    'skipped': skipped,
+    'destinations': destinations,
+    'initialDestination': initialDestination,
+    'finalDestination': finalDestination,
+    'restore': restore,
+    if (notices.isNotEmpty) 'notices': notices,
+  };
+  return _Execution(
+    response,
+    catalog: initialCatalog,
+    exitCode: primaryExitCode,
+    summary:
+        'visited=${visited.length} passed=${passed.length} '
+        'failed=${failed.length} skipped=${skipped.length} '
+        'finalDestination=${finalDestination ?? 'none'}',
+  );
+}
+
+Future<_Execution> _verifyManifestCurrent(
+  PatchbayClient connection,
+  Map<String, Object?> catalog,
+  PatchbayUiManifest manifest,
+) async {
+  String? destination;
+  if (manifest.usesDestinations) {
+    final Map<String, Object?> current = await _invokeAgainstCatalog(
+      connection,
+      catalog,
+      'navigation.current',
+      const <String, Object?>{},
+    );
+    if (current['admission'] == 'rejected') {
+      return _Execution(
+        _withSource(current, 'destinationSource'),
+        catalog: catalog,
+      );
+    }
+    destination = _navigationDestination(current);
+  }
+  PatchbayUiManifestSemanticsRuntime? semantics;
+  if (manifest.requiresSemanticsAt(destination)) {
+    if (_CatalogCommand.find(catalog, 'ui.semantics.tree') == null) {
+      throw const PatchbayProtocolException('manifestSemanticsUnavailable');
+    }
+    final Map<String, Object?> observed = await _invokeAgainstCatalog(
+      connection,
+      catalog,
+      'ui.semantics.tree',
+      const <String, Object?>{},
+    );
+    if (observed['admission'] == 'rejected') {
+      return _Execution(
+        _withSource(observed, 'semanticsSource'),
+        catalog: catalog,
+      );
+    }
+    semantics = _manifestSemanticsRuntime(observed);
+  }
+  final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
+    manifest: manifest,
+    runtime: decodePatchbayCatalogUiTargets(catalog),
+    currentDestination: destination,
+    semantics: semantics,
+  );
+  return _Execution(
+    report.toJson(),
+    catalog: catalog,
+    exitCode: report.hasDeviation
+        ? PatchbayExitCode.verificationDeviation
+        : PatchbayExitCode.accepted,
+    summary: report.humanReport,
+  );
+}
+
+Duration _manifestWalkthroughBudget(
+  ArgResults parsed,
+  String name, {
+  required Duration fallback,
+  required Duration maximum,
+}) {
+  final String? raw = parsed.option(name);
+  if (raw == null) return fallback;
+  final int? milliseconds = int.tryParse(raw);
+  if (milliseconds == null ||
+      milliseconds <= 0 ||
+      milliseconds > maximum.inMilliseconds) {
+    throw FormatException(
+      '--$name must be an integer from 1 to ${maximum.inMilliseconds}',
+    );
+  }
+  return Duration(milliseconds: milliseconds);
+}
+
+Duration _remainingWalkthroughBudget(
+  Duration screenBudget,
+  Duration screenElapsed,
+  Duration totalBudget,
+  Duration totalElapsed,
+) {
+  final Duration screenRemaining = screenBudget - screenElapsed;
+  final Duration totalRemaining = totalBudget - totalElapsed;
+  return screenRemaining < totalRemaining ? screenRemaining : totalRemaining;
+}
+
+int _firstFailure(int current, int next) =>
+    current == PatchbayExitCode.accepted ? next : current;
+
+Map<String, Object?> _localWalkthroughFailure(String code) => <String, Object?>{
+  'outcome': 'failed',
+  'failure': <String, Object?>{'code': code},
+};
+
+Future<Map<String, Object?>> _invokeWalkthroughWait(
+  PatchbayClient connection,
+  Map<String, Object?> catalog,
+  String command,
+  Map<String, Object?> arguments, {
+  required Duration deadline,
+  required Stopwatch total,
+  required Duration totalBudget,
+  String? timeoutCode,
+}) async {
+  if (deadline.inMilliseconds < 1) {
+    return _localWalkthroughFailure(
+      timeoutCode ??
+          (total.elapsed >= totalBudget
+              ? 'manifestWalkthroughTotalTimeout'
+              : 'manifestWalkthroughScreenTimeout'),
+    );
+  }
+  try {
+    return await _invokeAgainstCatalog(
+      connection,
+      catalog,
+      command,
+      arguments,
+      deadline: deadline,
+    ).timeout(deadline);
+  } on TimeoutException {
+    return _localWalkthroughFailure(
+      timeoutCode ??
+          (total.elapsed >= totalBudget
+              ? 'manifestWalkthroughTotalTimeout'
+              : 'manifestWalkthroughScreenTimeout'),
+    );
+  }
+}
+
+String _walkthroughFailureCode(Map<String, Object?> response) {
+  final Object? rejection = response['rejection'];
+  if (rejection is Map<Object?, Object?> && rejection['code'] is String) {
+    return rejection['code']! as String;
+  }
+  final Object? failure = response['failure'];
+  if (failure is Map<Object?, Object?> && failure['code'] is String) {
+    return failure['code']! as String;
+  }
+  return 'manifestWalkthroughFailed';
+}
+
+PatchbayNavigationCatalogWire _decodeNavigationCatalog(
+  Map<String, Object?> response,
+) {
+  final Object? payload = response['payload'];
+  if (payload is! Map<String, Object?>) {
+    throw const PatchbayProtocolException('navigationCatalogContractViolated');
+  }
+  try {
+    return PatchbayNavigationCatalogWire.fromJson(payload);
+  } on FormatException catch (failure) {
+    throw PatchbayProtocolException(
+      'navigationCatalogContractViolated',
+      details: <String, Object?>{'reason': failure.message},
+    );
+  }
+}
+
+_Execution _walkthroughPreludeRejected(
+  PatchbayUiManifest manifest,
+  Map<String, Object?> catalog,
+  bool restoreRequested,
+  Map<String, Object?> rejection,
+  String fallbackCode,
+) {
+  final String code =
+      _walkthroughFailureCode(rejection) == 'manifestWalkthroughFailed'
+      ? fallbackCode
+      : _walkthroughFailureCode(rejection);
+  return _Execution(
+    <String, Object?>{
+      'schema': _manifestWalkthroughSchema,
+      'navigationMode': 'walkthrough',
+      'reasonCode': code,
+      'visited': const <String>[],
+      'passed': const <String>[],
+      'failed': const <String>[],
+      'skipped': manifest.destinations,
+      'destinations': <Map<String, Object?>>[
+        for (final String destination in manifest.destinations)
+          <String, Object?>{
+            'destinationId': destination,
+            'status': 'skipped',
+            'reasonCode': code,
+          },
+      ],
+      'restore': <String, Object?>{
+        'requested': restoreRequested,
+        'attempted': false,
+      },
+      'finalDestination': null,
+    },
+    catalog: catalog,
+    exitCode: patchbayExitCodeFor(rejection),
+    summary: 'walkthrough refused: $code',
+  );
 }
 
 /// Stable code for "this App is too old to understand a snapshot selector".

@@ -62,6 +62,13 @@ Semantics tree → 校验 → 记录 generation/事实来源。失败后默认�
 输出包含 `visited/passed/failed/skipped` 和每个 destination 的稳定 reasonCode。是否恢复起始屏由
 显式 `--restore` 控制；恢复失败独立报告，不能覆盖原始巡检失败。
 
+CLI 形态冻结为 `ui verify-manifest <file> --navigate`，可选
+`--continue-on-error`、`--restore`、`--screen-timeout-ms` 与 `--total-timeout-ms`；后四项离开
+`--navigate` 一律作为用法错误拒绝。巡检按 manifest 中 destination 的文档顺序执行，不按 catalog
+排序。首个主失败决定退出码，后续屏只补证据；总预算耗尽后不再发导航请求，剩余 destination 标为
+`skipped`。`navigationMode` 只有 `walkthrough` / `unavailable` 两值；能力不完整时不根据错误形状探测，
+仅保留旧的当前挂载态校验。
+
 退出码分工必须明确落到这里，沿用既有语义不新造：清单偏差走 `verificationDeviation`（App 正常回答
 了，只是和带来的文件对不上）；导航被拒是受理拒绝；**恢复失败不改写退出码**，只加 notice 与机读
 字段，并输出 App 最终停在哪个 destination——否则操作者拿不到"现在设备在哪一屏"这个继续调试所需的
