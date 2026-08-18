@@ -188,6 +188,82 @@ $ patchbay logs tail
 $ patchbay repl < commands.txt
 ```
 
+<!-- PATCHBAY_COMMAND_REFERENCE:START -->
+This table describes syntax shipped by this CLI. Protocol-backed rows come from repository descriptors; client and local rows remain explicit CLI declarations. It is not the runtime capability catalog; use `patchbay catalog` for actual availability.
+
+| CLI syntax | Declaration source | Protocol command |
+|---|---|---|
+| `patchbay blob get <blob-id> --output <path>` | client CLI declaration | `blob.metadata` |
+| `patchbay blob metadata <blob-id>` | client CLI declaration | `blob.metadata` |
+| `patchbay capture diff <before-blob-id> <after-blob-id>` | client CLI declaration | `ui.capture.diff` |
+| `patchbay capture root --output <path>` | protocol descriptor | `ui.capture` |
+| `patchbay capture target <target-id> <generation> --output <path>` | protocol descriptor | `ui.capture` |
+| `patchbay catalog` | client CLI declaration | — |
+| `patchbay describe <service-command>` | local CLI declaration | — |
+| `patchbay doctor` | local CLI declaration | — |
+| `patchbay doctor permission` | local CLI declaration | — |
+| `patchbay exec <service-command>` | client CLI declaration | — |
+| `patchbay identity` | client CLI declaration | — |
+| `patchbay job cancel <job-id>` | client CLI declaration | `patchbay.job.cancel` |
+| `patchbay job get <job-id>` | client CLI declaration | `patchbay.job.get` |
+| `patchbay launch -- <consumer command>` | local CLI declaration | — |
+| `patchbay logs export --output <path>` | client CLI declaration | `logs.export` |
+| `patchbay logs query` | client CLI declaration | `logs.query` |
+| `patchbay logs tail` | client CLI declaration | `logs.tail` |
+| `patchbay navigation back [--revision <revision>]` | protocol descriptor | `navigation.back` |
+| `patchbay navigation catalog` | protocol descriptor | `navigation.catalog` |
+| `patchbay navigation current` | protocol descriptor | `navigation.current` |
+| `patchbay navigation go <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.go` |
+| `patchbay navigation push <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.push` |
+| `patchbay net profile` | client CLI declaration | — |
+| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client CLI declaration | — |
+| `patchbay permission capabilities` | local CLI declaration | — |
+| `patchbay permission exercise <permission> --decision <decision>` | local CLI declaration | — |
+| `patchbay permission fail <permission> --state <state>` | local CLI declaration | — |
+| `patchbay permission normalize <permission> --state <state>` | local CLI declaration | — |
+| `patchbay permission reset <permission>` | local CLI declaration | — |
+| `patchbay permission status <permission>` | local CLI declaration | — |
+| `patchbay repl` | client CLI declaration | — |
+| `patchbay session use <session-id> \| --clear` | local CLI declaration | — |
+| `patchbay sessions list` | local CLI declaration | — |
+| `patchbay sessions prune` | local CLI declaration | — |
+| `patchbay snapshot [--path <dot.path>]` | client CLI declaration | — |
+| `patchbay snapshot diff --from <revision>` | client CLI declaration | — |
+| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client CLI declaration | — |
+| `patchbay trace diff <before-trace-id> <after-trace-id>` | local CLI declaration | — |
+| `patchbay trace export <trace-id> --output <directory>` | local CLI declaration | — |
+| `patchbay trace mark <note>` | local CLI declaration | — |
+| `patchbay trace prune [--dry-run]` | local CLI declaration | — |
+| `patchbay trace show <trace-id>` | local CLI declaration | — |
+| `patchbay trace start --name <name> [--activate] [--pin]` | local CLI declaration | — |
+| `patchbay trace stop [trace-id]` | local CLI declaration | — |
+| `patchbay ui focus-tree` | client CLI declaration | — |
+| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` |
+| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` |
+| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.pressHold` |
+| `patchbay ui inspect off` | protocol descriptor | `ui.inspect.select` |
+| `patchbay ui inspect on [--ttl-ms <ms>]` | protocol descriptor | `ui.inspect.select` |
+| `patchbay ui inspect status` | protocol descriptor | `ui.inspect.status` |
+| `patchbay ui keep-awake off` | protocol descriptor | `ui.keepAwake.set` |
+| `patchbay ui keep-awake on [--lease-ms <ms>]` | protocol descriptor | `ui.keepAwake.set` |
+| `patchbay ui keep-awake status` | protocol descriptor | `ui.keepAwake.status` |
+| `patchbay ui render-tree` | client CLI declaration | — |
+| `patchbay ui semantics action <node-id> <generation> <action> [text]` | protocol descriptor | `ui.semantics.action` |
+| `patchbay ui semantics tree` | protocol descriptor | `ui.semantics.tree` |
+| `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` |
+| `patchbay ui targets --emit-manifest` | local CLI declaration | — |
+| `patchbay ui text enter <target-id> <generation> [text]` | protocol descriptor | `ui.text.enter` |
+| `patchbay ui text set <target-id> <generation> [text]` | protocol descriptor | `ui.text.set` |
+| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local CLI declaration | — |
+| `patchbay ui wait destination <destination-id>` | protocol descriptor | `ui.wait` |
+| `patchbay ui wait frame-revision <revision>` | protocol descriptor | `ui.wait` |
+| `patchbay ui wait semantics-mounted <identifier>` | protocol descriptor | `ui.wait` |
+| `patchbay ui wait semantics-unmounted <identifier>` | protocol descriptor | `ui.wait` |
+| `patchbay ui wait semantics-value <identifier> <value>` | protocol descriptor | `ui.wait` |
+| `patchbay ui wait tree-revision <revision>` | protocol descriptor | `ui.wait` |
+| `patchbay ui widget-tree` | client CLI declaration | — |
+<!-- PATCHBAY_COMMAND_REFERENCE:END -->
+
 ## Why Patchbay
 
 Ordinary external automation sees pixels, copy, and coordinates; Patchbay sees the semantics and

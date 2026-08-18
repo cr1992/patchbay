@@ -237,7 +237,7 @@ Future<int> runPatchbayCli(
         // can reach, so a later command has no way to open a second one.
         execute: (ArgResults line) async {
           final PatchbayTraceRecorder? trace = _traceRecorder;
-          final PatchbayFriendlyCommand? lineSpec =
+          final PatchbayFriendlyCommandSpec? lineSpec =
               PatchbayFriendlyCommandRegistry.specFor(line.rest);
           final String? runId = trace == null || lineSpec == null
               ? null
@@ -429,7 +429,7 @@ Future<int> _runPatchbayCliWithTrace(
   Map<String, String>? environment,
 }) async {
   final ArgResults? parsed = _tryParseForTrace(arguments);
-  final PatchbayFriendlyCommand? spec = parsed == null
+  final PatchbayFriendlyCommandSpec? spec = parsed == null
       ? null
       : PatchbayFriendlyCommandRegistry.specFor(parsed.rest);
   if (parsed == null ||
@@ -848,6 +848,17 @@ ArgParser patchbayCliParser() => ArgParser()
     'generation',
     help: 'Expected semantics generation; refuses a target that already moved.',
   )
+  ..addOption('start', help: 'JSON target-local normalized gesture point.')
+  ..addOption('gesture-path', help: 'JSON array of target-local drag points.')
+  ..addOption('velocity', help: 'JSON normalized fling velocity vector.')
+  // 手势时长与性能画像窗口共用这一个选项名：allowedOptions 按命令分别限定，
+  // 所以一个声明服务两种用途，重复声明会让 ArgParser 直接抛错。
+  ..addOption(
+    'duration-ms',
+    help:
+        'Bounded gesture duration, or performance profile window, '
+        'in milliseconds.',
+  )
   ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
   ..addOption('cursor', help: 'Opaque structured-log cursor.')
   ..addOption(
@@ -880,10 +891,6 @@ ArgParser patchbayCliParser() => ArgParser()
         'own when it runs out. Omit to use the App-declared default.',
   )
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
-  ..addOption(
-    'duration-ms',
-    help: 'Performance profile window in milliseconds (1..60000).',
-  )
   ..addOption(
     'sample-limit',
     help: 'Maximum VM timeline events summarized (1..10000).',
@@ -1330,7 +1337,7 @@ String _sessionLines(List<PatchbaySessionListing> listings) {
 /// Dispatches one resolved declaration.
 ///
 /// There is deliberately no second command table here: every path the CLI
-/// accepts comes from [PatchbayFriendlyCommand], and the switch below has no
+/// accepts comes from [PatchbayFriendlyCommandRegistry], and the switch below has no
 /// default arm, so a new declaration cannot be added without wiring dispatch
 /// and help at the same time.
 Future<_Execution> _execute(
@@ -1549,8 +1556,9 @@ Future<_Execution> _execute(
       _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
       Map<String, Object?> arguments = friendly.arguments;
       String? captureMode;
-      if ((friendly.spec == PatchbayFriendlyCommand.captureRoot ||
-              friendly.spec == PatchbayFriendlyCommand.captureTarget) &&
+      // 重构后 capture 由生成的协议命令承载，枚举常量只是兼容外壳，
+      // 因此按服务命令名识别，而不是按枚举同一性。
+      if (friendly.spec.serviceCommand == 'ui.capture' &&
           arguments.containsKey('afterFrames')) {
         final Set<String>? features = patchbayDeclaredFeatures(
           await connection.identity(),

@@ -236,7 +236,7 @@ final class PatchbayPermissionCommandRunner {
       operation == PatchbayPermissionOperation.exercise;
 
   static PatchbayPermissionOperation _operation(
-    PatchbayFriendlyCommand command,
+    PatchbayFriendlyCommandSpec command,
   ) => switch (command) {
     PatchbayFriendlyCommand.permissionCapabilities =>
       PatchbayPermissionOperation.capabilities,

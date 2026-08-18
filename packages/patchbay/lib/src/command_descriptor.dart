@@ -75,6 +75,23 @@ final class PatchbayParameterDescriptor {
   final List<Object?> allowedValues;
   final String? summary;
 
+  /// Returns the same stable parameter declaration with a host-observed
+  /// default.
+  ///
+  /// Runtime adapters use this for defaults that belong to consumer policy
+  /// (for example a lease duration). Shape, sensitivity, allowed values, and
+  /// documentation remain owned by the canonical protocol descriptor.
+  PatchbayParameterDescriptor withRuntimeDefault(Object? value) =>
+      PatchbayParameterDescriptor(
+        name: name,
+        type: type,
+        required: required,
+        sensitive: sensitive,
+        defaultValue: value,
+        allowedValues: allowedValues,
+        summary: summary,
+      );
+
   PatchbayParameterDescriptorWire _toWire() => PatchbayParameterDescriptorWire(
     name: name,
     type: _parameterTypeWire(type),
@@ -86,6 +103,78 @@ final class PatchbayParameterDescriptor {
   );
 
   Map<String, Object?> toJson() => _toWire().toJson();
+}
+
+/// One CLI spelling derived from a protocol-owned command descriptor.
+///
+/// This metadata is deliberately local to the Dart packages: it is build-time
+/// syntax for the separately deployed CLI, not a runtime capability, and is
+/// therefore never included in [PatchbayCommandDescriptor.toJson]. One service
+/// command may expose several spellings when the path injects a fixed argument
+/// such as an `on`/`off` or `ui.wait` condition variant.
+final class PatchbayCliSyntax {
+  const PatchbayCliSyntax({
+    required this.id,
+    required this.path,
+    required this.summary,
+    this.usageSuffix = '',
+    this.positionalParameters = const <String>[],
+    this.optionParameters = const <String, String>{},
+    this.positiveParameters = const <String>{},
+    this.fixedArguments = const <String, Object?>{},
+    this.fencesNavigationRevision = false,
+    this.inputMode = PatchbayCliInputMode.descriptorParameters,
+    this.nonNegativeParameters = const <String>{},
+    this.omitOptionDefaults = const <String>{},
+    this.trailingParameter,
+    this.stdinParameter,
+    this.stdinMarkerParameter,
+    this.trailingWhen,
+    this.artifactDisposition = PatchbayCliArtifactDisposition.none,
+  });
+
+  /// Stable Dart identifier used by generated CLI registration code.
+  final String id;
+  final List<String> path;
+  final String summary;
+  final String usageSuffix;
+
+  /// Descriptor parameter names, in argv positional order.
+  final List<String> positionalParameters;
+
+  /// Descriptor parameter name to long option name.
+  final Map<String, String> optionParameters;
+
+  /// Numeric parameters whose CLI spelling accepts positive values only.
+  final Set<String> positiveParameters;
+
+  /// Arguments implied by the chosen path rather than typed by the operator.
+  final Map<String, Object?> fixedArguments;
+
+  /// Whether an omitted `revision` is resolved through navigation.current.
+  final bool fencesNavigationRevision;
+  final PatchbayCliInputMode inputMode;
+  final Set<String> nonNegativeParameters;
+  final Set<String> omitOptionDefaults;
+  final String? trailingParameter;
+  final String? stdinParameter;
+  final String? stdinMarkerParameter;
+  final PatchbayCliEqualsCondition? trailingWhen;
+  final PatchbayCliArtifactDisposition artifactDisposition;
+}
+
+enum PatchbayCliInputMode { descriptorParameters, mergedJsonObject }
+
+enum PatchbayCliArtifactDisposition { none, payloadBlob, responseBlob }
+
+final class PatchbayCliEqualsCondition {
+  const PatchbayCliEqualsCondition({
+    required this.parameter,
+    required this.value,
+  });
+
+  final String parameter;
+  final Object? value;
 }
 
 /// Consumer-neutral catalog entry. Business namespaces remain consumer-owned.
@@ -104,6 +193,7 @@ final class PatchbayCommandDescriptor {
     this.confirmationBudgetMs,
     this.weakConfirmationCompletes = false,
     this.retryPolicy,
+    this.cliSyntax = const <PatchbayCliSyntax>[],
   });
 
   final String name;
@@ -137,6 +227,53 @@ final class PatchbayCommandDescriptor {
   /// A registry-owned command cannot declare this: the host's external
   /// fallback is the boundary that owns requestId de-duplication.
   final PatchbayRetryPolicy? retryPolicy;
+
+  /// Build-time CLI syntax. It is intentionally absent from the wire form.
+  final List<PatchbayCliSyntax> cliSyntax;
+
+  /// Applies the only catalog fields a runtime adapter may specialize.
+  ///
+  /// The command identity and stable contract deliberately cannot be supplied
+  /// here. This keeps runtime packages from rebuilding names, summaries,
+  /// planes, modes, side effects, fact sources, or parameter schemas beside
+  /// the protocol-owned canonical descriptor.
+  PatchbayCommandDescriptor withRuntimeOverrides({
+    Set<String>? gates,
+    Map<String, Object?> parameterDefaults = const <String, Object?>{},
+  }) {
+    final Set<String> parameterNames = parameters
+        .map((PatchbayParameterDescriptor parameter) => parameter.name)
+        .toSet();
+    final List<String> unknownDefaults =
+        parameterDefaults.keys
+            .where((String name) => !parameterNames.contains(name))
+            .toList(growable: false)
+          ..sort();
+    if (unknownDefaults.isNotEmpty) {
+      throw ArgumentError.value(
+        unknownDefaults,
+        'parameterDefaults',
+        'contains parameters not declared by $name',
+      );
+    }
+    return PatchbayCommandDescriptor(
+      name: name,
+      summary: summary,
+      plane: plane,
+      mode: mode,
+      sideEffect: sideEffect,
+      factSources: factSources,
+      parameters: <PatchbayParameterDescriptor>[
+        for (final PatchbayParameterDescriptor parameter in parameters)
+          if (parameterDefaults.containsKey(parameter.name))
+            parameter.withRuntimeDefault(parameterDefaults[parameter.name])
+          else
+            parameter,
+      ],
+      gates: gates ?? this.gates,
+      cliSyntax: cliSyntax,
+    );
+  }
 
   Map<String, Object?> toJson() {
     final List<PatchbayFactSourceWire> sortedFactSources =

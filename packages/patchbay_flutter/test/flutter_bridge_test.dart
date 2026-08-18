@@ -136,6 +136,70 @@ void main() {
   );
 
   test(
+    'runtime UI catalog specializes only gates and policy defaults',
+    () async {
+      final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+        registry: PatchbayUiRegistry(),
+        gates: PatchbayGateEvaluator(
+          baseGate: () => const PatchbayGateDecision.allow(),
+          consumerGate: (_) => const PatchbayGateDecision.allow(),
+        ),
+        keepAwakeGates: const <String>{'consumer.keepAwake'},
+        inspectPolicy: const PatchbayInspectPolicy(
+          gates: <String>{'consumer.inspect'},
+          defaultLease: Duration(minutes: 3),
+        ),
+      );
+      addTearDown(bridge.dispose);
+      final PatchbayFlutterServiceHost host = PatchbayFlutterServiceHost(
+        applicationId: 'dev.patchbay.flutter.canonical-catalog',
+        bridge: bridge,
+      );
+      final Map<String, Object?> catalog = await host.dispatchCatalog();
+      final Map<String, Map<String, Object?>> actual =
+          <String, Map<String, Object?>>{
+            for (final Map<String, Object?> descriptor
+                in (catalog['commands']! as List<Object?>)
+                    .cast<Map<String, Object?>>())
+              descriptor['name']! as String: descriptor,
+          };
+      final List<PatchbayCommandDescriptor> expected =
+          <PatchbayCommandDescriptor>[
+            patchbayUiTextSetCommandDescriptor,
+            patchbayUiTextEnterCommandDescriptor,
+            patchbayUiSemanticsTreeCommandDescriptor,
+            patchbayUiWaitCommandDescriptor,
+            patchbayUiKeepAwakeSetCommandDescriptor.withRuntimeOverrides(
+              gates: const <String>{'consumer.keepAwake'},
+              parameterDefaults: <String, Object?>{
+                'leaseMs': PatchbayKeepAwakeBridge.defaultLease.inMilliseconds,
+              },
+            ),
+            patchbayUiKeepAwakeStatusCommandDescriptor,
+            patchbayUiInspectStatusCommandDescriptor,
+            patchbayUiInspectSelectCommandDescriptor.withRuntimeOverrides(
+              gates: const <String>{'consumer.inspect'},
+              parameterDefaults: <String, Object?>{
+                'ttlMs': Duration(minutes: 3).inMilliseconds,
+              },
+            ),
+          ];
+
+      expect(
+        actual.keys,
+        expected.map((descriptor) => descriptor.name).toSet(),
+      );
+      for (final PatchbayCommandDescriptor canonical in expected) {
+        expect(
+          actual[canonical.name],
+          canonical.toJson(),
+          reason: canonical.name,
+        );
+      }
+    },
+  );
+
+  test(
     'service catalog exposes semantics action only with consumer policy',
     () async {
       final Map<String, ServiceExtensionHandler> handlers =

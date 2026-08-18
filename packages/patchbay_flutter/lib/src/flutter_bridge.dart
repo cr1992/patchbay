@@ -221,6 +221,9 @@ final class PatchbayFlutterBridge {
     required PatchbayGateEvaluator gates,
     PatchbayUiRegistry? registry,
     PatchbaySemanticsActionPolicy? semanticsActionPolicy,
+    PatchbayGesturePolicy? gesturePolicy,
+    PatchbayPointerEventDispatcher? gesturePointerDispatcher,
+    PatchbayGestureDelay? gestureDelay,
     PatchbayNavigationAdapter? navigationAdapter,
     PatchbayInspectPolicy? inspectPolicy,
     PatchbayInspectorSurface? inspectorSurface,
@@ -254,6 +257,16 @@ final class PatchbayFlutterBridge {
     semantics = PatchbaySemanticsBridge(
       gates: gates,
       actionPolicy: semanticsActionPolicy,
+      isAppResumed: _isAppResumed,
+      lifecycleState: _lifecycleState,
+      newRequestId: newRequestId,
+    );
+    gesture = PatchbayGestureBridge(
+      gates: gates,
+      semantics: semantics,
+      policy: gesturePolicy,
+      pointerDispatcher: gesturePointerDispatcher,
+      delay: gestureDelay,
       isAppResumed: _isAppResumed,
       lifecycleState: _lifecycleState,
       newRequestId: newRequestId,
@@ -308,6 +321,7 @@ final class PatchbayFlutterBridge {
   final PatchbayLifecycleStateReader _lifecycleState;
   final PatchbayFrameObserver _frames;
   late final PatchbaySemanticsBridge semantics;
+  late final PatchbayGestureBridge gesture;
   late final PatchbayNavigationBridge? navigation;
   late final PatchbayUiWaitBridge wait;
   late final PatchbayCaptureBridge? capture;

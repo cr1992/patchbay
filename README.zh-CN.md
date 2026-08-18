@@ -174,6 +174,82 @@ $ patchbay logs tail
 $ patchbay repl < commands.txt
 ```
 
+<!-- PATCHBAY_COMMAND_REFERENCE:START -->
+下表只描述当前 CLI 随包发布的语法。协议命令行来自仓内 descriptor；client / local 行仍来自 CLI 的显式声明。它不是运行时 capability catalog，实际可用性请以 `patchbay catalog` 为准。
+
+| CLI 语法 | 声明来源 | 协议命令 |
+|---|---|---|
+| `patchbay blob get <blob-id> --output <path>` | client 显式声明 | `blob.metadata` |
+| `patchbay blob metadata <blob-id>` | client 显式声明 | `blob.metadata` |
+| `patchbay capture diff <before-blob-id> <after-blob-id>` | client 显式声明 | `ui.capture.diff` |
+| `patchbay capture root --output <path>` | 协议 descriptor | `ui.capture` |
+| `patchbay capture target <target-id> <generation> --output <path>` | 协议 descriptor | `ui.capture` |
+| `patchbay catalog` | client 显式声明 | — |
+| `patchbay describe <service-command>` | local 显式声明 | — |
+| `patchbay doctor` | local 显式声明 | — |
+| `patchbay doctor permission` | local 显式声明 | — |
+| `patchbay exec <service-command>` | client 显式声明 | — |
+| `patchbay identity` | client 显式声明 | — |
+| `patchbay job cancel <job-id>` | client 显式声明 | `patchbay.job.cancel` |
+| `patchbay job get <job-id>` | client 显式声明 | `patchbay.job.get` |
+| `patchbay launch -- <consumer command>` | local 显式声明 | — |
+| `patchbay logs export --output <path>` | client 显式声明 | `logs.export` |
+| `patchbay logs query` | client 显式声明 | `logs.query` |
+| `patchbay logs tail` | client 显式声明 | `logs.tail` |
+| `patchbay navigation back [--revision <revision>]` | 协议 descriptor | `navigation.back` |
+| `patchbay navigation catalog` | 协议 descriptor | `navigation.catalog` |
+| `patchbay navigation current` | 协议 descriptor | `navigation.current` |
+| `patchbay navigation go <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.go` |
+| `patchbay navigation push <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.push` |
+| `patchbay net profile` | client 显式声明 | — |
+| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client 显式声明 | — |
+| `patchbay permission capabilities` | local 显式声明 | — |
+| `patchbay permission exercise <permission> --decision <decision>` | local 显式声明 | — |
+| `patchbay permission fail <permission> --state <state>` | local 显式声明 | — |
+| `patchbay permission normalize <permission> --state <state>` | local 显式声明 | — |
+| `patchbay permission reset <permission>` | local 显式声明 | — |
+| `patchbay permission status <permission>` | local 显式声明 | — |
+| `patchbay repl` | client 显式声明 | — |
+| `patchbay session use <session-id> \| --clear` | local 显式声明 | — |
+| `patchbay sessions list` | local 显式声明 | — |
+| `patchbay sessions prune` | local 显式声明 | — |
+| `patchbay snapshot [--path <dot.path>]` | client 显式声明 | — |
+| `patchbay snapshot diff --from <revision>` | client 显式声明 | — |
+| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client 显式声明 | — |
+| `patchbay trace diff <before-trace-id> <after-trace-id>` | local 显式声明 | — |
+| `patchbay trace export <trace-id> --output <directory>` | local 显式声明 | — |
+| `patchbay trace mark <note>` | local 显式声明 | — |
+| `patchbay trace prune [--dry-run]` | local 显式声明 | — |
+| `patchbay trace show <trace-id>` | local 显式声明 | — |
+| `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — |
+| `patchbay trace stop [trace-id]` | local 显式声明 | — |
+| `patchbay ui focus-tree` | client 显式声明 | — |
+| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
+| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
+| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` |
+| `patchbay ui inspect off` | 协议 descriptor | `ui.inspect.select` |
+| `patchbay ui inspect on [--ttl-ms <ms>]` | 协议 descriptor | `ui.inspect.select` |
+| `patchbay ui inspect status` | 协议 descriptor | `ui.inspect.status` |
+| `patchbay ui keep-awake off` | 协议 descriptor | `ui.keepAwake.set` |
+| `patchbay ui keep-awake on [--lease-ms <ms>]` | 协议 descriptor | `ui.keepAwake.set` |
+| `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` |
+| `patchbay ui render-tree` | client 显式声明 | — |
+| `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` |
+| `patchbay ui semantics tree` | 协议 descriptor | `ui.semantics.tree` |
+| `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` |
+| `patchbay ui targets --emit-manifest` | local 显式声明 | — |
+| `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` |
+| `patchbay ui text set <target-id> <generation> [text]` | 协议 descriptor | `ui.text.set` |
+| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local 显式声明 | — |
+| `patchbay ui wait destination <destination-id>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait frame-revision <revision>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait semantics-mounted <identifier>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait semantics-unmounted <identifier>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait semantics-value <identifier> <value>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait tree-revision <revision>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui widget-tree` | client 显式声明 | — |
+<!-- PATCHBAY_COMMAND_REFERENCE:END -->
+
 ## 为什么是 Patchbay
 
 普通外部自动化看到的是像素、文案和坐标；Patchbay 看到的是 App 主动暴露的语义与事实：

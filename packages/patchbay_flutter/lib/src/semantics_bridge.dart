@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
 import 'lifecycle.dart';
+
+part 'gesture_bridge.dart';
 
 /// Stable Patchbay names for the first supported Flutter semantics actions.
 enum PatchbaySemanticsAction {
