@@ -13,6 +13,7 @@ import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
+import 'performance_profile.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -476,6 +477,14 @@ ArgParser patchbayCliParser() => ArgParser()
         'own when it runs out. Omit to use the App-declared default.',
   )
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
+  ..addOption(
+    'duration-ms',
+    help: 'Performance profile window in milliseconds (1..60000).',
+  )
+  ..addOption(
+    'sample-limit',
+    help: 'Maximum VM timeline events summarized (1..10000).',
+  )
   ..addOption('output', help: 'Local artifact output path.')
   ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.')
   ..addFlag(
@@ -735,6 +744,27 @@ Future<_Execution> _execute(
       return _Execution(await connection.renderTree());
     case PatchbayCommandTarget.clientFocusTree:
       return _Execution(await connection.focusTree());
+    case PatchbayCommandTarget.clientPerformanceProfile:
+      final PatchbayProfilingClient profiling = _profilingClient(
+        connection,
+        capability: 'performanceProfile',
+      );
+      final PatchbayPerformanceProfileRequest request =
+          PatchbayPerformanceProfileRequest(
+            duration: Duration(
+              milliseconds: friendly.arguments['durationMs']! as int,
+            ),
+            eventLimit: friendly.arguments['sampleLimit']! as int,
+          );
+      request.validate();
+      return _Execution(await profiling.performanceProfile(request));
+    case PatchbayCommandTarget.clientNetworkProfile:
+      return _Execution(
+        await _profilingClient(
+          connection,
+          capability: 'networkProfile',
+        ).networkProfile(),
+      );
     case PatchbayCommandTarget.localManifestVerification:
       // A one-shot invocation parsed this before it dialled; a repl line
       // arrives with the connection already open and nothing parsed yet, so
@@ -830,6 +860,21 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+PatchbayProfilingClient _profilingClient(
+  PatchbayClient client, {
+  required String capability,
+}) {
+  if (client is PatchbayProfilingClient) {
+    return client as PatchbayProfilingClient;
+  }
+  throw PatchbayProtocolException(
+    capability == 'networkProfile'
+        ? 'networkProfilingUnavailable'
+        : 'profilingVmServiceRequired',
+    details: <String, Object?>{'capability': capability},
+  );
 }
 
 /// Stable code for "this App is too old to understand a snapshot selector".
