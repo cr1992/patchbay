@@ -57,6 +57,21 @@ dart run bin/patchbay.dart --json snapshot
 dart run bin/patchbay.dart --json exec <namespace.command>
 ```
 
+要把启动与恢复收敛成一次有界操作，可由 CLI 启动已接入声明契约的 consumer：
+
+```text
+dart run bin/patchbay.dart launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+```
+
+child 用 `PatchbayLaunchContext.tryFromEnvironment` 读取 `PATCHBAY_SESSION_DIR`、
+`PATCHBAY_LAUNCH_ID`、`PATCHBAY_LAUNCH_OWNER_PID`，再用 `pendingRecord` 写完整 pending 记录，
+发现 transport 后用 `withTransport` 更新。launcher 不伪造 application/device metadata，也不解析
+stdout 私有帧；child 必须显式传入真实 consumer/App `processId`，不能拿 launcher `ownerPid` 代填。
+launcher 只监督 `launchId + ownerPid` 同时匹配的记录；未声明的 child 会在有限预算后以
+`sessionNotDeclared` 失败。machine frame 只写 stdout，child 与人读日志转发到 stderr。
+稳定 live 会话每 5 秒观测一次；断连后从 200 ms 初始退避重新恢复，每次 identity probe 同时受 child
+退出与剩余总预算约束。
+
 上面任何一步不通时先跑体检——它自己拨号，因此拨不通是它的一条 finding，而不是命令终止：
 
 ```text
@@ -203,17 +218,16 @@ ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio` 和 `--timeout-ms`
 - 不写入脚本、日志、快照和提交物；
 - CLI 错误只报告错误类别，不回显完整 URI。
 
-launcher 会先以原子替换写入 provisional 记录，再在收到 `app.debugPort` 后补 URI；CLI 连接并读取
+参与声明的 child 会先以原子替换写入 provisional 记录，再由自己的工具链发现 URI 后补齐；launcher 连接并读取
 `ext.patchbay.identity` 后才补齐 `appInstanceId` 和 `isolateId`。完整记录绑定 session schema、
 `applicationId`、`appInstanceId`、`isolateId`、launcher PID、`wsUri`、build mode、创建时间、worktree
 与设备 ID。记录默认位于当前用户的系统临时目录，可用 `PATCHBAY_SESSION_DIR` 覆盖。
-launcher 仍会把 `app.log`、`app.progress` 和 stderr 以人可读形式回显，但统一替换其中的 http/ws URI；
-`app.debugPort` 只显示“会话已发现”，永不回显 machine 事件载荷。
+`patchbay launch` 将 child stdout/stderr 作为人读日志转发到 stderr，stdout 只保留稳定 machine frame。
 
-PID 存活只表示 launcher 可能仍在，不能证明 App 实例仍相同。以下任一情况都会删除记录并返回稳定的
-session error：PID 不活、URI 不可连接、schema/identity 不匹配。hot restart 再次产生
-`app.debugPort` 时 launcher 会原子重置已补齐的 identity，CLI 必须重新实测补齐；显式 `--ws-uri` 也会
-执行同一 schema/isolate/appInstance identity 校验。launcher 退出时删除自己拥有的记录。POSIX 上目录和
+PID 存活只表示 launcher 可能仍在，不能证明 App 实例仍相同。PID 不活或 schema/identity 不匹配会使
+记录失效；短暂不可达则保留记录并在有限预算内恢复。hot restart 改变 App instance 时 launcher 会在
+复用前重新实测并重锚；显式 `--ws-uri` 也执行同一 schema/isolate/appInstance identity 校验。launcher
+退出时只删除自己拥有的 pending 记录。POSIX 上目录和
 文件分别收紧到 `0700` / `0600`，普通输出、错误和选择列表都不包含 URI/token。
 
 当前命令执行路径自身不调用 ADB。不过在 Android 上，如果 URI 来自 `flutter run`，Flutter 的启动、

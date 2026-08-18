@@ -30,6 +30,16 @@ PID 探活加 URI 有无派生出来的 `status` 关系必须写明：前者是 
 冲突时以观测为准。老记录没有 `state` 时按现有探活逻辑读取；新 writer 必须先写 `pending`，identity
 握手成功后原子替换为 `live`。
 
+`launch` 采用公开的 child-declaration 契约，不解析某一种设备工具的私有 stdout，也不凭空补
+`applicationId/deviceId`：launcher 启动子进程时注入既有 `PATCHBAY_SESSION_DIR`，以及新增的
+`PATCHBAY_LAUNCH_ID`、`PATCHBAY_LAUNCH_OWNER_PID`。参与接入的 child/consumer 通过
+`PatchbayLaunchContext.tryFromEnvironment` 读取三者，并使用 `pendingRecord` 写入包含全部既有必填
+metadata 的记录；其中 `processId` 必须由 child 显式传入真实 consumer/App 进程，拿到 transport 后以
+`withTransport` 原子更新。`ownerPid` 是 launcher PID，不是 App PID；两者不得互相代填。launcher 只监督
+同时匹配 `launchId + ownerPid` 的记录。三项都不存在表示普通独立启动，部分存在
+则是 `launchContextInvalid`，不得猜测。无参与 child 在预算耗尽后以 `failed/sessionNotDeclared` 收尾。
+这套声明不新增 metadata 命令行 flags，也不占用 child stdout 的私有 frame。
+
 **session 记录的 `schemaVersion` 保持 `1`，新字段一律松读追加。** 这不是风格偏好：现有 reader 遇到
 不认识的 `schemaVersion` 会抛，而目录扫描把解析失败的文件**直接删除**。所以升一次版本号的实际
 后果是——装着老 CLI 的那台机器会悄悄删掉新 launcher 刚写下的会话记录。这是比 wire 面更容易踩的
@@ -50,6 +60,8 @@ live -> disconnected -> retrying | completed
 - 同一 `launchId` 只认一个 owner；PID 存活只证明 launcher 仍在，不证明 App ready。
 - 重试使用带抖动指数退避：首次等待 200 ms，每次翻倍并封顶 5 s，抖动取计算值的 `[50%,100%]`；默认
   总预算 120 s。预算耗尽以类型化 `launchFailed` 收尾。时钟与随机源必须可注入，测试不能靠真实等待。
+- `live` 后的健康观测固定为 5 s cadence，不沿用恢复退避轮询；从 `live` 转为不可达时，恢复退避重新从
+  200 ms 起步。identity probe 必须与 child 退出及剩余预算竞速，不能让一次无响应连接突破总预算。
 - pending 记录默认 TTL 为 5 min；launcher 每次有效状态推进都刷新 `observedAtMs`，但单纯读取不续期。
   配置可把总预算和 TTL 调小，不能分别超过 10 min 与 30 min。
 - 监督期间发现别的 session 不自动切换，只在 machine frame 中报告候选。
@@ -81,6 +93,7 @@ capability 沿用既有表达：`ui.keepAwake.status` 的 `wired: false` 与 `ke
 
 - 新 CLI 遇不支持 pending schema 的接入方，使用既有探活并标记 `sessionMode: legacy`。
 - 老 CLI 忽略新 session 字段；writer 保持既有必填字段语义与 `schemaVersion: 1`。
+- 不参与 child 不会被 launcher 误认；它仍可沿用旧 writer 独立写记录，但 `patchbay launch` 不拥有它。
 - keep-awake 未接线时按既有 `keepAwakeNotWired` 显式拒绝，不假装策略已生效。
 - VM/direct 只影响连接方式，不改变监督状态和 reasonCode。
 

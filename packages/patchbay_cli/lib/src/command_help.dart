@@ -276,6 +276,8 @@ abstract final class PatchbayCommandHelp {
               'whose token would have to share stdin with the commands.',
         PatchbayCommandTarget.localSessionStore =>
           'Always available: it needs no App, no connection and no catalog.',
+        PatchbayCommandTarget.localLauncher =>
+          'Always available: the child declares the session it supervises.',
         PatchbayCommandTarget.localManifestVerification =>
           'Available on any connected Patchbay transport; a manifest that '
               'scopes entries to a destination also needs navigation.current.',
@@ -308,6 +310,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.localSessionStore =>
           'Reads and writes the local launcher session directory '
               '(--session-dir); it never dials the App.',
+        PatchbayCommandTarget.localLauncher =>
+          'Starts one child with additive PATCHBAY_LAUNCH_* environment and '
+              'supervises only the session that child declares.',
         PatchbayCommandTarget.localManifestVerification =>
           'Compares the manifest against the UI targets the catalog publishes; '
               'the verdict is computed locally and exits '

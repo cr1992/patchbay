@@ -80,6 +80,7 @@ Availability is still decided by the running App catalog.
       // `catalog`, `snapshot`, `exec` and `job` were dispatchable commands
       // with no help at all. The freeze is now the full dispatchable surface.
       expect(groups, <String>{
+        'launch',
         'identity',
         'catalog',
         'snapshot',

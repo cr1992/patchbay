@@ -366,20 +366,31 @@ delegate 只在真正发生状态翻转时被调用，不会连着两次收到�
 
 ### 6. 会话自动发现（可选）
 
-自动发现不是 `flutter run` 自带行为，需要一层启动器把 VM Service URI 写成会话记录。推荐让
-`flutter run` 自己把 URI 落盘，启动器只监视这个文件：
+自动发现不是 `flutter run` 自带行为。`patchbay launch -- <consumer command>` 负责有界监督，consumer
+仍负责提供真实的 App/device metadata 并声明自己的 session。推荐让 `flutter run` 自己把 URI 落盘：
 
 ```console
 $ flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
 ```
 
-读到 URI 后用 `patchbay_cli` 的 session writer（`PatchbaySessionStore` + `PatchbaySessionRecord`）
-写记录，`appInstanceId` 由 CLI 首次连上后补齐。这条路径不接管 `flutter run` 的 stdio：`r` / `R` /
-`q` 与热重载输出照旧，启动器解析出问题也只影响发现，不会连交互一起毁掉。
+`patchbay launch` 向 child 注入 `PATCHBAY_SESSION_DIR`、`PATCHBAY_LAUNCH_ID`、
+`PATCHBAY_LAUNCH_OWNER_PID`。接入方用 `PatchbayLaunchContext.tryFromEnvironment` 判断是否处于受监督
+启动；三项全无表示普通启动，部分存在则拒绝。参与 child 用 `pendingRecord` 写带完整必填 metadata 的
+pending 记录，并显式传入真实 consumer/App `processId`；这个 PID 与 launcher `ownerPid` 各自独立。读到
+URI 后用 `withTransport` 原子更新。launcher 不伪造 metadata、不解析 stdout 私有帧，
+只认 `launchId + ownerPid` 都匹配的记录；identity 成功后才写入 `appInstanceId/isolateId` 并进入 `live`。
 
-包住 `flutter run --machine` 再解析 machine frame 仍然可行（它额外提供 `app.debugPort` 等事件），
-但那要求启动器接管 stdio 并自行转发按键，实测更脆，不是推荐路径。没有启动器时始终使用
-`--ws-uri`。
+```console
+$ patchbay launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+```
+
+stdout 是稳定 machine frame；child stdout/stderr 作为人读日志转发到 stderr。没有执行上述声明步骤的
+child 不会被猜成当前 App，而是在默认 120 秒预算耗尽后以 `failed/sessionNotDeclared` 终止。退避从
+200 ms 指数增长、封顶 5 s 并带 `[50%,100%]` 抖动；hot restart 会重新校验并重锚 App instance。
+稳定 `live` 状态每 5 秒观测一次；断连时恢复退避从 200 ms 重新起步，单次 identity probe 也受剩余
+总预算和 child 退出约束。
+consumer 内部仍可解析自己所用工具链的输出，但这是接入方实现，不是 launcher 的私有协议。没有
+声明接入时始终使用 `--ws-uri` 或既有独立 session writer。
 
 ## CLI 手册
 

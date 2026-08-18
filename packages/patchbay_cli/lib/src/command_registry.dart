@@ -62,6 +62,9 @@ enum PatchbayCommandTarget {
   /// CLI cannot pick a session on its own.
   localSessionStore,
 
+  /// Starts and supervises one consumer child and its declared session.
+  localLauncher,
+
   /// A diagnosis that owns its own connection attempt.
   ///
   /// Every other target is dispatched *after* a successful dial, which is
@@ -78,6 +81,13 @@ enum PatchbayCommandTarget {
 /// catalog and the invoke response remains authoritative. This table is
 /// syntax, not a capability inventory.
 enum PatchbayFriendlyCommand {
+  launch(
+    null,
+    <String>['launch'],
+    summary: 'Supervise a consumer command and its declared Patchbay session.',
+    usageSuffix: '-- <consumer command>',
+    target: PatchbayCommandTarget.localLauncher,
+  ),
   identity(
     null,
     <String>['identity'],
@@ -494,6 +504,9 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         const <String, Object?>{},
       ),
+      PatchbayFriendlyCommand.launch => <String, Object?>{
+        'command': _launchCommand(tail),
+      },
       // An omitted `--path` produces no arguments at all, which is what makes
       // the whole-snapshot read stay exactly the request it always was.
       PatchbayFriendlyCommand.snapshot => _noTail(tail, <String, Object?>{
@@ -848,6 +861,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     // A release takes no lease, and a read takes nothing at all.
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
+    PatchbayFriendlyCommand.launch => const <String>{},
     PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
     PatchbayFriendlyCommand.snapshot => const <String>{'path'},
     PatchbayFriendlyCommand.snapshotWait => const <String>{
@@ -1065,6 +1079,13 @@ abstract final class PatchbayFriendlyCommandRegistry {
       if (comparing) 'value': _jsonLiteral(tail[1]),
       'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
     };
+  }
+
+  static List<String> _launchCommand(List<String> tail) {
+    if (tail.isEmpty) {
+      throw const FormatException('launch requires -- <consumer command>');
+    }
+    return List<String>.unmodifiable(tail);
   }
 
   /// One JSON literal from the command line, refused rather than guessed at.

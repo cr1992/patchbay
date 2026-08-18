@@ -13,6 +13,7 @@ import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
+import 'launcher.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -61,6 +62,27 @@ Future<int> runPatchbayCli(
     _validateGlobalShape(parsed);
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
+    }
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localLauncher) {
+      final PatchbayFriendlyInvocation invocation =
+          PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+      final String launchId =
+          'launch-${pid}-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+      final PatchbayLaunchResult result =
+          await PatchbayLauncherSupervisor(
+            store: PatchbaySessionStore(parsed.option('session-dir')),
+          ).run(
+            command: List<String>.from(
+              invocation.arguments['command']! as List<Object?>,
+            ),
+            launchId: launchId,
+            ownerPid: pid,
+            onFrame: (PatchbayLaunchFrame frame) =>
+                out.writeln(jsonEncode(frame.toJson())),
+            onHumanLine: error.writeln,
+          );
+      return result.exitCode;
     }
     // Session bookkeeping answers before any transport exists: these commands
     // are what an operator reaches for when the CLI cannot pick a session, so
@@ -783,6 +805,8 @@ Future<_Execution> _execute(
       // Answered before the dial, and refused inside a repl, so this arm is
       // unreachable for the same reason the one above is.
       throw StateError('session-directory commands run without a connection');
+    case PatchbayCommandTarget.localLauncher:
+      throw StateError('launcher runs without a connection');
     case PatchbayCommandTarget.localDiagnostics:
       // Answered before the dial as well: doctor dials for itself so that a
       // failed dial becomes a finding instead of ending the command.
