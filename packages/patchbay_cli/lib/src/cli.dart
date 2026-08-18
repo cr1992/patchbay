@@ -851,7 +851,14 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('start', help: 'JSON target-local normalized gesture point.')
   ..addOption('gesture-path', help: 'JSON array of target-local drag points.')
   ..addOption('velocity', help: 'JSON normalized fling velocity vector.')
-  ..addOption('duration-ms', help: 'Bounded gesture duration in milliseconds.')
+  // 手势时长与性能画像窗口共用这一个选项名：allowedOptions 按命令分别限定，
+  // 所以一个声明服务两种用途，重复声明会让 ArgParser 直接抛错。
+  ..addOption(
+    'duration-ms',
+    help:
+        'Bounded gesture duration, or performance profile window, '
+        'in milliseconds.',
+  )
   ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
   ..addOption('cursor', help: 'Opaque structured-log cursor.')
   ..addOption(
@@ -884,10 +891,6 @@ ArgParser patchbayCliParser() => ArgParser()
         'own when it runs out. Omit to use the App-declared default.',
   )
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
-  ..addOption(
-    'duration-ms',
-    help: 'Performance profile window in milliseconds (1..60000).',
-  )
   ..addOption(
     'sample-limit',
     help: 'Maximum VM timeline events summarized (1..10000).',

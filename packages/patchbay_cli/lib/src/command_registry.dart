@@ -9,6 +9,13 @@ part 'generated/protocol_cli_commands.g.dart';
 
 enum PatchbayArtifactDisposition { none, payloadBlob, responseBlob }
 
+/// Where a CLI-only command declaration is implemented.
+///
+/// This is process-local metadata, not part of the Patchbay wire contract.
+/// Protocol-generated declarations are identified by their descriptor before
+/// this value is consulted.
+enum PatchbayCommandDeclarationSource { client, local }
+
 abstract interface class PatchbayFriendlyCommandSpec {
   String get name;
   String? get serviceCommand;
@@ -86,39 +93,39 @@ final class _GeneratedProtocolCommand implements PatchbayFriendlyCommandSpec {
 /// removes the need for a second hand-written command table beside this one.
 enum PatchbayCommandTarget {
   /// `ext.patchbay.invoke` with the declaration's own stable service command.
-  declaredServiceCommand,
+  declaredServiceCommand(PatchbayCommandDeclarationSource.client),
 
   /// `ext.patchbay.invoke` with the service command supplied by the caller.
   ///
   /// The generic escape hatch: the protocol name is data, not a declaration.
-  callerServiceCommand,
+  callerServiceCommand(PatchbayCommandDeclarationSource.client),
 
   /// `PatchbayClient.identity` — the transport handshake, never a catalog row.
-  clientIdentity,
+  clientIdentity(PatchbayCommandDeclarationSource.client),
 
   /// `PatchbayClient.catalog` — the capability listing itself.
-  clientCatalog,
+  clientCatalog(PatchbayCommandDeclarationSource.client),
 
   /// A local projection of one live catalog row; invokes no App command.
-  localCatalogDescription,
+  localCatalogDescription(PatchbayCommandDeclarationSource.local),
 
   /// `PatchbayClient.snapshot` — the transport-level state read.
-  clientSnapshot,
+  clientSnapshot(PatchbayCommandDeclarationSource.client),
 
   /// `PatchbayClient.widgetTree` — Flutter SDK diagnostic passthrough.
-  clientWidgetTree,
+  clientWidgetTree(PatchbayCommandDeclarationSource.client),
 
   /// `PatchbayClient.renderTree` — Flutter SDK diagnostic passthrough.
-  clientRenderTree,
+  clientRenderTree(PatchbayCommandDeclarationSource.client),
 
   /// `PatchbayClient.focusTree` — Flutter SDK diagnostic passthrough.
-  clientFocusTree,
+  clientFocusTree(PatchbayCommandDeclarationSource.client),
 
   /// Public VM Service timeline and memory RPCs reduced to a stable summary.
-  clientPerformanceProfile,
+  clientPerformanceProfile(PatchbayCommandDeclarationSource.client),
 
   /// A stable refusal until a collection-before-redaction network RPC exists.
-  clientNetworkProfile,
+  clientNetworkProfile(PatchbayCommandDeclarationSource.client),
 
   /// A verdict computed on this side of the wire from a catalog reading.
   ///
@@ -126,18 +133,18 @@ enum PatchbayCommandTarget {
   /// catalog, and the current destination when the manifest scopes anything.
   /// The comparison and the exit code are the CLI's, which is what lets this
   /// command exist without a single new wire command.
-  localManifestVerification,
+  localManifestVerification(PatchbayCommandDeclarationSource.local),
 
   /// A manifest draft computed on this side of the wire from live catalog
   /// facts and the currently settled destination.
-  localManifestEmission,
+  localManifestEmission(PatchbayCommandDeclarationSource.local),
 
   /// A reusable session: connect once, then run many of the targets above.
   ///
   /// It is declared here so help, option validation and the usage banner all
   /// derive from the same table as every other path, but it dispatches nothing
   /// itself — `runPatchbayCli` hands the connection to the repl loop.
-  clientReplSession,
+  clientReplSession(PatchbayCommandDeclarationSource.client),
 
   /// The local launcher session directory, read and written without dialling.
   ///
@@ -145,10 +152,10 @@ enum PatchbayCommandTarget {
   /// which one later commands should use — so requiring a connection would
   /// invert the dependency: the operator reaches for them precisely when the
   /// CLI cannot pick a session on its own.
-  localSessionStore,
+  localSessionStore(PatchbayCommandDeclarationSource.local),
 
   /// Starts and supervises one consumer child and its declared session.
-  localLauncher,
+  localLauncher(PatchbayCommandDeclarationSource.local),
 
   /// A diagnosis that owns its own connection attempt.
   ///
@@ -156,13 +163,20 @@ enum PatchbayCommandTarget {
   /// exactly what a diagnosis cannot require: a dial that fails is the answer
   /// it was asked for. So `runPatchbayCli` hands this target the connection
   /// options rather than a connection, and it reports what happened to each.
-  localDiagnostics,
+  localDiagnostics(PatchbayCommandDeclarationSource.local),
 
   /// An explicitly installed external JSON Lines permission driver.
-  localPermissionDriver,
+  localPermissionDriver(PatchbayCommandDeclarationSource.local),
 
   /// The local append-only trace store, read and written without dialling.
-  localTraceStore,
+  localTraceStore(PatchbayCommandDeclarationSource.local);
+
+  const PatchbayCommandTarget(this.declarationSource);
+
+  /// Authoritative source for declarations that do not carry a protocol
+  /// descriptor. Every target must choose explicitly, so adding a future
+  /// local target cannot silently fall through to a client default.
+  final PatchbayCommandDeclarationSource declarationSource;
 }
 
 /// Explicit declarations for local and client-only CLI commands.
@@ -1227,7 +1241,6 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'pin',
       'dry-run',
       'include-artifacts',
-      'duration-ms',
       'sample-limit',
     };
     for (final String name in friendlyOptions) {

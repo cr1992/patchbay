@@ -48,6 +48,82 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 `ui wait <condition>` 形式的 condition 名）。别名只是既有声明的另一种拼写，不新增命令，也不改任何
 稳定名；没有任何声明发送的协议名仍是 `unknown help topic`。
 
+<!-- PATCHBAY_COMMAND_REFERENCE:START -->
+下表只描述当前 CLI 随包发布的语法。协议命令行来自仓内 descriptor；client / local 行仍来自 CLI 的显式声明。它不是运行时 capability catalog，实际可用性请以 `patchbay catalog` 为准。
+
+| CLI 语法 | 声明来源 | 协议命令 |
+|---|---|---|
+| `patchbay blob get <blob-id> --output <path>` | client 显式声明 | `blob.metadata` |
+| `patchbay blob metadata <blob-id>` | client 显式声明 | `blob.metadata` |
+| `patchbay capture diff <before-blob-id> <after-blob-id>` | client 显式声明 | `ui.capture.diff` |
+| `patchbay capture root --output <path>` | 协议 descriptor | `ui.capture` |
+| `patchbay capture target <target-id> <generation> --output <path>` | 协议 descriptor | `ui.capture` |
+| `patchbay catalog` | client 显式声明 | — |
+| `patchbay describe <service-command>` | local 显式声明 | — |
+| `patchbay doctor` | local 显式声明 | — |
+| `patchbay doctor permission` | local 显式声明 | — |
+| `patchbay exec <service-command>` | client 显式声明 | — |
+| `patchbay identity` | client 显式声明 | — |
+| `patchbay job cancel <job-id>` | client 显式声明 | `patchbay.job.cancel` |
+| `patchbay job get <job-id>` | client 显式声明 | `patchbay.job.get` |
+| `patchbay launch -- <consumer command>` | local 显式声明 | — |
+| `patchbay logs export --output <path>` | client 显式声明 | `logs.export` |
+| `patchbay logs query` | client 显式声明 | `logs.query` |
+| `patchbay logs tail` | client 显式声明 | `logs.tail` |
+| `patchbay navigation back [--revision <revision>]` | 协议 descriptor | `navigation.back` |
+| `patchbay navigation catalog` | 协议 descriptor | `navigation.catalog` |
+| `patchbay navigation current` | 协议 descriptor | `navigation.current` |
+| `patchbay navigation go <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.go` |
+| `patchbay navigation push <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.push` |
+| `patchbay net profile` | client 显式声明 | — |
+| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client 显式声明 | — |
+| `patchbay permission capabilities` | local 显式声明 | — |
+| `patchbay permission exercise <permission> --decision <decision>` | local 显式声明 | — |
+| `patchbay permission fail <permission> --state <state>` | local 显式声明 | — |
+| `patchbay permission normalize <permission> --state <state>` | local 显式声明 | — |
+| `patchbay permission reset <permission>` | local 显式声明 | — |
+| `patchbay permission status <permission>` | local 显式声明 | — |
+| `patchbay repl` | client 显式声明 | — |
+| `patchbay session use <session-id> \| --clear` | local 显式声明 | — |
+| `patchbay sessions list` | local 显式声明 | — |
+| `patchbay sessions prune` | local 显式声明 | — |
+| `patchbay snapshot [--path <dot.path>]` | client 显式声明 | — |
+| `patchbay snapshot diff --from <revision>` | client 显式声明 | — |
+| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client 显式声明 | — |
+| `patchbay trace diff <before-trace-id> <after-trace-id>` | local 显式声明 | — |
+| `patchbay trace export <trace-id> --output <directory>` | local 显式声明 | — |
+| `patchbay trace mark <note>` | local 显式声明 | — |
+| `patchbay trace prune [--dry-run]` | local 显式声明 | — |
+| `patchbay trace show <trace-id>` | local 显式声明 | — |
+| `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — |
+| `patchbay trace stop [trace-id]` | local 显式声明 | — |
+| `patchbay ui focus-tree` | client 显式声明 | — |
+| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
+| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
+| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` |
+| `patchbay ui inspect off` | 协议 descriptor | `ui.inspect.select` |
+| `patchbay ui inspect on [--ttl-ms <ms>]` | 协议 descriptor | `ui.inspect.select` |
+| `patchbay ui inspect status` | 协议 descriptor | `ui.inspect.status` |
+| `patchbay ui keep-awake off` | 协议 descriptor | `ui.keepAwake.set` |
+| `patchbay ui keep-awake on [--lease-ms <ms>]` | 协议 descriptor | `ui.keepAwake.set` |
+| `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` |
+| `patchbay ui render-tree` | client 显式声明 | — |
+| `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` |
+| `patchbay ui semantics tree` | 协议 descriptor | `ui.semantics.tree` |
+| `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` |
+| `patchbay ui targets --emit-manifest` | local 显式声明 | — |
+| `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` |
+| `patchbay ui text set <target-id> <generation> [text]` | 协议 descriptor | `ui.text.set` |
+| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local 显式声明 | — |
+| `patchbay ui wait destination <destination-id>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait frame-revision <revision>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait semantics-mounted <identifier>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait semantics-unmounted <identifier>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait semantics-value <identifier> <value>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui wait tree-revision <revision>` | 协议 descriptor | `ui.wait` |
+| `patchbay ui widget-tree` | client 显式声明 | — |
+<!-- PATCHBAY_COMMAND_REFERENCE:END -->
+
 由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：
 
 ```text
@@ -107,44 +183,6 @@ dart run bin/patchbay.dart --ws-uri <uri> --json identity
 dart run bin/patchbay.dart --ws-uri <uri> --json catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json snapshot
 dart run bin/patchbay.dart --ws-uri <uri> --json exec <namespace.command>
-dart run bin/patchbay.dart --ws-uri <uri> --json --args '{"value":42}' exec <namespace.command>
-dart run bin/patchbay.dart --ws-uri <uri> --json --wait exec <namespace.command>
-dart run bin/patchbay.dart --ws-uri <uri> --json job get <job-id>
-dart run bin/patchbay.dart --ws-uri <uri> --json job cancel <job-id>
-dart run bin/patchbay.dart --ws-uri <uri> --json ui text set <target-id> <generation> <text>
-dart run bin/patchbay.dart --ws-uri <uri> --json ui text enter <target-id> <generation> <text>
-dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics tree
-dart run bin/patchbay.dart --ws-uri <uri> --json ui semantics action <node-id> <generation> <action>
-dart run bin/patchbay.dart --ws-uri <uri> --json ui tap <identifier>
-dart run bin/patchbay.dart --ws-uri <uri> --json --generation <generation> ui tap <identifier>
-dart run bin/patchbay.dart --ws-uri <uri> --json ui verify-manifest ./ui-targets.json
-dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
-dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
-dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
-dart run bin/patchbay.dart --ws-uri <uri> --json perf profile
-dart run bin/patchbay.dart --ws-uri <uri> --json --duration-ms 5000 --sample-limit 2000 perf profile
-dart run bin/patchbay.dart --ws-uri <uri> --json net profile
-dart run bin/patchbay.dart --ws-uri <uri> --json navigation catalog
-dart run bin/patchbay.dart --ws-uri <uri> --json navigation current
-dart run bin/patchbay.dart --ws-uri <uri> --json navigation go settings
-dart run bin/patchbay.dart --ws-uri <uri> --json --revision 4 navigation go settings
-dart run bin/patchbay.dart --ws-uri <uri> --json --revision 5 navigation push details
-dart run bin/patchbay.dart --ws-uri <uri> --json --revision 6 navigation back
-dart run bin/patchbay.dart --ws-uri <uri> --json --timeout-ms 5000 ui wait semantics-mounted app.settings
-dart run bin/patchbay.dart --ws-uri <uri> --json --timeout-ms 5000 ui wait semantics-unmounted app.loading
-dart run bin/patchbay.dart --ws-uri <uri> --json --timeout-ms 5000 ui wait semantics-value app.status ready
-dart run bin/patchbay.dart --ws-uri <uri> --json --revision 4 ui wait destination settings
-dart run bin/patchbay.dart --ws-uri <uri> --json ui wait tree-revision 10
-dart run bin/patchbay.dart --ws-uri <uri> --json ui wait frame-revision 20
-dart run bin/patchbay.dart --ws-uri <uri> --json --limit 100 logs query
-dart run bin/patchbay.dart --ws-uri <uri> --json --cursor <cursor> --timeout-ms 5000 logs tail
-dart run bin/patchbay.dart --ws-uri <uri> --json --output ./logs.ndjson logs export
-dart run bin/patchbay.dart --ws-uri <uri> --json --output ./screen.png capture root
-dart run bin/patchbay.dart --ws-uri <uri> --json --after-frames 12 --output ./frame-12.png capture root
-dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture target <target-id> <generation>
-dart run bin/patchbay.dart --ws-uri <uri> --json capture diff <before-blob-id> <after-blob-id>
-dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
-dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
 
 `<generation>` 来自最近一次 catalog 或 Semantics tree。目标重挂载后 generation 会变化；写操作携带
