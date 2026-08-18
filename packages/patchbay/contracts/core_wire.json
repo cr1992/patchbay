@@ -494,7 +494,8 @@
         {"name": "targetId", "type": "String", "nullable": true},
         {"name": "generation", "type": "int", "nullable": true},
         {"name": "pixelRatio", "type": "num", "nullable": true},
-        {"name": "timeoutMs", "type": "int", "nullable": true}
+        {"name": "timeoutMs", "type": "int", "nullable": true},
+        {"name": "afterFrames", "type": "int", "nullable": true}
       ]
     },
     {
@@ -509,8 +510,42 @@
         {"name": "width", "type": "int"},
         {"name": "height", "type": "int"},
         {"name": "pixelRatio", "type": "num"},
+        {"name": "pixelFormat", "type": "String"},
+        {"name": "capturedAt", "type": "String"},
+        {"name": "requestedFrames", "type": "int"},
+        {"name": "observedFrames", "type": "int"},
+        {"name": "maxPixels", "type": "int"},
+        {"name": "maxBytes", "type": "int"},
         {"name": "warnings", "type": "PatchbayCaptureWarningWire", "list": true},
         {"name": "blob", "type": "PatchbayBlobMetadataWire"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayCaptureDiffRequestWire",
+      "fields": [
+        {"name": "beforeBlobId", "type": "String"},
+        {"name": "afterBlobId", "type": "String"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayCaptureDiffResultWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "beforeBlobId", "type": "String"},
+        {"name": "afterBlobId", "type": "String"},
+        {"name": "width", "type": "int"},
+        {"name": "height", "type": "int"},
+        {"name": "pixelFormat", "type": "String"},
+        {"name": "changedPixels", "type": "int"},
+        {"name": "totalPixels", "type": "int"},
+        {"name": "differenceRatio", "type": "num"},
+        {"name": "comparedAt", "type": "String"},
+        {"name": "maxPixels", "type": "int"},
+        {"name": "maxBytes", "type": "int"},
+        {"name": "warnings", "type": "PatchbayCaptureWarningWire", "list": true}
       ]
     },
     {

@@ -34,4 +34,11 @@ enum PatchbayFeature {
   /// apart from an App that reports `unknown` because its consumer replaced
   /// the resumed decision without supplying a reader.
   lifecycleState,
+
+  /// `ui.capture` accepts `afterFrames` and reports observed frame counts.
+  ///
+  /// A CLI that does not see this declaration must omit `afterFrames` and
+  /// label the result as a legacy immediate capture. It must not infer support
+  /// from an `invalidArguments` response because that shape has other causes.
+  captureAfterFrames,
 }

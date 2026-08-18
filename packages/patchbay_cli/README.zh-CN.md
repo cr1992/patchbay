@@ -113,7 +113,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --limit 100 logs query
 dart run bin/patchbay.dart --ws-uri <uri> --json --cursor <cursor> --timeout-ms 5000 logs tail
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./logs.ndjson logs export
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./screen.png capture root
+dart run bin/patchbay.dart --ws-uri <uri> --json --after-frames 12 --output ./frame-12.png capture root
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture target <target-id> <generation>
+dart run bin/patchbay.dart --ws-uri <uri> --json capture diff <before-blob-id> <after-blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
@@ -191,8 +193,12 @@ App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocation
 声明了它的请求会把本次 RPC 预算放宽成「声明的等待 + 一次往返」，不会被默认预算腰斩。
 
 日志过滤支持 `--cursor`、`--direction`、`--limit`、逗号分隔的 `--levels`/`--categories` 以及
-ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio` 和 `--timeout-ms`。所有 artifact 下载先写同目录
-临时文件，分块校验 blob metadata、offset、base64、总长度与 SHA-256，全部通过后才 rename；已有输出
+ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio`、`--after-frames`（1..120 次 Patchbay
+观测到的 Flutter 帧）和 `--timeout-ms`。host 未声明 `captureAfterFrames` 时，CLI 会省略该字段并在结果
+标记 `captureMode=legacyImmediate`，不会从错误形状猜支持情况。`capture diff` 只比较宽高和像素格式
+相同的两份已保留 capture blob，返回变化像素数、总像素数和比例，不代替调用方判 pass/fail。
+
+所有 artifact 下载先写同目录临时文件，分块校验 blob metadata、offset、base64、总长度与 SHA-256，全部通过后才 rename；已有输出
 默认拒绝，只有显式 `--force` 才替换。过期、拒绝、错序、哈希错误和中断不会留下完整输出名的残文件。
 
 ## 连接边界

@@ -51,6 +51,7 @@ void main() {
         generation: null,
         pixelRatio: 1,
         timeoutMs: 1000,
+        afterFrames: null,
       ),
       requestId: 'capture-root',
     );
@@ -105,6 +106,7 @@ void main() {
         generation: null,
         pixelRatio: 1,
         timeoutMs: 1000,
+        afterFrames: null,
       ),
       requestId: 'capture-background',
     )).toJson();
@@ -141,6 +143,7 @@ void main() {
         generation: null,
         pixelRatio: 1,
         timeoutMs: 1000,
+        afterFrames: null,
       ),
       requestId: 'capture-pixels',
     );
@@ -179,6 +182,7 @@ void main() {
         generation: null,
         pixelRatio: 1,
         timeoutMs: 1000,
+        afterFrames: null,
       ),
       requestId: 'capture-bytes',
     );
@@ -221,6 +225,7 @@ void main() {
           generation: descriptor.generation,
           pixelRatio: 1,
           timeoutMs: 1000,
+          afterFrames: null,
         ),
         requestId: 'capture-target',
       );
@@ -229,6 +234,211 @@ void main() {
       expect((await pending).admission, PatchbayAdmission.accepted);
     },
   );
+
+  testWidgets('afterFrames starts at the first post-admission observation', (
+    WidgetTester tester,
+  ) async {
+    final PatchbayRootController root = PatchbayRootController();
+    var encodeCalls = 0;
+    final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+      gates: _gates,
+      artifacts: _artifacts(),
+      rootController: root,
+      isAppResumed: () => true,
+      captureEncoder: (_, _) async {
+        encodeCalls += 1;
+        return PatchbayEncodedCapture(bytes: _pngBytes(), width: 4, height: 4);
+      },
+    );
+    await tester.pumpWidget(
+      PatchbayRoot(
+        controller: root,
+        child: const SizedBox.square(dimension: 4),
+      ),
+    );
+
+    final Future<PatchbayInvocation> pending = bridge.capture!.capture(
+      const PatchbayCaptureRequestWire(
+        targetId: null,
+        generation: null,
+        pixelRatio: 1,
+        timeoutMs: 1000,
+        afterFrames: 3,
+      ),
+      requestId: 'capture-after-three',
+    );
+    for (var observed = 1; observed < 3; observed += 1) {
+      await tester.pump();
+      expect(encodeCalls, 0, reason: 'encoded after only $observed frames');
+    }
+    await tester.pump();
+    await tester.pump();
+
+    final Map<String, Object?> response = (await pending).toJson();
+    final Map<String, Object?> payload =
+        response['payload']! as Map<String, Object?>;
+    expect(encodeCalls, 1);
+    expect(payload['requestedFrames'], 3);
+    expect(payload['observedFrames'], 3);
+    expect(payload['pixelFormat'], 'rgba8888');
+    expect(payload['maxPixels'], 16 * 1024 * 1024);
+    expect(payload['maxBytes'], 8 * 1024 * 1024);
+  });
+
+  testWidgets('capture rejects an afterFrames value above its budget', (
+    WidgetTester tester,
+  ) async {
+    final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+      gates: _gates,
+      artifacts: _artifacts(),
+      isAppResumed: () => true,
+    );
+    final Map<String, Object?> response = (await bridge.capture!.capture(
+      const PatchbayCaptureRequestWire(
+        targetId: null,
+        generation: null,
+        pixelRatio: 1,
+        timeoutMs: 1000,
+        afterFrames: 121,
+      ),
+      requestId: 'capture-too-many-frames',
+    )).toJson();
+
+    expect(_rejectionCode(response), 'invalidCaptureArguments');
+    expect(
+      (response['rejection']! as Map<String, Object?>)['details'],
+      containsPair('maxAfterFrames', 120),
+    );
+  });
+
+  test('capture diff reports no change and one changed pixel', () async {
+    final PatchbayArtifactService artifacts = _artifacts();
+    final PatchbayCaptureBridge capture = _diffBridge(artifacts);
+    final String before = _captureBlob(artifacts, 1);
+    final String same = _captureBlob(artifacts, 1);
+    final String after = _captureBlob(artifacts, 2);
+
+    final Map<String, Object?> unchanged = (await capture.diff(
+      PatchbayCaptureDiffRequestWire(beforeBlobId: before, afterBlobId: same),
+      requestId: 'diff-unchanged',
+    )).toJson();
+    final Map<String, Object?> unchangedPayload =
+        unchanged['payload']! as Map<String, Object?>;
+    expect(unchangedPayload['changedPixels'], 0);
+    expect(unchangedPayload['totalPixels'], 2);
+    expect(unchangedPayload['differenceRatio'], 0);
+    expect(unchangedPayload['source'], 'uiObserved');
+    expect(unchangedPayload['warnings'], contains('systemUiNotIncluded'));
+
+    final Map<String, Object?> changed = (await capture.diff(
+      PatchbayCaptureDiffRequestWire(beforeBlobId: before, afterBlobId: after),
+      requestId: 'diff-one-pixel',
+    )).toJson();
+    final Map<String, Object?> changedPayload =
+        changed['payload']! as Map<String, Object?>;
+    expect(changedPayload['changedPixels'], 1);
+    expect(changedPayload['totalPixels'], 2);
+    expect(changedPayload['differenceRatio'], 0.5);
+    expect(changedPayload, isNot(contains('passed')));
+  });
+
+  test('capture diff refuses mismatched image specifications', () async {
+    final PatchbayArtifactService artifacts = _artifacts();
+    final PatchbayCaptureBridge capture = _diffBridge(artifacts);
+    final Map<String, Object?> response = (await capture.diff(
+      PatchbayCaptureDiffRequestWire(
+        beforeBlobId: _captureBlob(artifacts, 1),
+        afterBlobId: _captureBlob(artifacts, 3),
+      ),
+      requestId: 'diff-mismatch',
+    )).toJson();
+
+    expect(_rejectionCode(response), 'captureDiffSpecMismatch');
+  });
+
+  test(
+    'capture diff enforces encoded byte and decoded pixel budgets',
+    () async {
+      final PatchbayArtifactService artifacts = _artifacts();
+      final String before = _captureBlob(artifacts, 1);
+      final String after = _captureBlob(artifacts, 2);
+      final Map<String, Object?> bytes =
+          (await _diffBridge(artifacts, maxBytes: 8).diff(
+            PatchbayCaptureDiffRequestWire(
+              beforeBlobId: before,
+              afterBlobId: after,
+            ),
+            requestId: 'diff-bytes',
+          )).toJson();
+      expect(_rejectionCode(bytes), 'captureDiffByteLimitExceeded');
+
+      final Map<String, Object?> pixels =
+          (await _diffBridge(artifacts, maxPixels: 1).diff(
+            PatchbayCaptureDiffRequestWire(
+              beforeBlobId: before,
+              afterBlobId: after,
+            ),
+            requestId: 'diff-pixels',
+          )).toJson();
+      expect(_rejectionCode(pixels), 'captureDiffPixelLimitExceeded');
+    },
+  );
+
+  test('VM handler and direct dispatcher share capture diff results', () async {
+    final PatchbayArtifactService artifacts = _artifacts();
+    final String before = _captureBlob(artifacts, 1);
+    final String after = _captureBlob(artifacts, 2);
+    final Map<String, ServiceExtensionHandler> handlers =
+        <String, ServiceExtensionHandler>{};
+    final PatchbayFlutterServiceHost host = PatchbayFlutterServiceHost(
+      applicationId: 'dev.patchbay.capture-diff',
+      bridge: PatchbayFlutterBridge(
+        gates: _gates,
+        artifacts: artifacts,
+        captureDecoder: _decodeFixture,
+        isAppResumed: () => true,
+      ),
+      registrar: (method, handler) => handlers[method] = handler,
+    )..register();
+    final Map<String, Object?> arguments = <String, Object?>{
+      'beforeBlobId': before,
+      'afterBlobId': after,
+    };
+    final Map<String, Object?> direct = await host.dispatchInvoke(
+      'ui.capture.diff',
+      arguments,
+      'direct-request',
+    );
+    final Map<String, Object?> vm = await _call(
+      handlers,
+      PatchbayServiceHost.invokeMethod,
+      <String, String>{
+        'command': 'ui.capture.diff',
+        'args': jsonEncode(arguments),
+        'requestId': 'vm-request',
+      },
+    );
+
+    final Map<String, Object?> vmPayload = Map<String, Object?>.from(
+      vm['payload']! as Map<String, Object?>,
+    )..remove('comparedAt');
+    final Map<String, Object?> directPayload = Map<String, Object?>.from(
+      direct['payload']! as Map<String, Object?>,
+    )..remove('comparedAt');
+    expect(vmPayload, directPayload);
+    final Map<String, Object?> catalog = await host.dispatchCatalog();
+    expect(
+      (catalog['commands']! as List<Object?>).cast<Map<String, Object?>>().map(
+        (entry) => entry['name'],
+      ),
+      contains('ui.capture.diff'),
+    );
+    final Map<String, Object?> identity = await _call(
+      handlers,
+      PatchbayServiceHost.identityMethod,
+    );
+    expect(identity['features'], contains('captureAfterFrames'));
+  });
 
   testWidgets('service host omits capture and artifacts without injection', (
     WidgetTester tester,
@@ -329,6 +539,52 @@ final PatchbayGateEvaluator _gates = PatchbayGateEvaluator(
 
 PatchbayArtifactService _artifacts() =>
     PatchbayArtifactService(blobs: PatchbayMemoryBlobStore(), gates: _gates);
+
+PatchbayCaptureBridge _diffBridge(
+  PatchbayArtifactService artifacts, {
+  int maxPixels = 16 * 1024 * 1024,
+  int maxBytes = 8 * 1024 * 1024,
+}) => PatchbayCaptureBridge(
+  gates: _gates,
+  registry: PatchbayUiRegistry(),
+  frames: PatchbayFrameObserver(),
+  artifacts: artifacts,
+  isAppResumed: () => true,
+  maxPixels: maxPixels,
+  maxBytes: maxBytes,
+  decoder: _decodeFixture,
+);
+
+String _captureBlob(PatchbayArtifactService artifacts, int marker) => artifacts
+    .blobs
+    .put(
+      Uint8List.fromList(<int>[..._pngBytes(), marker]),
+      kind: PatchbayBlobSourceWire.flutterCapture,
+      source: PatchbayFactSourceWire.uiObserved,
+      contentType: 'image/png',
+      properties: const <String, Object?>{'pixelFormat': 'rgba8888'},
+    )
+    .blobId;
+
+Future<PatchbayDecodedCapture> _decodeFixture(Uint8List bytes) async {
+  final int marker = bytes.last;
+  if (marker == 3) {
+    return PatchbayDecodedCapture(
+      bytes: Uint8List.fromList(const <int>[0, 0, 0, 255]),
+      width: 1,
+      height: 1,
+      pixelFormat: 'rgba8888',
+      bytesPerPixel: 4,
+    );
+  }
+  return PatchbayDecodedCapture(
+    bytes: Uint8List.fromList(<int>[0, 0, 0, 255, marker, 1, 1, 255]),
+    width: 2,
+    height: 1,
+    pixelFormat: 'rgba8888',
+    bytesPerPixel: 4,
+  );
+}
 
 Uint8List _pngBytes() =>
     Uint8List.fromList(const <int>[137, 80, 78, 71, 13, 10, 26, 10]);
