@@ -245,6 +245,33 @@ The theoretical upper bound on observable records in the registry is therefore
 `maxRunningJobs + retainedJobs`. `runningJobs`, `settledJobs`, and `totalJobs` are useful for
 consumer health checks, but are not a substitute for evidence of business completion.
 
+When a job command declares `responseSchema.terminal`, bind the ledger to the same immutable
+command registry. A handler calls `start()` without naming itself: the dispatch scope supplies the
+exact registration identity instead of trusting a handler-owned string.
+
+```dart
+late final PatchbayJobRegistry jobs;
+final commands = PatchbayCommandRegistry(registrations);
+jobs = PatchbayJobRegistry(commandRegistry: commands);
+
+final jobId = jobs.start(
+  source: PatchbayFactSource.appRecorded,
+  body: refreshDevice,
+);
+```
+
+The scope follows asynchronous handlers and remains isolated across nested or concurrent
+dispatches. If a handler still passes `command`, it must match the active registration; selecting
+another schema in the same registry fails synchronously before a job is created. An adapter that
+really starts work outside dispatch must opt into the explicit
+`startBoundToCommand(command: ...)` API. Plain `start(command: ...)` is rejected outside dispatch,
+so a bare string cannot masquerade as provenance.
+
+The terminal schema is deeply frozen when the job starts and checked before its event enters the
+ledger. An invalid provider payload is replaced with a value-free `providerProtocolViolation`; the
+invalid payload itself is never retained. A registry constructed without `commandRegistry` and a
+job started without `command` keep the 0.3 free-payload behavior.
+
 If the consumer's async API only means "the request has been sent", you cannot mark `completed`
 when that Future returns; you must keep observing domain state until the app can give a real
 terminal state. `suggestedWaitTimeoutMs` only suggests an observation window to the client — it

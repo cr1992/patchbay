@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'command_dispatch_scope.dart';
 import 'command_descriptor.dart';
 import 'invocation.dart';
 import 'response_schema.dart';
@@ -133,7 +134,11 @@ final class PatchbayCommandRegistry {
     final PatchbayCommandRegistration<Object?>? registration =
         _registrations[command];
     if (registration == null) return null;
-    return registration.dispatch(arguments, requestId);
+    return runInPatchbayCommandDispatchScope<Map<String, Object?>>(
+      registry: this,
+      descriptor: registration.descriptor,
+      body: () => registration.dispatch(arguments, requestId),
+    );
   }
 
   /// Dispatches within this registry and types an unknown command as rejected.

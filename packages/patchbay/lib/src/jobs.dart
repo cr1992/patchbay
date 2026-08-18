@@ -1,7 +1,11 @@
 import 'dart:async';
 
+import 'command_dispatch_scope.dart';
+import 'command_descriptor.dart';
+import 'command_registry.dart';
 import 'facts.dart';
 import 'generated/core_wire.g.dart';
+import 'response_schema.dart';
 
 enum PatchbayJobPhase { running, completed, failed, cancelled }
 
@@ -174,12 +178,20 @@ final class PatchbayJobCapacityExceeded implements Exception {
 /// In-isolate job ledger for operations whose completion cannot be represented
 /// honestly by the admission response.
 final class PatchbayJobRegistry {
+  /// Creates a bounded ledger, optionally bound to the originating commands.
+  ///
+  /// Pass the same [commandRegistry] used by command handlers. [start]
+  /// captures the exact registration executing in that registry and validates
+  /// terminal payloads before they are retained. Omitting the registry keeps
+  /// legacy free payloads.
   PatchbayJobRegistry({
     DateTime Function()? now,
+    PatchbayCommandRegistry? commandRegistry,
     this.retainedJobs = 200,
     this.maxRunningJobs = 32,
     this.cancellationTimeout = const Duration(seconds: 5),
-  }) : _now = now ?? DateTime.now {
+  }) : _now = now ?? DateTime.now,
+       _commandRegistry = commandRegistry {
     if (retainedJobs < 1) {
       throw ArgumentError.value(retainedJobs, 'retainedJobs');
     }
@@ -211,6 +223,7 @@ final class PatchbayJobRegistry {
   final Duration cancellationTimeout;
 
   final DateTime Function() _now;
+  final PatchbayCommandRegistry? _commandRegistry;
   final Map<String, _PatchbayJobRecord> _records =
       <String, _PatchbayJobRecord>{};
   int _nextJob = 0;
@@ -225,9 +238,93 @@ final class PatchbayJobRegistry {
 
   int get totalJobs => _records.length;
 
+  /// Starts a job and captures the current registration when available.
+  ///
+  /// In a dispatch from this ledger's [PatchbayCommandRegistry], the exact
+  /// descriptor is inherited across async gaps. [command] remains accepted for
+  /// source compatibility but, in that scope, may only repeat the active name.
+  /// Outside dispatch, omit [command] for a legacy unbound job or use
+  /// [startBoundToCommand] for an explicit adapter binding.
   String start({
     required PatchbayFactSource source,
+    String? command,
     String? operation,
+    required PatchbayJobBody body,
+    PatchbayJobCancellation? cancel,
+  }) {
+    final PatchbayCommandDescriptor? descriptor = _dispatchDescriptorFor(
+      command,
+    );
+    return _start(
+      source: source,
+      operation: operation ?? descriptor?.name ?? command,
+      responseSchema: _freezeResponseSchema(descriptor?.responseSchema),
+      body: body,
+      cancel: cancel,
+    );
+  }
+
+  /// Starts a schema-bound job from an adapter outside command dispatch.
+  ///
+  /// Normal registry handlers should call [start] without a command: the
+  /// dispatch scope supplies an unforgeable registration identity. An adapter
+  /// that genuinely starts work outside dispatch must opt into this name-based
+  /// lookup explicitly. If this is called from a handler in the same registry,
+  /// the active descriptor still wins and a different [command] is rejected.
+  String startBoundToCommand({
+    required String command,
+    required PatchbayFactSource source,
+    String? operation,
+    required PatchbayJobBody body,
+    PatchbayJobCancellation? cancel,
+  }) {
+    final PatchbayCommandDispatchIdentity? identity =
+        patchbayCommandDispatchIdentity;
+    final PatchbayCommandRegistry? registry = _commandRegistry;
+    if (identity != null &&
+        registry != null &&
+        !identical(identity.registry, registry)) {
+      throw StateError(
+        'PatchbayJobRegistry is bound to a different command registry than '
+        'the active dispatch.',
+      );
+    }
+    if (identity != null &&
+        registry != null &&
+        identical(identity.registry, registry)) {
+      return start(
+        command: command,
+        source: source,
+        operation: operation,
+        body: body,
+        cancel: cancel,
+      );
+    }
+    if (registry == null) {
+      throw ArgumentError.value(
+        command,
+        'command',
+        'requires PatchbayJobRegistry(commandRegistry: ...)',
+      );
+    }
+    if (!registry.handles(command)) {
+      throw ArgumentError.value(command, 'command', 'is not registered');
+    }
+    return _start(
+      source: source,
+      operation: operation ?? command,
+      responseSchema: _freezeResponseSchema(
+        registry.responseSchemaFor(command),
+      ),
+      body: body,
+      cancel: cancel,
+    );
+  }
+
+  String _start({
+    required PatchbayFactSource source,
+    required String? operation,
+    required PatchbayResponseSchema? responseSchema,
     required PatchbayJobBody body,
     PatchbayJobCancellation? cancel,
   }) {
@@ -238,17 +335,67 @@ final class PatchbayJobRegistry {
     final _PatchbayJobRecord record = _PatchbayJobRecord(
       cancel: cancel,
       operation: operation,
+      responseSchema: responseSchema,
     );
     _records[jobId] = record;
     _append(
       record,
       PatchbayJobPhase.running,
       source: source,
-      operation: operation,
+      operation: record.operation,
     );
-    unawaited(_run(record, source: source, operation: operation, body: body));
+    unawaited(
+      _run(record, source: source, operation: record.operation, body: body),
+    );
     _evictSettled();
     return jobId;
+  }
+
+  PatchbayCommandDescriptor? _dispatchDescriptorFor(String? command) {
+    final PatchbayCommandDispatchIdentity? identity =
+        patchbayCommandDispatchIdentity;
+    final PatchbayCommandRegistry? registry = _commandRegistry;
+    if (identity != null &&
+        registry != null &&
+        !identical(identity.registry, registry)) {
+      throw StateError(
+        'PatchbayJobRegistry is bound to a different command registry than '
+        'the active dispatch.',
+      );
+    }
+    if (identity != null &&
+        registry != null &&
+        identical(identity.registry, registry)) {
+      final PatchbayCommandDescriptor descriptor = identity.descriptor;
+      if (command != null && command != descriptor.name) {
+        throw ArgumentError.value(
+          command,
+          'command',
+          'does not match the active ${descriptor.name} registration',
+        );
+      }
+      return descriptor;
+    }
+    if (command != null) {
+      throw ArgumentError.value(
+        command,
+        'command',
+        'name-based binding outside dispatch requires startBoundToCommand()',
+      );
+    }
+    return null;
+  }
+
+  /// Freezes nested maps at admission. Completion never consults a mutable
+  /// catalog or observes later mutation of a descriptor's schema collections.
+  static PatchbayResponseSchema? _freezeResponseSchema(
+    PatchbayResponseSchema? schema,
+  ) {
+    // Freeze nested maps now. Completion must not consult a mutable catalog or
+    // observe a consumer mutating schema collections while the job is running.
+    return schema == null
+        ? null
+        : PatchbayResponseSchema.fromJson(schema.toJson());
   }
 
   /// Drops the oldest settled jobs once the ledger exceeds [retainedJobs].
@@ -492,6 +639,8 @@ final class PatchbayJobRegistry {
     Map<String, Object?> payload = const <String, Object?>{},
     String? reason,
   }) {
+    final ({Map<String, Object?> payload, String? reason}) terminal =
+        _validatedTerminal(record, phase, payload: payload, reason: reason);
     record.events.add(
       PatchbayJobEvent(
         sequence: record.events.length + 1,
@@ -499,8 +648,8 @@ final class PatchbayJobRegistry {
         phase: phase,
         source: source,
         operation: operation,
-        payload: payload,
-        reason: reason,
+        payload: terminal.payload,
+        reason: terminal.reason,
       ),
     );
     for (final Completer<void> waiter in record.waiters.toList(
@@ -512,16 +661,63 @@ final class PatchbayJobRegistry {
     if (phase != PatchbayJobPhase.running) _evictSettled();
   }
 
+  static ({Map<String, Object?> payload, String? reason}) _validatedTerminal(
+    _PatchbayJobRecord record,
+    PatchbayJobPhase phase, {
+    required Map<String, Object?> payload,
+    required String? reason,
+  }) {
+    final PatchbayResponseSchema? responseSchema = record.responseSchema;
+    if (phase == PatchbayJobPhase.running || responseSchema == null) {
+      return (payload: payload, reason: reason);
+    }
+    final PatchbayResponseValueSchema? schema =
+        responseSchema.terminal[phase.name];
+    final List<PatchbayResponseValidationIssue> issues = schema == null
+        ? <PatchbayResponseValidationIssue>[
+            PatchbayResponseValidationIssue(
+              field: r'$.phase',
+              reason: 'unknownVariant',
+              expected: responseSchema.terminal.keys.join('|'),
+            ),
+          ]
+        : validatePatchbayResponsePayload(schema, payload);
+    if (issues.isEmpty) return (payload: payload, reason: reason);
+
+    final PatchbayResponseValidationIssue first = issues.first;
+    return (
+      payload: <String, Object?>{
+        'rejection': <String, Object?>{
+          'code': 'providerProtocolViolation',
+          'details': <String, Object?>{
+            'reason': first.reason,
+            'field': first.field,
+            if (first.expected != null) 'expected': first.expected!,
+            'violations': issues
+                .map((PatchbayResponseValidationIssue issue) => issue.toJson())
+                .toList(growable: false),
+          },
+        },
+      },
+      reason: 'providerProtocolViolation',
+    );
+  }
+
   static bool _terminal(_PatchbayJobRecord record) =>
       record.events.isNotEmpty &&
       record.events.last.phase != PatchbayJobPhase.running;
 }
 
 final class _PatchbayJobRecord {
-  _PatchbayJobRecord({required this.cancel, required this.operation});
+  _PatchbayJobRecord({
+    required this.cancel,
+    required this.operation,
+    required this.responseSchema,
+  });
 
   final PatchbayJobCancellation? cancel;
   final String? operation;
+  final PatchbayResponseSchema? responseSchema;
   final List<PatchbayJobEvent> events = <PatchbayJobEvent>[];
   final Set<Completer<void>> waiters = <Completer<void>>{};
 }

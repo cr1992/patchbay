@@ -214,6 +214,36 @@ final jobs = PatchbayJobRegistry(
 );
 ```
 
+声明了 `responseSchema.terminal` 的 job 命令要把**同一份** `PatchbayCommandRegistry` 绑定到账本。
+handler 在 registry 的 dispatch scope 内调用 `start()` 时不用再传命令名：账本会捕获当前正在执行的
+exact registration identity，而不是相信 handler 提供的字符串。这是 0.4 新增的可选接入，旧 job 不改也
+继续走 `legacyUnvalidated`：
+
+```dart
+late final PatchbayJobRegistry jobs;
+final commands = PatchbayCommandRegistry(registrations);
+jobs = PatchbayJobRegistry(
+  commandRegistry: commands,
+  maxRunningJobs: 16,
+  retainedJobs: 100,
+);
+
+final jobId = jobs.start(
+  source: PatchbayFactSource.appRecorded,
+  body: refreshDevice,
+);
+```
+
+dispatch scope 跟随 async handler，嵌套或并发 dispatch 不会串用 descriptor。handler 仍显式传
+`command` 时只能与当前 registration 同名；试图绑定同 registry 的另一条 schema 会同步抛
+`ArgumentError`，且不会创建 job。
+
+确实在 dispatch 外启动 job 的 adapter 必须明确选择 `startBoundToCommand(command: ...)`；普通
+`start(command: ...)` 在 dispatch 外会拒绝，避免一个裸字符串冒充来源。账本在启动时深冻结该 descriptor
+的终态 schema，不在任务完成时重新读取可变 catalog。终态 payload 若漏字段、类型错误、变体或额外字段
+违规，会在写 ledger **之前**被替换成不含原值的 `providerProtocolViolation`。未绑定
+`commandRegistry` 且不声明 command 的旧 job 继续保留 0.3 free-payload 行为。
+
 达到 `maxRunningJobs` 时，`start()` 会在 body 启动前抛出 `PatchbayJobCapacityExceeded`。adapter 应把它
 转换成稳定 rejection（例如 `jobCapacityExceeded`），不要排入无界队列。取消 callback 超时后任务仍是
 running；只有 controller 提供了真实终态，才能写入 completed / failed / cancelled。
