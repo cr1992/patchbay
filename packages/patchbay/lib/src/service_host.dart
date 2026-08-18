@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 import 'dart:isolate';
 import 'dart:math';
 
+import 'audit.dart';
 import 'catalog_digest.dart';
+import 'command_descriptor.dart';
 import 'command_registry.dart';
 import 'execution_evidence.dart';
 import 'features.dart';
@@ -35,6 +38,8 @@ final class PatchbayServiceHost {
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    this.auditSink,
+    this.onAuditSinkError,
   }) : appInstanceId = appInstanceId ?? _nonce(),
        _catalog = catalog,
        _snapshot = snapshot,
@@ -76,12 +81,21 @@ final class PatchbayServiceHost {
   final PatchbayCommandRegistry _registry;
   final PatchbayExtensionRegistrar _registrar;
   final Set<PatchbayFeature> _declaredFeatures;
+  final PatchbayAuditSink? auditSink;
+  final PatchbayAuditSinkErrorHandler? onAuditSinkError;
+  final List<PatchbayAuditEvent> _auditLedger = <PatchbayAuditEvent>[];
+  final Map<(String, String), _ExternalInvocationRecord> _externalInvocations =
+      <(String, String), _ExternalInvocationRecord>{};
   Map<String, PatchbayResponseSchema> _catalogResponseSchemas =
       const <String, PatchbayResponseSchema>{};
   Map<String, PatchbayExecutionContract> _catalogExecutionContracts =
       const <String, PatchbayExecutionContract>{};
   int _catalogReadGeneration = 0;
   bool _registered = false;
+
+  /// The newest 256 redacted command facts, in dispatch completion order.
+  List<PatchbayAuditEvent> get auditEvents =>
+      List<PatchbayAuditEvent>.unmodifiable(_auditLedger);
 
   /// Capabilities this host declares on the identity plane.
   ///
@@ -308,6 +322,36 @@ final class PatchbayServiceHost {
     Map<String, Object?> arguments,
     String requestId,
   ) async {
+    var gateResult = 'notEvaluated';
+    var recordAudit = true;
+    final Map<String, Object?> result = await _dispatchInvoke(
+      command,
+      arguments,
+      requestId,
+      onGateResult: (String value) => gateResult = value,
+      onExternalDisposition: (String value) {
+        if (value == 'replay') recordAudit = false;
+      },
+    );
+    if (recordAudit) {
+      _recordAudit(
+        command: command,
+        requestId: requestId,
+        arguments: _withoutStdinProvenance(arguments),
+        gateResult: gateResult,
+        response: result,
+      );
+    }
+    return result;
+  }
+
+  Future<Map<String, Object?>> _dispatchInvoke(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    required void Function(String result) onGateResult,
+    required void Function(String disposition) onExternalDisposition,
+  }) async {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
     }
@@ -351,9 +395,39 @@ final class PatchbayServiceHost {
           ? arguments
           : _withoutStdinProvenance(arguments);
     }
-    final Map<String, Object?> result =
-        await _registry.tryDispatch(command, forwarded, requestId) ??
-        await _invoke(command, forwarded, requestId);
+    final Map<String, Object?>? registered = await _registry.tryDispatch(
+      command,
+      forwarded,
+      requestId,
+      onGateResult: onGateResult,
+    );
+    final Map<String, Object?> result;
+    if (registered != null) {
+      result = registered;
+    } else {
+      _CatalogRead? externalCatalog = invocationCatalog;
+      externalCatalog ??= await _readCatalog();
+      if (externalCatalog.violation case final Map<String, Object?> violation
+          when _invalidRetryPolicyTargets(violation, command)) {
+        return _invalidInvocationEnvelope(
+          requestId,
+          'catalogUnavailable',
+          <String, Object?>{'catalog': violation},
+        );
+      }
+      result = await _dispatchExternal(
+        command,
+        forwarded,
+        requestId,
+        onDisposition: onExternalDisposition,
+        retryPolicy: externalCatalog.violation == null
+            ? _retryPolicyFromCatalog(externalCatalog.response, command)
+            : null,
+      );
+      invocationCatalog ??= externalCatalog.violation == null
+          ? externalCatalog
+          : null;
+    }
     final PatchbayInvocationWire wire;
     try {
       wire = PatchbayInvocationWire.fromJson(result);
@@ -444,6 +518,138 @@ final class PatchbayServiceHost {
       ...result,
       'schemaMode': responseSchema == null ? 'legacyUnvalidated' : 'validated',
     }, executionValidation);
+  }
+
+  Future<Map<String, Object?>> _dispatchExternal(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    required PatchbayRetryPolicy? retryPolicy,
+    required void Function(String disposition) onDisposition,
+  }) async {
+    final (String, String) key = (command, requestId);
+    final String argumentDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
+      arguments,
+    ]).value;
+    final _ExternalInvocationRecord? existing = _externalInvocations[key];
+    if (existing != null) {
+      if (existing.argumentDigest != argumentDigest) {
+        onDisposition('rejection');
+        return _externalDuplicateRejection(requestId, 'requestIdConflict');
+      }
+      if (!existing.idempotent) {
+        onDisposition('rejection');
+        return _externalDuplicateRejection(requestId, 'duplicateRequestId');
+      }
+      onDisposition('replay');
+      return existing.response;
+    }
+    if (!_reserveExternalInvocationSlot()) {
+      onDisposition('rejection');
+      return _externalDuplicateRejection(requestId, 'requestLedgerFull');
+    }
+    onDisposition('owner');
+    final _ExternalInvocationRecord record = _ExternalInvocationRecord(
+      argumentDigest: argumentDigest,
+      idempotent: retryPolicy != null,
+    );
+    _externalInvocations[key] = record;
+    record.response = () async {
+      try {
+        return _freezeJsonMap(await _invoke(command, arguments, requestId));
+      } finally {
+        record.settled = true;
+      }
+    }();
+    return record.response;
+  }
+
+  bool _reserveExternalInvocationSlot() {
+    if (_externalInvocations.length < 256) return true;
+    for (final MapEntry<(String, String), _ExternalInvocationRecord> entry
+        in _externalInvocations.entries) {
+      if (!entry.value.settled) continue;
+      _externalInvocations.remove(entry.key);
+      return true;
+    }
+    return false;
+  }
+
+  static Map<String, Object?> _externalDuplicateRejection(
+    String requestId,
+    String code,
+  ) => PatchbayInvocation.rejected(
+    requestId: requestId,
+    rejection: PatchbayRejection(code: code),
+  ).toJson();
+
+  static Map<String, Object?> _freezeJsonMap(Map<String, Object?> value) =>
+      Map<String, Object?>.from(
+        jsonDecode(jsonEncode(value)) as Map<String, dynamic>,
+      );
+
+  void _recordAudit({
+    required String command,
+    required String requestId,
+    required Map<String, Object?> arguments,
+    required String gateResult,
+    required Map<String, Object?> response,
+  }) {
+    final Object? payload = response['payload'];
+    final Object? execution = payload is Map<Object?, Object?>
+        ? payload['execution']
+        : null;
+    final Object? rawClassification = execution is Map<Object?, Object?>
+        ? execution['classification']
+        : null;
+    final String? classification =
+        rawClassification is String &&
+            const <String>{
+              'notSent',
+              'sentUnconfirmed',
+              'unchanged',
+              'deviceConfirmed',
+            }.contains(rawClassification)
+        ? rawClassification
+        : null;
+    final PatchbayAuditEvent event = PatchbayAuditEvent(
+      command: command,
+      requestId: requestId,
+      parameterShape: patchbayParameterShape(arguments),
+      gateResult: gateResult,
+      executionClassification: classification,
+    );
+    if (_auditLedger.length == 256) _auditLedger.removeAt(0);
+    _auditLedger.add(event);
+    final PatchbayAuditSink? sink = auditSink;
+    if (sink == null) return;
+    unawaited(
+      Future<void>.sync(() => sink(event)).catchError((
+        Object error,
+        StackTrace stackTrace,
+      ) {
+        try {
+          onAuditSinkError?.call(error, stackTrace, event);
+        } on Object {
+          // An observer of an already-isolated sink failure cannot change
+          // the command fact either.
+        }
+      }),
+    );
+  }
+
+  static PatchbayRetryPolicy? _retryPolicyFromCatalog(
+    Map<String, Object?> catalog,
+    String command,
+  ) {
+    final Object? rows = catalog['commands'];
+    if (rows is! List<Object?>) return null;
+    for (final Object? row in rows) {
+      if (row is! Map<Object?, Object?> || row['name'] != command) continue;
+      if (!row.containsKey('retryPolicy')) return null;
+      return PatchbayRetryPolicy.fromJson(row['retryPolicy']);
+    }
+    return null;
   }
 
   void register() {
@@ -693,6 +899,22 @@ final class PatchbayServiceHost {
             });
           }
         }
+        if (command.containsKey('retryPolicy')) {
+          try {
+            if (command['sideEffect'] != PatchbaySideEffectWire.external.name) {
+              throw const FormatException(
+                'retryPolicy requires external sideEffect',
+              );
+            }
+            PatchbayRetryPolicy.fromJson(command['retryPolicy']);
+          } on Object {
+            violations.add(<String, Object?>{
+              'index': index,
+              'name': rawName,
+              'reason': 'invalidRetryPolicy',
+            });
+          }
+        }
         try {
           PatchbayExecutionContract.fromCatalogRow(command);
         } on Object {
@@ -833,6 +1055,20 @@ final class PatchbayServiceHost {
     );
   }
 
+  static bool _invalidRetryPolicyTargets(
+    Map<String, Object?> violation,
+    String command,
+  ) {
+    final Object? rows = violation['violations'];
+    if (rows is! List<Object?>) return false;
+    return rows.any(
+      (Object? row) =>
+          row is Map<Object?, Object?> &&
+          row['name'] == command &&
+          row['reason'] == 'invalidRetryPolicy',
+    );
+  }
+
   static String? _invocationSemanticViolation(PatchbayInvocationWire wire) {
     if (wire.requestId.isEmpty) return 'emptyRequestId';
     if (wire.jobId != null && wire.jobId!.isEmpty) return 'emptyJobId';
@@ -942,6 +1178,18 @@ Map<String, Object?> _providerViolationEnvelope(
     details: violation,
   ).toJson(),
 };
+
+final class _ExternalInvocationRecord {
+  _ExternalInvocationRecord({
+    required this.argumentDigest,
+    required this.idempotent,
+  });
+
+  final String argumentDigest;
+  final bool idempotent;
+  late final Future<Map<String, Object?>> response;
+  bool settled = false;
+}
 
 /// The catalog-declared argument policy the host enforces before dispatch.
 final class _CommandPolicy {

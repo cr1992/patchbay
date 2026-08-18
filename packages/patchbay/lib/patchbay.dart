@@ -2,6 +2,7 @@
 library;
 
 export 'src/artifacts.dart';
+export 'src/audit.dart';
 export 'src/blob_store.dart';
 export 'src/catalog_digest.dart';
 export 'src/command_descriptor.dart';

@@ -27,6 +27,9 @@ enum PatchbayCommandTarget {
   /// `PatchbayClient.catalog` — the capability listing itself.
   clientCatalog,
 
+  /// A local projection of one live catalog row; invokes no App command.
+  localCatalogDescription,
+
   /// `PatchbayClient.snapshot` — the transport-level state read.
   clientSnapshot,
 
@@ -89,6 +92,13 @@ enum PatchbayFriendlyCommand {
     <String>['catalog'],
     summary: 'List the commands and UI targets the App registers.',
     target: PatchbayCommandTarget.clientCatalog,
+  ),
+  describe(
+    null,
+    <String>['describe'],
+    summary: 'Describe one live service command and its retry eligibility.',
+    usageSuffix: '<service-command>',
+    target: PatchbayCommandTarget.localCatalogDescription,
   ),
   snapshot(
     null,
@@ -494,6 +504,10 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         const <String, Object?>{},
       ),
+      PatchbayFriendlyCommand.describe => _oneTail(
+        tail,
+        (String command) => <String, Object?>{'command': command},
+      ),
       // An omitted `--path` produces no arguments at all, which is what makes
       // the whole-snapshot read stay exactly the request it always was.
       PatchbayFriendlyCommand.snapshot => _noTail(tail, <String, Object?>{
@@ -822,6 +836,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
   ) => switch (spec) {
     PatchbayFriendlyCommand.identity ||
     PatchbayFriendlyCommand.catalog ||
+    PatchbayFriendlyCommand.describe ||
     PatchbayFriendlyCommand.jobGet ||
     PatchbayFriendlyCommand.jobCancel ||
     PatchbayFriendlyCommand.uiWidgetTree ||

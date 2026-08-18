@@ -186,6 +186,11 @@ App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocation
 `commandNotRegistered` rejection 和退出码 `4`。CLI 从不按命令数量推断能力。完整命令名仍是协议身份，
 任意 consumer 命令继续使用 `exec <namespace.command>`。
 
+`describe <namespace.command>` 只读这份 catalog，绝不调用命令。JSON 结果包含完整 command 行、
+`schemaMode`，以及封闭取值 `eligible` / `notDeclared` / `notExternal` 的 `retryEligibility`。external 行声明
+合法 `retryPolicy` 时，CLI 只在 transport unavailable / timeout 时重试，并为所有 attempt 复用同一个
+`requestId`；App 拒绝、协议失败和任意 provider 返回结果都是终局，绝不重试。
+
 每一次 RPC 往返都有预算，默认 30 秒，由 `--transport-timeout-ms` 调整，两条传输都适用；耗尽时以
 退出码 `3` 和稳定 code `appUnresponsive` 失败并附处置提示。`--timeout-ms` 是发给 App 的业务等待预算，
 声明了它的请求会把本次 RPC 预算放宽成「声明的等待 + 一次往返」，不会被默认预算腰斩。

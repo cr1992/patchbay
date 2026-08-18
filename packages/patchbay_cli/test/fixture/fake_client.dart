@@ -2,7 +2,11 @@ import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 
 /// One recorded call against the fake connection.
-typedef FakeInvocation = ({String command, Map<String, Object?> arguments});
+typedef FakeInvocation = ({
+  String command,
+  Map<String, Object?> arguments,
+  String? requestId,
+});
 
 /// A `PatchbayClient` whose catalog and answers are supplied by the test.
 ///
@@ -103,7 +107,7 @@ final class FakePatchbayClient implements PatchbayClient {
     String? requestId,
     Duration? deadline,
   }) async {
-    calls.add((command: command, arguments: arguments));
+    calls.add((command: command, arguments: arguments, requestId: requestId));
     final Map<String, Object?> response = await handle(command, arguments);
     return <String, Object?>{
       'schemaVersion': 1,

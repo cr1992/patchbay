@@ -266,6 +266,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientCatalog ||
         PatchbayCommandTarget.clientSnapshot =>
           'Available on any connected Patchbay transport.',
+        PatchbayCommandTarget.localCatalogDescription =>
+          'Available on any connected Patchbay transport; reads the live '
+              'catalog and invokes no App command.',
         PatchbayCommandTarget.clientWidgetTree ||
         PatchbayCommandTarget.clientRenderTree ||
         PatchbayCommandTarget.clientFocusTree =>
@@ -298,6 +301,8 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientCatalog ||
         PatchbayCommandTarget.clientSnapshot =>
           'Served by the transport handshake, not by an App catalog command.',
+        PatchbayCommandTarget.localCatalogDescription =>
+          'Reads one row from the live catalog and invokes no service command.',
         PatchbayCommandTarget.clientWidgetTree ||
         PatchbayCommandTarget.clientRenderTree ||
         PatchbayCommandTarget.clientFocusTree =>

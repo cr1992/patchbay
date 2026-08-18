@@ -14,6 +14,7 @@ import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
 import 'repl.dart';
+import 'request_id.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
 import 'sensitive_input.dart';
@@ -722,6 +723,13 @@ Future<_Execution> _execute(
       return _Execution(await connection.identity());
     case PatchbayCommandTarget.clientCatalog:
       return _Execution(await connection.catalog());
+    case PatchbayCommandTarget.localCatalogDescription:
+      return _Execution(
+        _describeCatalogCommand(
+          await connection.catalog(),
+          friendly.arguments['command']! as String,
+        ),
+      );
     case PatchbayCommandTarget.clientSnapshot:
       final PatchbaySnapshotRequest? selection = _selection(friendly);
       return _Execution(
@@ -1142,11 +1150,38 @@ Future<Map<String, Object?>> _invokeAgainstCatalog(
   Duration? deadline,
 }) async {
   final bool cataloged = _CatalogCommand.find(catalog, command) != null;
-  final Map<String, Object?> response = await connection.invoke(
-    command: command,
-    arguments: arguments,
-    deadline: deadline,
-  );
+  final PatchbayRetryPolicy? retryPolicy = _retryPolicyFor(catalog, command);
+  final Map<String, Object?> response;
+  if (retryPolicy == null) {
+    response = await connection.invoke(
+      command: command,
+      arguments: arguments,
+      deadline: deadline,
+    );
+  } else {
+    final String requestId = patchbayCliRequestId('retry');
+    Map<String, Object?>? answer;
+    for (var attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+      try {
+        answer = await connection.invoke(
+          command: command,
+          arguments: arguments,
+          requestId: requestId,
+          deadline: deadline,
+        );
+        break;
+      } on PatchbayTransportException catch (failure) {
+        if (!_isRetryableTransportFailure(failure)) rethrow;
+        if (attempt == retryPolicy.maxAttempts) rethrow;
+        if (retryPolicy.backoffMs > 0) {
+          await Future<void>.delayed(
+            Duration(milliseconds: retryPolicy.backoffMs),
+          );
+        }
+      }
+    }
+    response = answer!;
+  }
   if (!cataloged && !_isCommandNotRegistered(response)) {
     throw PatchbayProtocolException(
       'catalogInvocationDrift',
@@ -1200,6 +1235,74 @@ Map<String, Object?> _withCliExecutionDetails(
       'legacyDispatchedConflict': true,
     },
   };
+}
+
+bool _isRetryableTransportFailure(PatchbayTransportException failure) =>
+    const <String>{
+      patchbayAppUnresponsiveCode,
+      'transportError',
+      'transportUnavailable',
+      'socketClosed',
+    }.contains(failure.code);
+
+PatchbayRetryPolicy? _retryPolicyFor(
+  Map<String, Object?> catalog,
+  String command,
+) {
+  final Map<Object?, Object?>? row = _catalogRow(catalog, command);
+  if (row == null || !row.containsKey('retryPolicy')) return null;
+  if (row['sideEffect'] != 'external') {
+    throw const PatchbayProtocolException('catalogRetryPolicyInvalid');
+  }
+  try {
+    return PatchbayRetryPolicy.fromJson(row['retryPolicy']);
+  } on FormatException {
+    throw const PatchbayProtocolException('catalogRetryPolicyInvalid');
+  }
+}
+
+Map<String, Object?> _describeCatalogCommand(
+  Map<String, Object?> catalog,
+  String command,
+) {
+  final Map<Object?, Object?>? row = _catalogRow(catalog, command);
+  if (row == null) {
+    throw PatchbayProtocolException(
+      'commandNotRegistered',
+      details: <String, Object?>{'command': command},
+    );
+  }
+  final String retryEligibility;
+  if (row['sideEffect'] != 'external') {
+    retryEligibility = 'notExternal';
+  } else if (!row.containsKey('retryPolicy')) {
+    retryEligibility = 'notDeclared';
+  } else {
+    _retryPolicyFor(catalog, command);
+    retryEligibility = 'eligible';
+  }
+  return <String, Object?>{
+    'command': <String, Object?>{
+      for (final MapEntry<Object?, Object?> entry in row.entries)
+        '${entry.key}': entry.value,
+    },
+    'schemaMode': row.containsKey('responseSchema')
+        ? 'validated'
+        : 'legacyUnvalidated',
+    'retryEligibility': retryEligibility,
+  };
+}
+
+Map<Object?, Object?>? _catalogRow(
+  Map<String, Object?> catalog,
+  String command,
+) {
+  final Object? rows = catalog['commands'];
+  if (rows is! List<Object?>) return null;
+  for (final Object? row in rows) {
+    if (row is Map<Object?, Object?> && row['name'] == command) return row;
+  }
+  return null;
 }
 
 Map<String, Object?> _cliResponseSchemaViolation(

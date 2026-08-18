@@ -222,6 +222,13 @@ which command name was invalid), and a missing command still preserves the app's
 number of commands. The full command name remains the protocol identity, and arbitrary consumer
 commands continue to use `exec <namespace.command>`.
 
+`describe <namespace.command>` reads that catalog only; it never invokes the command. Its JSON
+answer contains the complete command row, `schemaMode`, and the closed `retryEligibility` value
+`eligible`, `notDeclared`, or `notExternal`. When an external row declares a valid `retryPolicy`,
+the CLI retries only transport-unavailable/timeout failures, reusing one `requestId` for every
+attempt. App rejections, protocol failures, and any provider response are final and are never
+retried.
+
 Every RPC round trip has a budget, 30 seconds by default, adjustable with
 `--transport-timeout-ms` and applying to both transports; on exhaustion it fails with exit code `3`
 and the stable code `appUnresponsive` plus a remediation hint. `--timeout-ms` is the business wait

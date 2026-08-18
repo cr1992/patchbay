@@ -171,6 +171,20 @@ side-effect notices. It describes at least:
 - a `none`, `appState`, or `external` side effect;
 - the sensitive-parameter policy and the fact sources that may appear.
 
+Consumer-owned external commands may opt into idempotent transport retry with
+`retryPolicy: PatchbayRetryPolicy(maxAttempts: 2..3, backoffMs: 0..5000)`. The host de-duplicates
+before the external adapter by `(command, requestId)` plus an internal canonical-argument digest:
+matching in-flight work is shared and settled results are replayed, conflicting arguments are
+rejected as `requestIdConflict`, and a duplicate ID on a command without the opt-in is rejected as
+`duplicateRequestId`. Registry-owned commands cannot declare this policy because they do not pass
+through that external de-duplication boundary.
+
+`PatchbayServiceHost` may receive an `auditSink` and `onAuditSinkError`. It first retains the newest
+256 redacted `PatchbayAuditEvent`s in `auditEvents`, then delivers each event to the sink on a
+best-effort basis. Parameter shapes expose only recursive JSON types, object keys, and coarse
+length buckets; scalar values and the internal argument digest never leave the host. Sink failures
+cannot change an invocation result.
+
 Enforcement of `sensitive: true` is done by the host, not by the consumer's handler. The client
 marks a value as coming from no-echo stdin with `inputWasStdin`; the host validates against the
 catalog declaration before dispatch and strips that meta key out of the arguments, so

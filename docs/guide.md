@@ -175,6 +175,23 @@ PatchbayCommandDescriptor(
 - 敏感参数标 `sensitive: true`——值只能走 `--stdin`（不回显），强制由 host 完成，见下一节；
 - handler 复用你既有的 controller / 并发约束，**不要**为 CLI 另建一套状态机。
 
+外部副作用命令只有在 descriptor 显式声明 `retryPolicy` 时才是幂等的：
+
+```dart
+retryPolicy: const PatchbayRetryPolicy(maxAttempts: 3, backoffMs: 250),
+```
+
+它只允许用于 `sideEffect: PatchbaySideEffect.external`，`maxAttempts` 含首次调用且只能是 2～3，
+`backoffMs` 为 0～5000。CLI 仅在 transport unavailable / timeout 时复用同一个 `requestId` 重试；
+App 拒绝、协议错误和 provider 已返回的结果都不重试。host 在调用 `domainInvoke` 前按
+`(command, requestId)` 去重：同参数共享进行中的工作并重放已完成结果，不同参数拒绝为
+`requestIdConflict`；未声明策略的命令遇到重复 ID 则拒绝为 `duplicateRequestId`，不会执行第二次。
+
+用 `patchbay describe <namespace.command>` 可只读检查 catalog 行、response schema 模式与
+`retryEligibility`，不会调用命令。需要把调试调用接入审计时，在 host 注入 `auditSink`；host 会先保留
+最近 256 条脱敏事实，再 best-effort 投递 sink。事件只含参数的递归类型、键结构和长度档位，不含标量值；
+sink 失败默认隔离，也可用 `onAuditSinkError` 上报，不能改写已经发生的命令结果。
+
 #### 敏感参数由 host 强制，adapter 不用配合
 
 `sensitive: true` 写在 descriptor 里就够了。客户端会用 `inputWasStdin` 标记「这个值来自无回显

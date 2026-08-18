@@ -27,7 +27,8 @@ void main() {
       final List<String> words = <String>[
         ...spec.path,
         ...switch (spec) {
-          PatchbayFriendlyCommand.exec => <String>['fixture.command'],
+          PatchbayFriendlyCommand.exec ||
+          PatchbayFriendlyCommand.describe => <String>['fixture.command'],
           PatchbayFriendlyCommand.jobGet ||
           PatchbayFriendlyCommand.jobCancel => <String>['job-id'],
           PatchbayFriendlyCommand.uiTextSet ||

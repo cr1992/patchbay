@@ -15,6 +15,46 @@ enum PatchbayParameterType {
   json,
 }
 
+/// Bounded retry contract for one consumer-owned external command.
+///
+/// The presence of this object is the command's explicit idempotency opt-in.
+/// [maxAttempts] includes the first attempt; clients must reuse one requestId
+/// across every attempt so the host can return the same execution fact.
+final class PatchbayRetryPolicy {
+  const PatchbayRetryPolicy({
+    required this.maxAttempts,
+    required this.backoffMs,
+  });
+
+  factory PatchbayRetryPolicy.fromJson(Object? value) {
+    if (value is! Map<Object?, Object?> ||
+        value.keys.any(
+          (Object? key) => key != 'maxAttempts' && key != 'backoffMs',
+        )) {
+      throw const FormatException('invalid retryPolicy shape');
+    }
+    final Object? maxAttempts = value['maxAttempts'];
+    final Object? backoffMs = value['backoffMs'];
+    if (maxAttempts is! int ||
+        maxAttempts < 2 ||
+        maxAttempts > 3 ||
+        backoffMs is! int ||
+        backoffMs < 0 ||
+        backoffMs > 5000) {
+      throw const FormatException('invalid retryPolicy bounds');
+    }
+    return PatchbayRetryPolicy(maxAttempts: maxAttempts, backoffMs: backoffMs);
+  }
+
+  final int maxAttempts;
+  final int backoffMs;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'maxAttempts': maxAttempts,
+    'backoffMs': backoffMs,
+  };
+}
+
 /// Machine-readable argument declaration used by both validation and CLI help.
 final class PatchbayParameterDescriptor {
   const PatchbayParameterDescriptor({
@@ -63,6 +103,7 @@ final class PatchbayCommandDescriptor {
     this.unchangedEvidenceMaxAgeMs,
     this.confirmationBudgetMs,
     this.weakConfirmationCompletes = false,
+    this.retryPolicy,
   });
 
   final String name;
@@ -91,6 +132,12 @@ final class PatchbayCommandDescriptor {
     weakConfirmationCompletes: weakConfirmationCompletes,
   );
 
+  /// Idempotent retry opt-in for a consumer-owned external command.
+  ///
+  /// A registry-owned command cannot declare this: the host's external
+  /// fallback is the boundary that owns requestId de-duplication.
+  final PatchbayRetryPolicy? retryPolicy;
+
   Map<String, Object?> toJson() {
     final List<PatchbayFactSourceWire> sortedFactSources =
         factSources.map(_factSourceWire).toList(growable: false)
@@ -118,6 +165,9 @@ final class PatchbayCommandDescriptor {
       json['confirmationBudgetMs'] = value;
     }
     json['weakConfirmationCompletes'] = weakConfirmationCompletes;
+    if (retryPolicy case final PatchbayRetryPolicy policy) {
+      json['retryPolicy'] = policy.toJson();
+    }
     return json;
   }
 }

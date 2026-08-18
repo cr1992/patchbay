@@ -343,7 +343,7 @@ void main() {
       );
     });
 
-    test('0.3 digest reader verifies a 0.4 responseSchema catalog', () {
+    test('0.3 digest reader verifies 0.4 nested command contracts', () {
       final List<Object?> commands = <Object?>[
         <String, Object?>{
           'name': 'fixture.command',
@@ -360,6 +360,7 @@ void main() {
               'additionalProperties': false,
             },
           },
+          'retryPolicy': <String, Object?>{'maxAttempts': 2, 'backoffMs': 100},
         },
       ];
       final Map<String, Object?> catalog = <String, Object?>{

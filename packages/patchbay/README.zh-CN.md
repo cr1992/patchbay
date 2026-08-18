@@ -151,6 +151,16 @@ direct HTTP 上都变不成回复，调用方只会看到挂起：
 - `none`、`appState` 或 `external` side effect；
 - 敏感参数策略和可能出现的事实来源。
 
+接入方拥有的 external 命令可通过
+`retryPolicy: PatchbayRetryPolicy(maxAttempts: 2..3, backoffMs: 0..5000)` 显式选择幂等 transport
+重试。host 在 external adapter 前按 `(command, requestId)` 与内部 canonical 参数摘要去重：同参数共享
+进行中的工作并重放已完成结果；不同参数拒绝为 `requestIdConflict`；未声明策略的命令遇到重复 ID 则拒绝
+为 `duplicateRequestId`。registry 命令不经过这条 external 去重边界，因此不能声明该策略。
+
+`PatchbayServiceHost` 可注入 `auditSink` 与 `onAuditSinkError`。host 先在 `auditEvents` 中保留最近 256 条
+脱敏 `PatchbayAuditEvent`，再 best-effort 投递 sink。参数形状只暴露递归 JSON 类型、对象键和粗粒度长度
+档位；标量值和内部参数摘要绝不离开 host。sink 失败不能改变调用结果。
+
 `sensitive: true` 的强制由 host 完成，不由接入方 handler 完成。客户端用 `inputWasStdin` 标记值来自
 无回显 stdin；host 在 dispatch 之前按 catalog 声明校验，并把这个元键从 arguments 中剥掉，因此
 `PatchbayInvocationSource` 收到的参数里永远没有它。任意 sensitive 参数带非空值却缺少该标记时，host

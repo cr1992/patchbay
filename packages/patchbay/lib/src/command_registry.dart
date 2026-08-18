@@ -50,9 +50,11 @@ final class PatchbayCommandRegistration<T> {
 
   Future<Map<String, Object?>> dispatch(
     Map<String, Object?> arguments,
-    String requestId,
-  ) async {
+    String requestId, {
+    void Function(String result)? onGateResult,
+  }) async {
     if (!available) {
+      onGateResult?.call('notEvaluated');
       return PatchbayInvocation.rejected(
         requestId: requestId,
         rejection: const PatchbayRejection(code: 'commandNotRegistered'),
@@ -62,6 +64,7 @@ final class PatchbayCommandRegistration<T> {
     try {
       request = _decode(arguments);
     } on Object catch (failure) {
+      onGateResult?.call('notEvaluated');
       final PatchbayCommandFailureHandler? recover = _onDecodeFailure;
       if (recover == null) rethrow;
       return recover(failure, arguments, requestId, descriptor);
@@ -70,7 +73,11 @@ final class PatchbayCommandRegistration<T> {
       request,
       requestId,
     );
-    if (gateRejection != null) return gateRejection;
+    if (gateRejection != null) {
+      onGateResult?.call('rejected');
+      return gateRejection;
+    }
+    onGateResult?.call(_gate == null ? 'notDeclared' : 'passed');
     try {
       return await _handle(request, requestId);
     } on Object catch (failure) {
@@ -133,15 +140,20 @@ final class PatchbayCommandRegistry {
   Future<Map<String, Object?>?> tryDispatch(
     String command,
     Map<String, Object?> arguments,
-    String requestId,
-  ) async {
+    String requestId, {
+    void Function(String result)? onGateResult,
+  }) async {
     final PatchbayCommandRegistration<Object?>? registration =
         _registrations[command];
     if (registration == null) return null;
     return runInPatchbayCommandDispatchScope<Map<String, Object?>>(
       registry: this,
       descriptor: registration.descriptor,
-      body: () => registration.dispatch(arguments, requestId),
+      body: () => registration.dispatch(
+        arguments,
+        requestId,
+        onGateResult: onGateResult,
+      ),
     );
   }
 
@@ -174,6 +186,11 @@ final class PatchbayCommandRegistry {
           registration.descriptor.mode != PatchbayCommandMode.job) {
         throw ArgumentError(
           'weakConfirmationCompletes is only valid for job commands',
+        );
+      }
+      if (registration.descriptor.retryPolicy != null) {
+        throw ArgumentError(
+          'retryPolicy is only valid on consumer external fallback commands',
         );
       }
       if (registration.descriptor.responseSchema

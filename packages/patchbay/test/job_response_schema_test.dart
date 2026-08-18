@@ -505,7 +505,14 @@ void main() {
         registrar: (_, _) {},
         catalog: () async => <String, Object?>{
           'commands': <Object?>[
-            <String, Object?>{'name': 'patchbay.job.get'},
+            <String, Object?>{
+              'name': 'patchbay.job.get',
+              'sideEffect': 'external',
+              'retryPolicy': <String, Object?>{
+                'maxAttempts': 2,
+                'backoffMs': 0,
+              },
+            },
           ],
         },
         snapshot: () async => const <String, Object?>{},

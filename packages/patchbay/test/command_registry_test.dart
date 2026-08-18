@@ -258,6 +258,11 @@ void main() {
           'commands': <Object?>[
             <String, Object?>{
               'name': 'device.status',
+              'sideEffect': 'external',
+              'retryPolicy': <String, Object?>{
+                'maxAttempts': 2,
+                'backoffMs': 0,
+              },
               'responseSchema': <String, Object?>{
                 'accepted': <String, Object?>{
                   'type': 'object',
