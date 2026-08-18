@@ -280,6 +280,10 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
     --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
 ```
 
+The wire generator treats the Dart file and `test/golden/wire_surface.json` as one generated
+surface: `--write` refreshes both in the same run, while `--check` fails if either output is
+missing or drifted. Do not update the wire surface through a test-only environment variable.
+
 For the contract format and how dependents use it, see
 [wire-contract-v1.md](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/contracts/wire-contract-v1.md) (currently in Chinese).
 

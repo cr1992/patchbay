@@ -237,6 +237,10 @@ $ dart run packages/patchbay/bin/wire_codegen.dart \
     --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
 ```
 
+wire 生成器把 Dart 文件与 `test/golden/wire_surface.json` 视为同一组生成物：`--write` 在一次
+运行中同步刷新两者，任一文件缺失或漂移都会让 `--check` 失败。不要再通过测试专用环境变量更新
+wire surface。
+
 contract 格式与依赖方用法见 [wire-contract-v1.md](https://github.com/cr1992/patchbay/blob/main/packages/patchbay/contracts/wire-contract-v1.md)。
 
 ## Command contract 与生成代码
