@@ -2,13 +2,14 @@
 
 本仓有两个远端，**同步方向是单向的**，请勿双头推：
 
-- 内网主仓 —— 协作与 MR 入口，所有变更先在这里合入 `main`；
+- 内网主仓 —— 协作与 MR 入口，版本功能先进入对应 release 分支，验收后再合入稳定 `main`；
 - GitHub `cr1992/patchbay` —— 公开镜像，只接受 maintainer（cr1992）从内网主仓同步的同一提交，
   不在两端重复合并，流程见[发版](#发版)。
 
 ## 提交改动
 
-1. 从 `main` 拉分支，改动保持一个可独立评审的单元；
+1. 版本功能从对应 `release/<SemVer>` 拉分支并向该版本分支提 MR；hotfix 和仓库治理从 `main` 拉分支。
+   MR 保持一个可独立评审、验收和回退的交付单元，具体颗粒度见[规划与交付治理](docs/planning.md)；
 2. 跑绿再提 MR：仓根 `dart format --output=none --set-exit-if-changed .` 零改动，
    四包 `dart test` / `flutter test` 全过，`dart analyze` 无问题；
 3. 生成物改动跑两个 `--check`：`wire_codegen.dart`（**必须从仓根调用**，进包目录会假漂移
@@ -39,7 +40,7 @@ CI 会阻止 backlog 与版本范围不一致、重复编号、非法状态、�
 
 ## CHANGELOG 碎片
 
-会影响使用者的 MR 必须在 `changelog.d/` 新增一个独占碎片，文件名绑定版本计划/backlog 编号和
+会影响使用者的 MR 必须在 `changelog.d/<target-version>/` 新增一个独占碎片，文件名绑定版本计划/backlog 编号和
 `added|changed|deprecated|removed|fixed|security` 类型。纯测试、注释、排版或无外部行为变化的
 内部重构可以不写，但要在 MR 模板说明理由。
 
@@ -55,5 +56,5 @@ CHANGELOG 仍由根表统一派生，不是独立真源。完整命名、内容�
 
 ## 发版
 
-只由 maintainer 操作：内网主仓 MR 合并 → 将同一 `main` SHA 同步到 GitHub →
-打 `patchbay-vX.Y.Z` tag → 下游按 pin 升级。
+只由 maintainer 操作：版本功能在 `release/<SemVer>` 完成 RC 与真机验收 → 发布 MR 合回 `main` →
+将同一 `main` SHA 同步到 GitHub → 打 `patchbay-vX.Y.Z` tag → 下游按 pin 升级。

@@ -493,6 +493,29 @@ dependencies:
       );
       expect(aggregated, contains('## 0.2.1 - 2026-08-14'));
     });
+
+    test('仓内碎片全部位于合法版本目录且正文可解析', () {
+      final Directory directory = Directory('${_repoRoot()}/changelog.d');
+      for (final FileSystemEntity entry in directory.listSync()) {
+        final String name = entry.uri.pathSegments
+            .where((segment) => segment.isNotEmpty)
+            .last;
+        if (name == 'README.md') continue;
+        expect(entry, isA<Directory>(), reason: '$name 必须是版本目录');
+        expect(() => requireVersion(name), returnsNormally, reason: name);
+        for (final FileSystemEntity fragment
+            in (entry as Directory).listSync()) {
+          expect(fragment, isA<File>(), reason: fragment.path);
+          final File file = fragment as File;
+          final String fileName = file.uri.pathSegments.last;
+          expect(
+            () => parseChangelogFragment(fileName, file.readAsBytesSync()),
+            returnsNormally,
+            reason: '${entry.path}/$fileName',
+          );
+        }
+      }
+    });
   });
 
   group('包内 CHANGELOG', () {
@@ -1215,6 +1238,68 @@ sdks:
       expect(_releaseFileBytes(repo), before);
     });
 
+    test('apply 只消费目标版本目录，保留其他版本队列', () async {
+      _writeFragment(
+        repo,
+        'PB-040-20.changed.md',
+        '- 只属于 0.4.0。\n',
+        version: '0.4.0',
+      );
+      _writeFragment(
+        repo,
+        'PB-050-01.added.md',
+        '- 只属于 0.5.0。\n',
+        version: '0.5.0',
+      );
+
+      final ProcessResult applied = await _run(
+        repo,
+        '--apply',
+        version: '0.4.0',
+      );
+
+      expect(applied.exitCode, isNot(64));
+      final String changelog = File(
+        '${repo.path}/$changelogPath',
+      ).readAsStringSync();
+      expect(changelog, contains('- 只属于 0.4.0。'));
+      expect(changelog, isNot(contains('- 只属于 0.5.0。')));
+      expect(
+        File(
+          '${repo.path}/changelog.d/0.4.0/PB-040-20.changed.md',
+        ).existsSync(),
+        isFalse,
+      );
+      expect(
+        File('${repo.path}/changelog.d/0.5.0/PB-050-01.added.md').existsSync(),
+        isTrue,
+      );
+    });
+
+    test('根目录散落碎片会 fail-closed，不被任何版本消费', () async {
+      final File loose = File('${repo.path}/changelog.d/PB-040-20.changed.md')
+        ..writeAsStringSync('- 旧布局碎片。\n');
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+
+      final ProcessResult checked = await _run(
+        repo,
+        '--check',
+        version: '0.4.0',
+      );
+      expect(checked.exitCode, 1);
+      expect(checked.stdout, contains('[未过] changelog-fragments'));
+      expect(checked.stdout, contains('碎片必须放入 changelog.d/<version>/'));
+
+      final ProcessResult applied = await _run(
+        repo,
+        '--apply',
+        version: '0.4.0',
+      );
+      expect(applied.exitCode, 64);
+      expect(_releaseFileBytes(repo), before);
+      expect(loose.existsSync(), isTrue);
+    });
+
     test('RC 协议语料可重复冻结，正式版本使用独立目录', () async {
       final ProcessResult rc = await _run(
         repo,
@@ -1288,7 +1373,9 @@ sdks:
       expect(applied.stderr, contains('host surface golden'));
       expect(_releaseFileBytes(repo), before);
       expect(
-        File('${repo.path}/changelog.d/PB-040-18.changed.md').existsSync(),
+        File(
+          '${repo.path}/changelog.d/0.3.0/PB-040-18.changed.md',
+        ).existsSync(),
         isTrue,
       );
     });
@@ -1357,11 +1444,11 @@ sdks:
       expect(applied.stderr, contains('CHANGELOG 碎片校验失败'));
       expect(_releaseFileBytes(repo), before);
       expect(
-        File('${repo.path}/changelog.d/PB-040-20.added.md').existsSync(),
+        File('${repo.path}/changelog.d/0.3.0/PB-040-20.added.md').existsSync(),
         isTrue,
       );
       expect(
-        File('${repo.path}/changelog.d/PB-040-20.bad.md').existsSync(),
+        File('${repo.path}/changelog.d/0.3.0/PB-040-20.bad.md').existsSync(),
         isTrue,
       );
     });
@@ -1376,7 +1463,7 @@ sdks:
       expect(applied.stderr, contains('恰好有一个 `## Unreleased`'));
       expect(_releaseFileBytes(repo), before);
       expect(
-        File('${repo.path}/changelog.d/PB-040-20.added.md').existsSync(),
+        File('${repo.path}/changelog.d/0.3.0/PB-040-20.added.md').existsSync(),
         isTrue,
       );
     });
@@ -1731,8 +1818,13 @@ void _materialize(Directory repo, ReleaseInputs inputs) {
   write('changelog.d/README.md', '# CHANGELOG 碎片规范\n');
 }
 
-void _writeFragment(Directory repo, String name, String content) {
-  final File file = File('${repo.path}/changelog.d/$name');
+void _writeFragment(
+  Directory repo,
+  String name,
+  String content, {
+  String version = '0.3.0',
+}) {
+  final File file = File('${repo.path}/changelog.d/$version/$name');
   file.parent.createSync(recursive: true);
   file.writeAsStringSync(content);
 }
@@ -1751,7 +1843,7 @@ Map<String, List<int>> _releaseFileBytes(Directory repo) {
     ],
     for (final File file in Directory(
       '${repo.path}/changelog.d',
-    ).listSync().whereType<File>())
+    ).listSync(recursive: true).whereType<File>())
       file.path.substring(repo.path.length + 1),
     if (Directory('${repo.path}/$compatibilityCorpusPath').existsSync())
       for (final File file in Directory(

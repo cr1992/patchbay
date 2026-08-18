@@ -1,6 +1,6 @@
 # 发版检查清单
 
-> 只由 maintainer 执行：内网主仓 MR 合并 → 同步同一 SHA 到 GitHub → 打 tag → 发布 → 下游按 pin 升级。
+> 只由 maintainer 执行：版本分支验收 → 发布 MR 合回 `main` → 同步同一 SHA 到 GitHub → 打 tag → 发布 → 下游按 pin 升级。
 > 本清单是发版动作的核对表，不改变 [CONTRIBUTING.md](../CONTRIBUTING.md) 定义的权责边界。
 
 清单分两半：**脚本项**由 `release_prep` 一次跑完并给红绿，不必人肉逐条比对；**人工项**是脚本
@@ -8,17 +8,17 @@
 
 ## 0. 聚合 CHANGELOG 碎片
 
-日常行为 MR 只新增 [`changelog.d/`](../changelog.d/README.md) 碎片，不直接争写根 CHANGELOG。
-定版先按碎片规范校验并聚合为根表的 `## Unreleased` 段，同时删除已消费碎片，再进入下面的
+日常行为 MR 只在 [`changelog.d/<version>/`](../changelog.d/README.md) 新增碎片，不直接争写根
+CHANGELOG。定版先按碎片规范校验并把目标版本目录聚合为根表的 `## Unreleased` 段，同时只删除
+该版本已消费碎片，再进入下面的
 `release_prep` 流程。
 
-PB-040-20 自动化落地前，这一步由 maintainer 在发布 MR 中手工完成；聚合顺序固定为
-`Added → Changed → Deprecated → Removed → Fixed → Security`，同一栏目按文件名升序。自动化落地后，
-此处改为核对 `release_prep --check/--apply` 的结果，不再保留另一套手工逻辑。
+聚合顺序固定为 `Added → Changed → Deprecated → Removed → Fixed → Security`，同一栏目按文件名升序，
+由 `release_prep --check/--apply` 校验和执行；不再保留另一套手工聚合逻辑。
 
-- [ ] 所有非 README 碎片文件名、change-id、类型和正文符合规范
+- [ ] 所有版本目录和碎片文件名、change-id、类型、正文符合规范，根目录没有散落碎片
 - [ ] 根 CHANGELOG 的 Unreleased 内容与待发布碎片一一对应
-- [ ] 已聚合碎片在同一发布提交中删除，`changelog.d/README.md` 保留
+- [ ] 目标版本碎片在同一发布提交中删除，`README.md` 与其他版本队列保留
 - [ ] 没有直接编辑四个包的派生 CHANGELOG
 
 ## 1. 脚本项：跑一遍机检
@@ -55,7 +55,8 @@ warning，`--dry-run` 就退 65，和 error 一样发不出去；排版则是 CI
 `--apply` 会代改：四包 version 与随版依赖约束、`patchbayPackageVersion`、两份 README 的受管版本
 引用、版本化协议兼容语料、根 CHANGELOG 落款、四包 CHANGELOG（从根表派生）、
 `example/pubspec.lock` 的版本格子、兼容矩阵新行（tag 后才能定的两格留占位符）、缺失的
-`pubspec_overrides.yaml`。它不碰 `publish_to: none`（第 3 节），也不代写 CHANGELOG 正文。
+`pubspec_overrides.yaml`。它不碰 `publish_to: none`（第 3 节），也不代写 CHANGELOG 正文；碎片只从
+与 `--version` 精确同名的目录读取。
 
 ## 2. 人工项：CI 门禁全绿
 
@@ -104,7 +105,7 @@ $ dart run packages/patchbay/bin/release_prep.dart --version X.Y.Z --apply --ena
 
 ## 4. 人工项：打 tag（`patchbay-vX.Y.Z`）
 
-- [ ] 顺序遵循 CONTRIBUTING.md「发版」：内网主仓 MR 合并 → 同步同一 SHA 到 GitHub → 打 tag
+- [ ] 顺序遵循 CONTRIBUTING.md「发版」：发布 MR 合回 `main` → 同步同一 SHA 到 GitHub → 打 tag
 - [ ] tag 名格式 `patchbay-vX.Y.Z`，与第 1 节核过的版本号一致
 
 ```console
