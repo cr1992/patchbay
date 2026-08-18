@@ -45,6 +45,15 @@ void main() {
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
+          PatchbayFriendlyCommand.traceMark => <String>['operator-note'],
+          PatchbayFriendlyCommand.traceShow ||
+          PatchbayFriendlyCommand.traceExport => <String>[
+            'tr_fixture_0123456789abcdef0123',
+          ],
+          PatchbayFriendlyCommand.traceDiff => <String>[
+            'tr_before_0123456789abcdef0123',
+            'tr_after_0123456789abcdef0123',
+          ],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
           PatchbayFriendlyCommand.navigationGo ||
           PatchbayFriendlyCommand.navigationPush => <String>['settings'],
@@ -77,6 +86,14 @@ void main() {
         if (spec == PatchbayFriendlyCommand.snapshotWait) ...<String>[
           '--until',
           'exists',
+        ],
+        if (spec == PatchbayFriendlyCommand.traceStart) ...<String>[
+          '--name',
+          'fixture-trace',
+        ],
+        if (spec == PatchbayFriendlyCommand.traceExport) ...<String>[
+          '--output',
+          '/tmp/trace-output',
         ],
         ...words,
       ];

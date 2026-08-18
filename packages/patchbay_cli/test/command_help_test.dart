@@ -90,6 +90,7 @@ Availability is still decided by the running App catalog.
         'job',
         'session',
         'sessions',
+        'trace',
         'navigation',
         'ui',
         'logs',

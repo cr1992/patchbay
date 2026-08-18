@@ -595,29 +595,12 @@ final class PatchbayServiceHost {
     required String gateResult,
     required Map<String, Object?> response,
   }) {
-    final Object? payload = response['payload'];
-    final Object? execution = payload is Map<Object?, Object?>
-        ? payload['execution']
-        : null;
-    final Object? rawClassification = execution is Map<Object?, Object?>
-        ? execution['classification']
-        : null;
-    final String? classification =
-        rawClassification is String &&
-            const <String>{
-              'notSent',
-              'sentUnconfirmed',
-              'unchanged',
-              'deviceConfirmed',
-            }.contains(rawClassification)
-        ? rawClassification
-        : null;
-    final PatchbayAuditEvent event = PatchbayAuditEvent(
+    final PatchbayAuditEvent event = patchbayProjectAuditEvent(
       command: command,
       requestId: requestId,
-      parameterShape: patchbayParameterShape(arguments),
+      arguments: arguments,
       gateResult: gateResult,
-      executionClassification: classification,
+      response: response,
     );
     if (_auditLedger.length == 256) _auditLedger.removeAt(0);
     _auditLedger.add(event);

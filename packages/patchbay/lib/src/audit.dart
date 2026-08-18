@@ -38,6 +38,47 @@ typedef PatchbayAuditSinkErrorHandler =
       PatchbayAuditEvent event,
     );
 
+/// The stable execution classification projected by both host audit and CLI
+/// trace consumers from one invocation response.
+///
+/// The transport boundary remains explicit: host-only audit events are not
+/// streamed back to the CLI. Sharing this pure projection prevents the two
+/// persisted views from assigning different meanings to a response they both
+/// observed without inventing a cross-process event channel.
+String? patchbayAuditExecutionClassification(Map<String, Object?> response) {
+  final Object? payload = response['payload'];
+  final Object? execution = payload is Map<Object?, Object?>
+      ? payload['execution']
+      : null;
+  final Object? raw = execution is Map<Object?, Object?>
+      ? execution['classification']
+      : null;
+  return raw is String &&
+          const <String>{
+            'notSent',
+            'sentUnconfirmed',
+            'unchanged',
+            'deviceConfirmed',
+          }.contains(raw)
+      ? raw
+      : null;
+}
+
+/// Builds the redacted audit projection from a command fact.
+PatchbayAuditEvent patchbayProjectAuditEvent({
+  required String command,
+  required String requestId,
+  required Map<String, Object?> arguments,
+  required String gateResult,
+  required Map<String, Object?> response,
+}) => PatchbayAuditEvent(
+  command: command,
+  requestId: requestId,
+  parameterShape: patchbayParameterShape(arguments),
+  gateResult: gateResult,
+  executionClassification: patchbayAuditExecutionClassification(response),
+);
+
 /// Produces a recursively redacted JSON shape without retaining scalar values.
 Map<String, Object?> patchbayParameterShape(Map<String, Object?> arguments) =>
     _shape(arguments);
