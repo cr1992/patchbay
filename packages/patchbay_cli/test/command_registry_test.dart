@@ -45,6 +45,7 @@ void main() {
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
           PatchbayFriendlyCommand.permissionStatus ||
+          PatchbayFriendlyCommand.permissionReset ||
           PatchbayFriendlyCommand.permissionNormalize ||
           PatchbayFriendlyCommand.permissionExercise ||
           PatchbayFriendlyCommand.permissionFail => <String>['camera'],

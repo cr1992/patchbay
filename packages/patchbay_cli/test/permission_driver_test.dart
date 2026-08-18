@@ -40,7 +40,10 @@ PatchbayPermissionDriverRequest _request(
   timeoutMs: 1000,
 );
 
-PatchbayPermissionCommandRunner _commandRunner(String driver) {
+PatchbayPermissionCommandRunner _commandRunner(
+  String driver, {
+  String buildMode = 'debug',
+}) {
   final Directory directory = Directory.systemTemp.createTempSync(
     'patchbay-permission-session-',
   );
@@ -54,7 +57,7 @@ PatchbayPermissionCommandRunner _commandRunner(String driver) {
       isolateId: 'fixture-isolate',
       processId: pid,
       wsUri: 'ws://127.0.0.1:1/token/ws',
-      buildMode: 'debug',
+      buildMode: buildMode,
       createdAt: DateTime.now().toUtc(),
       workspacePath: Directory.current.path,
       deviceId: 'fixture-device',
@@ -260,6 +263,7 @@ void main() {
 
       for (final List<String> command in <List<String>>[
         <String>['permission', 'normalize', 'camera', '--state', 'granted'],
+        <String>['permission', 'reset', 'camera'],
         <String>['permission', 'exercise', 'camera', '--decision', 'deny'],
         <String>['permission', 'fail', 'camera', '--state', 'granted'],
       ]) {
@@ -272,6 +276,30 @@ void main() {
         ], runner: _commandRunner(commandDriver));
         expect(response['admission'], 'accepted', reason: command.join(' '));
       }
+    },
+  );
+
+  test(
+    'doctor permission reports the resolved executable and version',
+    () async {
+      final String driver = _driver('normal');
+      final Map<String, Object?> response = await _runCli(<String>[
+        '--json',
+        '--permission-driver',
+        driver,
+        'doctor',
+        'permission',
+      ]);
+      final Map<String, Object?> doctor = Map<String, Object?>.from(
+        response['doctor']! as Map,
+      );
+      final Map<String, Object?> observed = Map<String, Object?>.from(
+        doctor['driver']! as Map,
+      );
+      expect(doctor['verdict'], 'ok');
+      expect(observed['path'], File(driver).resolveSymbolicLinksSync());
+      expect(observed['name'], 'fixture.permission');
+      expect(observed['version'], '9');
     },
   );
 
@@ -291,4 +319,42 @@ void main() {
       expect((response['error']! as Map)['code'], 'usageError');
     },
   );
+
+  test('mutating operations only allow debug and profile sessions', () async {
+    for (final String buildMode in <String>['release', 'debuggable', 'Debug']) {
+      final String driver = _driver('normal');
+      final Map<String, Object?> response = await _runCli(
+        <String>[
+          '--json',
+          '--permission-driver',
+          driver,
+          'permission',
+          'normalize',
+          'camera',
+          '--state',
+          'granted',
+        ],
+        runner: _commandRunner(driver, buildMode: buildMode),
+        expectedExit: PatchbayExitCode.typedFailure,
+      );
+      expect(
+        (response['error']! as Map)['code'],
+        'permissionReleaseBuildForbidden',
+        reason: buildMode,
+      );
+    }
+
+    final String profileDriver = _driver('normal');
+    final Map<String, Object?> profile = await _runCli(<String>[
+      '--json',
+      '--permission-driver',
+      profileDriver,
+      'permission',
+      'normalize',
+      'camera',
+      '--state',
+      'granted',
+    ], runner: _commandRunner(profileDriver, buildMode: 'profile'));
+    expect(profile['admission'], 'accepted');
+  });
 }

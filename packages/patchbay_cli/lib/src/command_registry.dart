@@ -127,6 +127,12 @@ enum PatchbayFriendlyCommand {
         'Check session, connection, catalog and App lifecycle in one pass.',
     target: PatchbayCommandTarget.localDiagnostics,
   ),
+  permissionDoctor(
+    null,
+    <String>['doctor', 'permission'],
+    summary: 'Check the selected external permission driver and capabilities.',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
   permissionCapabilities(
     null,
     <String>['permission', 'capabilities'],
@@ -145,6 +151,13 @@ enum PatchbayFriendlyCommand {
     <String>['permission', 'normalize'],
     summary: 'Normalize one permission for an active debug/test session.',
     usageSuffix: '<permission> --state <state>',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
+  permissionReset(
+    null,
+    <String>['permission', 'reset'],
+    summary: 'Reset one permission for an active debug/test session.',
+    usageSuffix: '<permission>',
     target: PatchbayCommandTarget.localPermissionDriver,
   ),
   permissionExercise(
@@ -532,6 +545,10 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         const <String, Object?>{},
       ),
+      PatchbayFriendlyCommand.permissionDoctor => _noTail(
+        tail,
+        const <String, Object?>{},
+      ),
       // An omitted `--path` produces no arguments at all, which is what makes
       // the whole-snapshot read stay exactly the request it always was.
       PatchbayFriendlyCommand.snapshot => _noTail(tail, <String, Object?>{
@@ -542,7 +559,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
         options,
       ),
       PatchbayFriendlyCommand.sessionUse => _sessionUseArguments(tail, options),
-      PatchbayFriendlyCommand.permissionStatus => _oneTail(
+      PatchbayFriendlyCommand.permissionStatus ||
+      PatchbayFriendlyCommand.permissionReset => _oneTail(
         tail,
         (String permission) => <String, Object?>{'permission': permission},
       ),
@@ -920,7 +938,9 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
     PatchbayFriendlyCommand.permissionCapabilities ||
-    PatchbayFriendlyCommand.permissionStatus => const <String>{
+    PatchbayFriendlyCommand.permissionStatus ||
+    PatchbayFriendlyCommand.permissionDoctor ||
+    PatchbayFriendlyCommand.permissionReset => const <String>{
       'permission-driver',
       'device-id',
       'application-id',

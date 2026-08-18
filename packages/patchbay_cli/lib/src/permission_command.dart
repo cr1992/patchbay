@@ -5,6 +5,7 @@ import 'package:patchbay/patchbay.dart';
 
 import 'command_registry.dart';
 import 'permission_driver.dart';
+import 'permission_recovery.dart';
 import 'result.dart';
 import 'session.dart';
 
@@ -29,21 +30,31 @@ final class PatchbayPermissionCommandRunner {
     PatchbayPermissionDriverDiscovery? discovery,
     PatchbayPermissionDriverClientFactory? clientFactory,
     PatchbaySessionResolver? sessions,
+    PatchbayPermissionRecoveryCoordinator? recovery,
+    PatchbayPermissionEventSink? eventSink,
   }) : _discovery = discovery ?? const PatchbayPermissionDriverDiscovery(),
        _clientFactory =
            clientFactory ??
            ((String path) => PatchbayPermissionDriverClient(executable: path)),
-       _sessions = sessions;
+       _sessions = sessions,
+       _recovery = recovery,
+       _eventSink = eventSink ?? ignorePatchbayPermissionEvent;
 
   final PatchbayPermissionDriverDiscovery _discovery;
   final PatchbayPermissionDriverClientFactory _clientFactory;
   final PatchbaySessionResolver? _sessions;
+  final PatchbayPermissionRecoveryCoordinator? _recovery;
+  final PatchbayPermissionEventSink _eventSink;
 
   Future<PatchbayPermissionCommandOutcome> run(
     ArgResults options,
     PatchbayFriendlyInvocation invocation,
   ) async {
+    if (invocation.spec == PatchbayFriendlyCommand.permissionDoctor) {
+      return _doctor(options);
+    }
     final PatchbayPermissionOperation operation = _operation(invocation.spec);
+    final Stopwatch elapsed = Stopwatch()..start();
     _validateDetachedSelection(options);
     if (options.option('ws-uri') != null ||
         options.option('direct-endpoint') != null) {
@@ -69,6 +80,7 @@ final class PatchbayPermissionCommandRunner {
     String? deviceId = options.option('device-id');
     String? applicationId = options.option('application-id');
     Map<String, Object?>? sessionRef;
+    PatchbayDiscoveredSession? selectedSession;
     final bool mutates = _mutates(operation);
     if (mutates ||
         options.option('session') != null ||
@@ -79,8 +91,10 @@ final class PatchbayPermissionCommandRunner {
                     store: PatchbaySessionStore(options.option('session-dir')),
                   ))
               .resolve(sessionId: options.option('session'));
+      selectedSession = session;
       final PatchbaySessionRecord record = session.record;
-      if (mutates && record.buildMode == 'release') {
+      if (mutates &&
+          !const <String>{'debug', 'profile'}.contains(record.buildMode)) {
         throw const PatchbayPermissionDriverException(
           'permissionReleaseBuildForbidden',
         );
@@ -117,6 +131,18 @@ final class PatchbayPermissionCommandRunner {
     final Duration budget = PatchbayPermissionBudget.forOperation(
       operation,
     ).validate(requestedTimeout);
+    await _eventSink('permission.preflight', <String, Object?>{
+      'operation': operation.name,
+      if (invocation.arguments['permission'] case final String permission)
+        'permission': permission,
+      if (sessionRef?['sessionId'] case final String sessionId)
+        'sessionId': sessionId,
+      'budgetMs': budget.inMilliseconds,
+    });
+    final Duration driverBudget = budget - elapsed.elapsed;
+    if (driverBudget <= Duration.zero) {
+      throw const PatchbayPermissionDriverException('budgetExceeded');
+    }
     final String requestId = _requestId();
     final PatchbayPermissionDriverResponse response =
         await PatchbayPermissionDriverRunner(_clientFactory(executable)).run(
@@ -132,9 +158,61 @@ final class PatchbayPermissionCommandRunner {
             decision: decision,
             timeoutMs: budget.inMilliseconds,
           ),
-          timeout: budget,
+          timeout: driverBudget,
         );
-    final Map<String, Object?> json = response.toJson();
+    await _eventSink('permission.transition', <String, Object?>{
+      'stage': 'driverCompleted',
+      'operation': operation.name,
+      'admission': response.admission,
+      if (response.code != null) 'code': response.code,
+    });
+    PatchbayPermissionRecoveryResult? recovery;
+    if (operation == PatchbayPermissionOperation.exercise &&
+        response.accepted &&
+        selectedSession != null &&
+        response.interruption?.handled == true) {
+      final PatchbayPermissionInterruption? interruption =
+          response.interruption;
+      if (interruption != null) {
+        await _eventSink('systemUi.detected', <String, Object?>{
+          'expected': interruption.expected,
+          'handled': interruption.handled,
+          if (interruption.permission != null)
+            'permission': interruption.permission,
+          if (interruption.decision != null)
+            'decision': interruption.decision!.name,
+        });
+        if (interruption.handled) {
+          await _eventSink('systemUi.handled', <String, Object?>{
+            if (interruption.permission != null)
+              'permission': interruption.permission,
+            if (interruption.decision != null)
+              'decision': interruption.decision!.name,
+          });
+        }
+      }
+      final Duration remaining = budget - elapsed.elapsed;
+      if (remaining <= Duration.zero) {
+        throw const PatchbayPermissionDriverException('budgetExceeded');
+      }
+      recovery =
+          await (_recovery ??
+                  PatchbayPermissionRecoveryCoordinator(
+                    sessions:
+                        _sessions ??
+                        PatchbaySessionResolver(
+                          store: PatchbaySessionStore(
+                            options.option('session-dir'),
+                          ),
+                        ),
+                    eventSink: _eventSink,
+                  ))
+              .recover(selectedSession, timeout: remaining);
+    }
+    final Map<String, Object?> json = <String, Object?>{
+      ...response.toJson(),
+      if (recovery != null) 'recovery': recovery.toJson(),
+    };
     return PatchbayPermissionCommandOutcome(
       json,
       response.accepted ? PatchbayExitCode.accepted : PatchbayExitCode.rejected,
@@ -154,6 +232,7 @@ final class PatchbayPermissionCommandRunner {
 
   static bool _mutates(PatchbayPermissionOperation operation) =>
       operation == PatchbayPermissionOperation.normalize ||
+      operation == PatchbayPermissionOperation.reset ||
       operation == PatchbayPermissionOperation.exercise;
 
   static PatchbayPermissionOperation _operation(
@@ -165,6 +244,8 @@ final class PatchbayPermissionCommandRunner {
       PatchbayPermissionOperation.status,
     PatchbayFriendlyCommand.permissionNormalize =>
       PatchbayPermissionOperation.normalize,
+    PatchbayFriendlyCommand.permissionReset =>
+      PatchbayPermissionOperation.reset,
     PatchbayFriendlyCommand.permissionExercise =>
       PatchbayPermissionOperation.exercise,
     PatchbayFriendlyCommand.permissionFail => PatchbayPermissionOperation.fail,
@@ -206,5 +287,71 @@ final class PatchbayPermissionCommandRunner {
           'permissions=${value.permissions.length}';
     }
     return response.code ?? response.admission;
+  }
+
+  Future<PatchbayPermissionCommandOutcome> _doctor(ArgResults options) async {
+    _validateDetachedSelection(options);
+    String? deviceId = options.option('device-id');
+    String? applicationId = options.option('application-id');
+    if (options.option('session') != null || options.wasParsed('session-dir')) {
+      final PatchbayDiscoveredSession session =
+          await (_sessions ??
+                  PatchbaySessionResolver(
+                    store: PatchbaySessionStore(options.option('session-dir')),
+                  ))
+              .resolve(sessionId: options.option('session'));
+      deviceId = session.record.deviceId;
+      applicationId = session.record.applicationId;
+    }
+    final String executable = _discovery.resolve(
+      configuredPath: options.option('permission-driver'),
+    );
+    final String? rawTimeout = options.option('timeout-ms');
+    final Duration timeout = PatchbayPermissionBudget.read.validate(
+      rawTimeout == null
+          ? null
+          : Duration(milliseconds: _positiveInt(rawTimeout, '--timeout-ms')),
+    );
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayPermissionDriverRunner(_clientFactory(executable)).run(
+          PatchbayPermissionDriverRequest(
+            requestId: _requestId(),
+            operation: PatchbayPermissionOperation.capabilities,
+            deviceId: deviceId,
+            applicationId: applicationId,
+            timeoutMs: timeout.inMilliseconds,
+          ),
+          timeout: timeout,
+        );
+    final PatchbayPermissionCapabilities? capabilities = response.capabilities;
+    final Map<String, Object?> report = <String, Object?>{
+      'doctor': <String, Object?>{
+        'scope': 'permission',
+        'verdict': response.accepted ? 'ok' : 'failed',
+        'driver': <String, Object?>{
+          'path': executable,
+          'protocolVersion': response.protocolVersion,
+          if (capabilities != null) ...<String, Object?>{
+            'name': capabilities.driver,
+            'version': capabilities.driverVersion,
+            'platform': capabilities.platform,
+          },
+        },
+        if (capabilities != null)
+          'permissions': capabilities.toJson()['permissions'],
+        if (response.code != null) 'code': response.code,
+        'evidence': <Map<String, Object?>>[
+          for (final PatchbayPermissionEvidence evidence in response.evidence)
+            evidence.toJson(),
+        ],
+      },
+    };
+    return PatchbayPermissionCommandOutcome(
+      report,
+      response.accepted ? PatchbayExitCode.accepted : PatchbayExitCode.rejected,
+      capabilities == null
+          ? 'permission driver unavailable code=${response.code}'
+          : 'permission driver=${capabilities.driver} path=$executable',
+    );
   }
 }

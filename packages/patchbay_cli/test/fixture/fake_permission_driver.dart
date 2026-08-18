@@ -56,6 +56,7 @@ Future<void> main() async {
   final File? stateFile = statePath == null ? null : File(statePath);
   final String state = switch (operation) {
     'normalize' => request['state']! as String,
+    'reset' => 'notDetermined',
     'exercise' => switch (request['decision']) {
       'allow' => 'granted',
       'allowOnce' => 'allowOnce',
@@ -68,7 +69,9 @@ Future<void> main() async {
           ? stateFile!.readAsStringSync().trim()
           : 'granted',
   };
-  if (operation == 'normalize' || operation == 'exercise') {
+  if (operation == 'normalize' ||
+      operation == 'reset' ||
+      operation == 'exercise') {
     stateFile?.writeAsStringSync(state);
   }
   stdout.writeln(
