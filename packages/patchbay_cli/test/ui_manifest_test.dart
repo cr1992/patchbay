@@ -90,7 +90,7 @@ Future<CliRun> _emit(FakePatchbayClient client, {bool json = true}) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
   final int exitCode = await runPatchbayCli(
-    <String>[if (json) '--json', '--emit-manifest', 'ui', 'targets'],
+    <String>[if (json) '--json', 'ui', 'targets', '--emit-manifest'],
     connect: (_) async => client,
     output: out,
     errorOutput: err,

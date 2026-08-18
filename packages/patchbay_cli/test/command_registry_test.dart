@@ -445,7 +445,7 @@ void main() {
 
   test('ui targets requires its explicit emission flag', () {
     expect(
-      _resolve(<String>['--emit-manifest', 'ui', 'targets']).spec,
+      _resolve(<String>['ui', 'targets', '--emit-manifest']).spec,
       PatchbayFriendlyCommand.uiTargets,
     );
     expect(
