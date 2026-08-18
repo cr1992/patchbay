@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "serverVersion": "0.3.0",
+  "features": [
+    "catalogDigest",
+    "lifecycleState"
+  ],
+  "applicationId": "dev.patchbay.golden",
+  "appInstanceId": "golden-instance",
+  "isolateId": "<runtime>"
+}

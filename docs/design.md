@@ -322,6 +322,12 @@ consumer 生造、也不会在两个 App 里指两件事；客户端则把它当
   必须是 1），拿它去读当前 host 真的吐出来的东西。复刻而不是 import，是因为要测的正是「当年那份
   代码」的行为，而当年那份代码已经不在树里了。
 
+从 0.3.0 起，发布流程会在 tag 之前由 `release_prep --apply` 把
+`packages/patchbay/test/golden/host_surface.json` 中真实 host 生成的 identity / catalog 拆成版本化语料，
+写入 `packages/patchbay_cli/test/golden/legacy_host_v<version>/`；RC 与正式版本各有独立目录。兼容测试
+枚举这些目录并交给当前 CLI 读取。这里的唯一真源仍是实际 host surface golden，不再手抄一份“应该
+长这样”的响应；0.2.0 那份手写历史语料带有明确标记，发布脚本拒绝用当前实现覆写它。
+
 ### 本地会话文件是第三个兼容面
 
 wire 面有握手兜底：版本对不上就 `schemaVersionMismatch`，谁都不会误伤谁。**会话目录没有这层保护。**

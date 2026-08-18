@@ -25,10 +25,27 @@ import 'package:test/test.dart';
 import 'fixture/fake_client.dart';
 
 const String _legacyCorpus = 'test/golden/legacy_host_v0_2_0';
+const String _compatibilityCorpusRoot = 'test/golden';
 
 Map<String, Object?> _legacy(String name) =>
     jsonDecode(File('$_legacyCorpus/$name.json').readAsStringSync())
         as Map<String, Object?>;
+
+List<Directory> _versionedCorpora() =>
+    Directory(_compatibilityCorpusRoot)
+        .listSync()
+        .whereType<Directory>()
+        .where((directory) {
+          final String path = directory.path;
+          return path
+                  .split(Platform.pathSeparator)
+                  .last
+                  .startsWith('legacy_host_v') &&
+              File('$path/identity.json').existsSync() &&
+              File('$path/catalog.json').existsSync();
+        })
+        .toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
 
 /// 当前 host 真的吐出来的东西——不是手抄的一份「应该长这样」。
 PatchbayServiceHost _currentHost() => PatchbayServiceHost(
@@ -229,6 +246,49 @@ void main() {
         isNot(contains(patchbayCapabilityNotHonouredWarningKind)),
       );
     });
+  });
+
+  group('版本化兼容语料可被当前 CLI 读取', () {
+    final List<Directory> corpora = _versionedCorpora();
+    test('至少保留一个真实历史版本', () {
+      expect(corpora, isNotEmpty);
+    });
+    for (final Directory corpus in corpora) {
+      final String name = corpus.path.split(Platform.pathSeparator).last;
+      test(name, () async {
+        final Map<String, Object?> identity =
+            jsonDecode(File('${corpus.path}/identity.json').readAsStringSync())
+                as Map<String, Object?>;
+        final Map<String, Object?> catalog =
+            jsonDecode(File('${corpus.path}/catalog.json').readAsStringSync())
+                as Map<String, Object?>;
+        final List<Map<String, Object?>> commands = <Map<String, Object?>>[
+          for (final Object? row in catalog['commands']! as List<Object?>)
+            Map<String, Object?>.from(row! as Map<Object?, Object?>),
+        ];
+        final Map<String, Object?> extras = <String, Object?>{...catalog}
+          ..remove('commands')
+          ..remove('uiTargets');
+        store.write(record());
+
+        final _Run result = await runDoctor(
+          FakePatchbayClient(
+            identityData: identity,
+            commands: commands,
+            uiTargets:
+                (catalog['uiTargets'] as List<Object?>?) ?? const <Object?>[],
+            catalogExtras: extras,
+            handle: (_, _) async => fakeCommandNotRegistered(),
+          ),
+        );
+
+        expect(
+          result.details('connection')['code'],
+          isNot('identityValidationFailed'),
+        );
+        expect(result.check('catalog')['verdict'], isNot('failed'));
+      });
+    }
   });
 
   group('老 CLI ↔ 新 host（复刻 0.2.0 读法）', () {
