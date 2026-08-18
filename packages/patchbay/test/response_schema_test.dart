@@ -81,6 +81,126 @@ void main() {
     );
   });
 
+  test('discriminator wrong type differs from an unknown string variant', () {
+    final List<PatchbayResponseValidationIssue> wrongType =
+        validatePatchbayResponsePayload(_schema().accepted, <String, Object?>{
+          'kind': 7,
+          'session': null,
+        });
+    final List<PatchbayResponseValidationIssue> unknownVariant =
+        validatePatchbayResponsePayload(_schema().accepted, <String, Object?>{
+          'kind': 'future',
+          'session': null,
+        });
+
+    expect(wrongType.first.reason, 'wrongType');
+    expect(wrongType.first.field, r'$.payload.kind');
+    expect(unknownVariant.first.reason, 'unknownVariant');
+    expect(unknownVariant.first.field, r'$.payload.kind');
+  });
+
+  test(
+    'terminal envelope defects fail closed with allowed reasons and paths',
+    () {
+      const PatchbayResponseValueSchema terminal = PatchbayResponseValueSchema(
+        type: PatchbayResponseType.object,
+        properties: <String, PatchbayResponseValueSchema>{'value': _string},
+        required: <String>{'value'},
+      );
+      const PatchbayResponseSchema schema = PatchbayResponseSchema(
+        accepted: PatchbayResponseValueSchema(
+          type: PatchbayResponseType.object,
+        ),
+        terminal: <String, PatchbayResponseValueSchema>{
+          'completed': terminal,
+          'failed': terminal,
+          'cancelled': terminal,
+        },
+      );
+      final List<({Object? payload, String reason, String field})> cases =
+          <({Object? payload, String reason, String field})>[
+            (payload: null, reason: 'wrongType', field: r'$.payload'),
+            (
+              payload: const <String, Object?>{},
+              reason: 'missingField',
+              field: r'$.payload.events',
+            ),
+            (
+              payload: const <String, Object?>{'events': null},
+              reason: 'unexpectedNull',
+              field: r'$.payload.events',
+            ),
+            (
+              payload: const <String, Object?>{'events': 'bad'},
+              reason: 'wrongType',
+              field: r'$.payload.events',
+            ),
+            (
+              payload: const <String, Object?>{'events': <Object?>[]},
+              reason: 'missingField',
+              field: r'$.payload.events',
+            ),
+            (
+              payload: const <String, Object?>{
+                'events': <Object?>[42],
+              },
+              reason: 'wrongType',
+              field: r'$.payload.events[0]',
+            ),
+            (
+              payload: const <String, Object?>{
+                'events': <Object?>[<String, Object?>{}],
+              },
+              reason: 'missingField',
+              field: r'$.payload.events[0].phase',
+            ),
+            (
+              payload: const <String, Object?>{
+                'events': <Object?>[
+                  <String, Object?>{'phase': null},
+                ],
+              },
+              reason: 'unexpectedNull',
+              field: r'$.payload.events[0].phase',
+            ),
+            (
+              payload: const <String, Object?>{
+                'events': <Object?>[
+                  <String, Object?>{'phase': 7},
+                ],
+              },
+              reason: 'wrongType',
+              field: r'$.payload.events[0].phase',
+            ),
+            (
+              payload: const <String, Object?>{
+                'events': <Object?>[
+                  <String, Object?>{'phase': 'running'},
+                ],
+              },
+              reason: 'unknownVariant',
+              field: r'$.payload.events[0].phase',
+            ),
+            (
+              payload: const <String, Object?>{
+                'events': <Object?>[
+                  <String, Object?>{'phase': 'completed'},
+                ],
+              },
+              reason: 'missingField',
+              field: r'$.payload.events[0].payload',
+            ),
+          ];
+
+      for (final testCase in cases) {
+        final PatchbayResponseValidationIssue issue =
+            validatePatchbayTerminalPayload(schema, testCase.payload).single;
+        expect(issue.reason, testCase.reason);
+        expect(issue.field, testCase.field);
+      }
+    },
+  );
+
   test('caps one payload validation at twenty issues', () {
     final PatchbayResponseValueSchema schema = PatchbayResponseValueSchema(
       type: PatchbayResponseType.object,

@@ -1077,20 +1077,8 @@ Map<String, Object?> _validateTerminalPayload(
   if (responseSchema == null || response['admission'] != 'accepted') {
     return response;
   }
-  final Object? payload = response['payload'];
-  final Object? events = payload is Map<Object?, Object?>
-      ? payload['events']
-      : null;
-  if (events is! List<Object?> || events.isEmpty) return response;
-  final Object? last = events.last;
-  if (last is! Map<Object?, Object?>) return response;
-  final Object? phase = last['phase'];
-  final PatchbayResponseValueSchema? schema = phase is String
-      ? responseSchema.terminal[phase]
-      : null;
-  if (schema == null) return response;
   final List<PatchbayResponseValidationIssue> issues =
-      validatePatchbayResponsePayload(schema, last['payload']);
+      validatePatchbayTerminalPayload(responseSchema, response['payload']);
   return issues.isEmpty
       ? <String, Object?>{...response, 'schemaMode': 'validated'}
       : _cliResponseSchemaViolation(response, issues);

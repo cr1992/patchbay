@@ -373,6 +373,30 @@ final class PatchbayServiceHost {
     responseSchema ??= invocationCatalog == null
         ? _catalogResponseSchemas[command]
         : _responseSchemasFromCatalog(invocationCatalog.response)[command];
+    if (responseSchema == null &&
+        invocationCatalog == null &&
+        !_registry.handles(command)) {
+      // An argument-free external command did not need the catalog for input
+      // policy, but it may still have declared an output contract. Discover it
+      // after adapter dispatch so a broken catalog cannot make a legacy,
+      // argument-free command stop working; a valid declaration, however, is
+      // never bypassed merely because this was the first direct invocation.
+      final _CatalogRead discovered = await _readCatalog();
+      if (discovered.violation == null) {
+        responseSchema = _responseSchemasFromCatalog(
+          discovered.response,
+        )[command];
+      } else if (_invalidResponseSchemaTargets(
+        discovered.violation!,
+        command,
+      )) {
+        return _invalidInvocationEnvelope(
+          requestId,
+          'catalogUnavailable',
+          <String, Object?>{'catalog': discovered.violation!},
+        );
+      }
+    }
     if (responseSchema == null) {
       return <String, Object?>{...result, 'schemaMode': 'legacyUnvalidated'};
     }
@@ -714,6 +738,20 @@ final class PatchbayServiceHost {
       );
     }
     return Map<String, PatchbayResponseSchema>.unmodifiable(schemas);
+  }
+
+  static bool _invalidResponseSchemaTargets(
+    Map<String, Object?> violation,
+    String command,
+  ) {
+    final Object? rows = violation['violations'];
+    if (rows is! List<Object?>) return false;
+    return rows.any(
+      (Object? row) =>
+          row is Map<Object?, Object?> &&
+          row['name'] == command &&
+          row['reason'] == 'invalidResponseSchema',
+    );
   }
 
   static String? _invocationSemanticViolation(PatchbayInvocationWire wire) {

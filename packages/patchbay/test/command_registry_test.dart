@@ -249,7 +249,7 @@ void main() {
   );
 
   test(
-    'external catalog schemas use the same VM and direct dispatcher',
+    'first direct no-arg invocation discovers an external response schema',
     () async {
       final PatchbayServiceHost host = PatchbayServiceHost(
         applicationId: 'external-schema-test',
@@ -278,7 +278,6 @@ void main() {
         ).toJson(),
       );
 
-      await host.dispatchCatalog();
       final Map<String, Object?> direct = await host.dispatchInvoke(
         'device.status',
         const <String, Object?>{},
@@ -340,6 +339,18 @@ void main() {
       expect(
         violations.single,
         containsPair('reason', 'invalidResponseSchema'),
+      );
+      final Map<String, Object?> direct = await host.dispatchInvoke(
+        'device.invalid',
+        const <String, Object?>{},
+        'invalid-direct',
+      );
+      final Map<Object?, Object?> directRejection =
+          direct['rejection']! as Map<Object?, Object?>;
+      expect(directRejection['code'], 'providerProtocolViolation');
+      expect(
+        (directRejection['details']! as Map<Object?, Object?>)['reason'],
+        'catalogUnavailable',
       );
     },
   );

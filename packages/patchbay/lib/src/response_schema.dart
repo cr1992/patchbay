@@ -259,12 +259,131 @@ void validatePatchbayResponseSchema(PatchbayResponseSchema schema) =>
 
 List<PatchbayResponseValidationIssue> validatePatchbayResponsePayload(
   PatchbayResponseValueSchema schema,
-  Object? payload,
-) {
+  Object? payload, {
+  String path = r'$.payload',
+}) {
   final List<PatchbayResponseValidationIssue> issues =
       <PatchbayResponseValidationIssue>[];
-  _validateValue(schema, payload, r'$.payload', issues);
+  _validateValue(schema, payload, path, issues);
   return List<PatchbayResponseValidationIssue>.unmodifiable(issues);
+}
+
+/// Validates the terminal event carried by a completed job-wait payload.
+List<PatchbayResponseValidationIssue> validatePatchbayTerminalPayload(
+  PatchbayResponseSchema schema,
+  Object? payload,
+) {
+  const String eventsPath = r'$.payload.events';
+  if (payload is! Map<Object?, Object?>) {
+    return const <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: r'$.payload',
+        reason: 'wrongType',
+        expected: 'object',
+      ),
+    ];
+  }
+  if (!payload.containsKey('events')) {
+    return const <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: eventsPath,
+        reason: 'missingField',
+        expected: 'terminalEvent',
+      ),
+    ];
+  }
+  final Object? rawEvents = payload['events'];
+  if (rawEvents == null) {
+    return const <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: eventsPath,
+        reason: 'unexpectedNull',
+        expected: 'array',
+      ),
+    ];
+  }
+  if (rawEvents is! List<Object?>) {
+    return const <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: eventsPath,
+        reason: 'wrongType',
+        expected: 'array',
+      ),
+    ];
+  }
+  if (rawEvents.isEmpty) {
+    return const <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: eventsPath,
+        reason: 'missingField',
+        expected: 'terminalEvent',
+      ),
+    ];
+  }
+  final String eventPath = '$eventsPath[${rawEvents.length - 1}]';
+  final Object? rawEvent = rawEvents.last;
+  if (rawEvent is! Map<Object?, Object?>) {
+    return <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: eventPath,
+        reason: 'wrongType',
+        expected: 'object',
+      ),
+    ];
+  }
+  if (!rawEvent.containsKey('phase')) {
+    return <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: '$eventPath.phase',
+        reason: 'missingField',
+        expected: 'string',
+      ),
+    ];
+  }
+  final Object? rawPhase = rawEvent['phase'];
+  if (rawPhase == null) {
+    return <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: '$eventPath.phase',
+        reason: 'unexpectedNull',
+        expected: 'string',
+      ),
+    ];
+  }
+  if (rawPhase is! String) {
+    return <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: '$eventPath.phase',
+        reason: 'wrongType',
+        expected: 'string',
+      ),
+    ];
+  }
+  final PatchbayResponseValueSchema? terminalSchema = schema.terminal[rawPhase];
+  if (terminalSchema == null) {
+    final List<String> expected = schema.terminal.keys.toList()..sort();
+    return <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: '$eventPath.phase',
+        reason: 'unknownVariant',
+        expected: expected.join('|'),
+      ),
+    ];
+  }
+  if (!rawEvent.containsKey('payload')) {
+    return <PatchbayResponseValidationIssue>[
+      PatchbayResponseValidationIssue(
+        field: '$eventPath.payload',
+        reason: 'missingField',
+        expected: 'object',
+      ),
+    ];
+  }
+  return validatePatchbayResponsePayload(
+    terminalSchema,
+    rawEvent['payload'],
+    path: '$eventPath.payload',
+  );
 }
 
 void _checkSchemaLimits(PatchbayResponseSchema schema) {
@@ -399,7 +518,7 @@ void _validateValue(
     final PatchbayResponseValueSchema? variant = selected is String
         ? schema.variants[selected]
         : null;
-    if (variant == null) {
+    if (selected is String && variant == null) {
       final List<String> expectedVariants = schema.variants.keys.toList()
         ..sort();
       issues.add(
@@ -409,7 +528,7 @@ void _validateValue(
           expected: expectedVariants.join('|'),
         ),
       );
-    } else {
+    } else if (variant != null) {
       effective = _mergeObjectSchemas(schema, variant);
     }
   }

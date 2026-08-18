@@ -141,7 +141,10 @@ void main() {
 
       expect(response['schemaMode'], 'validated');
       expect(response['admission'], 'rejected');
-      expect(response.toString(), contains(r'$.payload.session'));
+      expect(
+        response.toString(),
+        contains(r'$.payload.events[0].payload.session'),
+      );
     },
   );
 }
