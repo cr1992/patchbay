@@ -6,7 +6,9 @@ import 'dart:math';
 import 'package:patchbay/patchbay.dart';
 
 import 'client.dart';
+import 'keep_awake_policy.dart';
 import 'result.dart';
+import 'rpc_timeout.dart';
 import 'session.dart';
 
 const Duration patchbayLaunchDefaultBudget = Duration(minutes: 2);
@@ -27,6 +29,12 @@ typedef PatchbayLaunchChildStarter =
     );
 typedef PatchbayLaunchDeadlineFactory =
     PatchbayLaunchDeadline Function(Duration duration);
+typedef PatchbayLaunchKeepAwakeRequest =
+    Future<PatchbayKeepAwakeAttempt> Function(
+      Uri uri, {
+      required bool enabled,
+      required Duration lease,
+    });
 
 abstract interface class PatchbayLaunchDeadline {
   Future<void> get elapsed;
@@ -55,6 +63,27 @@ final class _PatchbayProbeTimeout extends _PatchbayProbeEvent {
   const _PatchbayProbeTimeout();
 }
 
+final class _PatchbayProbeCancelled extends _PatchbayProbeEvent {
+  const _PatchbayProbeCancelled();
+}
+
+sealed class _PatchbayWaitEvent {
+  const _PatchbayWaitEvent();
+}
+
+final class _PatchbayWaitElapsed extends _PatchbayWaitEvent {
+  const _PatchbayWaitElapsed();
+}
+
+final class _PatchbayWaitChildExit extends _PatchbayWaitEvent {
+  const _PatchbayWaitChildExit(this.exitCode);
+  final int exitCode;
+}
+
+final class _PatchbayWaitCancelled extends _PatchbayWaitEvent {
+  const _PatchbayWaitCancelled();
+}
+
 final RegExp _patchbaySensitiveUri = RegExp(
   r'\b(?:https?|wss?)://[^\s]+',
   caseSensitive: false,
@@ -81,6 +110,7 @@ final class PatchbayLaunchFrame {
     this.nextRetryMs,
     this.reasonCode,
     this.candidateCount,
+    this.keepAwake,
   });
 
   final String launchId;
@@ -91,6 +121,7 @@ final class PatchbayLaunchFrame {
   final int? nextRetryMs;
   final String? reasonCode;
   final int? candidateCount;
+  final PatchbayKeepAwakeAttempt? keepAwake;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'launchId': launchId,
@@ -101,6 +132,7 @@ final class PatchbayLaunchFrame {
     if (nextRetryMs != null) 'nextRetryMs': nextRetryMs,
     if (reasonCode != null) 'reasonCode': reasonCode,
     if (candidateCount != null) 'candidateCount': candidateCount,
+    if (keepAwake != null) 'keepAwake': keepAwake!.toJson(),
   };
 }
 
@@ -119,6 +151,7 @@ final class PatchbayLauncherSupervisor {
     PatchbayLaunchClock? clock,
     PatchbayLaunchSleep? sleep,
     PatchbayLaunchDeadlineFactory? deadlineFactory,
+    PatchbayLaunchKeepAwakeRequest? keepAwakeRequest,
     PatchbayLaunchRandom? random,
     this.budget = patchbayLaunchDefaultBudget,
   }) : _startChild = startChild ?? _startProcess,
@@ -126,6 +159,7 @@ final class PatchbayLauncherSupervisor {
        _clock = clock ?? DateTime.now,
        _sleep = sleep ?? Future<void>.delayed,
        _deadlineFactory = deadlineFactory ?? _TimerLaunchDeadline.new,
+       _keepAwakeRequest = keepAwakeRequest ?? _requestKeepAwake,
        _random = random ?? Random.secure().nextDouble {
     if (budget <= Duration.zero || budget > patchbayLaunchMaximumBudget) {
       throw const PatchbaySessionException('launchBudgetInvalid');
@@ -138,6 +172,7 @@ final class PatchbayLauncherSupervisor {
   final PatchbayLaunchClock _clock;
   final PatchbayLaunchSleep _sleep;
   final PatchbayLaunchDeadlineFactory _deadlineFactory;
+  final PatchbayLaunchKeepAwakeRequest _keepAwakeRequest;
   final PatchbayLaunchRandom _random;
   final Duration budget;
 
@@ -147,6 +182,10 @@ final class PatchbayLauncherSupervisor {
     required int ownerPid,
     required void Function(PatchbayLaunchFrame frame) onFrame,
     void Function(String line)? onHumanLine,
+    PatchbayKeepAwakePolicy keepAwakePolicy = const PatchbayKeepAwakePolicy(
+      enabled: false,
+    ),
+    Future<void>? cancellation,
   }) async {
     if (command.isEmpty)
       throw const FormatException('launch requires a command');
@@ -157,12 +196,17 @@ final class PatchbayLauncherSupervisor {
     String? sessionId;
     PatchbayRuntimeIdentity? lastIdentity;
     DateTime? retryWindowStarted = started;
+    Uri? currentUri;
+    bool keepAwakeHeld = false;
+    DateTime? keepAwakeRenewAt;
+    final Future<void> cancelled = cancellation ?? Completer<void>().future;
 
     PatchbayLaunchFrame emit(
       String state, {
       String? reasonCode,
       int? nextRetryMs,
       int? candidates,
+      PatchbayKeepAwakeAttempt? keepAwake,
     }) {
       final PatchbayLaunchFrame frame = PatchbayLaunchFrame(
         launchId: launchId,
@@ -173,6 +217,7 @@ final class PatchbayLauncherSupervisor {
         nextRetryMs: nextRetryMs,
         reasonCode: reasonCode,
         candidateCount: candidates,
+        keepAwake: keepAwake,
       );
       onFrame(frame);
       return frame;
@@ -211,6 +256,40 @@ final class PatchbayLauncherSupervisor {
                     (onHumanLine ?? (_) {})(redactPatchbayLaunchLine(line)),
               ),
         ];
+    Future<PatchbayLaunchResult> finish({
+      required String state,
+      required int exitCode,
+      String? reasonCode,
+      int? candidates,
+      bool terminateChild = false,
+    }) async {
+      PatchbayKeepAwakeAttempt? release;
+      if (keepAwakePolicy.enabled && keepAwakeHeld) {
+        final Uri? uri = currentUri;
+        release = uri == null
+            ? const PatchbayKeepAwakeAttempt(
+                success: false,
+                state: 'releaseUnconfirmed',
+                reasonCode: 'keepAwakeTransportUnavailable',
+              )
+            : await _keepAwakeRequest(
+                uri,
+                enabled: false,
+                lease: keepAwakePolicy.lease,
+              );
+        keepAwakeHeld = false;
+      }
+      _cleanupPending(store.readAll(), launchId, ownerPid);
+      if (terminateChild) child.terminate();
+      final PatchbayLaunchFrame frame = emit(
+        state,
+        reasonCode: reasonCode,
+        candidates: candidates,
+        keepAwake: release,
+      );
+      return PatchbayLaunchResult(frame: frame, exitCode: exitCode);
+    }
+
     try {
       while (true) {
         final DateTime now = _clock().toUtc();
@@ -222,16 +301,12 @@ final class PatchbayLauncherSupervisor {
         ];
         final int candidates = all.length - owned.length;
         if (owned.length > 1) {
-          final frame = emit(
-            'failed',
+          return await finish(
+            state: 'failed',
+            exitCode: PatchbayExitCode.typedFailure,
             reasonCode: 'launchSessionAmbiguous',
             candidates: candidates,
-          );
-          _cleanupPending(owned, launchId, ownerPid);
-          child.terminate();
-          return PatchbayLaunchResult(
-            frame: frame,
-            exitCode: PatchbayExitCode.typedFailure,
+            terminateChild: true,
           );
         }
 
@@ -245,11 +320,11 @@ final class PatchbayLauncherSupervisor {
               when record.wsUri == null &&
                   expires <= now.millisecondsSinceEpoch) {
             store.remove(record.sessionId);
-            final frame = emit('failed', reasonCode: 'pendingSessionExpired');
-            child.terminate();
-            return PatchbayLaunchResult(
-              frame: frame,
+            return await finish(
+              state: 'failed',
               exitCode: PatchbayExitCode.typedFailure,
+              reasonCode: 'pendingSessionExpired',
+              terminateChild: true,
             );
           }
           final String? rawUri = record.wsUri;
@@ -264,12 +339,11 @@ final class PatchbayLauncherSupervisor {
             final Duration probeRemaining =
                 budget - now.difference(probeWindowStarted);
             if (probeRemaining <= Duration.zero) {
-              final frame = emit('failed', reasonCode: 'sessionUnreachable');
-              _cleanupPending(owned, launchId, ownerPid);
-              child.terminate();
-              return PatchbayLaunchResult(
-                frame: frame,
+              return await finish(
+                state: 'failed',
                 exitCode: PatchbayExitCode.typedFailure,
+                reasonCode: 'sessionUnreachable',
+                terminateChild: true,
               );
             }
             final _PatchbayProbeEvent probe;
@@ -293,6 +367,9 @@ final class PatchbayLauncherSupervisor {
                   deadline.elapsed.then<_PatchbayProbeEvent>(
                     (_) => const _PatchbayProbeTimeout(),
                   ),
+                  cancelled.then<_PatchbayProbeEvent>(
+                    (_) => const _PatchbayProbeCancelled(),
+                  ),
                 ]);
               } finally {
                 deadline.cancel();
@@ -300,28 +377,31 @@ final class PatchbayLauncherSupervisor {
             }
             if (probe case _PatchbayProbeChildExit(:final exitCode)) {
               final bool accepted = wasLive && exitCode == 0;
-              final frame = emit(
-                accepted ? 'completed' : 'failed',
-                reasonCode: accepted ? null : 'childExited',
-              );
-              _cleanupPending(store.readAll(), launchId, ownerPid);
-              return PatchbayLaunchResult(
-                frame: frame,
+              return await finish(
+                state: accepted ? 'completed' : 'failed',
                 exitCode: accepted
                     ? PatchbayExitCode.accepted
                     : PatchbayExitCode.typedFailure,
+                reasonCode: accepted ? null : 'childExited',
               );
             }
             if (probe is _PatchbayProbeTimeout) {
               if (wasLive) {
                 emit('disconnected', reasonCode: 'sessionUnreachable');
               }
-              final frame = emit('failed', reasonCode: 'sessionUnreachable');
-              _cleanupPending(owned, launchId, ownerPid);
-              child.terminate();
-              return PatchbayLaunchResult(
-                frame: frame,
+              return await finish(
+                state: 'failed',
                 exitCode: PatchbayExitCode.typedFailure,
+                reasonCode: 'sessionUnreachable',
+                terminateChild: true,
+              );
+            }
+            if (probe is _PatchbayProbeCancelled) {
+              return await finish(
+                state: 'cancelled',
+                exitCode: PatchbayExitCode.typedFailure,
+                reasonCode: 'launchCancelled',
+                terminateChild: true,
               );
             }
             if (probe case _PatchbayProbeIdentity(:final identity)) {
@@ -336,6 +416,8 @@ final class PatchbayLauncherSupervisor {
                 if (restarted) {
                   emit('disconnected', reasonCode: 'sessionRuntimeRestarted');
                   emit('connecting', candidates: candidates);
+                  keepAwakeHeld = false;
+                  keepAwakeRenewAt = null;
                 }
                 lastIdentity = identity;
                 if (reconnecting || restarted) {
@@ -351,8 +433,29 @@ final class PatchbayLauncherSupervisor {
                 if (reconnecting || restarted) {
                   retry = patchbayLaunchInitialRetry;
                 }
-                if (reconnecting || restarted) {
-                  emit('live', candidates: candidates);
+                currentUri = uri;
+                PatchbayKeepAwakeAttempt? keepAwake;
+                final bool renewalDue =
+                    keepAwakePolicy.enabled &&
+                    (keepAwakeRenewAt == null ||
+                        !now.isBefore(keepAwakeRenewAt) ||
+                        (reconnecting && !keepAwakeHeld));
+                if (renewalDue) {
+                  keepAwake = await _keepAwakeRequest(
+                    uri!,
+                    enabled: true,
+                    lease: keepAwakePolicy.lease,
+                  );
+                  // A definitive rejection must not turn the 5-second health
+                  // observation into an implicit retry storm. A reconnect or
+                  // the next half-lease boundary gives it another bounded try.
+                  keepAwakeRenewAt = now.add(keepAwakePolicy.renewalCadence);
+                  if (keepAwake.success) {
+                    keepAwakeHeld = true;
+                  }
+                }
+                if (reconnecting || restarted || keepAwake != null) {
+                  emit('live', candidates: candidates, keepAwake: keepAwake);
                 }
               }
             } else {
@@ -366,12 +469,11 @@ final class PatchbayLauncherSupervisor {
         if (reason != null) retryWindowStarted ??= now;
         final Duration retryElapsed = now.difference(retryWindowStarted ?? now);
         if (reason != null && retryElapsed >= budget) {
-          final frame = emit('failed', reasonCode: reason);
-          _cleanupPending(owned, launchId, ownerPid);
-          child.terminate();
-          return PatchbayLaunchResult(
-            frame: frame,
+          return await finish(
+            state: 'failed',
             exitCode: PatchbayExitCode.typedFailure,
+            reasonCode: reason,
+            terminateChild: true,
           );
         }
         final int nextMs = reason == null && wasLive
@@ -380,22 +482,33 @@ final class PatchbayLauncherSupervisor {
         if (reason != null) {
           emit('retrying', reasonCode: reason, nextRetryMs: nextMs);
         }
-        final Object event = await Future.any<Object>(<Future<Object>>[
-          child.exitCode.then<Object>((int code) => code),
-          _sleep(Duration(milliseconds: nextMs)).then<Object>((_) => false),
-        ]);
-        if (event is int) {
-          final bool accepted = wasLive && event == 0;
-          final frame = emit(
-            accepted ? 'completed' : 'failed',
-            reasonCode: accepted ? null : 'childExited',
-          );
-          _cleanupPending(store.readAll(), launchId, ownerPid);
-          return PatchbayLaunchResult(
-            frame: frame,
+        final _PatchbayWaitEvent event = await Future.any(
+          <Future<_PatchbayWaitEvent>>[
+            child.exitCode.then<_PatchbayWaitEvent>(_PatchbayWaitChildExit.new),
+            _sleep(
+              Duration(milliseconds: nextMs),
+            ).then<_PatchbayWaitEvent>((_) => const _PatchbayWaitElapsed()),
+            cancelled.then<_PatchbayWaitEvent>(
+              (_) => const _PatchbayWaitCancelled(),
+            ),
+          ],
+        );
+        if (event case _PatchbayWaitChildExit(:final exitCode)) {
+          final bool accepted = wasLive && exitCode == 0;
+          return await finish(
+            state: accepted ? 'completed' : 'failed',
             exitCode: accepted
                 ? PatchbayExitCode.accepted
                 : PatchbayExitCode.typedFailure,
+            reasonCode: accepted ? null : 'childExited',
+          );
+        }
+        if (event is _PatchbayWaitCancelled) {
+          return await finish(
+            state: 'cancelled',
+            exitCode: PatchbayExitCode.typedFailure,
+            reasonCode: 'launchCancelled',
+            terminateChild: true,
           );
         }
         if (reason != null) {
@@ -408,6 +521,14 @@ final class PatchbayLauncherSupervisor {
         }
       }
     } finally {
+      if (keepAwakePolicy.enabled && keepAwakeHeld && currentUri != null) {
+        await _keepAwakeRequest(
+          currentUri,
+          enabled: false,
+          lease: keepAwakePolicy.lease,
+        );
+        keepAwakeHeld = false;
+      }
       for (final StreamSubscription<String> subscription
           in outputSubscriptions) {
         await subscription.cancel();
@@ -435,6 +556,36 @@ final class PatchbayLauncherSupervisor {
       return connection.runtimeIdentity;
     } finally {
       await connection.close();
+    }
+  }
+
+  static Future<PatchbayKeepAwakeAttempt> _requestKeepAwake(
+    Uri uri, {
+    required bool enabled,
+    required Duration lease,
+  }) async {
+    PatchbayClient? client;
+    try {
+      client = PatchbayTimeoutClient(
+        await dialPatchbayUnderBudget(
+          () => PatchbayConnection.connect(uri),
+          rpcTimeout: patchbayDefaultRpcTimeout,
+        ),
+        rpcTimeout: patchbayDefaultRpcTimeout,
+      );
+      return await requestPatchbayKeepAwake(
+        client,
+        enabled: enabled,
+        lease: lease,
+      );
+    } on Object {
+      return PatchbayKeepAwakeAttempt(
+        success: false,
+        state: enabled ? 'renewalUnconfirmed' : 'releaseUnconfirmed',
+        reasonCode: 'keepAwakeTransportUnavailable',
+      );
+    } finally {
+      await closePatchbayQuietly(client);
     }
   }
 

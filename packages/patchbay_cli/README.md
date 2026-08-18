@@ -68,6 +68,9 @@ To make startup and recovery one bounded operation, launch an integrated consume
 
 ```text
 dart run bin/patchbay.dart launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+dart run bin/patchbay.dart --keep-awake launch -- flutter run ...
+PATCHBAY_KEEP_AWAKE=true dart run bin/patchbay.dart launch -- flutter run ...
+dart run bin/patchbay.dart --no-keep-awake launch -- flutter run ...
 ```
 
 The child reads `PATCHBAY_SESSION_DIR`, `PATCHBAY_LAUNCH_ID`, and
@@ -79,6 +82,14 @@ whose launch ID and owner PID both match; a child that does not declare one fail
 `sessionNotDeclared`. Machine frames stay on stdout and child/human output is forwarded to stderr.
 Stable live sessions are observed every five seconds; a disconnect restarts recovery at the initial
 200 ms backoff, and each identity probe is bounded by both child exit and the remaining budget.
+
+The screen-awake policy is off by default. Global `--keep-awake`, or a local
+`PATCHBAY_KEEP_AWAKE=true/on/1`, acquires the existing ten-minute lease only after the launcher is
+`live` and renews it at half-lease through the existing health observation. `--no-keep-awake`
+overrides that local default. Successful one-shot / REPL commands may renew under the same policy,
+while explicit `ui keep-awake on|off|status` commands never trigger a second implicit operation.
+Terminal paths and signal cancellation attempt release; on disconnect the machine frame / JSON says
+`releaseUnconfirmed` or `renewalUnconfirmed`, with App-side lease expiry remaining the final fallback.
 
 When any of the steps above does not work, run the health check first — it dials out itself, so a
 failed connection is one of its findings rather than the end of the command:

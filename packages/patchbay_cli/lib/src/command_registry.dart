@@ -861,7 +861,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     // A release takes no lease, and a read takes nothing at all.
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
-    PatchbayFriendlyCommand.launch => const <String>{},
+    PatchbayFriendlyCommand.launch => const <String>{'keep-awake'},
     PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
     PatchbayFriendlyCommand.snapshot => const <String>{'path'},
     PatchbayFriendlyCommand.snapshotWait => const <String>{

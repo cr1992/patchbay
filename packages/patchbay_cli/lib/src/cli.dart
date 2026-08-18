@@ -14,6 +14,7 @@ import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
 import 'launcher.dart';
+import 'keep_awake_policy.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -32,6 +33,7 @@ Future<int> runPatchbayCli(
   Stream<String>? replInput,
   StringSink? output,
   StringSink? errorOutput,
+  Map<String, String>? environment,
 }) async {
   final StringSink out = output ?? stdout;
   final StringSink error = errorOutput ?? stderr;
@@ -53,6 +55,14 @@ Future<int> runPatchbayCli(
   }
 
   final bool json = parsed.flag('json');
+  PatchbayKeepAwakePolicy? keepAwakePolicy;
+  PatchbayKeepAwakePolicy resolveKeepAwakePolicy() =>
+      keepAwakePolicy ??= PatchbayKeepAwakePolicy.resolve(
+        commandLine: parsed.wasParsed('keep-awake')
+            ? parsed.flag('keep-awake')
+            : null,
+        environment: environment ?? Platform.environment,
+      );
   PatchbayClient? connection;
   try {
     if (_helpTopic(parsed) case final List<String> topic) {
@@ -69,20 +79,47 @@ Future<int> runPatchbayCli(
           PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
       final String launchId =
           'launch-${pid}-${DateTime.now().toUtc().microsecondsSinceEpoch}';
-      final PatchbayLaunchResult result =
-          await PatchbayLauncherSupervisor(
-            store: PatchbaySessionStore(parsed.option('session-dir')),
-          ).run(
-            command: List<String>.from(
-              invocation.arguments['command']! as List<Object?>,
-            ),
-            launchId: launchId,
-            ownerPid: pid,
-            onFrame: (PatchbayLaunchFrame frame) =>
-                out.writeln(jsonEncode(frame.toJson())),
-            onHumanLine: error.writeln,
+      final Completer<void> cancellation = Completer<void>();
+      final List<StreamSubscription<ProcessSignal>> signalSubscriptions =
+          <StreamSubscription<ProcessSignal>>[];
+      void watch(ProcessSignal signal) {
+        try {
+          signalSubscriptions.add(
+            signal.watch().listen((_) {
+              if (!cancellation.isCompleted) cancellation.complete();
+            }),
           );
-      return result.exitCode;
+        } on Object {
+          // Some signals are unavailable on Windows. Lease expiry remains the
+          // crash-safe release path there.
+        }
+      }
+
+      watch(ProcessSignal.sigint);
+      watch(ProcessSignal.sigterm);
+      try {
+        final PatchbayLaunchResult result =
+            await PatchbayLauncherSupervisor(
+              store: PatchbaySessionStore(parsed.option('session-dir')),
+            ).run(
+              command: List<String>.from(
+                invocation.arguments['command']! as List<Object?>,
+              ),
+              launchId: launchId,
+              ownerPid: pid,
+              onFrame: (PatchbayLaunchFrame frame) =>
+                  out.writeln(jsonEncode(frame.toJson())),
+              onHumanLine: error.writeln,
+              keepAwakePolicy: resolveKeepAwakePolicy(),
+              cancellation: cancellation.future,
+            );
+        return result.exitCode;
+      } finally {
+        for (final StreamSubscription<ProcessSignal> subscription
+            in signalSubscriptions) {
+          await subscription.cancel();
+        }
+      }
     }
     // Session bookkeeping answers before any transport exists: these commands
     // are what an operator reaches for when the CLI cannot pick a session, so
@@ -151,7 +188,12 @@ Future<int> runPatchbayCli(
         // One connection, every line: this closure is the only thing the loop
         // can reach, so a later command has no way to open a second one.
         execute: (ArgResults line) async {
-          final _Outcome outcome = await _executeOnce(connection!, line);
+          final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
+            connection!,
+            line,
+            await _executeOnce(connection, line),
+            resolveKeepAwakePolicy(),
+          );
           return PatchbayReplOutcome(outcome.response, outcome.exitCode);
         },
         out: out,
@@ -162,10 +204,11 @@ Future<int> runPatchbayCli(
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
-    final _Outcome outcome = await _executeOnce(
+    final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
       connection,
       parsed,
-      manifest: manifest,
+      await _executeOnce(connection, parsed, manifest: manifest),
+      resolveKeepAwakePolicy(),
     );
     _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
     return outcome.exitCode;
@@ -403,6 +446,41 @@ Future<_Outcome> _executeOnce(
   }
 }
 
+Future<_Outcome> _renewKeepAwakeAfterSuccess(
+  PatchbayClient connection,
+  ArgResults parsed,
+  _Outcome outcome,
+  PatchbayKeepAwakePolicy policy,
+) async {
+  if (!policy.enabled || outcome.exitCode != PatchbayExitCode.accepted) {
+    return outcome;
+  }
+  final String? serviceCommand = PatchbayFriendlyCommandRegistry.specFor(
+    parsed.rest,
+  )?.serviceCommand;
+  // Generated active specs are the authority after command-surface sync; the
+  // deprecated enum façade is not guaranteed to preserve object identity.
+  if (serviceCommand == 'ui.keepAwake.set' ||
+      serviceCommand == 'ui.keepAwake.status') {
+    return outcome;
+  }
+  final PatchbayKeepAwakeAttempt renewal = await requestPatchbayKeepAwake(
+    connection,
+    enabled: true,
+    lease: policy.lease,
+  );
+  final String originalSummary =
+      outcome.summary ?? patchbayResponseSummary(outcome.response);
+  final String keepAwakeSummary = renewal.reasonCode == null
+      ? 'keepAwake=${renewal.state}'
+      : 'keepAwake=${renewal.state} reason=${renewal.reasonCode}';
+  return _Outcome(
+    <String, Object?>{...outcome.response, 'localKeepAwake': renewal.toJson()},
+    renewal.success ? outcome.exitCode : PatchbayExitCode.typedFailure,
+    summary: '$originalSummary $keepAwakeSummary',
+  );
+}
+
 ArgParser patchbayCliParser() => ArgParser()
   ..addFlag(
     'help',
@@ -461,6 +539,13 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Wait for a returned jobId to reach a terminal event.',
   )
   ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
+  ..addFlag(
+    'keep-awake',
+    defaultsTo: false,
+    help:
+        'Renew the App keep-awake lease after successful commands; launch '
+        'also holds it for the supervised session. Disabled by default.',
+  )
   ..addOption('revision', help: 'Observed navigation revision.')
   ..addOption(
     'generation',

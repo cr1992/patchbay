@@ -60,6 +60,7 @@ void main() {
     required Future<void> Function(Duration) sleep,
     Future<PatchbayRuntimeIdentity> Function(Uri)? identity,
     PatchbayLaunchDeadlineFactory? deadlineFactory,
+    PatchbayLaunchKeepAwakeRequest? keepAwakeRequest,
     Duration budget = const Duration(seconds: 2),
   }) => PatchbayLauncherSupervisor(
     store: store,
@@ -68,6 +69,7 @@ void main() {
     random: () => 0,
     sleep: sleep,
     deadlineFactory: deadlineFactory,
+    keepAwakeRequest: keepAwakeRequest,
     startChild: (command, environment) async {
       childEnvironment = environment;
       return child;
@@ -478,6 +480,203 @@ void main() {
     expect(result.frame.state, 'failed');
     expect(result.frame.reasonCode, 'childExited');
   });
+
+  test('keep-awake is off by default for a live launcher', () async {
+    final List<bool> requests = <bool>[];
+    _writeLive(store, now, launchId: 'launch-default-off');
+
+    final PatchbayLaunchResult result =
+        await supervisor(
+          keepAwakeRequest: (uri, {required enabled, required lease}) async {
+            requests.add(enabled);
+            return const PatchbayKeepAwakeAttempt(
+              success: true,
+              state: 'unexpected',
+            );
+          },
+          sleep: (_) async => child.completion.complete(0),
+        ).run(
+          command: const <String>['fake-consumer'],
+          launchId: 'launch-default-off',
+          ownerPid: 42,
+          onFrame: frames.add,
+        );
+
+    expect(result.exitCode, 0);
+    expect(requests, isEmpty);
+  });
+
+  test('live launcher engages, renews at half lease, and releases', () async {
+    final List<bool> requests = <bool>[];
+    var waits = 0;
+    _writeLive(store, now, launchId: 'launch-lease');
+
+    final PatchbayLaunchResult result =
+        await supervisor(
+          keepAwakeRequest: (uri, {required enabled, required lease}) async {
+            requests.add(enabled);
+            return PatchbayKeepAwakeAttempt(
+              success: true,
+              state: enabled
+                  ? requests.where((value) => value).length == 1
+                        ? 'engaged'
+                        : 'renewed'
+                  : 'released',
+            );
+          },
+          sleep: (_) async {
+            waits += 1;
+            now = now.add(const Duration(minutes: 5));
+            if (waits == 2) child.completion.complete(0);
+          },
+        ).run(
+          command: const <String>['fake-consumer'],
+          launchId: 'launch-lease',
+          ownerPid: 42,
+          onFrame: frames.add,
+          keepAwakePolicy: const PatchbayKeepAwakePolicy(enabled: true),
+        );
+
+    expect(result.exitCode, 0);
+    expect(requests, <bool>[true, true, false]);
+    expect(
+      frames.map((frame) => frame.keepAwake?.state).whereType<String>(),
+      containsAllInOrder(<String>['engaged', 'renewed', 'released']),
+    );
+  });
+
+  test(
+    'rejected lease does not retry on every live health observation',
+    () async {
+      var requests = 0;
+      var waits = 0;
+      _writeLive(store, now, launchId: 'launch-rejected-lease');
+
+      final PatchbayLaunchResult result =
+          await supervisor(
+            keepAwakeRequest: (uri, {required enabled, required lease}) async {
+              requests += 1;
+              return const PatchbayKeepAwakeAttempt(
+                success: false,
+                state: 'renewalRejected',
+                reasonCode: 'keepAwakeNotWired',
+              );
+            },
+            sleep: (duration) async {
+              waits += 1;
+              now = now.add(duration);
+              if (waits == 2) child.completion.complete(0);
+            },
+          ).run(
+            command: const <String>['fake-consumer'],
+            launchId: 'launch-rejected-lease',
+            ownerPid: 42,
+            onFrame: frames.add,
+            keepAwakePolicy: const PatchbayKeepAwakePolicy(enabled: true),
+          );
+
+      expect(result.exitCode, PatchbayExitCode.accepted);
+      expect(requests, 1);
+      expect(
+        frames.map((frame) => frame.keepAwake?.reasonCode).whereType<String>(),
+        <String>['keepAwakeNotWired'],
+      );
+    },
+  );
+
+  test(
+    'cancellation releases an engaged lease before child termination',
+    () async {
+      final List<bool> requests = <bool>[];
+      final Completer<void> cancellation = Completer<void>();
+      _writeLive(store, now, launchId: 'launch-cancel');
+
+      final PatchbayLaunchResult result =
+          await supervisor(
+            keepAwakeRequest: (uri, {required enabled, required lease}) async {
+              requests.add(enabled);
+              if (enabled && !cancellation.isCompleted) cancellation.complete();
+              return PatchbayKeepAwakeAttempt(
+                success: true,
+                state: enabled ? 'engaged' : 'released',
+              );
+            },
+            sleep: (_) => Completer<void>().future,
+          ).run(
+            command: const <String>['fake-consumer'],
+            launchId: 'launch-cancel',
+            ownerPid: 42,
+            onFrame: frames.add,
+            keepAwakePolicy: const PatchbayKeepAwakePolicy(enabled: true),
+            cancellation: cancellation.future,
+          );
+
+      expect(result.frame.state, 'cancelled');
+      expect(result.frame.keepAwake?.state, 'released');
+      expect(requests, <bool>[true, false]);
+    },
+  );
+
+  test(
+    'child failure reports an unconfirmed release without hiding it',
+    () async {
+      final List<bool> requests = <bool>[];
+      _writeLive(store, now, launchId: 'launch-child-failure');
+
+      final PatchbayLaunchResult result =
+          await supervisor(
+            keepAwakeRequest: (uri, {required enabled, required lease}) async {
+              requests.add(enabled);
+              if (enabled) {
+                return const PatchbayKeepAwakeAttempt(
+                  success: true,
+                  state: 'engaged',
+                );
+              }
+              return const PatchbayKeepAwakeAttempt(
+                success: false,
+                state: 'releaseUnconfirmed',
+                reasonCode: 'keepAwakeTransportUnavailable',
+              );
+            },
+            sleep: (_) async => child.completion.complete(9),
+          ).run(
+            command: const <String>['fake-consumer'],
+            launchId: 'launch-child-failure',
+            ownerPid: 42,
+            onFrame: frames.add,
+            keepAwakePolicy: const PatchbayKeepAwakePolicy(enabled: true),
+          );
+
+      expect(result.frame.state, 'failed');
+      expect(result.frame.reasonCode, 'childExited');
+      expect(result.frame.keepAwake?.success, isFalse);
+      expect(result.frame.keepAwake?.state, 'releaseUnconfirmed');
+      expect(
+        result.frame.keepAwake?.reasonCode,
+        'keepAwakeTransportUnavailable',
+      );
+      expect(requests, <bool>[true, false]);
+    },
+  );
+}
+
+void _writeLive(
+  PatchbaySessionStore store,
+  DateTime now, {
+  required String launchId,
+}) {
+  final PatchbayLaunchContext context = PatchbayLaunchContext(
+    sessionDirectory: store.directory.path,
+    launchId: launchId,
+    ownerPid: 42,
+  );
+  store.write(
+    _pending(context, now).withTransport(
+      'ws://127.0.0.1:8181/token/ws',
+      observedAtMs: now.millisecondsSinceEpoch,
+    ),
+  );
 }
 
 PatchbaySessionRecord _pending(PatchbayLaunchContext context, DateTime at) =>

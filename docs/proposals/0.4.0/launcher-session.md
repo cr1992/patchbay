@@ -80,11 +80,19 @@ platform channel，给 `patchbay_flutter` 加插件或第三方 wakelock 依赖�
 
 所以 PB-040-03 在 0.4.0 的增量**只在 CLI/launcher 侧**：
 
-- 只有显式 `--keep-awake` 或项目配置策略开启时才申请租约，租约绑定 `launchId + sessionId`；
-- 续租发生在**命令成功之后**，不用独立心跳定时器——读一眼状态就续租会让“租约何时过期”取决于
-  有没有人在看，这正是 `ui.keepAwake.status` 刻意不续租的理由；
-- 正常退出、静默超时、App detach 或租约到期时释放；
+- 全局可否定 flag 为 `--[no-]keep-awake`；本地默认只读环境变量 `PATCHBAY_KEEP_AWAKE`
+  （`true/false`、`on/off` 或 `1/0`），未配置时关闭，显式 `--no-keep-awake` 优先级最高；
+- 0.4 不再引入第二套可调租约：策略申请沿用 App 已冻结的 10 分钟默认租约，最大值仍为 2 小时；
+  launcher 只在既有 5 秒健康观测中于半租期续租，不另起高频心跳，租约绑定当前 `launchId + sessionId`；
+- 普通 one-shot / REPL 命令只在**命令成功之后**续租；`ui keep-awake on|off|status` 自己就是租约操作，
+  不触发隐式续租，尤其不能让读一眼 `status` 改变过期时间；
+- 正常退出、child 结束、监督失败、信号取消都尽力显式 release；连接已断时必须输出
+  `releaseUnconfirmed`，不能伪称释放成功，最终仍由 App 租约到期静默兜底；
 - `--no-keep-awake` 必须覆盖任何本地默认值，供息屏行为本身的测试使用。
+
+普通命令的结构化结果在策略实际执行时增加 `localKeepAwake`；launcher machine frame 增加同形的
+`keepAwake: {state, success, reasonCode?}`。续租拒绝或无法确认时普通命令以类型化失败退出，launcher 则
+继续监督 App、但在 frame 中保留失败事实；两者都不输出 transport URI 或 token。
 
 capability 沿用既有表达：`ui.keepAwake.status` 的 `wired: false` 与 `keepAwakeNotWired` 已经能说明
 “这个 App 没接线”，不新增 feature 名。release 构建继续不注册命令、不创建平台句柄。

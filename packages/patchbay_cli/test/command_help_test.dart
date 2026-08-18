@@ -9,6 +9,15 @@ Matcher _listsGroup(String group) =>
     matches(RegExp('^  $group +\\d+ commands?\$', multiLine: true));
 
 void main() {
+  test('launcher help exposes the local keep-awake override pair', () {
+    final String help = PatchbayCommandHelp.render(
+      patchbayCliParser(),
+      <String>['launch'],
+    );
+
+    expect(help, contains('--[no-]keep-awake'));
+  });
+
   test('navigation group help matches the declaration-derived snapshot', () {
     expect(
       PatchbayCommandHelp.render(patchbayCliParser(), <String>['navigation']),

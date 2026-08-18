@@ -344,8 +344,11 @@ abstract final class PatchbayCommandHelp {
       if (option == null) {
         throw StateError('friendly option --$name is missing from the parser');
       }
+      final String spelling = name == 'keep-awake'
+          ? '--[no-]keep-awake'
+          : '--$name';
       output.writeln(
-        '  --${name.padRight(16)} ${option.help ?? ''}'.trimRight(),
+        '  ${spelling.padRight(18)} ${option.help ?? ''}'.trimRight(),
       );
     }
   }

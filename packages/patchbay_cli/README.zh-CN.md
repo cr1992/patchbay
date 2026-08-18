@@ -61,6 +61,9 @@ dart run bin/patchbay.dart --json exec <namespace.command>
 
 ```text
 dart run bin/patchbay.dart launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+dart run bin/patchbay.dart --keep-awake launch -- flutter run ...
+PATCHBAY_KEEP_AWAKE=true dart run bin/patchbay.dart launch -- flutter run ...
+dart run bin/patchbay.dart --no-keep-awake launch -- flutter run ...
 ```
 
 child 用 `PatchbayLaunchContext.tryFromEnvironment` 读取 `PATCHBAY_SESSION_DIR`、
@@ -71,6 +74,12 @@ launcher 只监督 `launchId + ownerPid` 同时匹配的记录；未声明的 ch
 `sessionNotDeclared` 失败。machine frame 只写 stdout，child 与人读日志转发到 stderr。
 稳定 live 会话每 5 秒观测一次；断连后从 200 ms 初始退避重新恢复，每次 identity probe 同时受 child
 退出与剩余总预算约束。
+
+亮屏策略默认关闭。全局 `--keep-awake` 或本地 `PATCHBAY_KEEP_AWAKE=true/on/1` 会在 launcher `live`
+后申请既有 10 分钟租约，并在半租期借健康观测续租；`--no-keep-awake` 覆盖本地默认。普通 one-shot /
+REPL 命令成功后也可按同一策略续租，但显式 `ui keep-awake on|off|status` 不会触发第二次操作。终态和
+信号取消尽力 release；断连时 machine frame / JSON 明确写 `releaseUnconfirmed` 或
+`renewalUnconfirmed`，App 的租约到期是最终兜底。
 
 上面任何一步不通时先跑体检——它自己拨号，因此拨不通是它的一条 finding，而不是命令终止：
 
