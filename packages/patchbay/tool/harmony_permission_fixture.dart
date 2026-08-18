@@ -77,9 +77,9 @@ List<String> validateHarmonyPermissionFixture(Map<String, Object?> fixture) {
       errors.add('baseline.device.status must be available or unavailable');
     }
     if (application == null ||
-        application['kind'] != 'moiiApp' ||
+        application['kind'] != 'consumerApp' ||
         !<String>{'available', 'unavailable'}.contains(application['status'])) {
-      errors.add('baseline.application must describe moiiApp availability');
+      errors.add('baseline.application must describe consumerApp availability');
     }
   }
 
@@ -120,8 +120,10 @@ List<String> validateHarmonyPermissionFixture(Map<String, Object?> fixture) {
         if (evidence?.isEmpty ?? true) {
           errors.add('matrix.$key verified result requires evidence');
         }
-        if (check['scope'] != 'moiiDeviceAcceptance') {
-          errors.add('matrix.$key verified result must come from moii app');
+        if (check['scope'] != 'consumerDeviceAcceptance') {
+          errors.add(
+            'matrix.$key verified result must come from the consumer app',
+          );
         }
       } else {
         allChecksVerified = false;
@@ -135,7 +137,9 @@ List<String> validateHarmonyPermissionFixture(Map<String, Object?> fixture) {
 
   final Object? supportStatus = fixture['supportStatus'];
   if (supportStatus != (allChecksVerified ? 'verified' : 'unsupported')) {
-    errors.add('supportStatus must be verified iff all six moii checks verify');
+    errors.add(
+      'supportStatus must be verified iff all six consumer checks verify',
+    );
   }
 
   final Map<String, Object?>? permissions = _map(fixture['permissions']);

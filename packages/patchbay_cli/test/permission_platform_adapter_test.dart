@@ -12,10 +12,10 @@ PatchbayPermissionDriverRequest _request(
   requestId: 'adapter-test',
   operation: operation,
   deviceId: 'device-1',
-  applicationId: 'dev.moii.debug',
+  applicationId: 'com.example.consumer.debug',
   sessionRef: const <String, Object?>{
-    'sessionId': 'moii-session',
-    'appInstanceId': 'moii-instance',
+    'sessionId': 'consumer-session',
+    'appInstanceId': 'consumer-instance',
     'buildMode': 'debug',
   },
   permission: permission,
@@ -49,7 +49,7 @@ void main() {
       if (arguments.contains('path')) {
         return const PatchbayPlatformCommandResult(
           exitCode: 0,
-          stdout: 'package:/data/app/dev.moii.debug/base.apk\n',
+          stdout: 'package:/data/app/com.example.consumer.debug/base.apk\n',
           stderr: '',
         );
       }
@@ -131,7 +131,7 @@ void main() {
       if (arguments.contains('launchctl')) {
         return const PatchbayPlatformCommandResult(
           exitCode: 0,
-          stdout: 'UIKitApplication:dev.moii.debug',
+          stdout: 'UIKitApplication:com.example.consumer.debug',
           stderr: '',
         );
       }
@@ -171,8 +171,8 @@ void main() {
       addTearDown(() => directory.deleteSync(recursive: true));
       final PatchbaySessionStore store = PatchbaySessionStore(directory.path);
       final PatchbaySessionRecord record = PatchbaySessionRecord(
-        sessionId: 'moii-session',
-        applicationId: 'dev.moii.debug',
+        sessionId: 'consumer-session',
+        applicationId: 'com.example.consumer.debug',
         appInstanceId: 'before-instance',
         isolateId: 'before-isolate',
         processId: pid,
@@ -185,7 +185,7 @@ void main() {
       store.write(record);
       const PatchbayRuntimeIdentity identity = PatchbayRuntimeIdentity(
         schemaVersion: 1,
-        applicationId: 'dev.moii.debug',
+        applicationId: 'com.example.consumer.debug',
         appInstanceId: 'after-instance',
         isolateId: 'after-isolate',
       );
@@ -220,7 +220,7 @@ void main() {
 
 const PatchbayRuntimeIdentity _before = PatchbayRuntimeIdentity(
   schemaVersion: 1,
-  applicationId: 'dev.moii.debug',
+  applicationId: 'com.example.consumer.debug',
   appInstanceId: 'before-instance',
   isolateId: 'before-isolate',
 );
@@ -229,7 +229,7 @@ final class _RecoveryClient implements PatchbayClient {
   @override
   Future<Map<String, Object?>> identity() async => <String, Object?>{
     'schemaVersion': 1,
-    'applicationId': 'dev.moii.debug',
+    'applicationId': 'com.example.consumer.debug',
     'appInstanceId': 'after-instance',
     'isolateId': 'after-isolate',
   };

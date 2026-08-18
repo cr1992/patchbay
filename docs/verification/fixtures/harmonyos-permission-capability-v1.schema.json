@@ -261,7 +261,7 @@
           ],
           "properties": {
             "kind": {
-              "const": "moiiApp"
+              "const": "consumerApp"
             },
             "status": {
               "enum": [
@@ -300,7 +300,7 @@
         "scope": {
           "enum": [
             "examplePreflight",
-            "moiiDeviceAcceptance"
+            "consumerDeviceAcceptance"
           ]
         },
         "status": {
@@ -319,7 +319,7 @@
             "enum": [
               "sdk",
               "device",
-              "moiiApp",
+              "consumerApp",
               "runner",
               "signing"
             ]
