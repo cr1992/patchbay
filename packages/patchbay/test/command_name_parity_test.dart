@@ -82,6 +82,9 @@ const String _cliLib = '../patchbay_cli/lib';
 const List<String> _hostSourcePaths = <String>[
   '../patchbay_flutter/lib/src/flutter_service_host.dart',
   'lib/src/artifacts.dart',
+  // PB-040-06 migrates protocol-owned descriptors here; the Flutter runtime
+  // imports these exact objects instead of restating their command names.
+  'lib/src/protocol_commands.dart',
 ];
 const String _fixtureHostPath = '../patchbay_cli/test/fixture/host.dart';
 

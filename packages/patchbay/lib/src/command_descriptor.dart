@@ -88,6 +88,48 @@ final class PatchbayParameterDescriptor {
   Map<String, Object?> toJson() => _toWire().toJson();
 }
 
+/// One CLI spelling derived from a protocol-owned command descriptor.
+///
+/// This metadata is deliberately local to the Dart packages: it is build-time
+/// syntax for the separately deployed CLI, not a runtime capability, and is
+/// therefore never included in [PatchbayCommandDescriptor.toJson]. One service
+/// command may expose several spellings when the path injects a fixed argument
+/// such as an `on`/`off` or `ui.wait` condition variant.
+final class PatchbayCliSyntax {
+  const PatchbayCliSyntax({
+    required this.id,
+    required this.path,
+    required this.summary,
+    this.usageSuffix = '',
+    this.positionalParameters = const <String>[],
+    this.optionParameters = const <String, String>{},
+    this.positiveParameters = const <String>{},
+    this.fixedArguments = const <String, Object?>{},
+    this.fencesNavigationRevision = false,
+  });
+
+  /// Stable Dart identifier used by generated CLI registration code.
+  final String id;
+  final List<String> path;
+  final String summary;
+  final String usageSuffix;
+
+  /// Descriptor parameter names, in argv positional order.
+  final List<String> positionalParameters;
+
+  /// Descriptor parameter name to long option name.
+  final Map<String, String> optionParameters;
+
+  /// Numeric parameters whose CLI spelling accepts positive values only.
+  final Set<String> positiveParameters;
+
+  /// Arguments implied by the chosen path rather than typed by the operator.
+  final Map<String, Object?> fixedArguments;
+
+  /// Whether an omitted `revision` is resolved through navigation.current.
+  final bool fencesNavigationRevision;
+}
+
 /// Consumer-neutral catalog entry. Business namespaces remain consumer-owned.
 final class PatchbayCommandDescriptor {
   const PatchbayCommandDescriptor({
@@ -104,6 +146,7 @@ final class PatchbayCommandDescriptor {
     this.confirmationBudgetMs,
     this.weakConfirmationCompletes = false,
     this.retryPolicy,
+    this.cliSyntax = const <PatchbayCliSyntax>[],
   });
 
   final String name;
@@ -137,6 +180,9 @@ final class PatchbayCommandDescriptor {
   /// A registry-owned command cannot declare this: the host's external
   /// fallback is the boundary that owns requestId de-duplication.
   final PatchbayRetryPolicy? retryPolicy;
+
+  /// Build-time CLI syntax. It is intentionally absent from the wire form.
+  final List<PatchbayCliSyntax> cliSyntax;
 
   Map<String, Object?> toJson() {
     final List<PatchbayFactSourceWire> sortedFactSources =

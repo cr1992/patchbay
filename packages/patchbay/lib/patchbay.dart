@@ -8,6 +8,7 @@ export 'src/catalog_digest.dart';
 export 'src/command_descriptor.dart';
 export 'src/command_registry.dart';
 export 'src/execution_evidence.dart';
+export 'src/protocol_commands.dart';
 export 'src/facts.dart';
 export 'src/features.dart';
 export 'src/gates.dart';

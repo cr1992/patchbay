@@ -1,3 +1,6 @@
+// ignore_for_file: deprecated_member_use_from_same_package
+
+import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:test/test.dart';
 
@@ -19,6 +22,11 @@ PatchbayFriendlyInvocation _resolve(
   return resolved!;
 }
 
+PatchbayFriendlyCommandSpec _protocol(String id) =>
+    PatchbayFriendlyCommandRegistry.commands.singleWhere(
+      (PatchbayFriendlyCommandSpec command) => command.name == id,
+    );
+
 void main() {
   test('launch preserves the consumer command after the option boundary', () {
     final PatchbayFriendlyInvocation invocation = _resolve(<String>[
@@ -39,9 +47,113 @@ void main() {
     ]);
   });
 
+  test('published navigation enum constants remain source compatible', () {
+    const List<PatchbayFriendlyCommand> legacy = <PatchbayFriendlyCommand>[
+      PatchbayFriendlyCommand.navigationCatalog,
+      PatchbayFriendlyCommand.navigationCurrent,
+      PatchbayFriendlyCommand.navigationGo,
+      PatchbayFriendlyCommand.navigationPush,
+      PatchbayFriendlyCommand.navigationBack,
+    ];
+    expect(
+      legacy.map((PatchbayFriendlyCommand command) => command.name),
+      <String>[
+        'navigationCatalog',
+        'navigationCurrent',
+        'navigationGo',
+        'navigationPush',
+        'navigationBack',
+      ],
+    );
+    for (final PatchbayFriendlyCommand compatibility in legacy) {
+      final PatchbayFriendlyCommandSpec active = _protocol(compatibility.name);
+      expect(compatibility.isCompatibilityStub, isTrue);
+      expect(compatibility.path, active.path);
+      expect(compatibility.serviceCommand, active.serviceCommand);
+      expect(compatibility.protocolDescriptor, same(active.protocolDescriptor));
+      expect(
+        PatchbayFriendlyCommandRegistry.commands
+            .where(
+              (PatchbayFriendlyCommandSpec command) =>
+                  command.path.join(' ') == active.path.join(' '),
+            )
+            .length,
+        1,
+      );
+    }
+  });
+
+  test(
+    'navigation registration and help metadata come from core descriptors',
+    () {
+      final Map<PatchbayFriendlyCommandSpec, PatchbayCommandDescriptor>
+      migrated = <PatchbayFriendlyCommandSpec, PatchbayCommandDescriptor>{
+        _protocol('navigationCatalog'):
+            patchbayNavigationCatalogCommandDescriptor,
+        _protocol('navigationCurrent'):
+            patchbayNavigationCurrentCommandDescriptor,
+        _protocol('navigationGo'): patchbayNavigationGoCommandDescriptor,
+        _protocol('navigationPush'): patchbayNavigationPushCommandDescriptor,
+        _protocol('navigationBack'): patchbayNavigationBackCommandDescriptor,
+      };
+      for (final MapEntry<
+            PatchbayFriendlyCommandSpec,
+            PatchbayCommandDescriptor
+          >
+          entry
+          in migrated.entries) {
+        final PatchbayFriendlyCommandSpec command = entry.key;
+        final PatchbayCommandDescriptor descriptor = entry.value;
+        final PatchbayCliSyntax syntax = descriptor.cliSyntax.single;
+        expect(command.protocolDescriptor, same(descriptor));
+        expect(command.serviceCommand, descriptor.name);
+        expect(command.path, syntax.path);
+        expect(command.summary, syntax.summary);
+        expect(command.usageSuffix, syntax.usageSuffix);
+        expect(
+          PatchbayFriendlyCommandRegistry.allowedOptions(command),
+          syntax.optionParameters.values.toSet(),
+        );
+      }
+
+      for (final PatchbayFriendlyCommandSpec command
+          in PatchbayFriendlyCommandRegistry.commands.where(
+            (PatchbayFriendlyCommandSpec command) =>
+                !migrated.containsKey(command),
+          )) {
+        expect(command.protocolDescriptor, isNull, reason: command.name);
+      }
+    },
+  );
+
+  test('navigation arguments follow descriptor bindings and defaults', () {
+    final PatchbayFriendlyInvocation explicit = _resolve(<String>[
+      '--revision',
+      '7',
+      '--timeout-ms',
+      '1200',
+      'navigation',
+      'go',
+      'settings',
+    ]);
+    expect(explicit.arguments, <String, Object?>{
+      'destinationId': 'settings',
+      'revision': 7,
+      'timeoutMs': 1200,
+    });
+
+    final PatchbayFriendlyInvocation fenced = _resolve(<String>[
+      'navigation',
+      'back',
+    ]);
+    expect(fenced.arguments, <String, Object?>{'timeoutMs': 5000});
+    expect(fenced.spec.fencesNavigationRevision, isTrue);
+  });
+
   test('friendly command paths are unique and every declaration resolves', () {
     final Set<String> paths = <String>{};
-    for (final PatchbayFriendlyCommand spec in PatchbayFriendlyCommand.values) {
+    for (final PatchbayFriendlyCommandSpec spec
+        in PatchbayFriendlyCommandRegistry.commands) {
       expect(paths.add(spec.path.join(' ')), isTrue, reason: spec.name);
       final List<String> words = <String>[
         ...spec.path,
@@ -81,8 +193,8 @@ void main() {
             'tr_after_0123456789abcdef0123',
           ],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
-          PatchbayFriendlyCommand.navigationGo ||
-          PatchbayFriendlyCommand.navigationPush => <String>['settings'],
+          _ when spec.name == 'navigationGo' || spec.name == 'navigationPush' =>
+            <String>['settings'],
           PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
           PatchbayFriendlyCommand.uiWaitSemanticsUnmounted ||
           PatchbayFriendlyCommand.uiWaitDestination => <String>['screen.id'],
@@ -103,9 +215,7 @@ void main() {
         },
       ];
       final List<String> options = <String>[
-        if (spec == PatchbayFriendlyCommand.navigationGo ||
-            spec == PatchbayFriendlyCommand.navigationPush ||
-            spec == PatchbayFriendlyCommand.navigationBack) ...<String>[
+        if (spec.protocolSyntax?.fencesNavigationRevision ?? false) ...<String>[
           '--revision',
           '1',
         ],
@@ -146,7 +256,7 @@ void main() {
         parsed.rest,
         parsed,
       );
-      expect(resolved?.spec, spec, reason: spec.name);
+      expect(resolved?.spec, same(spec), reason: spec.name);
       expect(
         resolved?.serviceCommand,
         spec.target == PatchbayCommandTarget.callerServiceCommand
@@ -183,7 +293,8 @@ void main() {
   });
 
   test('client targets never claim a catalog service command', () {
-    for (final PatchbayFriendlyCommand spec in PatchbayFriendlyCommand.values) {
+    for (final PatchbayFriendlyCommandSpec spec
+        in PatchbayFriendlyCommandRegistry.commands) {
       expect(
         spec.serviceCommand != null,
         spec.target == PatchbayCommandTarget.declaredServiceCommand,
@@ -337,7 +448,7 @@ void main() {
   test('group aliases expand without inventing commands', () {
     expect(
       _resolve(<String>['navigate', 'current']).spec,
-      PatchbayFriendlyCommand.navigationCurrent,
+      same(_protocol('navigationCurrent')),
     );
     expect(
       _resolve(<String>['wait', 'semantics-mounted', 'app.ready']).spec,
@@ -459,7 +570,7 @@ void main() {
 
   test('friendly mappings preserve stable service command names', () {
     expect(
-      PatchbayFriendlyCommand.values
+      PatchbayFriendlyCommandRegistry.commands
           .where((value) => value.path.first == 'navigation')
           .map((value) => value.serviceCommand),
       containsAll(<String>{
@@ -471,7 +582,7 @@ void main() {
       }),
     );
     expect(
-      PatchbayFriendlyCommand.values
+      PatchbayFriendlyCommandRegistry.commands
           .where((value) => value.path.first == 'logs')
           .map((value) => value.serviceCommand),
       containsAll(<String>{'logs.query', 'logs.tail', 'logs.export'}),

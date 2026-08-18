@@ -814,92 +814,11 @@ final class PatchbayFlutterServiceHost {
       ),
     ],
     if (navigationEnabled) ...<PatchbayCommandDescriptor>[
-      const PatchbayCommandDescriptor(
-        name: 'navigation.catalog',
-        summary: 'Read the consumer destination catalog.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.readOnly,
-        sideEffect: PatchbaySideEffect.none,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-      ),
-      const PatchbayCommandDescriptor(
-        name: 'navigation.current',
-        summary: 'Read the current settled consumer destination.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.readOnly,
-        sideEffect: PatchbaySideEffect.none,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-      ),
-      const PatchbayCommandDescriptor(
-        name: 'navigation.go',
-        summary: 'go to a cataloged consumer destination.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.immediate,
-        sideEffect: PatchbaySideEffect.appState,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-        parameters: <PatchbayParameterDescriptor>[
-          PatchbayParameterDescriptor(
-            name: 'destinationId',
-            type: PatchbayParameterType.string,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'revision',
-            type: PatchbayParameterType.integer,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'timeoutMs',
-            type: PatchbayParameterType.integer,
-            defaultValue: 5000,
-          ),
-        ],
-      ),
-      const PatchbayCommandDescriptor(
-        name: 'navigation.push',
-        summary: 'push to a cataloged consumer destination.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.immediate,
-        sideEffect: PatchbaySideEffect.appState,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-        parameters: <PatchbayParameterDescriptor>[
-          PatchbayParameterDescriptor(
-            name: 'destinationId',
-            type: PatchbayParameterType.string,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'revision',
-            type: PatchbayParameterType.integer,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'timeoutMs',
-            type: PatchbayParameterType.integer,
-            defaultValue: 5000,
-          ),
-        ],
-      ),
-      const PatchbayCommandDescriptor(
-        name: 'navigation.back',
-        summary: 'Navigate back through the consumer adapter.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.immediate,
-        sideEffect: PatchbaySideEffect.appState,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-        parameters: <PatchbayParameterDescriptor>[
-          PatchbayParameterDescriptor(
-            name: 'revision',
-            type: PatchbayParameterType.integer,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'timeoutMs',
-            type: PatchbayParameterType.integer,
-            defaultValue: 5000,
-          ),
-        ],
-      ),
+      patchbayNavigationCatalogCommandDescriptor,
+      patchbayNavigationCurrentCommandDescriptor,
+      patchbayNavigationGoCommandDescriptor,
+      patchbayNavigationPushCommandDescriptor,
+      patchbayNavigationBackCommandDescriptor,
     ],
   ];
 }

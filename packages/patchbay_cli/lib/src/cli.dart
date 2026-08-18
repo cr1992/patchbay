@@ -237,7 +237,7 @@ Future<int> runPatchbayCli(
         // can reach, so a later command has no way to open a second one.
         execute: (ArgResults line) async {
           final PatchbayTraceRecorder? trace = _traceRecorder;
-          final PatchbayFriendlyCommand? lineSpec =
+          final PatchbayFriendlyCommandSpec? lineSpec =
               PatchbayFriendlyCommandRegistry.specFor(line.rest);
           final String? runId = trace == null || lineSpec == null
               ? null
@@ -429,7 +429,7 @@ Future<int> _runPatchbayCliWithTrace(
   Map<String, String>? environment,
 }) async {
   final ArgResults? parsed = _tryParseForTrace(arguments);
-  final PatchbayFriendlyCommand? spec = parsed == null
+  final PatchbayFriendlyCommandSpec? spec = parsed == null
       ? null
       : PatchbayFriendlyCommandRegistry.specFor(parsed.rest);
   if (parsed == null ||
@@ -1330,7 +1330,7 @@ String _sessionLines(List<PatchbaySessionListing> listings) {
 /// Dispatches one resolved declaration.
 ///
 /// There is deliberately no second command table here: every path the CLI
-/// accepts comes from [PatchbayFriendlyCommand], and the switch below has no
+/// accepts comes from [PatchbayFriendlyCommandRegistry], and the switch below has no
 /// default arm, so a new declaration cannot be added without wiring dispatch
 /// and help at the same time.
 Future<_Execution> _execute(

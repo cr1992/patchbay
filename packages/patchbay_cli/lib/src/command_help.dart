@@ -10,11 +10,13 @@ abstract final class PatchbayCommandHelp {
     final List<String> path = PatchbayFriendlyCommandRegistry.canonicalPath(
       topic,
     );
-    final List<PatchbayFriendlyCommand> matches = PatchbayFriendlyCommand.values
-        .where(
-          (PatchbayFriendlyCommand command) => _startsWith(command.path, path),
-        )
-        .toList(growable: false);
+    final List<PatchbayFriendlyCommandSpec> matches =
+        PatchbayFriendlyCommandRegistry.commands
+            .where(
+              (PatchbayFriendlyCommandSpec command) =>
+                  _startsWith(command.path, path),
+            )
+            .toList(growable: false);
     if (matches.isNotEmpty) {
       if (matches.length == 1 && matches.single.path.length == path.length) {
         return _command(parser, matches.single);
@@ -25,13 +27,13 @@ abstract final class PatchbayCommandHelp {
     // field — a protocol name, not the CLI's own path. Sending that to
     // "unknown help topic" made the catalog and the help two separate maps.
     if (topic.length == 1) {
-      final List<PatchbayFriendlyCommand> byService = PatchbayFriendlyCommand
-          .values
-          .where(
-            (PatchbayFriendlyCommand command) =>
-                command.serviceCommand == topic.single,
-          )
-          .toList(growable: false);
+      final List<PatchbayFriendlyCommandSpec> byService =
+          PatchbayFriendlyCommandRegistry.commands
+              .where(
+                (PatchbayFriendlyCommandSpec command) =>
+                    command.serviceCommand == topic.single,
+              )
+              .toList(growable: false);
       if (byService.length == 1) return _command(parser, byService.single);
       if (byService.length > 1) {
         return _serviceCommand(parser, topic.single, byService);
@@ -43,8 +45,8 @@ abstract final class PatchbayCommandHelp {
   /// One-line usage banner, derived from the same declarations as the help.
   static String usageLine() {
     final List<String> groups =
-        PatchbayFriendlyCommand.values
-            .map((PatchbayFriendlyCommand command) => command.path.first)
+        PatchbayFriendlyCommandRegistry.commands
+            .map((PatchbayFriendlyCommandSpec command) => command.path.first)
             .toSet()
             .toList()
           ..sort();
@@ -54,8 +56,8 @@ abstract final class PatchbayCommandHelp {
 
   static String _root(ArgParser parser) {
     final Map<String, int> groups = <String, int>{};
-    for (final PatchbayFriendlyCommand command
-        in PatchbayFriendlyCommand.values) {
+    for (final PatchbayFriendlyCommandSpec command
+        in PatchbayFriendlyCommandRegistry.commands) {
       groups.update(
         command.path.first,
         (int count) => count + 1,
@@ -95,22 +97,22 @@ abstract final class PatchbayCommandHelp {
   static String _group(
     ArgParser parser,
     List<String> topic,
-    List<PatchbayFriendlyCommand> commands,
+    List<PatchbayFriendlyCommandSpec> commands,
   ) {
-    final List<PatchbayFriendlyCommand> sorted = List.of(commands)
+    final List<PatchbayFriendlyCommandSpec> sorted = List.of(commands)
       ..sort(
-        (PatchbayFriendlyCommand a, PatchbayFriendlyCommand b) =>
+        (PatchbayFriendlyCommandSpec a, PatchbayFriendlyCommandSpec b) =>
             a.path.join(' ').compareTo(b.path.join(' ')),
       );
     final List<String> usages = sorted
-        .map((PatchbayFriendlyCommand command) => _usage(command))
+        .map((PatchbayFriendlyCommandSpec command) => _usage(command))
         .toList(growable: false);
     final int width = usages.fold<int>(
       0,
       (int value, String usage) => usage.length > value ? usage.length : value,
     );
     final Set<String> optionNames = <String>{
-      for (final PatchbayFriendlyCommand command in sorted)
+      for (final PatchbayFriendlyCommandSpec command in sorted)
         ...PatchbayFriendlyCommandRegistry.allowedOptions(command),
     };
     final StringBuffer output = StringBuffer()
@@ -129,7 +131,7 @@ abstract final class PatchbayCommandHelp {
     // typed command calls belongs here, or it would be the one command whose
     // help omits it. Deeper commands keep their own page for that.
     output.writeln();
-    for (final PatchbayFriendlyCommand command in sorted) {
+    for (final PatchbayFriendlyCommandSpec command in sorted) {
       if (command.path.length != topic.length) continue;
       output.writeln(protocolLine(command));
     }
@@ -137,7 +139,7 @@ abstract final class PatchbayCommandHelp {
     // not required to be homogeneous, and `sessions` needs no App at all while
     // `ui` mixes catalog commands with SDK passthrough.
     for (final String line in <String>{
-      for (final PatchbayFriendlyCommand command in sorted)
+      for (final PatchbayFriendlyCommandSpec command in sorted)
         availabilityLine(command),
     }) {
       output.writeln(line);
@@ -153,15 +155,15 @@ abstract final class PatchbayCommandHelp {
   static String _serviceCommand(
     ArgParser parser,
     String serviceCommand,
-    List<PatchbayFriendlyCommand> commands,
+    List<PatchbayFriendlyCommandSpec> commands,
   ) {
-    final List<PatchbayFriendlyCommand> sorted = List.of(commands)
+    final List<PatchbayFriendlyCommandSpec> sorted = List.of(commands)
       ..sort(
-        (PatchbayFriendlyCommand a, PatchbayFriendlyCommand b) =>
+        (PatchbayFriendlyCommandSpec a, PatchbayFriendlyCommandSpec b) =>
             a.path.join(' ').compareTo(b.path.join(' ')),
       );
     final List<String> usages = sorted
-        .map((PatchbayFriendlyCommand command) => _usage(command))
+        .map((PatchbayFriendlyCommandSpec command) => _usage(command))
         .toList(growable: false);
     final int width = usages.fold<int>(
       0,
@@ -180,7 +182,7 @@ abstract final class PatchbayCommandHelp {
     }
     _writeConditions(output, sorted);
     _writeOptions(output, parser, <String>{
-      for (final PatchbayFriendlyCommand command in sorted)
+      for (final PatchbayFriendlyCommandSpec command in sorted)
         ...PatchbayFriendlyCommandRegistry.allowedOptions(command),
     });
     output
@@ -197,17 +199,18 @@ abstract final class PatchbayCommandHelp {
   /// are accepted on the command line; neither name changes.
   static void _writeConditions(
     StringBuffer output,
-    List<PatchbayFriendlyCommand> commands,
+    List<PatchbayFriendlyCommandSpec> commands,
   ) {
-    final List<PatchbayFriendlyCommand> conditions = commands
+    final List<PatchbayFriendlyCommandSpec> conditions = commands
         .where(
-          (PatchbayFriendlyCommand command) => command.waitCondition != null,
+          (PatchbayFriendlyCommandSpec command) =>
+              command.waitCondition != null,
         )
         .toList(growable: false);
     if (conditions.isEmpty) return;
     final int width = conditions.fold<int>(
       0,
-      (int value, PatchbayFriendlyCommand command) =>
+      (int value, PatchbayFriendlyCommandSpec command) =>
           command.path.join(' ').length > value
           ? command.path.join(' ').length
           : value,
@@ -217,14 +220,17 @@ abstract final class PatchbayCommandHelp {
       ..writeln(
         'Payload `condition` values (accepted as the command name too):',
       );
-    for (final PatchbayFriendlyCommand command in conditions) {
+    for (final PatchbayFriendlyCommandSpec command in conditions) {
       output.writeln(
         '  ${command.path.join(' ').padRight(width)}  ${command.waitCondition}',
       );
     }
   }
 
-  static String _command(ArgParser parser, PatchbayFriendlyCommand command) {
+  static String _command(
+    ArgParser parser,
+    PatchbayFriendlyCommandSpec command,
+  ) {
     final StringBuffer output = StringBuffer()
       ..writeln('Usage: patchbay ${_usage(command)} [options]')
       ..writeln()
@@ -257,7 +263,7 @@ abstract final class PatchbayCommandHelp {
   }
 
   /// Where the command's availability is actually decided.
-  static String availabilityLine(PatchbayFriendlyCommand command) =>
+  static String availabilityLine(PatchbayFriendlyCommandSpec command) =>
       switch (command.target) {
         PatchbayCommandTarget.declaredServiceCommand ||
         PatchbayCommandTarget.callerServiceCommand =>
@@ -310,7 +316,7 @@ abstract final class PatchbayCommandHelp {
   /// Client targets deliberately print no extension name: those names live in
   /// the transport and would go stale if help kept its own copy.
   static String protocolLine(
-    PatchbayFriendlyCommand command,
+    PatchbayFriendlyCommandSpec command,
   ) => switch (command.target) {
     PatchbayCommandTarget.declaredServiceCommand =>
       'Service command: ${command.serviceCommand}',
@@ -361,7 +367,7 @@ abstract final class PatchbayCommandHelp {
           'does not operate native system UI itself.',
   };
 
-  static String _usage(PatchbayFriendlyCommand command) => <String>[
+  static String _usage(PatchbayFriendlyCommandSpec command) => <String>[
     ...command.path,
     if (command.usageSuffix.isNotEmpty) command.usageSuffix,
   ].join(' ');

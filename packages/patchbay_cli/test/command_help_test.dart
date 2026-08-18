@@ -44,8 +44,8 @@ Availability is still decided by the running App catalog.
     () {
       final ArgParser parser = patchbayCliParser();
       final Set<String> paths = <String>{};
-      for (final PatchbayFriendlyCommand command
-          in PatchbayFriendlyCommand.values) {
+      for (final PatchbayFriendlyCommandSpec command
+          in PatchbayFriendlyCommandRegistry.commands) {
         expect(command.summary, isNotEmpty, reason: command.name);
         expect(paths.add(command.path.join(' ')), isTrue, reason: command.name);
         for (final String option
@@ -69,8 +69,8 @@ Availability is still decided by the running App catalog.
     // arm. Together with this test, a target can be neither unwired nor
     // unreachable, which is what keeps dispatch and help on one declaration.
     expect(
-      PatchbayFriendlyCommand.values
-          .map((PatchbayFriendlyCommand command) => command.target)
+      PatchbayFriendlyCommandRegistry.commands
+          .map((PatchbayFriendlyCommandSpec command) => command.target)
           .toSet(),
       PatchbayCommandTarget.values.toSet(),
     );
@@ -81,8 +81,8 @@ Availability is still decided by the running App catalog.
     () {
       final ArgParser parser = patchbayCliParser();
       final String root = PatchbayCommandHelp.render(parser, const <String>[]);
-      final Set<String> groups = PatchbayFriendlyCommand.values
-          .map((PatchbayFriendlyCommand command) => command.path.first)
+      final Set<String> groups = PatchbayFriendlyCommandRegistry.commands
+          .map((PatchbayFriendlyCommandSpec command) => command.path.first)
           .toSet();
       // This set was previously frozen at the five groups that happened to be
       // declared, which turned the help gap into a contract: `identity`,
@@ -118,9 +118,10 @@ Availability is still decided by the running App catalog.
         final String groupHelp = PatchbayCommandHelp.render(parser, <String>[
           group,
         ]);
-        for (final PatchbayFriendlyCommand command
-            in PatchbayFriendlyCommand.values.where(
-              (PatchbayFriendlyCommand command) => command.path.first == group,
+        for (final PatchbayFriendlyCommandSpec command
+            in PatchbayFriendlyCommandRegistry.commands.where(
+              (PatchbayFriendlyCommandSpec command) =>
+                  command.path.first == group,
             )) {
           expect(groupHelp, contains(command.path.join(' ')));
         }
@@ -242,9 +243,9 @@ Availability is still decided by the running App catalog.
     // Names that several friendly commands share resolve to the menu of them.
     final String wait = PatchbayCommandHelp.render(parser, <String>['ui.wait']);
     expect(wait, contains('Service command: ui.wait'));
-    for (final PatchbayFriendlyCommand command
-        in PatchbayFriendlyCommand.values.where(
-          (PatchbayFriendlyCommand command) =>
+    for (final PatchbayFriendlyCommandSpec command
+        in PatchbayFriendlyCommandRegistry.commands.where(
+          (PatchbayFriendlyCommandSpec command) =>
               command.serviceCommand == 'ui.wait',
         )) {
       expect(wait, contains(command.path.join(' ')), reason: command.name);
@@ -257,8 +258,8 @@ Availability is still decided by the running App catalog.
 
   test('every declared service command answers as a help topic', () {
     final ArgParser parser = patchbayCliParser();
-    for (final PatchbayFriendlyCommand command
-        in PatchbayFriendlyCommand.values) {
+    for (final PatchbayFriendlyCommandSpec command
+        in PatchbayFriendlyCommandRegistry.commands) {
       if (command.serviceCommand case final String name) {
         expect(
           () => PatchbayCommandHelp.render(parser, <String>[name]),
@@ -295,8 +296,8 @@ Availability is still decided by the running App catalog.
       'ui',
       'wait',
     ]);
-    for (final PatchbayFriendlyCommand command
-        in PatchbayFriendlyCommand.values) {
+    for (final PatchbayFriendlyCommandSpec command
+        in PatchbayFriendlyCommandRegistry.commands) {
       if (command.waitCondition case final String condition) {
         expect(group, contains(condition), reason: command.name);
         expect(
