@@ -508,6 +508,12 @@ enum PatchbayFriendlyCommand {
     usageSuffix: '<target-id> <generation> --output <path>',
     artifact: PatchbayArtifactDisposition.payloadBlob,
   ),
+  captureDiff(
+    'ui.capture.diff',
+    <String>['capture', 'diff'],
+    summary: 'Compare two Flutter capture artifacts pixel by pixel.',
+    usageSuffix: '<before-blob-id> <after-blob-id>',
+  ),
   blobGet(
     'blob.metadata',
     <String>['blob', 'get'],
@@ -889,6 +895,13 @@ abstract final class PatchbayFriendlyCommandRegistry {
           ..._captureArguments(options),
         },
       ),
+      PatchbayFriendlyCommand.captureDiff => _twoTail(
+        tail,
+        (String beforeBlobId, String afterBlobId) => <String, Object?>{
+          'beforeBlobId': beforeBlobId,
+          'afterBlobId': afterBlobId,
+        },
+      ),
       PatchbayFriendlyCommand.blobGet || PatchbayFriendlyCommand.blobMetadata =>
         _oneTail(tail, (String blobId) => <String, Object?>{'blobId': blobId}),
     };
@@ -1045,6 +1058,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'ttl-ms',
       'lease-ms',
       'pixel-ratio',
+      'after-frames',
       'output',
       'force',
       'clear',
@@ -1114,6 +1128,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.networkProfile ||
     PatchbayFriendlyCommand.navigationCatalog ||
     PatchbayFriendlyCommand.navigationCurrent ||
+    PatchbayFriendlyCommand.captureDiff ||
     PatchbayFriendlyCommand.uiInspectOff ||
     PatchbayFriendlyCommand.uiInspectStatus ||
     PatchbayFriendlyCommand.blobMetadata ||
@@ -1243,6 +1258,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.captureRoot ||
     PatchbayFriendlyCommand.captureTarget => const <String>{
       'pixel-ratio',
+      'after-frames',
       'timeout-ms',
       'output',
       'force',
@@ -1479,6 +1495,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
         if (_optionalNumber(options, 'pixel-ratio') case final num ratio)
           'pixelRatio': ratio,
         'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
+        if (_optionalPositiveInt(options, 'after-frames') case final int frames)
+          'afterFrames': frames,
       };
 
   static Map<String, Object?> _waitArguments(

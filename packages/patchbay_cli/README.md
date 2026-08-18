@@ -157,7 +157,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --limit 100 logs query
 dart run bin/patchbay.dart --ws-uri <uri> --json --cursor <cursor> --timeout-ms 5000 logs tail
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./logs.ndjson logs export
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./screen.png capture root
+dart run bin/patchbay.dart --ws-uri <uri> --json --after-frames 12 --output ./frame-12.png capture root
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture target <target-id> <generation>
+dart run bin/patchbay.dart --ws-uri <uri> --json capture diff <before-blob-id> <after-blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
@@ -315,8 +317,12 @@ budget sent to the app, and a request that declares it widens this RPC's budget 
 wait plus one round trip" so it is not cut short by the default.
 
 Log filtering supports `--cursor`, `--direction`, `--limit`, comma-separated `--levels`/
-`--categories`, and ISO-8601 `--since`/`--until`. Capture supports `--pixel-ratio` and
-`--timeout-ms`. Every artifact download first writes a temp file in the same directory and
+`--categories`, and ISO-8601 `--since`/`--until`. Capture supports `--pixel-ratio`,
+`--after-frames` (1..120 Patchbay-observed Flutter frames), and `--timeout-ms`. If the host does
+not declare `captureAfterFrames`, the CLI omits that field and labels the response
+`captureMode=legacyImmediate`; it never guesses support from an error. `capture diff` compares two
+retained capture blob IDs of the same size and pixel format and returns counts plus a ratio, not a
+pass/fail verdict. Every artifact download first writes a temp file in the same directory and
 validates blob metadata, offsets, base64, total length, and SHA-256 chunk by chunk, renaming only
 after everything passes; an existing output is refused by default and replaced only with an
 explicit `--force`. Expiry, rejection, out-of-order chunks, hash errors, and interruptions never

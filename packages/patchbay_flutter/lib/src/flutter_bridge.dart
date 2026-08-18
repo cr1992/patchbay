@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -228,6 +230,7 @@ final class PatchbayFlutterBridge {
     Set<String> keepAwakeGates = const <String>{},
     PatchbayRootController? rootController,
     PatchbayCaptureEncoder? captureEncoder,
+    PatchbayCaptureDecoder? captureDecoder,
     bool Function()? isAppResumed,
     PatchbayLifecycleStateReader? lifecycleState,
     String Function()? newRequestId,
@@ -293,6 +296,7 @@ final class PatchbayFlutterBridge {
             isAppResumed: _isAppResumed,
             lifecycleState: _lifecycleState,
             encoder: captureEncoder,
+            decoder: captureDecoder,
           );
   }
 

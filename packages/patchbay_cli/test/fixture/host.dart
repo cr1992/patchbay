@@ -58,6 +58,7 @@ void main() {
     'logs.tail',
     'logs.export',
     'ui.capture',
+    'ui.capture.diff',
     'ui.keepAwake.set',
     'ui.keepAwake.status',
     'ui.inspect.status',
@@ -187,6 +188,22 @@ void main() {
                     if (args['pixelRatio'] == 3)
                       'sha256': List<String>.filled(64, '0').join(),
                   },
+                },
+              ).toJson(),
+              'ui.capture.diff' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'compared',
+                  'source': 'uiObserved',
+                  'beforeBlobId': args['beforeBlobId'],
+                  'afterBlobId': args['afterBlobId'],
+                  'width': 1,
+                  'height': 1,
+                  'pixelFormat': 'rgba8888',
+                  'changedPixels': 0,
+                  'totalPixels': 1,
+                  'differenceRatio': 0,
+                  'warnings': const <String>['flutterSubtreeOnly'],
                 },
               ).toJson(),
               'ui.keepAwake.set' => () {

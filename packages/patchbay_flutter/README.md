@@ -19,7 +19,7 @@ boundaries, see [`../patchbay/README.md`](https://github.com/cr1992/patchbay/blo
 | **Text operations** | `text.set` / `text.enter`, per-operation gates, sensitive input, and side-effect descriptors |
 | **Semantics** | Container-free normalized tree, node generations, obscured value redaction, and standard actions rejected by policy default |
 | **Navigation and waits** | Composition-root navigation adapter, revision / redirect / timeout semantics, and `ui.wait` conditions |
-| **Capture** | Optional root / target capture, next-frame re-check, pixel and byte limits, and chunked blob output |
+| **Capture** | Optional root / target capture after N observed frames, bounded pixel diff, and chunked blob output |
 | **Keep awake** | Consumer-injected `keepAwakeDelegate`, off by default, auto-released on lease expiry and host disposal |
 | **Inspector switch** | `PatchbayInspectPolicy` opt-in on-device select mode: self-restoring lease, refused on non-debug builds |
 | **Host composition** | `PatchbayFlutterServiceHost` merges the UI and domain catalogs/operators into one service extension and forwards core redacted audit configuration |
@@ -278,11 +278,19 @@ is not already a boundary, it fails closed.
 A root capture proves only that the Flutter composition tree produced those pixels in that frame.
 `PlatformView`s, textures, system dialogs, and other apps may be absent from the image, so results
 always return the `flutterSubtreeOnly`, `platformViewsMayBeMissing`, and `systemUiNotIncluded`
-warnings and must not pose as a full physical screen capture. Capture waits for the next frame and
-re-checks resumed/target before the call, after the gate `await`, and before encoding; the
-defaults cap at 16 MP, an 8 MiB PNG, and a pixelRatio of at most 3. The PNG goes only into the
-shared blob store, and the response returns dimensions, ratio, SHA-256, TTL, and a blobId, so large
-byte payloads are never stuffed into a single service-extension response.
+warnings and must not pose as a full physical screen capture. Capture waits for `afterFrames`
+Patchbay-observed Flutter frames (default 1, maximum 120) and re-checks resumed/target before the
+call, after the gate `await`, and before encoding. The observer actively requests frames, so this
+is the Nth observation after admission, not the App's natural frame number. The defaults cap the
+shared wait at 5 seconds (maximum 30 seconds), each image at 16 MP and an 8 MiB PNG, and pixelRatio
+at 3. The PNG goes only into the shared blob store, and the response returns dimensions, RGBA8888
+pixel format, observed/requested frame counts, collection time, limits, SHA-256, TTL, and a blobId.
+
+`ui.capture.diff` compares two retained Flutter capture blob IDs only when their width, height, and
+decoded pixel format match. It returns `changedPixels`, `totalPixels`, and `differenceRatio` as
+observations and never invents a pass/fail threshold. Both inputs obey the same 16 MP / 8 MiB
+budgets and the three capture warnings remain attached to the result: platform views, textures,
+system dialogs, and other OS-composited pixels are outside this evidence.
 
 ## Keep Awake (Consumer-Injected)
 

@@ -93,6 +93,10 @@ void main() {
           PatchbayFriendlyCommand.uiWaitTreeRevision ||
           PatchbayFriendlyCommand.uiWaitFrameRevision => <String>['7'],
           PatchbayFriendlyCommand.captureTarget => <String>['capture.id', '2'],
+          PatchbayFriendlyCommand.captureDiff => <String>[
+            'before-blob',
+            'after-blob',
+          ],
           PatchbayFriendlyCommand.blobGet ||
           PatchbayFriendlyCommand.blobMetadata => <String>['blob-id'],
           _ => const <String>[],

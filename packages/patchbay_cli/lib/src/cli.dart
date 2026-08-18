@@ -888,6 +888,10 @@ ArgParser patchbayCliParser() => ArgParser()
     'sample-limit',
     help: 'Maximum VM timeline events summarized (1..10000).',
   )
+  ..addOption(
+    'after-frames',
+    help: 'Capture after this many Patchbay-observed Flutter frames (1..120).',
+  )
   ..addOption('output', help: 'Local artifact output path.')
   ..addOption('name', help: 'Human-readable local trace name.')
   ..addFlag(
@@ -1544,6 +1548,21 @@ Future<_Execution> _execute(
       final Map<String, Object?> catalog = await connection.catalog();
       _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
       Map<String, Object?> arguments = friendly.arguments;
+      String? captureMode;
+      if ((friendly.spec == PatchbayFriendlyCommand.captureRoot ||
+              friendly.spec == PatchbayFriendlyCommand.captureTarget) &&
+          arguments.containsKey('afterFrames')) {
+        final Set<String>? features = patchbayDeclaredFeatures(
+          await connection.identity(),
+        );
+        if (features?.contains(PatchbayFeature.captureAfterFrames.name) ==
+            true) {
+          captureMode = 'observedFrames';
+        } else {
+          arguments = <String, Object?>{...arguments}..remove('afterFrames');
+          captureMode = 'legacyImmediate';
+        }
+      }
       if (friendly.resolvesRevision) {
         final Map<String, Object?> current = await _invokeAgainstCatalog(
           connection,
@@ -1562,13 +1581,23 @@ Future<_Execution> _execute(
           'revision': _navigationRevision(current),
         };
       }
-      final Map<String, Object?> response = await _invokeCataloged(
+      Map<String, Object?> response = await _invokeCataloged(
         connection,
         catalog,
         command,
         arguments,
         wait: parsed.flag('wait'),
       );
+      if (captureMode != null) {
+        response = <String, Object?>{
+          ...response,
+          'captureMode': captureMode,
+          if (captureMode == 'legacyImmediate')
+            'captureNotice':
+                'host did not declare captureAfterFrames; captured in legacy '
+                'immediate mode',
+        };
+      }
       return _Execution(
         friendly.resolvesRevision ? _withRevisionSource(response) : response,
         catalog: catalog,
