@@ -26,6 +26,13 @@ enum PatchbayFeature {
   /// protocol, not by the consumer, so a host either has it or predates it.
   catalogDigest,
 
+  /// The snapshot RPC accepts a field selector and server-side wait request.
+  ///
+  /// Declared by every [PatchbayServiceHost] that understands the optional
+  /// snapshot request object. A client must see this declaration before it
+  /// sends that object; absence means it may only use the whole-snapshot RPC.
+  snapshotSelectors,
+
   /// `*LifecycleNotResumed` rejections carry `details.lifecycleState`.
   ///
   /// Declared by the Flutter host, which owns the lifecycle gate. A pure Dart

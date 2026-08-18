@@ -87,6 +87,7 @@ final class PatchbayServiceHost {
 
   static const Set<PatchbayFeature> _coreFeatures = <PatchbayFeature>{
     PatchbayFeature.catalogDigest,
+    PatchbayFeature.snapshotSelectors,
   };
 
   /// Transport-neutral dispatch seam used by alternate, explicitly enabled
