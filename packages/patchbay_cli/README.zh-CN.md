@@ -137,7 +137,8 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 
 ### UI 目标声明对账
 
-`ui verify-manifest <file>` 读一份接入方维护的 JSON 或 YAML manifest，与 catalog 的 `uiTargets` 对账，报
+`ui verify-manifest <file>` 读一份接入方维护的 JSON 或 YAML manifest：`catalogTarget` 与 catalog 的
+`uiTargets` 对账，`semanticsIdentifier` 与既有 `ui.semantics.tree` 活体快照对账，报
 `declaredNotMounted` / `mountedNotDeclared` / `propertyMismatch` 三类偏差。比对完全在 CLI 侧完成：
 不新增 wire 命令，只用 catalog；manifest 里出现 `destination` 时额外读一次 `navigation.current`
 做范围过滤。schema、字段语义、`destination` 过滤口径与「未挂载 ≠ 丢失」的边界见
@@ -150,6 +151,13 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 扩展名选择，不嗅探内容；YAML 关闭恢复并拒绝 alias 与显式 tag。两种格式共享 1 MiB、64 层、200000
 节点（含 mapping key）预算，语法错误给一基 `line` / `column` 且不回显文件内容。人读输出直接列出偏差条目；repl 内每行只占
 一行，给的是计数。
+
+v2 的两个 namespace 相互独立：`kind` / `sensitive` 只属于 `catalogTarget`，
+`semanticsIdentifier` 只持久化稳定 identifier。唯一活体命中会报告本次 `nodeId` / `generation` 与
+tree revision；零命中进入 `declaredNotMounted`，多命中以 `uiSemanticsIdentifierAmbiguous`
+fail-closed。能力缺失、tree 截断、payload 不完整分别有稳定 protocol code。`ui targets
+--emit-manifest` 会在 App 声明 tree capability 时加入唯一活体 identifier；歧义或跨 namespace 同 id
+则拒绝生成，不会挑一个代表。
 
 ### repl 会话
 

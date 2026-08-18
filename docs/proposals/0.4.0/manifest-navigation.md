@@ -37,10 +37,20 @@ catalog 时当场 `FormatException`。`kind` 保持原义，且只在 `namespace
 
 未知 namespace、重复 id 或跨命名空间冲突均 fail-closed。
 
+`semanticsIdentifier` 条目只允许 `namespace` + `id`，不得携带 `kind` / `sensitive`；CLI 只在该条目
+属于当前 settled destination 时读取既有 `ui.semantics.tree`。挂载事实就是完整、未截断快照中出现同名
+identifier；唯一命中时回报 `nodeId` / `generation`、`treeRevision`、命令来源与 App 回报的事实来源，零命中以
+`uiSemanticsIdentifierNotFound` 进入
+`declaredNotMounted`，多命中进入 `identifierAmbiguous` 并以 `uiSemanticsIdentifierAmbiguous` 结束为
+偏差。App 未声明 Semantics tree capability 时稳定失败 `manifestSemanticsUnavailable`；快照截断或形状
+不完整时分别失败 `manifestSemanticsTreeTruncated` / `manifestSemanticsContractViolated`，不得把局部树当
+完整事实。
+
 `--emit-manifest` 默认只输出当前 destination，并写 `coverage: mountedOnly`；该字段与既有报告里
 `destination` / `destinationSource` 的三态区分（读到了、读了但 App 没有、根本没读）保持同构，不另造
 第三种表达。只有 consumer 注册了 destination provider 后才可输出多屏骨架；生成结果不得暗示未访问
-屏幕已经验证。
+屏幕已经验证。活体 tree capability 存在时，emit 把当前完整快照中的唯一、非空 identifier 一并写成
+`semanticsIdentifier`；重复 identifier 或与 catalogTarget 同 id 时拒绝生成，不挑一个代表。
 
 ## 巡检协议
 

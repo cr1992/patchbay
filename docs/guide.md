@@ -705,8 +705,9 @@ generation 提供。同 identifier 挂载多个实例、identifier 不存在、�
 
 ### UI 目标声明对账（ui verify-manifest）
 
-接入方把「这个 App 应该开放哪些 UI 目标」写成一份 manifest，CLI 连上运行中的 App，把它与 catalog
-的 `uiTargets` 对一遍，报三类偏差。**纯 CLI 侧比对**：不新增 wire 命令，App 侧零改动。
+接入方把「这个 App 应该开放哪些 UI 目标」写成一份 manifest，CLI 连上运行中的 App，把
+`catalogTarget` 与 catalog 的 `uiTargets`、`semanticsIdentifier` 与既有 `ui.semantics.tree` 活体快照
+分别对账。**纯 CLI 侧比对**：不新增 wire 命令，App 侧零改动。
 
 ```console
 $ patchbay ui verify-manifest ui-targets.json          # 人读：直接列出偏差条目
@@ -728,8 +729,18 @@ manifest 可用 JSON 或 YAML 表达同一个 v1/v2 schema，完整 JSON 示例�
 ```
 
 上例与下表是继续兼容的 v1 平铺形式。v2 使用根级 `coverage: mountedOnly` 与 `destinations`，每个
-destination 再携带自己的 `targets`；当前可核对的 target 使用 `namespace: catalogTarget`。两种版本的
-JSON/YAML 都进入同一个内部模型。
+destination 再携带自己的 `targets`；target 必须明确使用 `namespace: catalogTarget` 或
+`namespace: semanticsIdentifier`。两种版本的 JSON/YAML 都进入同一个内部模型，例如：
+
+```json
+{"version":2,"coverage":"mountedOnly","destinations":[{"id":"login","targets":[
+  {"namespace":"catalogTarget","id":"login.password","kind":"text","sensitive":true},
+  {"namespace":"semanticsIdentifier","id":"login.submit"}
+]}]}
+```
+
+`kind` / `sensitive` 只属于 `catalogTarget`；`semanticsIdentifier` 只写稳定 identifier，不持久化
+`nodeId` / `generation`。同一 id 不得跨 namespace，未知 namespace 与非法字段组合都 fail-closed。
 
 | 字段 | 必填 | 含义 |
 |---|---|---|
@@ -757,6 +768,14 @@ JSON/YAML 都进入同一个内部模型。
 | `mountedNotDeclared` | 运行时挂载着、manifest 里没有 |
 | `propertyMismatch` | 两边都有但 `kind` / `sensitive` 对不上，逐字段给 `declared` / `runtime` |
 
+Semantics 唯一命中时，报告在 `semantics.observed` 给出本次活体的 `nodeId` / `generation`，并携带
+`treeRevision`、命令来源 `ui.semantics.tree` 与 App 回报的事实来源（通常为 `uiObserved`）；零命中以
+`uiSemanticsIdentifierNotFound` 进入
+`declaredNotMounted`。同 identifier 命中多个
+节点时以 `uiSemanticsIdentifierAmbiguous` 记入 `semantics.identifierAmbiguous`，退出 `7`，不会任选
+一个。App 未声明 tree capability、tree 被截断或 payload 不完整时分别给稳定 protocol code
+`manifestSemanticsUnavailable`、`manifestSemanticsTreeTruncated`、`manifestSemanticsContractViolated`。
+
 **「未挂载」不等于「丢了」。** 对账范围是**当前挂载态**：非常驻控件不在当前屏本来就不该挂载，
 所以输出如实说「当前未挂载」，不替你判成缺失。挂载状态与属性漂移是两个独立的轴，同一个 ID
 可以同时出现在 `declaredNotMounted` 和 `propertyMismatch` 里。
@@ -766,6 +785,10 @@ JSON/YAML 都进入同一个内部模型。
 计入 `stats.skippedOutOfScope`；出现在别的屏的声明仍然算「已声明」，不会被报成挂载未声明。同一个
 ID 可以在多条上重复，但每条都必须写各自不同的 `destination`——否则同一时刻会有两条声明去对同一个
 运行时目标。逐屏自动巡检要驱动导航，不在 v1 内。
+
+`ui targets --emit-manifest` 仍只为 App 已报告的当前 destination 生成 `coverage: mountedOnly` 草稿。
+App 声明 `ui.semantics.tree` 时，唯一、非空的活体 identifier 会一并写入；重复 identifier 或两类
+namespace 同 id 时拒绝生成，CLI 不伪造 destination，也不把截断 tree 冒充完整清单。
 
 `destination` 与 `destinationSource` 一起读：`destinationSource` 为 `null` 表示 manifest 压根没
 scope、没读过 `navigation.current`；为 `navigation.current` 而 `destination` 是 `null`，表示读了、

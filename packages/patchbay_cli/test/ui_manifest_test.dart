@@ -32,6 +32,43 @@ Map<String, Object?> _target(
   sideEffect: PatchbaySideEffect.appState,
 ).toJson();
 
+Map<String, Object?> _semanticsNode(
+  int nodeId, {
+  required int generation,
+  required String identifier,
+  int? parentNodeId,
+  int depth = 0,
+  List<int> children = const <int>[],
+}) => <String, Object?>{
+  'nodeId': nodeId,
+  'generation': generation,
+  'parentNodeId': parentNodeId,
+  'depth': depth,
+  'identifier': identifier,
+  'label': '',
+  'flags': <Object?>[],
+  'actions': <Object?>[],
+  'invisible': false,
+  'userActionsBlocked': false,
+  'rect': <String, Object?>{'left': 0, 'top': 0, 'width': 1, 'height': 1},
+  'rectCoordinateSpace': 'globalLogicalPixels',
+  'children': children,
+};
+
+Map<String, Object?> _semanticsPayload(
+  List<Map<String, Object?>> nodes, {
+  int treeRevision = 1,
+  bool truncated = false,
+}) => <String, Object?>{
+  'outcome': 'observed',
+  'source': 'uiObserved',
+  'treeRevision': treeRevision,
+  'rootNodeId': nodes.isEmpty ? 0 : nodes.first['nodeId'],
+  'truncated': truncated,
+  'nodeCount': nodes.length,
+  'nodes': nodes,
+};
+
 /// A client whose catalog carries [uiTargets] and whose `navigation.current`
 /// reports [destination].
 FakePatchbayClient _client({
@@ -39,13 +76,19 @@ FakePatchbayClient _client({
   String? destination,
   bool navigationCataloged = true,
   Map<String, Object?>? navigationResponse,
+  Map<String, Object?>? semanticsPayload,
 }) => FakePatchbayClient(
   commands: <Map<String, Object?>>[
     if (navigationCataloged)
       const <String, Object?>{'name': 'navigation.current'},
+    if (semanticsPayload != null)
+      const <String, Object?>{'name': 'ui.semantics.tree'},
   ],
   uiTargets: uiTargets,
   handle: (String command, Map<String, Object?> arguments) async {
+    if (command == 'ui.semantics.tree' && semanticsPayload != null) {
+      return fakeAccepted(semanticsPayload);
+    }
     // A host that does not catalog the command answers the same way for it as
     // for any other name it never registered.
     if (command != 'navigation.current' || !navigationCataloged) {
@@ -211,12 +254,12 @@ void main() {
       expect(_report(run)['admission'], 'rejected');
     });
 
-    test('v2 refuses namespaces this increment cannot verify', () {
+    test('v2 refuses unknown namespaces', () {
       expect(
         () => PatchbayUiManifest.parse(
           '{"version":2,"coverage":"mountedOnly","destinations":['
-          '{"id":"login","targets":[{"namespace":"semanticsIdentifier",'
-          '"id":"login.submit","kind":"text","sensitive":false}]}]}',
+          '{"id":"login","targets":[{"namespace":"futureNamespace",'
+          '"id":"login.submit"}]}]}',
         ),
         throwsA(
           isA<PatchbayUiManifestException>().having(
@@ -522,6 +565,298 @@ void main() {
             },
         ],
       }, 'manifest target limit exceeded');
+    });
+  });
+
+  group('semanticsIdentifier manifest namespace', () {
+    const String semanticsManifest =
+        '{"version":2,"coverage":"mountedOnly","destinations":['
+        '{"id":"login","targets":[{"namespace":"semanticsIdentifier",'
+        '"id":"login.submit"}]}]}';
+
+    test('v2 keeps semantics fields independent from catalog kind', () {
+      final PatchbayUiManifest manifest = PatchbayUiManifest.parse(
+        semanticsManifest,
+      );
+
+      expect(manifest.entries, isEmpty);
+      expect(manifest.semanticsEntries.single.id, 'login.submit');
+
+      for (final String forbidden in <String>[
+        '"kind":"text"',
+        '"sensitive":false',
+      ]) {
+        expect(
+          () => PatchbayUiManifest.parse(
+            semanticsManifest.replaceFirst(
+              '"id":"login.submit"',
+              '"id":"login.submit",$forbidden',
+            ),
+          ),
+          throwsA(
+            isA<PatchbayUiManifestException>().having(
+              (error) => error.code,
+              'code',
+              'manifestInvalid',
+            ),
+          ),
+        );
+      }
+    });
+
+    test(
+      'v1 remains catalog-only even when the App exposes Semantics',
+      () async {
+        final FakePatchbayClient client = _client(
+          uiTargets: <Object?>[_target('login.title')],
+          semanticsPayload: _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(4, generation: 2, identifier: 'login.title'),
+          ]),
+        );
+
+        final CliRun run = await _run(
+          client,
+          '{"version":1,"targets":['
+          '{"id":"login.title","kind":"text","sensitive":false}]}',
+        );
+
+        expect(run.exitCode, PatchbayExitCode.accepted, reason: run.stderr);
+        expect(client.calls, isEmpty);
+        expect(_report(run).containsKey('semantics'), isFalse);
+      },
+    );
+
+    test('unknown and cross-namespace ids fail closed', () {
+      expect(
+        () => PatchbayUiManifest.parse(
+          semanticsManifest.replaceFirst(
+            'semanticsIdentifier',
+            'unknownNamespace',
+          ),
+        ),
+        throwsA(
+          isA<PatchbayUiManifestException>().having(
+            (error) => error.code,
+            'code',
+            'manifestInvalid',
+          ),
+        ),
+      );
+      expect(
+        () => PatchbayUiManifest.parse(
+          '{"version":2,"coverage":"mountedOnly","destinations":['
+          '{"id":"login","targets":[{"namespace":"catalogTarget",'
+          '"id":"shared","kind":"text"}]},'
+          '{"id":"settings","targets":['
+          '{"namespace":"semanticsIdentifier","id":"shared"}]}]}',
+        ),
+        throwsA(
+          isA<PatchbayUiManifestException>()
+              .having((error) => error.code, 'code', 'manifestInvalid')
+              .having(
+                (error) => error.details['reason'],
+                'reason',
+                'a target id cannot cross manifest namespaces',
+              ),
+        ),
+      );
+    });
+
+    test('nested identifiers retain generation and tree fact source', () async {
+      final CliRun run = await _run(
+        _client(
+          destination: 'login',
+          semanticsPayload: _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(
+              1,
+              generation: 1,
+              identifier: '',
+              children: const <int>[2],
+            ),
+            _semanticsNode(
+              2,
+              generation: 7,
+              identifier: 'login.submit',
+              parentNodeId: 1,
+              depth: 1,
+            ),
+          ], treeRevision: 9),
+        ),
+        semanticsManifest,
+      );
+
+      expect(run.exitCode, PatchbayExitCode.accepted, reason: run.stderr);
+      final Map<String, Object?> semantics =
+          _report(run)['semantics']! as Map<String, Object?>;
+      expect(semantics['command'], 'ui.semantics.tree');
+      expect(semantics['source'], 'uiObserved');
+      expect(semantics['treeRevision'], 9);
+      expect(
+        (semantics['observed']! as List<Object?>).single,
+        containsPair('generation', 7),
+      );
+    });
+
+    test('an unmounted identifier is a manifest deviation', () async {
+      final CliRun run = await _run(
+        _client(
+          destination: 'login',
+          semanticsPayload: _semanticsPayload(const <Map<String, Object?>>[]),
+        ),
+        semanticsManifest,
+      );
+
+      expect(run.exitCode, PatchbayExitCode.verificationDeviation);
+      final Map<String, Object?> missing =
+          (_group(run, 'declaredNotMounted').single as Map<String, Object?>);
+      expect(missing['namespace'], 'semanticsIdentifier');
+      expect(missing['runtime'], 'unmounted');
+      expect(missing['code'], 'uiSemanticsIdentifierNotFound');
+    });
+
+    test('duplicate live identifiers fail closed with a stable code', () async {
+      final CliRun run = await _run(
+        _client(
+          destination: 'login',
+          semanticsPayload: _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(1, generation: 2, identifier: 'login.submit'),
+            _semanticsNode(2, generation: 3, identifier: 'login.submit'),
+          ]),
+        ),
+        semanticsManifest,
+      );
+
+      expect(run.exitCode, PatchbayExitCode.verificationDeviation);
+      final Map<String, Object?> semantics =
+          _report(run)['semantics']! as Map<String, Object?>;
+      final Map<String, Object?> ambiguity =
+          (semantics['identifierAmbiguous']! as List<Object?>).single
+              as Map<String, Object?>;
+      expect(ambiguity['code'], 'uiSemanticsIdentifierAmbiguous');
+      expect(ambiguity['matchCount'], 2);
+    });
+
+    test('replacement generation comes only from each live snapshot', () {
+      int observedGeneration(Map<String, Object?> payload) {
+        final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
+          manifest: PatchbayUiManifest.parse(semanticsManifest),
+          runtime: const <PatchbayUiTargetDescriptorWire>[],
+          currentDestination: 'login',
+          semantics: decodePatchbayManifestSemantics(payload),
+        );
+        return report.semanticsObserved.single.match.generation;
+      }
+
+      expect(
+        observedGeneration(
+          _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(8, generation: 1, identifier: 'login.submit'),
+          ], treeRevision: 4),
+        ),
+        1,
+      );
+      expect(
+        observedGeneration(
+          _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(12, generation: 2, identifier: 'login.submit'),
+          ], treeRevision: 5),
+        ),
+        2,
+      );
+    });
+
+    test('catalog and semantics namespaces reconcile independently', () async {
+      final CliRun run = await _run(
+        _client(
+          destination: 'login',
+          uiTargets: <Object?>[_target('login.title')],
+          semanticsPayload: _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(3, generation: 4, identifier: 'login.submit'),
+          ]),
+        ),
+        '{"version":2,"coverage":"mountedOnly","destinations":['
+        '{"id":"login","targets":[{"namespace":"catalogTarget",'
+        '"id":"login.title","kind":"text","sensitive":false},'
+        '{"namespace":"semanticsIdentifier","id":"login.submit"}]}]}',
+      );
+
+      expect(run.exitCode, PatchbayExitCode.accepted, reason: run.stderr);
+      expect(_group(run, 'declaredNotMounted'), isEmpty);
+      expect(_group(run, 'mountedNotDeclared'), isEmpty);
+    });
+
+    test(
+      'missing Semantics capability is explicit and never guessed',
+      () async {
+        final CliRun run = await _run(
+          _client(destination: 'login'),
+          semanticsManifest,
+        );
+
+        expect(run.exitCode, PatchbayExitCode.protocol);
+        expect(
+          (_report(run)['error']! as Map<String, Object?>)['code'],
+          'manifestSemanticsUnavailable',
+        );
+      },
+    );
+
+    test('a truncated tree cannot prove identifier absence', () async {
+      final CliRun run = await _run(
+        _client(
+          destination: 'login',
+          semanticsPayload: _semanticsPayload(
+            const <Map<String, Object?>>[],
+            truncated: true,
+          ),
+        ),
+        semanticsManifest,
+      );
+
+      expect(run.exitCode, PatchbayExitCode.protocol);
+      expect(
+        (_report(run)['error']! as Map<String, Object?>)['code'],
+        'manifestSemanticsTreeTruncated',
+      );
+    });
+
+    test('live emission includes only unique attached identifiers', () async {
+      final CliRun run = await _emit(
+        _client(
+          destination: 'login',
+          semanticsPayload: _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(2, generation: 6, identifier: 'login.submit'),
+          ]),
+        ),
+      );
+
+      expect(run.exitCode, PatchbayExitCode.accepted, reason: run.stderr);
+      final List<Object?> targets =
+          (((_report(run)['destinations']! as List<Object?>).single
+                  as Map<String, Object?>)['targets']!
+              as List<Object?>);
+      expect(targets.single, <String, Object?>{
+        'namespace': 'semanticsIdentifier',
+        'id': 'login.submit',
+      });
+    });
+
+    test('live emission refuses an ambiguous identifier draft', () async {
+      final CliRun run = await _emit(
+        _client(
+          destination: 'login',
+          semanticsPayload: _semanticsPayload(<Map<String, Object?>>[
+            _semanticsNode(2, generation: 1, identifier: 'login.submit'),
+            _semanticsNode(3, generation: 2, identifier: 'login.submit'),
+          ]),
+        ),
+      );
+
+      expect(run.exitCode, PatchbayExitCode.protocol);
+      expect(
+        (_report(run)['error']! as Map<String, Object?>)['code'],
+        'manifestSemanticsIdentifierAmbiguous',
+      );
     });
   });
 

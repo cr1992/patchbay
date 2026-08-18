@@ -826,10 +826,37 @@ Future<_Execution> _execute(
         }
         destination = _navigationDestination(current);
       }
+      PatchbayUiManifestSemanticsRuntime? semantics;
+      if (verified.requiresSemanticsAt(destination)) {
+        if (_CatalogCommand.find(catalog, 'ui.semantics.tree') == null) {
+          throw const PatchbayProtocolException(
+            'manifestSemanticsUnavailable',
+            details: <String, Object?>{
+              'reason':
+                  'the App does not declare ui.semantics.tree, so the CLI '
+                  'cannot verify semanticsIdentifier entries',
+            },
+          );
+        }
+        final Map<String, Object?> observed = await _invokeAgainstCatalog(
+          connection,
+          catalog,
+          'ui.semantics.tree',
+          const <String, Object?>{},
+        );
+        if (observed['admission'] == 'rejected') {
+          return _Execution(
+            _withSource(observed, 'semanticsSource'),
+            catalog: catalog,
+          );
+        }
+        semantics = _manifestSemanticsRuntime(observed);
+      }
       final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
         manifest: verified,
         runtime: decodePatchbayCatalogUiTargets(catalog),
         currentDestination: destination,
+        semantics: semantics,
       );
       return _Execution(
         report.toJson(),
@@ -864,9 +891,26 @@ Future<_Execution> _execute(
           },
         );
       }
+      PatchbayUiManifestSemanticsRuntime? semantics;
+      if (_CatalogCommand.find(catalog, 'ui.semantics.tree') != null) {
+        final Map<String, Object?> observed = await _invokeAgainstCatalog(
+          connection,
+          catalog,
+          'ui.semantics.tree',
+          const <String, Object?>{},
+        );
+        if (observed['admission'] == 'rejected') {
+          return _Execution(
+            _withSource(observed, 'semanticsSource'),
+            catalog: catalog,
+          );
+        }
+        semantics = _manifestSemanticsRuntime(observed);
+      }
       final Map<String, Object?> draft = emitPatchbayMountedUiManifest(
         runtime: decodePatchbayCatalogUiTargets(catalog),
         destination: destination,
+        semantics: semantics,
       );
       return _Execution(
         draft,
@@ -1066,6 +1110,21 @@ String? _navigationDestination(Map<String, Object?> response) {
     );
   }
   return destination as String?;
+}
+
+PatchbayUiManifestSemanticsRuntime _manifestSemanticsRuntime(
+  Map<String, Object?> response,
+) {
+  final Object? payload = response['payload'];
+  if (payload is! Map<String, Object?>) {
+    throw const PatchbayProtocolException(
+      'manifestSemanticsContractViolated',
+      details: <String, Object?>{
+        'reason': 'ui.semantics.tree did not return an object payload',
+      },
+    );
+  }
+  return decodePatchbayManifestSemantics(payload);
 }
 
 /// Parses the manifest of a one-shot `ui verify-manifest`, or returns `null`.

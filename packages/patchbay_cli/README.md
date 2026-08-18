@@ -155,10 +155,11 @@ expected/current), so an empty rejection never pushes the caller back to a whole
 
 ### UI Target Declaration Reconciliation
 
-`ui verify-manifest <file>` reads a JSON or YAML manifest maintained by the consumer and reconciles it
-against the catalog's `uiTargets`, reporting three classes of discrepancy: `declaredNotMounted`,
+`ui verify-manifest <file>` reads a JSON or YAML manifest maintained by the consumer and reconciles
+`catalogTarget` entries against the catalog's `uiTargets` and `semanticsIdentifier` entries against
+the existing live `ui.semantics.tree`, reporting three classes of discrepancy: `declaredNotMounted`,
 `mountedNotDeclared`, and `propertyMismatch`. The comparison happens entirely on the CLI side: it
-adds no wire command and uses only the catalog; when a `destination` appears in the manifest, it
+adds no wire command and uses only the existing catalog/tree surfaces; when a `destination` appears in the manifest, it
 additionally reads `navigation.current` once for scope filtering. For the schema, field semantics,
 `destination` filtering rules, and the "not mounted ≠ missing" boundary, see the
 [usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#ui-目标声明对账ui-verify-manifest) (currently in Chinese); the
@@ -175,6 +176,14 @@ uses safe parsing without recovery, aliases, or explicit tags, and both formats 
 echoing file content. Human-readable output
 lists the discrepancy entries directly; inside `repl` each line takes only one line and reports
 counts.
+
+Manifest v2 keeps the namespaces independent: `kind` / `sensitive` are valid only for
+`catalogTarget`, while `semanticsIdentifier` stores only its stable identifier. A unique live match
+reports the observed `nodeId`, `generation`, and tree revision; no match is `declaredNotMounted`, and
+multiple matches fail closed as `uiSemanticsIdentifierAmbiguous`. Missing capability, truncated tree,
+and malformed tree payloads have distinct stable protocol codes. `ui targets --emit-manifest`
+includes unique live identifiers when the App declares the tree capability, but refuses ambiguous or
+cross-namespace IDs instead of inventing a representative.
 
 ### repl Sessions
 
