@@ -137,6 +137,26 @@ curl /releases/download/patchbay-v0.2.1/patchbay-0.2.1-macos-arm64
       expect(applyReadmeVersionReferences(bumped, '0.3.0'), bumped);
     });
 
+    test('README AOT 文件名完整识别 prerelease SemVer，不在连字符处截断', () {
+      const String readme = '''
+> **Project status:** `v0.3.0`, keep
+      ref: patchbay-v0.3.0
+curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
+--git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+''';
+
+      final String bumped = applyReadmeVersionReferences(readme, '0.4.0-rc.1');
+
+      expect(bumped, contains('`v0.4.0-rc.1`'));
+      expect(bumped, contains('ref: patchbay-v0.4.0-rc.1'));
+      expect(
+        bumped,
+        contains('/patchbay-v0.4.0-rc.1/patchbay-0.4.0-rc.1-macos-arm64'),
+      );
+      expect(bumped, contains('--git-ref patchbay-v0.4.0-rc.1'));
+      expect(applyReadmeVersionReferences(bumped, '0.4.0-rc.1'), bumped);
+    });
+
     test('README 受管锚点缺失时拒绝，不静默放过结构漂移', () {
       expect(
         () => applyReadmeVersionReferences('# Patchbay\n', '0.3.0'),

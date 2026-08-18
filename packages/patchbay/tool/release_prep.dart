@@ -329,7 +329,7 @@ final List<RegExp> _managedReadmeVersionPatterns = <RegExp>[
 ];
 
 final RegExp _managedReadmeArtifactPattern = RegExp(
-  r'(/releases/download/patchbay-v)([^/]+)(/patchbay-)([^-\s]+)(-(?:linux|macos|windows)-)',
+  r'(/releases/download/patchbay-v)([^/]+)(/patchbay-)([^/\s]+?)(-(?:linux|macos|windows)-)',
 );
 
 /// 同步 README 中明确由发版流程管理的状态、Git 安装 ref 与 AOT 下载版本。
