@@ -155,7 +155,7 @@ expected/current), so an empty rejection never pushes the caller back to a whole
 
 ### UI Target Declaration Reconciliation
 
-`ui verify-manifest <file>` reads a JSON manifest maintained by the consumer and reconciles it
+`ui verify-manifest <file>` reads a JSON or YAML manifest maintained by the consumer and reconciles it
 against the catalog's `uiTargets`, reporting three classes of discrepancy: `declaredNotMounted`,
 `mountedNotDeclared`, and `propertyMismatch`. The comparison happens entirely on the CLI side: it
 adds no wire command and uses only the catalog; when a `destination` appears in the manifest, it
@@ -168,7 +168,11 @@ example file is at
 Full agreement exits `0`; any class of discrepancy in the report exits `7` — the app side answered
 everything normally, so it is neither a rejection (`5`) nor a typed failure (`6`). An unreadable or
 invalid manifest fails closed with exit code `64`, and `--json` gives `manifestInvalid` /
-`manifestUnreadable` plus a `details.field` pointing at the exact location. Human-readable output
+`manifestUnreadable` plus a `details.field` pointing at the exact location. Input format is selected
+only by a lowercase `.json`, `.yaml`, or `.yml` extension; unknown extensions are not sniffed. YAML
+uses safe parsing without recovery, aliases, or explicit tags, and both formats share the 1 MiB,
+64-level, and 200,000-node parser budgets (mapping keys included). Syntax errors include one-based `line` / `column` without
+echoing file content. Human-readable output
 lists the discrepancy entries directly; inside `repl` each line takes only one line and reports
 counts.
 

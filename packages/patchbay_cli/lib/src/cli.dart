@@ -1102,9 +1102,29 @@ PatchbayUiManifest? _preReadUiManifest(ArgResults parsed) {
 /// travels with it because "which file, and why not" is the whole content of
 /// this failure. No part of the file itself does.
 PatchbayUiManifest _readUiManifest(String path) {
-  final String source;
+  final PatchbayUiManifestFormat format = switch (path) {
+    final String value when value.endsWith('.json') =>
+      PatchbayUiManifestFormat.json,
+    final String value when value.endsWith('.yaml') || value.endsWith('.yml') =>
+      PatchbayUiManifestFormat.yaml,
+    _ => throw PatchbayUiManifestException(
+      'manifestFormatUnsupported',
+      details: const <String, Object?>{
+        'reason': 'manifest extension must be .json, .yaml, or .yml',
+      },
+    ),
+  };
+  final List<int> bytes;
   try {
-    source = File(path).readAsStringSync();
+    final RandomAccessFile file = File(path).openSync();
+    try {
+      // Never allocate from the file's claimed length and never read more than
+      // one byte beyond the accepted budget, including if the file changes
+      // between open and read.
+      bytes = file.readSync(patchbayUiManifestMaximumBytes + 1);
+    } finally {
+      file.closeSync();
+    }
   } on FileSystemException catch (failure) {
     throw PatchbayUiManifestException(
       'manifestUnreadable',
@@ -1122,7 +1142,29 @@ PatchbayUiManifest _readUiManifest(String path) {
       },
     );
   }
-  return PatchbayUiManifest.parse(source);
+  if (bytes.length > patchbayUiManifestMaximumBytes) {
+    throw const PatchbayUiManifestException(
+      'manifestResourceLimit',
+      details: <String, Object?>{
+        'reason': 'manifest byte limit exceeded',
+        'limit': patchbayUiManifestMaximumBytes,
+      },
+    );
+  }
+  final String source;
+  try {
+    source = utf8.decode(bytes);
+  } on FormatException {
+    throw const PatchbayUiManifestException(
+      'manifestInvalid',
+      details: <String, Object?>{
+        'reason': 'manifest must be valid UTF-8',
+        'line': 1,
+        'column': 1,
+      },
+    );
+  }
+  return PatchbayUiManifest.parseSource(source, format: format);
 }
 
 /// Refuses to send a catalog-declared sensitive parameter through argv.

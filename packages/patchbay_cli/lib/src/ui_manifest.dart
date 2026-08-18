@@ -1,6 +1,8 @@
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
+import 'package:yaml/yaml.dart';
 
 import 'client.dart';
 
@@ -27,9 +29,26 @@ final class PatchbayUiManifestException implements Exception {
     final StringBuffer buffer = StringBuffer('patchbay manifest error: $code');
     if (details['reason'] case final String reason) buffer.write('\n  $reason');
     if (details['field'] case final String field) buffer.write('\n  at $field');
+    if ((details['line'], details['column']) case (
+      final int line,
+      final int column,
+    )) {
+      buffer.write('\n  at line $line, column $column');
+    }
     return buffer.toString();
   }
 }
+
+/// The only file formats `ui verify-manifest` selects by extension.
+enum PatchbayUiManifestFormat { json, yaml }
+
+/// Manifest parsing budgets apply before schema validation for both formats.
+const int patchbayUiManifestMaximumBytes = 1024 * 1024;
+const int patchbayUiManifestMaximumDepth = 64;
+const int patchbayUiManifestMaximumNodes = 200000;
+const int patchbayUiManifestMaximumDestinations = 100;
+const int patchbayUiManifestMaximumTargetsPerDestination = 1000;
+const int patchbayUiManifestMaximumTargets = 10000;
 
 /// One declared UI target: what the consumer says the running App should carry.
 ///
@@ -74,26 +93,28 @@ final class PatchbayUiManifest {
   /// Every rule below refuses rather than repairs. A manifest exists to be
   /// compared against a runtime, so a file this parser had to guess about would
   /// produce a verdict about something the author never wrote.
-  factory PatchbayUiManifest.parse(String source) {
+  factory PatchbayUiManifest.parse(String source) =>
+      PatchbayUiManifest.parseSource(
+        source,
+        format: PatchbayUiManifestFormat.json,
+      );
+
+  /// Parses one explicitly selected input format into the shared model.
+  factory PatchbayUiManifest.parseSource(
+    String source, {
+    required PatchbayUiManifestFormat format,
+  }) {
+    _refuseSourceOverBudget(source);
     final Object? document;
-    try {
-      document = jsonDecode(source);
-    } on FormatException catch (failure) {
-      // `message` names the syntax problem; `toString()` would paste the
-      // offending slice of the file into the envelope.
+    document = switch (format) {
+      PatchbayUiManifestFormat.json => _decodeJson(source),
+      PatchbayUiManifestFormat.yaml => _decodeYaml(source),
+    };
+    if (document is! Map<String, Object?>) {
       throw PatchbayUiManifestException(
         'manifestInvalid',
-        details: <String, Object?>{
-          'reason': 'the file is not valid JSON: ${failure.message}',
-          'offset': ?failure.offset,
-        },
-      );
-    }
-    if (document is! Map<String, Object?>) {
-      throw const PatchbayUiManifestException(
-        'manifestInvalid',
-        details: <String, Object?>{
-          'reason': 'the manifest root must be a JSON object',
+        details: const <String, Object?>{
+          'reason': 'the manifest root must be an object',
           'field': r'$',
         },
       );
@@ -123,10 +144,17 @@ final class PatchbayUiManifest {
         },
       );
     }
+    _refuseLimit(
+      targets.length > patchbayUiManifestMaximumTargets,
+      reason: 'manifest target limit exceeded',
+      field: r'$.targets',
+      limit: patchbayUiManifestMaximumTargets,
+    );
     final List<PatchbayUiManifestEntry> entries = <PatchbayUiManifestEntry>[];
     for (var index = 0; index < targets.length; index += 1) {
       entries.add(_v1Entry(targets[index], _targetField(index)));
     }
+    _refuseV1DestinationLimits(entries);
     _refuseConflictingIds(entries);
     return PatchbayUiManifest(
       List<PatchbayUiManifestEntry>.unmodifiable(entries),
@@ -158,6 +186,12 @@ final class PatchbayUiManifest {
         },
       );
     }
+    _refuseLimit(
+      destinations.length > patchbayUiManifestMaximumDestinations,
+      reason: 'manifest destination limit exceeded',
+      field: r'$.destinations',
+      limit: patchbayUiManifestMaximumDestinations,
+    );
     final List<PatchbayUiManifestEntry> entries = <PatchbayUiManifestEntry>[];
     final Set<String> destinationIds = <String>{};
     for (
@@ -198,6 +232,18 @@ final class PatchbayUiManifest {
           },
         );
       }
+      _refuseLimit(
+        targets.length > patchbayUiManifestMaximumTargetsPerDestination,
+        reason: 'manifest per-destination target limit exceeded',
+        field: '$field.targets',
+        limit: patchbayUiManifestMaximumTargetsPerDestination,
+      );
+      _refuseLimit(
+        entries.length + targets.length > patchbayUiManifestMaximumTargets,
+        reason: 'manifest target limit exceeded',
+        field: '$field.targets',
+        limit: patchbayUiManifestMaximumTargets,
+      );
       for (
         var targetIndex = 0;
         targetIndex < targets.length;
@@ -219,6 +265,167 @@ final class PatchbayUiManifest {
   }
 
   final List<PatchbayUiManifestEntry> entries;
+
+  static Object? _decodeJson(String source) {
+    try {
+      return _ManifestDocumentNormalizer().fromJson(jsonDecode(source));
+    } on FormatException catch (failure) {
+      final ({int line, int column}) location = _jsonLocation(
+        source,
+        failure.offset,
+      );
+      throw PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'the file is not valid JSON',
+          'line': location.line,
+          'column': location.column,
+        },
+      );
+    }
+  }
+
+  static Object? _decodeYaml(String source) {
+    _preflightYaml(source);
+    try {
+      return _ManifestDocumentNormalizer().fromYaml(loadYamlNode(source));
+    } on YamlException catch (failure) {
+      final int line = (failure.span?.start.line ?? 0) + 1;
+      final int column = (failure.span?.start.column ?? 0) + 1;
+      throw PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': failure.message == 'Duplicate mapping key.'
+              ? 'YAML mapping keys must be unique'
+              : 'the file is not valid safe YAML',
+          'line': line,
+          'column': column,
+        },
+      );
+    }
+  }
+
+  static void _preflightYaml(String source) {
+    final List<String> lines = const LineSplitter().convert(source);
+    final List<int> indentationStack = <int>[];
+    var flowDepth = 0;
+    for (var lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      final String line = lines[lineIndex];
+      final int firstContent = line.length - line.trimLeft().length;
+      final String trimmed = line.trimLeft();
+      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+      while (indentationStack.isNotEmpty &&
+          indentationStack.last > firstContent) {
+        indentationStack.removeLast();
+      }
+      if (indentationStack.isEmpty || indentationStack.last < firstContent) {
+        indentationStack.add(firstContent);
+      }
+      var singleQuoted = false;
+      var doubleQuoted = false;
+      var escaped = false;
+      var blockSequenceDepth = 0;
+      for (var columnIndex = 0; columnIndex < line.length; columnIndex += 1) {
+        final String character = line[columnIndex];
+        if (doubleQuoted) {
+          if (escaped) {
+            escaped = false;
+          } else if (character == r'\') {
+            escaped = true;
+          } else if (character == '"') {
+            doubleQuoted = false;
+          }
+          continue;
+        }
+        if (singleQuoted) {
+          if (character == "'" &&
+              columnIndex + 1 < line.length &&
+              line[columnIndex + 1] == "'") {
+            columnIndex += 1;
+          } else if (character == "'") {
+            singleQuoted = false;
+          }
+          continue;
+        }
+        if (character == '#') break;
+        if (character == '"') {
+          doubleQuoted = true;
+          continue;
+        }
+        if (character == "'") {
+          singleQuoted = true;
+          continue;
+        }
+        if (character == '[' || character == '{') {
+          flowDepth += 1;
+        } else if (character == ']' || character == '}') {
+          flowDepth -= 1;
+        } else if (character == '-' &&
+            (columnIndex == firstContent ||
+                RegExp(r'\s').hasMatch(line[columnIndex - 1])) &&
+            columnIndex + 1 < line.length &&
+            RegExp(r'\s').hasMatch(line[columnIndex + 1])) {
+          blockSequenceDepth += 1;
+        }
+        final int estimatedDepth =
+            indentationStack.length + flowDepth + blockSequenceDepth;
+        if (estimatedDepth > patchbayUiManifestMaximumDepth) {
+          throw PatchbayUiManifestException(
+            'manifestResourceLimit',
+            details: <String, Object?>{
+              'reason': 'manifest depth limit exceeded',
+              'limit': patchbayUiManifestMaximumDepth,
+              'line': lineIndex + 1,
+              'column': columnIndex + 1,
+            },
+          );
+        }
+        if (character != '!') continue;
+        final String? previous = columnIndex == 0
+            ? null
+            : line[columnIndex - 1];
+        if (previous != null &&
+            !RegExp(r'[\s\[\]{},:?\-]').hasMatch(previous)) {
+          continue;
+        }
+        throw PatchbayUiManifestException(
+          'manifestInvalid',
+          details: <String, Object?>{
+            'reason': 'explicit YAML tags are not supported',
+            'line': lineIndex + 1,
+            'column': columnIndex + 1,
+          },
+        );
+      }
+    }
+  }
+
+  static void _refuseSourceOverBudget(String source) {
+    final int bytes = utf8.encode(source).length;
+    if (bytes <= patchbayUiManifestMaximumBytes) return;
+    throw PatchbayUiManifestException(
+      'manifestResourceLimit',
+      details: <String, Object?>{
+        'reason': 'manifest byte limit exceeded',
+        'limit': patchbayUiManifestMaximumBytes,
+      },
+    );
+  }
+
+  static ({int line, int column}) _jsonLocation(String source, int? offset) {
+    final int end = (offset ?? 0).clamp(0, source.length);
+    var line = 1;
+    var column = 1;
+    for (var index = 0; index < end; index += 1) {
+      if (source.codeUnitAt(index) == 0x0a) {
+        line += 1;
+        column = 1;
+      } else {
+        column += 1;
+      }
+    }
+    return (line: line, column: column);
+  }
 
   /// Whether any entry scopes itself to a destination.
   ///
@@ -402,6 +609,192 @@ final class PatchbayUiManifest {
       }
       destinations.add(entry.destination);
     }
+  }
+
+  static void _refuseV1DestinationLimits(
+    List<PatchbayUiManifestEntry> entries,
+  ) {
+    final Map<String?, int> counts = <String?, int>{};
+    for (var index = 0; index < entries.length; index += 1) {
+      final PatchbayUiManifestEntry entry = entries[index];
+      final int count = (counts[entry.destination] ?? 0) + 1;
+      counts[entry.destination] = count;
+      _refuseLimit(
+        count > patchbayUiManifestMaximumTargetsPerDestination,
+        reason: 'manifest per-destination target limit exceeded',
+        field: _targetField(index),
+        limit: patchbayUiManifestMaximumTargetsPerDestination,
+      );
+    }
+  }
+
+  static void _refuseLimit(
+    bool exceeded, {
+    required String reason,
+    required String field,
+    required int limit,
+  }) {
+    if (!exceeded) return;
+    throw PatchbayUiManifestException(
+      'manifestResourceLimit',
+      details: <String, Object?>{
+        'reason': reason,
+        'field': field,
+        'limit': limit,
+      },
+    );
+  }
+}
+
+/// Converts JSON/YAML into the same JSON-domain tree under shared budgets.
+final class _ManifestDocumentNormalizer {
+  final Set<YamlNode> _yamlNodes = HashSet<YamlNode>.identity();
+  var _nodes = 0;
+
+  Object? fromJson(Object? value) => _normalizeJson(value, depth: 1);
+
+  Object? fromYaml(YamlNode node) => _normalizeYaml(node, depth: 1);
+
+  Object? _normalizeJson(Object? value, {required int depth}) {
+    _count(depth, line: null, column: null);
+    if (value == null || value is bool || value is String || value is int) {
+      return value;
+    }
+    if (value is double && value.isFinite) return value;
+    if (value is List<Object?>) {
+      return <Object?>[
+        for (final Object? child in value)
+          _normalizeJson(child, depth: depth + 1),
+      ];
+    }
+    if (value is Map<String, Object?>) {
+      final Map<String, Object?> result = <String, Object?>{};
+      for (final MapEntry<String, Object?> entry in value.entries) {
+        _count(depth + 1, line: null, column: null);
+        result[entry.key] = _normalizeJson(entry.value, depth: depth + 1);
+      }
+      return result;
+    }
+    throw const PatchbayUiManifestException(
+      'manifestInvalid',
+      details: <String, Object?>{
+        'reason': 'the manifest contains a non-JSON value',
+      },
+    );
+  }
+
+  Object? _normalizeYaml(YamlNode node, {required int depth}) {
+    final int line = node.span.start.line + 1;
+    final int column = node.span.start.column + 1;
+    if (!_yamlNodes.add(node)) {
+      throw PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'YAML aliases are not supported',
+          'line': line,
+          'column': column,
+        },
+      );
+    }
+    _count(depth, line: line, column: column);
+    if (node is YamlScalar) {
+      final Object? value = node.value;
+      if (value == null || value is bool || value is String || value is int) {
+        return value;
+      }
+      if (value is double && value.isFinite) return value;
+      throw PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'the manifest contains a non-JSON scalar',
+          'line': line,
+          'column': column,
+        },
+      );
+    }
+    if (node is YamlList) {
+      return <Object?>[
+        for (final YamlNode child in node.nodes)
+          _normalizeYaml(child, depth: depth + 1),
+      ];
+    }
+    if (node is YamlMap) {
+      final Map<String, Object?> result = <String, Object?>{};
+      for (final MapEntry<dynamic, YamlNode> entry in node.nodes.entries) {
+        final YamlNode key = entry.key as YamlNode;
+        _count(
+          depth + 1,
+          line: key.span.start.line + 1,
+          column: key.span.start.column + 1,
+        );
+        if (!_yamlNodes.add(key)) {
+          throw PatchbayUiManifestException(
+            'manifestInvalid',
+            details: <String, Object?>{
+              'reason': 'YAML aliases are not supported',
+              'line': key.span.start.line + 1,
+              'column': key.span.start.column + 1,
+            },
+          );
+        }
+        final Object? rawKey = key.value;
+        if (rawKey is! String) {
+          throw PatchbayUiManifestException(
+            'manifestInvalid',
+            details: <String, Object?>{
+              'reason': 'YAML mapping keys must be strings',
+              'line': key.span.start.line + 1,
+              'column': key.span.start.column + 1,
+            },
+          );
+        }
+        if (result.containsKey(rawKey)) {
+          throw PatchbayUiManifestException(
+            'manifestInvalid',
+            details: <String, Object?>{
+              'reason': 'YAML mapping keys must be unique',
+              'line': key.span.start.line + 1,
+              'column': key.span.start.column + 1,
+            },
+          );
+        }
+        result[rawKey] = _normalizeYaml(entry.value, depth: depth + 1);
+      }
+      return result;
+    }
+    throw PatchbayUiManifestException(
+      'manifestInvalid',
+      details: <String, Object?>{
+        'reason': 'the manifest contains an unsupported YAML node',
+        'line': line,
+        'column': column,
+      },
+    );
+  }
+
+  void _count(int depth, {required int? line, required int? column}) {
+    if (depth > patchbayUiManifestMaximumDepth) {
+      throw PatchbayUiManifestException(
+        'manifestResourceLimit',
+        details: <String, Object?>{
+          'reason': 'manifest depth limit exceeded',
+          'limit': patchbayUiManifestMaximumDepth,
+          if (line != null) 'line': line,
+          if (column != null) 'column': column,
+        },
+      );
+    }
+    _nodes += 1;
+    if (_nodes <= patchbayUiManifestMaximumNodes) return;
+    throw PatchbayUiManifestException(
+      'manifestResourceLimit',
+      details: <String, Object?>{
+        'reason': 'manifest node limit exceeded',
+        'limit': patchbayUiManifestMaximumNodes,
+        if (line != null) 'line': line,
+        if (column != null) 'column': column,
+      },
+    );
   }
 }
 

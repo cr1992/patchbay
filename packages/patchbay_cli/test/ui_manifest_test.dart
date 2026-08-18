@@ -68,12 +68,13 @@ Future<CliRun> _run(
   FakePatchbayClient client,
   String manifest, {
   bool json = true,
+  String extension = '.json',
 }) async {
   final Directory directory = Directory.systemTemp.createTempSync(
     'patchbay-manifest',
   );
   addTearDown(() => directory.deleteSync(recursive: true));
-  final File file = File('${directory.path}/targets.json')
+  final File file = File('${directory.path}/targets$extension')
     ..writeAsStringSync(manifest);
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
@@ -228,6 +229,302 @@ void main() {
     });
   });
 
+  group('JSON and safe YAML input', () {
+    test('v1 and v2 normalize to the same manifest model', () {
+      for (final (String jsonDocument, String yamlDocument)
+          in <(String, String)>[
+            (
+              '{"version":1,"targets":[{"id":"login.submit",'
+                  '"kind":"text","sensitive":false}]}',
+              'version: 1\ntargets:\n'
+                  '  - id: login.submit\n'
+                  '    kind: text\n'
+                  '    sensitive: false\n',
+            ),
+            (
+              '{"version":2,"coverage":"mountedOnly","destinations":['
+                  '{"id":"login","targets":[{"namespace":"catalogTarget",'
+                  '"id":"login.submit","kind":"text","sensitive":false}]}]}',
+              'version: 2\ncoverage: mountedOnly\ndestinations:\n'
+                  '  - id: login\n'
+                  '    targets:\n'
+                  '      - namespace: catalogTarget\n'
+                  '        id: login.submit\n'
+                  '        kind: text\n'
+                  '        sensitive: false\n',
+            ),
+          ]) {
+        final PatchbayUiManifest jsonManifest = PatchbayUiManifest.parseSource(
+          jsonDocument,
+          format: PatchbayUiManifestFormat.json,
+        );
+        final PatchbayUiManifest yamlManifest = PatchbayUiManifest.parseSource(
+          yamlDocument,
+          format: PatchbayUiManifestFormat.yaml,
+        );
+
+        expect(
+          yamlManifest.entries.map((entry) => entry.toJson()),
+          jsonManifest.entries.map((entry) => entry.toJson()),
+        );
+      }
+    });
+
+    test('.yaml and .yml select YAML without content guessing', () async {
+      const String manifest =
+          'version: 1\ntargets:\n  - id: login.submit\n    kind: text\n';
+      for (final String extension in <String>['.yaml', '.yml']) {
+        final CliRun run = await _run(
+          _client(uiTargets: <Object?>[_target('login.submit')]),
+          manifest,
+          extension: extension,
+        );
+        expect(run.exitCode, PatchbayExitCode.accepted, reason: extension);
+      }
+    });
+
+    test('unknown extension fails closed before dialing', () async {
+      final FakePatchbayClient client = _client();
+      final CliRun run = await _run(
+        client,
+        '{"targets":[]}',
+        extension: '.txt',
+      );
+
+      expect(run.exitCode, PatchbayExitCode.usage);
+      expect(
+        (_report(run)['error']! as Map<String, Object?>)['code'],
+        'manifestFormatUnsupported',
+      );
+      expect(client.catalogReads, 0);
+    });
+
+    test(
+      'YAML syntax error reports one-based location without content',
+      () async {
+        const String secret = 'secret-target-value';
+        final CliRun run = await _run(
+          _client(),
+          'version: 1\ntargets:\n  - id: $secret\n    kind: [\n',
+          extension: '.yaml',
+        );
+
+        expect(run.exitCode, PatchbayExitCode.usage);
+        final Map<String, Object?> error =
+            _report(run)['error']! as Map<String, Object?>;
+        expect(error['code'], 'manifestInvalid');
+        final Map<String, Object?> details =
+            error['details']! as Map<String, Object?>;
+        expect(details['line'], isA<int>());
+        expect(details['column'], isA<int>());
+        expect(jsonEncode(error), isNot(contains(secret)));
+        expect(run.stderr, isNot(contains(secret)));
+      },
+    );
+
+    test('aliases, including an expansion bomb, are refused', () async {
+      final CliRun run = await _run(
+        _client(),
+        'version: 1\n'
+        'seed: &seed {id: login.submit, kind: text}\n'
+        'targets: [*seed, *seed, *seed, *seed]\n',
+        extension: '.yaml',
+      );
+
+      expect(run.exitCode, PatchbayExitCode.usage);
+      final Map<String, Object?> details =
+          ((_report(run)['error']! as Map<String, Object?>)['details']!
+              as Map<String, Object?>);
+      expect(details['reason'], 'YAML aliases are not supported');
+      expect(details['line'], isA<int>());
+      expect(details['column'], isA<int>());
+    });
+
+    test(
+      'unknown custom tags are refused without echoing their value',
+      () async {
+        const String secret = 'private-tag-payload';
+        final CliRun run = await _run(
+          _client(),
+          'version: 1\ntargets:\n  - id: !private $secret\n    kind: text\n',
+          extension: '.yaml',
+        );
+
+        expect(run.exitCode, PatchbayExitCode.usage);
+        final Map<String, Object?> error =
+            _report(run)['error']! as Map<String, Object?>;
+        final Map<String, Object?> details =
+            error['details']! as Map<String, Object?>;
+        expect(error['code'], 'manifestInvalid');
+        expect(details['line'], isA<int>());
+        expect(details['column'], isA<int>());
+        expect(jsonEncode(error), isNot(contains(secret)));
+      },
+    );
+
+    test('duplicate YAML mapping keys fail at the second key', () async {
+      final CliRun run = await _run(
+        _client(),
+        'version: 1\ntargets: []\ntargets: []\n',
+        extension: '.yaml',
+      );
+
+      expect(run.exitCode, PatchbayExitCode.usage);
+      final Map<String, Object?> error =
+          _report(run)['error']! as Map<String, Object?>;
+      final Map<String, Object?> details =
+          error['details']! as Map<String, Object?>;
+      expect(error['code'], 'manifestInvalid');
+      expect(details['reason'], 'YAML mapping keys must be unique');
+      expect(details['line'], 3);
+      expect(details['column'], 1);
+    });
+
+    test('depth and node budgets fail before schema interpretation', () {
+      final String deep =
+          'value: ${List<String>.filled(patchbayUiManifestMaximumDepth, '[').join()}'
+          '0${List<String>.filled(patchbayUiManifestMaximumDepth, ']').join()}';
+      expect(
+        () => PatchbayUiManifest.parseSource(
+          deep,
+          format: PatchbayUiManifestFormat.yaml,
+        ),
+        throwsA(
+          isA<PatchbayUiManifestException>()
+              .having((error) => error.code, 'code', 'manifestResourceLimit')
+              .having(
+                (error) => error.details['reason'],
+                'reason',
+                'manifest depth limit exceeded',
+              ),
+        ),
+      );
+
+      final String manyNodes =
+          'values: [${List<String>.filled(patchbayUiManifestMaximumNodes, '0').join(',')}]';
+      expect(
+        () => PatchbayUiManifest.parseSource(
+          manyNodes,
+          format: PatchbayUiManifestFormat.yaml,
+        ),
+        throwsA(
+          isA<PatchbayUiManifestException>()
+              .having((error) => error.code, 'code', 'manifestResourceLimit')
+              .having(
+                (error) => error.details['reason'],
+                'reason',
+                'manifest node limit exceeded',
+              ),
+        ),
+      );
+    });
+
+    test('mapping keys count toward the YAML node budget', () {
+      final int keyCount = patchbayUiManifestMaximumNodes ~/ 2 + 10;
+      final String entries = List<String>.generate(
+        keyCount,
+        (int index) => 'k${index.toRadixString(36)}:0',
+      ).join(',');
+
+      expect(
+        () => PatchbayUiManifest.parseSource(
+          'values: {$entries}',
+          format: PatchbayUiManifestFormat.yaml,
+        ),
+        throwsA(
+          isA<PatchbayUiManifestException>()
+              .having((error) => error.code, 'code', 'manifestResourceLimit')
+              .having(
+                (error) => error.details['reason'],
+                'reason',
+                'manifest node limit exceeded',
+              ),
+        ),
+      );
+    });
+
+    test('byte budget is checked before parsing', () async {
+      final CliRun run = await _run(
+        _client(),
+        List<String>.filled(patchbayUiManifestMaximumBytes + 1, 'x').join(),
+        extension: '.yaml',
+      );
+
+      expect(run.exitCode, PatchbayExitCode.usage);
+      expect(
+        (_report(run)['error']! as Map<String, Object?>)['code'],
+        'manifestResourceLimit',
+      );
+    });
+
+    test('schema collection budgets apply after either decoder', () {
+      void expectLimit(Map<String, Object?> document, String reason) {
+        expect(
+          () => PatchbayUiManifest.parse(jsonEncode(document)),
+          throwsA(
+            isA<PatchbayUiManifestException>()
+                .having((error) => error.code, 'code', 'manifestResourceLimit')
+                .having((error) => error.details['reason'], 'reason', reason),
+          ),
+        );
+      }
+
+      expectLimit(<String, Object?>{
+        'version': 2,
+        'coverage': 'mountedOnly',
+        'destinations': <Object?>[
+          for (
+            var index = 0;
+            index <= patchbayUiManifestMaximumDestinations;
+            index += 1
+          )
+            <String, Object?>{'id': 'screen-$index', 'targets': <Object?>[]},
+        ],
+      }, 'manifest destination limit exceeded');
+
+      expectLimit(<String, Object?>{
+        'version': 2,
+        'coverage': 'mountedOnly',
+        'destinations': <Object?>[
+          <String, Object?>{
+            'id': 'screen',
+            'targets': <Object?>[
+              for (
+                var index = 0;
+                index <= patchbayUiManifestMaximumTargetsPerDestination;
+                index += 1
+              )
+                <String, Object?>{
+                  'namespace': 'catalogTarget',
+                  'id': 'screen.target-$index',
+                  'kind': 'text',
+                },
+            ],
+          },
+        ],
+      }, 'manifest per-destination target limit exceeded');
+
+      expectLimit(<String, Object?>{
+        'version': 2,
+        'coverage': 'mountedOnly',
+        'destinations': <Object?>[
+          for (var screen = 0; screen < 11; screen += 1)
+            <String, Object?>{
+              'id': 'screen-$screen',
+              'targets': <Object?>[
+                for (var target = 0; target < 1000; target += 1)
+                  <String, Object?>{
+                    'namespace': 'catalogTarget',
+                    'id': 'screen-$screen.target-$target',
+                    'kind': 'text',
+                  },
+              ],
+            },
+        ],
+      }, 'manifest target limit exceeded');
+    });
+  });
+
   group('manifest parsing is fail-closed', () {
     test('a file that is not JSON names the syntax failure', () async {
       final CliRun run = await _run(_client(), 'targets: []');
@@ -238,6 +535,8 @@ void main() {
       final Map<String, Object?> details =
           error['details']! as Map<String, Object?>;
       expect(details['reason'], contains('not valid JSON'));
+      expect(details['line'], 1);
+      expect(details['column'], isA<int>());
       expect(run.stderr, contains('patchbay manifest error: manifestInvalid'));
     });
 

@@ -66,8 +66,14 @@ probe。理由与 snapshot 不做表达式语言完全同构：一个 host 要�
 - 没有 destination capability 时，保留当前挂载态验证并标记 `navigationMode: unavailable`。
 - v1 清单在 0.4 CLI 上继续被接受；升级 CLI 不要求同时改清单文件。
 - YAML 只是输入格式，不改变 manifest schema；解析后立即转同一模型，两种版本各自适用。
+- 格式只按小写扩展名选择：`.json`、`.yaml`、`.yml`；未知扩展名直接拒绝，不嗅探内容，也不在一种
+  解析失败后尝试另一种。YAML 使用 CLI 独占的 `package:yaml ^3.1.3`、关闭 recover；显式 tag 与 alias
+  一律拒绝，解析结果只允许 JSON 数据域，不加载类型、不执行构造器。该依赖不进入另外四个 package。
 - manifest 输入最大 1 MiB、destination 最多 100 个、每屏 target 最多 1000 个且全文件累计最多 10000 个；
-  Semantics 读取沿用既有 `maxDepth: 64`、`maxNodes: 10000` 上限。
+  解析树最大深度 64、最多 200000 个节点（含 mapping key）；Semantics 读取沿用既有 `maxDepth: 64`、`maxNodes: 10000`
+  上限。
+- JSON/YAML 语法错误继续使用 `manifestInvalid`，并给出不含输入片段的一基 `line/column`；格式不支持
+  为 `manifestFormatUnsupported`，预算越界为 `manifestResourceLimit`，都沿用本地输入错误退出码 64。
 - 每屏稳定等待默认 5 s、最大 120 s；一次巡检默认总预算 120 s、最大 10 min。单屏与总预算同时生效，
   任一耗尽都保留已经完成的 `visited` 证据并返回类型化失败。
 - sensitive 参数必须走 stdin；巡检输出不包含输入框值或未脱敏语义文本。

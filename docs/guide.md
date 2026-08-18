@@ -711,9 +711,10 @@ generation 提供。同 identifier 挂载多个实例、identifier 不存在、�
 ```console
 $ patchbay ui verify-manifest ui-targets.json          # 人读：直接列出偏差条目
 $ patchbay --json ui verify-manifest ui-targets.json   # 结构化报告
+$ patchbay --json ui verify-manifest ui-targets.yaml   # 同一 schema、同一校验路径
 ```
 
-manifest 是 JSON（v1 只认 JSON），完整示例见
+manifest 可用 JSON 或 YAML 表达同一个 v1/v2 schema，完整 JSON 示例见
 [`docs/examples/ui-targets-manifest.json`](examples/ui-targets-manifest.json)：
 
 ```json
@@ -726,9 +727,13 @@ manifest 是 JSON（v1 只认 JSON），完整示例见
 }
 ```
 
+上例与下表是继续兼容的 v1 平铺形式。v2 使用根级 `coverage: mountedOnly` 与 `destinations`，每个
+destination 再携带自己的 `targets`；当前可核对的 target 使用 `namespace: catalogTarget`。两种版本的
+JSON/YAML 都进入同一个内部模型。
+
 | 字段 | 必填 | 含义 |
 |---|---|---|
-| `version` | 否 | 只接受 `1`；省略即 `1`，将来的版本号会被拒读，而不是当成 `1` 读 |
+| `version` | 否 | v1 只接受 `1`；省略即 `1`，其它版本不会被当成 v1 读 |
 | `targets[].id` | 是 | 稳定 ID，与 catalog `uiTargets[].id` 是同一个 |
 | `targets[].kind` | 是 | `text` / `capture`——词表就是 catalog `uiTargets[].kind` 的取值，不另立新词 |
 | `targets[].sensitive` | 否 | 默认 `false`，对应 catalog 的 `sensitivePolicy`（`redacted` ⇔ `true`） |
@@ -737,6 +742,12 @@ manifest 是 JSON（v1 只认 JSON），完整示例见
 未声明的键、缺失的必填项、非法 `kind`、冲突的重复 ID 一律 fail-closed 拒读：退出码 `64`，
 `--json` 的错误信封给稳定 code（`manifestInvalid` / `manifestUnreadable`）和
 `details.field`，直接指到位置（形如 `$.targets[2].kind`）。文件内容本身不进信封。
+
+格式只按小写 `.json`、`.yaml`、`.yml` 扩展名选择；未知扩展名不猜内容，一种解析失败也不会回退到
+另一种。YAML 关闭错误恢复，拒绝 alias 与显式 tag，只归一成 JSON 的 map/list/scalar 数据域后进入
+同一个 `PatchbayUiManifest` 校验器。两种格式共享 1 MiB、64 层、200000 节点（含 mapping key）预算；YAML/JSON 语法
+错误带一基 `line` / `column`，错误信封不回显输入片段。格式与预算失败分别使用稳定 code
+`manifestFormatUnsupported` / `manifestResourceLimit`，退出码仍为本地输入错误 `64`。
 
 三类偏差：
 

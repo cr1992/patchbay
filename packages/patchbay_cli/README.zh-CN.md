@@ -137,7 +137,7 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 
 ### UI 目标声明对账
 
-`ui verify-manifest <file>` 读一份接入方维护的 JSON manifest，与 catalog 的 `uiTargets` 对账，报
+`ui verify-manifest <file>` 读一份接入方维护的 JSON 或 YAML manifest，与 catalog 的 `uiTargets` 对账，报
 `declaredNotMounted` / `mountedNotDeclared` / `propertyMismatch` 三类偏差。比对完全在 CLI 侧完成：
 不新增 wire 命令，只用 catalog；manifest 里出现 `destination` 时额外读一次 `navigation.current`
 做范围过滤。schema、字段语义、`destination` 过滤口径与「未挂载 ≠ 丢失」的边界见
@@ -146,7 +146,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 
 全部相符退出 `0`，报告里有任一类偏差退出 `7`——App 侧一切正常应答，所以它既不是拒绝（`5`）也不是
 类型化失败（`6`）。manifest 读不了或不合法时 fail-closed 退出 `64`，`--json` 给 `manifestInvalid` /
-`manifestUnreadable` 和指到具体位置的 `details.field`。人读输出直接列出偏差条目；repl 内每行只占
+`manifestUnreadable` 和指到具体位置的 `details.field`。格式只按小写 `.json` / `.yaml` / `.yml`
+扩展名选择，不嗅探内容；YAML 关闭恢复并拒绝 alias 与显式 tag。两种格式共享 1 MiB、64 层、200000
+节点（含 mapping key）预算，语法错误给一基 `line` / `column` 且不回显文件内容。人读输出直接列出偏差条目；repl 内每行只占
 一行，给的是计数。
 
 ### repl 会话
