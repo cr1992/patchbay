@@ -208,6 +208,11 @@ sequenceDiagram
 目录、日志、可复用脚本或调试轨迹。一旦它被持久化，任何"照着记录再跑一遍"的能力就天然有了一个
 绝对坐标入口，上面那条红线就只剩字面。
 
+调试轨迹的事实边界同样以观察者为准：CLI 只持久化自己实际看到的 session、request/response、job、
+执行证据和 artifact，不把 App host 内部 audit sink 的事实自动升级为 CLI 已观察事实。M0 原先关于
+“共用 emit 点”的结论因 host/CLI 进程边界无法成立，已于 2026-08-18 明示重新接受为：四包不为此新增
+跨进程 audit event-stream；host audit 与 CLI trace 共享纯脱敏/分类投影，是否传输仍由显式协议决定。
+
 ### 6. 慢事实用 job 表达
 
 配网、连接这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实
@@ -321,6 +326,12 @@ consumer 生造、也不会在两个 App 里指两件事；客户端则把它当
 - **老 CLI ↔ 新 host**——在用例里**复刻** 0.2.0 客户端的读法（逐键读、多余键忽略、`schemaVersion`
   必须是 1），拿它去读当前 host 真的吐出来的东西。复刻而不是 import，是因为要测的正是「当年那份
   代码」的行为，而当年那份代码已经不在树里了。
+
+从 0.3.0 起，发布流程会在 tag 之前由 `release_prep --apply` 把
+`packages/patchbay/test/golden/host_surface.json` 中真实 host 生成的 identity / catalog 拆成版本化语料，
+写入 `packages/patchbay_cli/test/golden/legacy_host_v<version>/`；RC 与正式版本各有独立目录。兼容测试
+枚举这些目录并交给当前 CLI 读取。这里的唯一真源仍是实际 host surface golden，不再手抄一份“应该
+长这样”的响应；0.2.0 那份手写历史语料带有明确标记，发布脚本拒绝用当前实现覆写它。
 
 ### 本地会话文件是第三个兼容面
 

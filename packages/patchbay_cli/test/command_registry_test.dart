@@ -20,6 +20,25 @@ PatchbayFriendlyInvocation _resolve(
 }
 
 void main() {
+  test('launch preserves the consumer command after the option boundary', () {
+    final PatchbayFriendlyInvocation invocation = _resolve(<String>[
+      'launch',
+      '--',
+      'flutter',
+      'run',
+      '--vmservice-out-file',
+      '.dart_tool/patchbay/vmservice.txt',
+    ]);
+
+    expect(invocation.spec, PatchbayFriendlyCommand.launch);
+    expect(invocation.arguments['command'], <String>[
+      'flutter',
+      'run',
+      '--vmservice-out-file',
+      '.dart_tool/patchbay/vmservice.txt',
+    ]);
+  });
+
   test('friendly command paths are unique and every declaration resolves', () {
     final Set<String> paths = <String>{};
     for (final PatchbayFriendlyCommand spec in PatchbayFriendlyCommand.values) {
@@ -27,7 +46,9 @@ void main() {
       final List<String> words = <String>[
         ...spec.path,
         ...switch (spec) {
-          PatchbayFriendlyCommand.exec => <String>['fixture.command'],
+          PatchbayFriendlyCommand.launch => <String>['fake-consumer'],
+          PatchbayFriendlyCommand.exec ||
+          PatchbayFriendlyCommand.describe => <String>['fixture.command'],
           PatchbayFriendlyCommand.jobGet ||
           PatchbayFriendlyCommand.jobCancel => <String>['job-id'],
           PatchbayFriendlyCommand.uiTextSet ||
@@ -43,11 +64,22 @@ void main() {
           ],
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
+          PatchbayFriendlyCommand.snapshotDiff => const <String>[],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
           PatchbayFriendlyCommand.permissionStatus ||
+          PatchbayFriendlyCommand.permissionReset ||
           PatchbayFriendlyCommand.permissionNormalize ||
           PatchbayFriendlyCommand.permissionExercise ||
           PatchbayFriendlyCommand.permissionFail => <String>['camera'],
+          PatchbayFriendlyCommand.traceMark => <String>['operator-note'],
+          PatchbayFriendlyCommand.traceShow ||
+          PatchbayFriendlyCommand.traceExport => <String>[
+            'tr_fixture_0123456789abcdef0123',
+          ],
+          PatchbayFriendlyCommand.traceDiff => <String>[
+            'tr_before_0123456789abcdef0123',
+            'tr_after_0123456789abcdef0123',
+          ],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
           PatchbayFriendlyCommand.navigationGo ||
           PatchbayFriendlyCommand.navigationPush => <String>['settings'],
@@ -61,6 +93,10 @@ void main() {
           PatchbayFriendlyCommand.uiWaitTreeRevision ||
           PatchbayFriendlyCommand.uiWaitFrameRevision => <String>['7'],
           PatchbayFriendlyCommand.captureTarget => <String>['capture.id', '2'],
+          PatchbayFriendlyCommand.captureDiff => <String>[
+            'before-blob',
+            'after-blob',
+          ],
           PatchbayFriendlyCommand.blobGet ||
           PatchbayFriendlyCommand.blobMetadata => <String>['blob-id'],
           _ => const <String>[],
@@ -89,6 +125,19 @@ void main() {
         if (spec == PatchbayFriendlyCommand.permissionExercise) ...<String>[
           '--decision',
           'deny',
+        ],
+        if (spec == PatchbayFriendlyCommand.uiTargets) '--emit-manifest',
+        if (spec == PatchbayFriendlyCommand.traceStart) ...<String>[
+          '--name',
+          'fixture-trace',
+        ],
+        if (spec == PatchbayFriendlyCommand.traceExport) ...<String>[
+          '--output',
+          '/tmp/trace-output',
+        ],
+        if (spec == PatchbayFriendlyCommand.snapshotDiff) ...<String>[
+          '--from',
+          '1',
         ],
         ...words,
       ];
@@ -438,6 +487,21 @@ void main() {
     ]);
     expect(
       () => PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('ui targets requires its explicit emission flag', () {
+    expect(
+      _resolve(<String>['ui', 'targets', '--emit-manifest']).spec,
+      PatchbayFriendlyCommand.uiTargets,
+    );
+    expect(
+      () => _resolve(<String>['ui', 'targets']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>['--emit-manifest', 'catalog']),
       throwsA(isA<FormatException>()),
     );
   });

@@ -33,6 +33,16 @@ enum PatchbayFeature {
   /// sends that object; absence means it may only use the whole-snapshot RPC.
   snapshotSelectors,
 
+  /// Catalog command descriptors can drive host-side response validation.
+  responseSchemas,
+
+  /// The snapshot RPC accepts a separate revision-diff request shape.
+  ///
+  /// Revisions advance only when this host observes changed canonical content.
+  /// A client must see this declaration before it sends the new request; old
+  /// hosts strictly decode the selector request and cannot accept it.
+  snapshotRevisionDiff,
+
   /// `*LifecycleNotResumed` rejections carry `details.lifecycleState`.
   ///
   /// Declared by the Flutter host, which owns the lifecycle gate. A pure Dart
@@ -41,4 +51,11 @@ enum PatchbayFeature {
   /// apart from an App that reports `unknown` because its consumer replaced
   /// the resumed decision without supplying a reader.
   lifecycleState,
+
+  /// `ui.capture` accepts `afterFrames` and reports observed frame counts.
+  ///
+  /// A CLI that does not see this declaration must omit `afterFrames` and
+  /// label the result as a legacy immediate capture. It must not infer support
+  /// from an `invalidArguments` response because that shape has other causes.
+  captureAfterFrames,
 }

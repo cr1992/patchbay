@@ -57,6 +57,30 @@ dart run bin/patchbay.dart --json snapshot
 dart run bin/patchbay.dart --json exec <namespace.command>
 ```
 
+要把启动与恢复收敛成一次有界操作，可由 CLI 启动已接入声明契约的 consumer：
+
+```text
+dart run bin/patchbay.dart launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+dart run bin/patchbay.dart --keep-awake launch -- flutter run ...
+PATCHBAY_KEEP_AWAKE=true dart run bin/patchbay.dart launch -- flutter run ...
+dart run bin/patchbay.dart --no-keep-awake launch -- flutter run ...
+```
+
+child 用 `PatchbayLaunchContext.tryFromEnvironment` 读取 `PATCHBAY_SESSION_DIR`、
+`PATCHBAY_LAUNCH_ID`、`PATCHBAY_LAUNCH_OWNER_PID`，再用 `pendingRecord` 写完整 pending 记录，
+发现 transport 后用 `withTransport` 更新。launcher 不伪造 application/device metadata，也不解析
+stdout 私有帧；child 必须显式传入真实 consumer/App `processId`，不能拿 launcher `ownerPid` 代填。
+launcher 只监督 `launchId + ownerPid` 同时匹配的记录；未声明的 child 会在有限预算后以
+`sessionNotDeclared` 失败。machine frame 只写 stdout，child 与人读日志转发到 stderr。
+稳定 live 会话每 5 秒观测一次；断连后从 200 ms 初始退避重新恢复，每次 identity probe 同时受 child
+退出与剩余总预算约束。
+
+亮屏策略默认关闭。全局 `--keep-awake` 或本地 `PATCHBAY_KEEP_AWAKE=true/on/1` 会在 launcher `live`
+后申请既有 10 分钟租约，并在半租期借健康观测续租；`--no-keep-awake` 覆盖本地默认。普通 one-shot /
+REPL 命令成功后也可按同一策略续租，但显式 `ui keep-awake on|off|status` 不会触发第二次操作。终态和
+信号取消尽力 release；断连时 machine frame / JSON 明确写 `releaseUnconfirmed` 或
+`renewalUnconfirmed`，App 的租约到期是最终兜底。
+
 上面任何一步不通时先跑体检——它自己拨号，因此拨不通是它的一条 finding，而不是命令终止：
 
 ```text
@@ -97,6 +121,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui verify-manifest ./ui-targets
 dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
+dart run bin/patchbay.dart --ws-uri <uri> --json perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json --duration-ms 5000 --sample-limit 2000 perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json net profile
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation current
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation go settings
@@ -113,7 +140,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --limit 100 logs query
 dart run bin/patchbay.dart --ws-uri <uri> --json --cursor <cursor> --timeout-ms 5000 logs tail
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./logs.ndjson logs export
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./screen.png capture root
+dart run bin/patchbay.dart --ws-uri <uri> --json --after-frames 12 --output ./frame-12.png capture root
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture target <target-id> <generation>
+dart run bin/patchbay.dart --ws-uri <uri> --json capture diff <before-blob-id> <after-blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
@@ -129,6 +158,25 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 `destination` ↔ `navigationDestination`）。两种拼写都可直接键入，映射表在 `patchbay help ui wait`；
 两边的名字都不会改，它们是 wire 契约。
 
+### 有界 VM 性能画像
+
+`perf profile` 默认对已连接的 VM Service 采样 10 秒，只输出稳定的
+`patchbay.performanceProfile.v1` 摘要：build/raster 帧耗时与 16 ms jank 计数、两次 heap 观测、
+新/老生代 GC 计数。`--duration-ms` 限 1..60000，`--sample-limit` 限 1..10000；单次最多处理
+10000 个事件和 8 MiB 事件数据，任一先到都会明确给 `sampling.truncated=true` 与丢弃数。公开 VM
+stream 每批 timeline event 到达即汇总，触顶马上取消订阅；原始事件不保留，也不进入 Patchbay 输出、
+日志或 artifact。命令临时启用所需公开 VM timeline stream，
+无论成功或失败都会恢复原 stream 集合。
+
+这是 VM 观测（`factSource=uiObserved`），不是 App catalog 命令。direct HTTP 稳定返回
+`profilingVmServiceRequired`，不伪造同口径事实；老 VM 缺少所需公开 RPC/stream 时返回
+`performanceProfilingUnavailable`。
+
+`net profile` 当前不采集任何数据，稳定返回 `networkProfilingUnavailable`。经核对的
+`vm_service 15.2.0` 公开 HTTP profile 在调用方过滤前已经收进 body、header、cookie 和 query 值；
+先取回再脱敏违反 Patchbay 的采集时隐私边界，因此只有公开 RPC 能采集前过滤，或接入方注入仅产生
+已脱敏事件的 collector 后，才会发布 net capability。
+
 `ui tap <identifier>` 是 `ui semantics tree` + `ui semantics action` 的一步替代：解析、代际校验和派发
 都在 App 侧一次完成，CLI 不构造 nodeId，也不给 generation 补默认值。`--generation` 可选，传了就是
 调用方自己的前置围栏；不传时围栏由 bridge 在过门前 pin 住的 generation 提供。未命中、多义和代际
@@ -137,7 +185,8 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 
 ### UI 目标声明对账
 
-`ui verify-manifest <file>` 读一份接入方维护的 JSON manifest，与 catalog 的 `uiTargets` 对账，报
+`ui verify-manifest <file>` 读一份接入方维护的 JSON 或 YAML manifest：`catalogTarget` 与 catalog 的
+`uiTargets` 对账，`semanticsIdentifier` 与既有 `ui.semantics.tree` 活体快照对账，报
 `declaredNotMounted` / `mountedNotDeclared` / `propertyMismatch` 三类偏差。比对完全在 CLI 侧完成：
 不新增 wire 命令，只用 catalog；manifest 里出现 `destination` 时额外读一次 `navigation.current`
 做范围过滤。schema、字段语义、`destination` 过滤口径与「未挂载 ≠ 丢失」的边界见
@@ -146,8 +195,17 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 
 全部相符退出 `0`，报告里有任一类偏差退出 `7`——App 侧一切正常应答，所以它既不是拒绝（`5`）也不是
 类型化失败（`6`）。manifest 读不了或不合法时 fail-closed 退出 `64`，`--json` 给 `manifestInvalid` /
-`manifestUnreadable` 和指到具体位置的 `details.field`。人读输出直接列出偏差条目；repl 内每行只占
+`manifestUnreadable` 和指到具体位置的 `details.field`。格式只按小写 `.json` / `.yaml` / `.yml`
+扩展名选择，不嗅探内容；YAML 关闭恢复并拒绝 alias 与显式 tag。两种格式共享 1 MiB、64 层、200000
+节点（含 mapping key）预算，语法错误给一基 `line` / `column` 且不回显文件内容。人读输出直接列出偏差条目；repl 内每行只占
 一行，给的是计数。
+
+v2 的两个 namespace 相互独立：`kind` / `sensitive` 只属于 `catalogTarget`，
+`semanticsIdentifier` 只持久化稳定 identifier。唯一活体命中会报告本次 `nodeId` / `generation` 与
+tree revision；零命中进入 `declaredNotMounted`，多命中以 `uiSemanticsIdentifierAmbiguous`
+fail-closed。能力缺失、tree 截断、payload 不完整分别有稳定 protocol code。`ui targets
+--emit-manifest` 会在 App 声明 tree capability 时加入唯一活体 identifier；歧义或跨 namespace 同 id
+则拒绝生成，不会挑一个代表。
 
 ### repl 会话
 
@@ -186,13 +244,22 @@ App 当前 catalog；catalog 与 invoke 结果矛盾时返回 `catalogInvocation
 `commandNotRegistered` rejection 和退出码 `4`。CLI 从不按命令数量推断能力。完整命令名仍是协议身份，
 任意 consumer 命令继续使用 `exec <namespace.command>`。
 
+`describe <namespace.command>` 只读这份 catalog，绝不调用命令。JSON 结果包含完整 command 行、
+`schemaMode`，以及封闭取值 `eligible` / `notDeclared` / `notExternal` 的 `retryEligibility`。external 行声明
+合法 `retryPolicy` 时，CLI 只在 transport unavailable / timeout 时重试，并为所有 attempt 复用同一个
+`requestId`；App 拒绝、协议失败和任意 provider 返回结果都是终局，绝不重试。
+
 每一次 RPC 往返都有预算，默认 30 秒，由 `--transport-timeout-ms` 调整，两条传输都适用；耗尽时以
 退出码 `3` 和稳定 code `appUnresponsive` 失败并附处置提示。`--timeout-ms` 是发给 App 的业务等待预算，
 声明了它的请求会把本次 RPC 预算放宽成「声明的等待 + 一次往返」，不会被默认预算腰斩。
 
 日志过滤支持 `--cursor`、`--direction`、`--limit`、逗号分隔的 `--levels`/`--categories` 以及
-ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio` 和 `--timeout-ms`。所有 artifact 下载先写同目录
-临时文件，分块校验 blob metadata、offset、base64、总长度与 SHA-256，全部通过后才 rename；已有输出
+ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio`、`--after-frames`（1..120 次 Patchbay
+观测到的 Flutter 帧）和 `--timeout-ms`。host 未声明 `captureAfterFrames` 时，CLI 会省略该字段并在结果
+标记 `captureMode=legacyImmediate`，不会从错误形状猜支持情况。`capture diff` 只比较宽高和像素格式
+相同的两份已保留 capture blob，返回变化像素数、总像素数和比例，不代替调用方判 pass/fail。
+
+所有 artifact 下载先写同目录临时文件，分块校验 blob metadata、offset、base64、总长度与 SHA-256，全部通过后才 rename；已有输出
 默认拒绝，只有显式 `--force` 才替换。过期、拒绝、错序、哈希错误和中断不会留下完整输出名的残文件。
 
 ## 连接边界
@@ -203,17 +270,16 @@ ISO-8601 `--since`/`--until`。capture 支持 `--pixel-ratio` 和 `--timeout-ms`
 - 不写入脚本、日志、快照和提交物；
 - CLI 错误只报告错误类别，不回显完整 URI。
 
-launcher 会先以原子替换写入 provisional 记录，再在收到 `app.debugPort` 后补 URI；CLI 连接并读取
+参与声明的 child 会先以原子替换写入 provisional 记录，再由自己的工具链发现 URI 后补齐；launcher 连接并读取
 `ext.patchbay.identity` 后才补齐 `appInstanceId` 和 `isolateId`。完整记录绑定 session schema、
 `applicationId`、`appInstanceId`、`isolateId`、launcher PID、`wsUri`、build mode、创建时间、worktree
 与设备 ID。记录默认位于当前用户的系统临时目录，可用 `PATCHBAY_SESSION_DIR` 覆盖。
-launcher 仍会把 `app.log`、`app.progress` 和 stderr 以人可读形式回显，但统一替换其中的 http/ws URI；
-`app.debugPort` 只显示“会话已发现”，永不回显 machine 事件载荷。
+`patchbay launch` 将 child stdout/stderr 作为人读日志转发到 stderr，stdout 只保留稳定 machine frame。
 
-PID 存活只表示 launcher 可能仍在，不能证明 App 实例仍相同。以下任一情况都会删除记录并返回稳定的
-session error：PID 不活、URI 不可连接、schema/identity 不匹配。hot restart 再次产生
-`app.debugPort` 时 launcher 会原子重置已补齐的 identity，CLI 必须重新实测补齐；显式 `--ws-uri` 也会
-执行同一 schema/isolate/appInstance identity 校验。launcher 退出时删除自己拥有的记录。POSIX 上目录和
+PID 存活只表示 launcher 可能仍在，不能证明 App 实例仍相同。PID 不活或 schema/identity 不匹配会使
+记录失效；短暂不可达则保留记录并在有限预算内恢复。hot restart 改变 App instance 时 launcher 会在
+复用前重新实测并重锚；显式 `--ws-uri` 也执行同一 schema/isolate/appInstance identity 校验。launcher
+退出时只删除自己拥有的 pending 记录。POSIX 上目录和
 文件分别收紧到 `0700` / `0600`，普通输出、错误和选择列表都不包含 URI/token。
 
 当前命令执行路径自身不调用 ADB。不过在 Android 上，如果 URI 来自 `flutter run`，Flutter 的启动、

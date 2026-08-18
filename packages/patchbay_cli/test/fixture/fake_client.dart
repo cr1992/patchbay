@@ -2,7 +2,11 @@ import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 
 /// One recorded call against the fake connection.
-typedef FakeInvocation = ({String command, Map<String, Object?> arguments});
+typedef FakeInvocation = ({
+  String command,
+  Map<String, Object?> arguments,
+  String? requestId,
+});
 
 /// A `PatchbayClient` whose catalog and answers are supplied by the test.
 ///
@@ -11,7 +15,11 @@ typedef FakeInvocation = ({String command, Map<String, Object?> arguments});
 /// the test controls, and the `connect` seam of `runPatchbayCli` is the only
 /// honest way in: it exercises the real dispatcher rather than a re-creation of
 /// it. Every invoke is recorded so a test can assert what actually went out.
-final class FakePatchbayClient implements PatchbayClient {
+final class FakePatchbayClient
+    implements
+        PatchbayClient,
+        PatchbayProfilingClient,
+        PatchbaySnapshotDiffClient {
   FakePatchbayClient({
     required this.commands,
     required this.handle,
@@ -19,6 +27,8 @@ final class FakePatchbayClient implements PatchbayClient {
     this.snapshotData = const <String, Object?>{'source': 'appRecorded'},
     this.identityData = legacyFakeIdentity,
     this.catalogExtras = const <String, Object?>{},
+    this.profilePerformance,
+    this.profileNetwork,
   });
 
   /// What the identity handshake answers.
@@ -37,6 +47,12 @@ final class FakePatchbayClient implements PatchbayClient {
   /// version or another sets them here rather than by rewriting the command
   /// list.
   final Map<String, Object?> catalogExtras;
+
+  final Future<Map<String, Object?>> Function(
+    PatchbayPerformanceProfileRequest request,
+  )?
+  profilePerformance;
+  final Future<Map<String, Object?>> Function()? profileNetwork;
 
   /// Catalog rows exactly as an App would publish them.
   final List<Map<String, Object?>> commands;
@@ -62,6 +78,7 @@ final class FakePatchbayClient implements PatchbayClient {
   /// arrived in the declared shape.
   final List<PatchbaySnapshotRequest?> snapshotRequests =
       <PatchbaySnapshotRequest?>[];
+  final List<int> snapshotDiffRequests = <int>[];
   int catalogReads = 0;
   bool closed = false;
 
@@ -97,13 +114,27 @@ final class FakePatchbayClient implements PatchbayClient {
   }
 
   @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) async {
+    snapshotDiffRequests.add(fromRevision);
+    return <String, Object?>{
+      'schemaVersion': 1,
+      'fromRevision': fromRevision,
+      'snapshotRevision': fromRevision + 1,
+      'revisionSource': 'hostObserved',
+      'added': const <Object?>[],
+      'changed': const <Object?>[],
+      'removed': const <Object?>[],
+    };
+  }
+
+  @override
   Future<Map<String, Object?>> invoke({
     required String command,
     required Map<String, Object?> arguments,
     String? requestId,
     Duration? deadline,
   }) async {
-    calls.add((command: command, arguments: arguments));
+    calls.add((command: command, arguments: arguments, requestId: requestId));
     final Map<String, Object?> response = await handle(command, arguments);
     return <String, Object?>{
       'schemaVersion': 1,
@@ -123,6 +154,26 @@ final class FakePatchbayClient implements PatchbayClient {
   @override
   Future<Map<String, Object?>> focusTree() =>
       throw const PatchbayProtocolException('flutterDiagnosticUnavailable');
+
+  @override
+  Future<Map<String, Object?>> performanceProfile(
+    PatchbayPerformanceProfileRequest request,
+  ) async {
+    final handler = profilePerformance;
+    if (handler == null) {
+      throw const PatchbayProtocolException('profilingVmServiceRequired');
+    }
+    return handler(request);
+  }
+
+  @override
+  Future<Map<String, Object?>> networkProfile() async {
+    final handler = profileNetwork;
+    if (handler == null) {
+      throw const PatchbayProtocolException('networkProfilingUnavailable');
+    }
+    return handler();
+  }
 
   @override
   Future<void> close() async => closed = true;

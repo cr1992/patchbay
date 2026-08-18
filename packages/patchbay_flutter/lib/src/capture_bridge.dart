@@ -6,6 +6,9 @@ typedef PatchbayCaptureEncoder =
       double pixelRatio,
     );
 
+typedef PatchbayCaptureDecoder =
+    Future<PatchbayDecodedCapture> Function(Uint8List bytes);
+
 /// Optional composition-root wrapper. In release this is exactly its child;
 /// in other modes it adds only a repaint boundary and no layout/state widget.
 final class PatchbayRoot extends StatelessWidget {
@@ -55,6 +58,7 @@ final class PatchbayCaptureBridge {
     bool Function()? isAppResumed,
     PatchbayLifecycleStateReader? lifecycleState,
     PatchbayCaptureEncoder? encoder,
+    PatchbayCaptureDecoder? decoder,
     this.maxPixels = 16 * 1024 * 1024,
     this.maxBytes = 8 * 1024 * 1024,
     this.maxPixelRatio = 3,
@@ -74,7 +78,8 @@ final class PatchbayCaptureBridge {
          isAppResumed: isAppResumed,
          lifecycleState: lifecycleState,
        ),
-       _encoder = encoder ?? _encode {
+       _encoder = encoder ?? _encode,
+       _decoder = decoder ?? _decode {
     if (maxPixels <= 0 ||
         maxBytes <= 0 ||
         maxPixelRatio <= 0 ||
@@ -92,12 +97,15 @@ final class PatchbayCaptureBridge {
   final bool Function() _isAppResumed;
   final PatchbayLifecycleStateReader _lifecycleState;
   final PatchbayCaptureEncoder _encoder;
+  final PatchbayCaptureDecoder _decoder;
   final int maxPixels;
   final int maxBytes;
   final double maxPixelRatio;
   final Duration defaultTimeout;
 
   Set<String> get gateIds => _gateIds;
+
+  static const int maxAfterFrames = 120;
 
   Future<PatchbayInvocation> capture(
     PatchbayCaptureRequestWire request, {
@@ -107,11 +115,14 @@ final class PatchbayCaptureBridge {
         ? defaultTimeout
         : Duration(milliseconds: request.timeoutMs!);
     final double pixelRatio = request.pixelRatio?.toDouble() ?? 1;
+    final int requestedFrames = request.afterFrames ?? 1;
     final List<String> outOfRange = <String>[
       if (timeout <= Duration.zero || timeout > const Duration(seconds: 30))
         'timeoutMs',
       if (!pixelRatio.isFinite || pixelRatio <= 0 || pixelRatio > maxPixelRatio)
         'pixelRatio',
+      if (requestedFrames <= 0 || requestedFrames > maxAfterFrames)
+        'afterFrames',
     ];
     if (outOfRange.isNotEmpty) {
       // Which bound was crossed, and what the bound is. Both are declared in
@@ -124,6 +135,7 @@ final class PatchbayCaptureBridge {
           'invalid': outOfRange,
           'maxTimeoutMs': const Duration(seconds: 30).inMilliseconds,
           'maxPixelRatio': maxPixelRatio,
+          'maxAfterFrames': maxAfterFrames,
         },
       );
     }
@@ -155,8 +167,19 @@ final class PatchbayCaptureBridge {
       );
     }
     final DateTime deadline = DateTime.now().add(timeout);
-    if (!await _frames.nextFrameBefore(deadline)) {
-      return _reject(requestId, 'captureFrameTimeout');
+    final int observedFrames = await _frames.framesBefore(
+      deadline,
+      requestedFrames,
+    );
+    if (observedFrames != requestedFrames) {
+      return _reject(
+        requestId,
+        'captureFrameTimeout',
+        details: <String, Object?>{
+          'requestedFrames': requestedFrames,
+          'observedFrames': observedFrames,
+        },
+      );
     }
     if (!_isAppResumed()) {
       return _reject(
@@ -236,6 +259,7 @@ final class PatchbayCaptureBridge {
           'width': encoded.width,
           'height': encoded.height,
           'pixelRatio': pixelRatio,
+          'pixelFormat': 'rgba8888',
         },
       );
     } on PatchbayBlobFailure catch (failure) {
@@ -258,6 +282,12 @@ final class PatchbayCaptureBridge {
         width: encoded.width,
         height: encoded.height,
         pixelRatio: pixelRatio,
+        pixelFormat: 'rgba8888',
+        capturedAt: blob.createdAt,
+        requestedFrames: requestedFrames,
+        observedFrames: observedFrames,
+        maxPixels: maxPixels,
+        maxBytes: maxBytes,
         warnings: const <PatchbayCaptureWarningWire>[
           PatchbayCaptureWarningWire.flutterSubtreeOnly,
           PatchbayCaptureWarningWire.platformViewsMayBeMissing,
@@ -266,6 +296,166 @@ final class PatchbayCaptureBridge {
         blob: blob,
       ).toJson(),
     );
+  }
+
+  /// Compares two capture artifacts after decoding both to RGBA8888.
+  ///
+  /// The comparison is deliberately a fact, not a verdict: callers own any
+  /// pass/fail threshold. Both inputs remain bounded by the same limits as
+  /// capture and the result stays in this command payload rather than adding
+  /// fields to the strictly decoded blob metadata wire type.
+  Future<PatchbayInvocation> diff(
+    PatchbayCaptureDiffRequestWire request, {
+    required String requestId,
+  }) async {
+    final PatchbayGateRejection? gate = await _gates.evaluate(_gateIds);
+    if (gate != null) {
+      return _reject(
+        requestId,
+        gate.code,
+        details: <String, Object?>{'gateId': gate.gateId},
+        notice: gate.notice,
+      );
+    }
+    final PatchbayBlobMetadataWire beforeMetadata;
+    final PatchbayBlobMetadataWire afterMetadata;
+    try {
+      beforeMetadata = _artifacts.blobs.metadata(request.beforeBlobId);
+      afterMetadata = _artifacts.blobs.metadata(request.afterBlobId);
+    } on PatchbayBlobFailure catch (failure) {
+      return _reject(requestId, switch (failure.code) {
+        PatchbayBlobFailureCode.expired => 'captureDiffArtifactExpired',
+        PatchbayBlobFailureCode.notFound => 'captureDiffArtifactNotFound',
+        _ => 'captureDiffArtifactUnavailable',
+      }, details: failure.details);
+    }
+    for (final PatchbayBlobMetadataWire metadata in <PatchbayBlobMetadataWire>[
+      beforeMetadata,
+      afterMetadata,
+    ]) {
+      if (metadata.kind != PatchbayBlobSourceWire.flutterCapture ||
+          metadata.contentType != 'image/png') {
+        return _reject(
+          requestId,
+          'captureDiffArtifactUnsupported',
+          details: <String, Object?>{'blobId': metadata.blobId},
+        );
+      }
+      if (metadata.length > maxBytes) {
+        return _reject(
+          requestId,
+          'captureDiffByteLimitExceeded',
+          details: <String, Object?>{
+            'blobId': metadata.blobId,
+            'length': metadata.length,
+            'maxBytes': maxBytes,
+          },
+        );
+      }
+    }
+
+    final PatchbayDecodedCapture before;
+    final PatchbayDecodedCapture after;
+    try {
+      before = await _decoder(_readBlob(beforeMetadata));
+      after = await _decoder(_readBlob(afterMetadata));
+    } on PatchbayBlobFailure catch (failure) {
+      return _reject(
+        requestId,
+        'captureDiffArtifactUnavailable',
+        details: failure.details,
+      );
+    } on Object {
+      return _reject(requestId, 'captureDiffDecodeFailed');
+    }
+    for (final PatchbayDecodedCapture image in <PatchbayDecodedCapture>[
+      before,
+      after,
+    ]) {
+      final int pixels = image.width * image.height;
+      if (image.width <= 0 ||
+          image.height <= 0 ||
+          pixels > maxPixels ||
+          image.bytesPerPixel <= 0 ||
+          image.bytes.length != pixels * image.bytesPerPixel) {
+        return _reject(
+          requestId,
+          'captureDiffPixelLimitExceeded',
+          details: <String, Object?>{
+            'width': image.width,
+            'height': image.height,
+            'maxPixels': maxPixels,
+          },
+        );
+      }
+    }
+    if (before.width != after.width ||
+        before.height != after.height ||
+        before.pixelFormat != after.pixelFormat ||
+        before.bytesPerPixel != after.bytesPerPixel) {
+      return _reject(
+        requestId,
+        'captureDiffSpecMismatch',
+        details: <String, Object?>{'before': before.spec, 'after': after.spec},
+      );
+    }
+
+    final int totalPixels = before.width * before.height;
+    var changedPixels = 0;
+    for (var pixel = 0; pixel < totalPixels; pixel += 1) {
+      final int offset = pixel * before.bytesPerPixel;
+      var changed = false;
+      for (var byte = 0; byte < before.bytesPerPixel; byte += 1) {
+        if (before.bytes[offset + byte] != after.bytes[offset + byte]) {
+          changed = true;
+          break;
+        }
+      }
+      if (changed) changedPixels += 1;
+    }
+    return PatchbayInvocation.accepted(
+      requestId: requestId,
+      payload: PatchbayCaptureDiffResultWire(
+        outcome: 'compared',
+        source: PatchbayFactSourceWire.uiObserved,
+        beforeBlobId: request.beforeBlobId,
+        afterBlobId: request.afterBlobId,
+        width: before.width,
+        height: before.height,
+        pixelFormat: before.pixelFormat,
+        changedPixels: changedPixels,
+        totalPixels: totalPixels,
+        differenceRatio: changedPixels / totalPixels,
+        comparedAt: DateTime.now().toUtc().toIso8601String(),
+        maxPixels: maxPixels,
+        maxBytes: maxBytes,
+        warnings: const <PatchbayCaptureWarningWire>[
+          PatchbayCaptureWarningWire.flutterSubtreeOnly,
+          PatchbayCaptureWarningWire.platformViewsMayBeMissing,
+          PatchbayCaptureWarningWire.systemUiNotIncluded,
+        ],
+      ).toJson(),
+    );
+  }
+
+  Uint8List _readBlob(PatchbayBlobMetadataWire metadata) {
+    final BytesBuilder bytes = BytesBuilder(copy: false);
+    var offset = 0;
+    while (offset < metadata.length) {
+      final PatchbayBlobChunkWire chunk = _artifacts.blobs.read(
+        blobId: metadata.blobId,
+        offset: offset,
+        limit: _artifacts.blobs.maxChunkBytes,
+      );
+      bytes.add(base64Decode(chunk.dataBase64));
+      if (chunk.nextOffset <= offset) {
+        throw const PatchbayBlobFailure(
+          PatchbayBlobFailureCode.offsetOutOfBounds,
+        );
+      }
+      offset = chunk.nextOffset;
+    }
+    return bytes.takeBytes();
   }
 
   _CaptureResolution _resolve(PatchbayCaptureRequestWire request) {
@@ -330,6 +520,33 @@ final class PatchbayCaptureBridge {
     }
   }
 
+  static Future<PatchbayDecodedCapture> _decode(Uint8List bytes) async {
+    final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+    try {
+      final ui.FrameInfo frame = await codec.getNextFrame();
+      try {
+        final ByteData? data = await frame.image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        );
+        if (data == null) throw StateError('RGBA decoder returned no data.');
+        return PatchbayDecodedCapture(
+          bytes: data.buffer.asUint8List(
+            data.offsetInBytes,
+            data.lengthInBytes,
+          ),
+          width: frame.image.width,
+          height: frame.image.height,
+          pixelFormat: 'rgba8888',
+          bytesPerPixel: 4,
+        );
+      } finally {
+        frame.image.dispose();
+      }
+    } finally {
+      codec.dispose();
+    }
+  }
+
   static bool _isPng(Uint8List bytes) {
     const List<int> signature = <int>[137, 80, 78, 71, 13, 10, 26, 10];
     if (bytes.length < signature.length) return false;
@@ -365,6 +582,28 @@ final class PatchbayEncodedCapture {
   final Uint8List bytes;
   final int width;
   final int height;
+}
+
+final class PatchbayDecodedCapture {
+  const PatchbayDecodedCapture({
+    required this.bytes,
+    required this.width,
+    required this.height,
+    required this.pixelFormat,
+    required this.bytesPerPixel,
+  });
+
+  final Uint8List bytes;
+  final int width;
+  final int height;
+  final String pixelFormat;
+  final int bytesPerPixel;
+
+  Map<String, Object?> get spec => <String, Object?>{
+    'width': width,
+    'height': height,
+    'pixelFormat': pixelFormat,
+  };
 }
 
 final class _CaptureResolution {

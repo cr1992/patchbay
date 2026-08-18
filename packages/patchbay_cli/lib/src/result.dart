@@ -62,7 +62,11 @@ int patchbayExitCodeFor(Map<String, Object?> response) {
 
   final Object? payload = response['payload'];
   if (payload is Map) {
-    if (payload['outcome'] == 'failed' || payload['dispatched'] == false) {
+    if (payload['outcome'] == 'failed') {
+      return PatchbayExitCode.typedFailure;
+    }
+    final Object? execution = payload['execution'];
+    if (execution is! Map<Object?, Object?> && payload['dispatched'] == false) {
       return PatchbayExitCode.typedFailure;
     }
     if (payload['terminal'] == true) {
@@ -73,7 +77,17 @@ int patchbayExitCodeFor(Map<String, Object?> response) {
         if (phase == 'failed' || phase == 'cancelled') {
           return PatchbayExitCode.typedFailure;
         }
+        if (phase == 'completed') return PatchbayExitCode.accepted;
       }
+    }
+    if (execution is Map<Object?, Object?>) {
+      final Object? classification = execution['classification'];
+      if (classification == 'notSent' || classification == 'sentUnconfirmed') {
+        return PatchbayExitCode.typedFailure;
+      }
+      // The typed execution object supersedes the legacy dispatched bit even
+      // when the two disagree; the validator records that conflict in details.
+      return PatchbayExitCode.accepted;
     }
   }
   return PatchbayExitCode.accepted;

@@ -119,7 +119,8 @@ final class PatchbayPermissionBudget {
     PatchbayPermissionOperation.capabilities ||
     PatchbayPermissionOperation.status ||
     PatchbayPermissionOperation.fail => read,
-    PatchbayPermissionOperation.normalize => write,
+    PatchbayPermissionOperation.normalize ||
+    PatchbayPermissionOperation.reset => write,
     PatchbayPermissionOperation.exercise => exercise,
   };
 }
@@ -375,8 +376,7 @@ final class PatchbayPermissionDriverRunner {
     if (!capability.actions.contains(required)) {
       throw const PatchbayPermissionDriverException('permissionUnsupported');
     }
-    if ((request.operation == PatchbayPermissionOperation.normalize ||
-            request.operation == PatchbayPermissionOperation.exercise) &&
+    if (request.operation == PatchbayPermissionOperation.normalize &&
         !capability.actions.contains(PatchbayPermissionAction.status)) {
       throw const PatchbayPermissionDriverException('permissionUnsupported');
     }
@@ -434,6 +434,37 @@ final class PatchbayPermissionDriverRunner {
       return operation;
     }
 
+    // simctl privacy exposes an authoritative reset operation but no public
+    // status query. A reset-only driver may therefore return the reset fact
+    // itself; it must be device-reported and exactly notDetermined. Drivers
+    // that do declare status still take the independent verification path.
+    if (request.operation == PatchbayPermissionOperation.reset &&
+        !capability.actions.contains(PatchbayPermissionAction.status)) {
+      final PatchbayPermissionStatus reset = _requireStatus(operation);
+      if (reset.state != PatchbayPermissionState.notDetermined ||
+          reset.factSource != PatchbayPermissionFactSource.deviceReported) {
+        throw const PatchbayPermissionDriverException(
+          'permissionStatusInvalid',
+        );
+      }
+      return operation;
+    }
+    if (request.operation == PatchbayPermissionOperation.exercise &&
+        !capability.actions.contains(PatchbayPermissionAction.status)) {
+      final PatchbayPermissionStatus exercised = _requireStatus(operation);
+      final PatchbayPermissionInterruption? interruption =
+          operation.interruption;
+      if (exercised.state == PatchbayPermissionState.unknown ||
+          interruption == null ||
+          !interruption.expected ||
+          !interruption.handled ||
+          interruption.permission != request.permission ||
+          interruption.decision != request.decision) {
+        throw const PatchbayPermissionDriverException('systemUiUnexpected');
+      }
+      return operation;
+    }
+
     // A successful mutation exit code is not a permission fact. Read the state
     // again under the same total budget and make that observation authoritative.
     final Duration verificationRemaining = budget - elapsed.elapsed;
@@ -455,15 +486,20 @@ final class PatchbayPermissionDriverRunner {
     );
     if (!verification.accepted) return verification;
     final PatchbayPermissionStatus verified = _requireStatus(verification);
-    if (request.operation == PatchbayPermissionOperation.normalize &&
-        verified.state != request.state) {
+    final PatchbayPermissionState? expectedState = switch (request.operation) {
+      PatchbayPermissionOperation.normalize => request.state,
+      PatchbayPermissionOperation.reset =>
+        PatchbayPermissionState.notDetermined,
+      _ => null,
+    };
+    if (expectedState != null && verified.state != expectedState) {
       return PatchbayPermissionDriverResponse(
         protocolVersion: verification.protocolVersion,
         requestId: request.requestId,
         admission: 'rejected',
         code: 'permissionStateMismatch',
         details: <String, Object?>{
-          'expected': request.state!.name,
+          'expected': expectedState.name,
           'actual': verified.state.name,
         },
         before: operation.before,
@@ -528,6 +564,7 @@ final class PatchbayPermissionDriverRunner {
     PatchbayPermissionOperation.status ||
     PatchbayPermissionOperation.fail => PatchbayPermissionAction.status,
     PatchbayPermissionOperation.exercise => PatchbayPermissionAction.exercise,
+    PatchbayPermissionOperation.reset => PatchbayPermissionAction.reset,
     PatchbayPermissionOperation.normalize => switch (request.state) {
       PatchbayPermissionState.granted => PatchbayPermissionAction.grant,
       PatchbayPermissionState.notDetermined => PatchbayPermissionAction.reset,

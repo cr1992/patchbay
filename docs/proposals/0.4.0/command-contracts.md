@@ -92,7 +92,8 @@ CLI 侧的命令表因此仍然是**语法**，不是能力清单；本提案消
 - `notSent`：有证据表明发送动作未发生；终态必须为 `failed`。
 - `sentUnconfirmed`：发送动作已发生，但确认预算内未观察到设备事实；要求确认的命令必须 `failed`，
   允许弱确认的命令可 `completed`，但 descriptor 必须显式声明 `weakConfirmationCompletes: true`，
-  默认为否。
+  默认为否。该策略只对 `mode: job` 有效；即时命令声明它属于无效 descriptor，注册与 catalog
+  解析都必须拒绝，避免同一分类在即时和 job 路径产生相反退出码。
 - `unchanged`：发送前已有可信的同值证据，且发送后没有相反设备事实；可以 `completed`。
 - `deviceConfirmed`：存在 `deviceReported` 或 descriptor 明示可接受的更强观测；可以 `completed`。
 
@@ -120,7 +121,9 @@ host 按 `providerProtocolViolation` 拒绝，`details.reason` 用既有封闭�
 
 0.3.x 已有接入方用 `payload.dispatched: false` 表达“没发出去”，CLI 也已按它判类型化失败。它是
 `notSent` 的遗留投影，本版不移除。两者同时出现且矛盾时，**以 `execution` 为准**，并在 `details` 里
-记 `legacyDispatchedConflict`；退出码语义不变。不写这条，同一份 payload 会有两套事实。
+记 `legacyDispatchedConflict`；只有 payload 确实带有类型化 `execution` 时才适用这条优先级。没有
+`execution` 的旧 payload 仍按 `dispatched: false` 判失败，即使 job 的末事件写成 `completed` 也不能
+把它升级为成功。不写这条，同一份 payload 会有两套事实。
 
 ## 兼容与降级
 
@@ -140,6 +143,29 @@ host 按 `providerProtocolViolation` 拒绝，`details.reason` 用既有封闭�
   `1..300000`。需要设备确认的 descriptor 同样必须显式声明 `confirmationBudgetMs`，合法范围为
   `1..120000`。把这两个时间预算省略或写出范围都属于 descriptor 无效，不能拖到运行时猜默认值。
 
+### 幂等重试、去重与审计的冻结契约
+
+只有 `sideEffect: external` 的 consumer command 可以声明 `retryPolicy`；字段存在本身就是幂等 opt-in，
+没有另一个可漂移的 `idempotent` 开关。形状固定为
+`{maxAttempts, backoffMs}`：`maxAttempts` 包含首次调用，合法范围 `2..3`；`backoffMs` 合法范围
+`0..5000`。CLI 只对 transport unavailable/timeout 重试；协议错误、host/provider 拒绝和任何已经返回的
+provider 结果都不重试。所有 attempt 必须复用同一 requestId。
+
+host 在 external fallback 前以 `(command, requestId)` 去重，并用完整 canonical arguments 的内部摘要
+校验同一 key 是否仍是同一请求；摘要和参数值都不外发。同 key、同参数且声明 policy 时，in-flight 共享，
+settled 结果重放；参数不同稳定拒绝 `requestIdConflict`。未声明 policy 的 external 命令第二次出现同一
+requestId 时稳定拒绝 `duplicateRequestId`，绝不再次调用 provider。ledger 按插入顺序最多保留 256 条；
+容量全被 in-flight 占用时 fail-closed，不通过驱逐正在执行的记录制造重复执行窗口。
+
+audit event 固定为 `command/requestId/parameterShape/gateResult/executionClassification`。参数形状只保留
+递归 JSON 类型、对象键和粗粒度长度区间，不保留标量值或其摘要。事件先进入 host 内部 256 条有界
+ledger，再 best-effort 投递 `FutureOr<void> Function(PatchbayAuditEvent)` sink；sink 失败不改写已经发生
+的命令事实，可交给 `onAuditSinkError(error, stackTrace, event)` 观测，默认静默隔离。
+
+CLI `describe <service-command>` 只读活体 catalog、不 invoke，输出
+`{command: <catalog row>, schemaMode, retryEligibility}`；`retryEligibility` 是封闭值
+`eligible | notDeclared | notExternal`。
+
 ## 验证
 
 - registry 单测证明目录、dispatcher、CLI/help/docs 来自同一注册单元；并断言生成面只包含协议自有
@@ -158,6 +184,13 @@ host 按 `providerProtocolViolation` 拒绝，`details.reason` 用既有封闭�
   4. **负向**：人为多加一个 covers 条目时，复刻 reader 必须得 `unsupported`——这条把“为什么不扩
      covers”变成会红的闸，而不是一句注释。
 - VM/direct 对同一请求返回相同 schemaMode、稳定 code、requestId 和执行证据。
+- retry policy 的范围、额外字段和非 external 声明逐项 fail-closed；CLI 只在可重试 transport failure
+  复用同一 requestId，协议错误、provider 拒绝和非可用性 transport 错误均只调用一次。
+- host 覆盖同参数 in-flight 共享与 settled 重放、异参 `requestIdConflict`、无 policy
+  `duplicateRequestId` 和 256 条资源上限；纯重放不重复写 provider execution 审计事实。
+- audit 参数形状对对象键与数组 item type 排序确定、标量值不可见、未知运行时类型稳定为
+  `unsupported`；sink 与 error observer 抛错均不能改写命令结果。
+- CLI `describe` 覆盖三种 retryEligibility、逐命令 schemaMode，并断言只读 catalog、零 invoke。
 - 两个接入方各验证 `notSent/unchanged/sentUnconfirmed/deviceConfirmed`，至少一个覆盖 DP 同值写入。
 
 ## 已裁决补充

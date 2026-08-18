@@ -8,6 +8,31 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
 void main() {
+  test('Flutter host forwards redacted audit configuration', () async {
+    final List<PatchbayAuditEvent> delivered = <PatchbayAuditEvent>[];
+    final PatchbayFlutterServiceHost host = PatchbayFlutterServiceHost(
+      applicationId: 'dev.patchbay.flutter.audit-test',
+      bridge: _allowedBridge(PatchbayUiRegistry()),
+      domainCatalog: () async => <String, Object?>{
+        'commands': <Object?>[
+          <String, Object?>{'name': 'device.status'},
+        ],
+      },
+      domainInvoke: (_, _, requestId) async =>
+          PatchbayInvocation.accepted(requestId: requestId).toJson(),
+      auditSink: delivered.add,
+    );
+
+    await host.dispatchInvoke('device.status', const <String, Object?>{
+      'token': 'do-not-log',
+    }, 'flutter-audit');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(delivered, hasLength(1));
+    expect(host.auditEvents, delivered);
+    expect(delivered.single.toJson().toString(), isNot(contains('do-not-log')));
+  });
+
   test('service catalog declares UI command fact sources', () async {
     final Map<String, ServiceExtensionHandler> handlers =
         <String, ServiceExtensionHandler>{};

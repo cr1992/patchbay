@@ -64,6 +64,33 @@ dart run bin/patchbay.dart --json snapshot
 dart run bin/patchbay.dart --json exec <namespace.command>
 ```
 
+To make startup and recovery one bounded operation, launch an integrated consumer through the CLI:
+
+```text
+dart run bin/patchbay.dart launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+dart run bin/patchbay.dart --keep-awake launch -- flutter run ...
+PATCHBAY_KEEP_AWAKE=true dart run bin/patchbay.dart launch -- flutter run ...
+dart run bin/patchbay.dart --no-keep-awake launch -- flutter run ...
+```
+
+The child reads `PATCHBAY_SESSION_DIR`, `PATCHBAY_LAUNCH_ID`, and
+`PATCHBAY_LAUNCH_OWNER_PID` with `PatchbayLaunchContext.tryFromEnvironment`, then writes the full
+pending record using `pendingRecord` and adds its transport with `withTransport`. The launcher does
+not invent application/device metadata: the child must pass the real consumer/App `processId`,
+which is distinct from the launcher `ownerPid`. It also does not parse a private stdout frame. It supervises only a record
+whose launch ID and owner PID both match; a child that does not declare one fails in bounded time as
+`sessionNotDeclared`. Machine frames stay on stdout and child/human output is forwarded to stderr.
+Stable live sessions are observed every five seconds; a disconnect restarts recovery at the initial
+200 ms backoff, and each identity probe is bounded by both child exit and the remaining budget.
+
+The screen-awake policy is off by default. Global `--keep-awake`, or a local
+`PATCHBAY_KEEP_AWAKE=true/on/1`, acquires the existing ten-minute lease only after the launcher is
+`live` and renews it at half-lease through the existing health observation. `--no-keep-awake`
+overrides that local default. Successful one-shot / REPL commands may renew under the same policy,
+while explicit `ui keep-awake on|off|status` commands never trigger a second implicit operation.
+Terminal paths and signal cancellation attempt release; on disconnect the machine frame / JSON says
+`releaseUnconfirmed` or `renewalUnconfirmed`, with App-side lease expiry remaining the final fallback.
+
 When any of the steps above does not work, run the health check first — it dials out itself, so a
 failed connection is one of its findings rather than the end of the command:
 
@@ -93,6 +120,9 @@ dart run bin/patchbay.dart --session <session-id> --json identity
 dart run bin/patchbay.dart --ws-uri <uri> --json identity
 dart run bin/patchbay.dart --ws-uri <uri> --json catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json snapshot
+
+# Compare the current full snapshot with a retained host-observed revision.
+dart run bin/patchbay.dart --ws-uri <uri> --json snapshot diff --from 7
 dart run bin/patchbay.dart --ws-uri <uri> --json exec <namespace.command>
 dart run bin/patchbay.dart --ws-uri <uri> --json --args '{"value":42}' exec <namespace.command>
 dart run bin/patchbay.dart --ws-uri <uri> --json --wait exec <namespace.command>
@@ -108,6 +138,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui verify-manifest ./ui-targets
 dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
+dart run bin/patchbay.dart --ws-uri <uri> --json perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json --duration-ms 5000 --sample-limit 2000 perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json net profile
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation current
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation go settings
@@ -124,7 +157,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --limit 100 logs query
 dart run bin/patchbay.dart --ws-uri <uri> --json --cursor <cursor> --timeout-ms 5000 logs tail
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./logs.ndjson logs export
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./screen.png capture root
+dart run bin/patchbay.dart --ws-uri <uri> --json --after-frames 12 --output ./frame-12.png capture root
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./target.png capture target <target-id> <generation>
+dart run bin/patchbay.dart --ws-uri <uri> --json capture diff <before-blob-id> <after-blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json blob metadata <blob-id>
 dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob get <blob-id>
 ```
@@ -145,6 +180,27 @@ The `ui wait <subcommand>` names deliberately differ from the `condition` in the
 can be typed directly, and the mapping table is in `patchbay help ui wait`; neither set of names
 will change, because they are wire contracts.
 
+### Bounded VM Performance Profile
+
+`perf profile` samples the connected VM Service for 10 seconds by default and emits only the
+stable `patchbay.performanceProfile.v1` summary: build/raster frame durations and 16 ms jank counts,
+two heap observations, and new/old-generation GC counts. `--duration-ms` is limited to 1..60000 and
+`--sample-limit` to 1..10000. At most 10000 events and 8 MiB of processed event data contribute to
+one result; either limit sets `sampling.truncated=true` and reports the dropped count. Timeline
+events are reduced as public VM stream batches arrive, and the subscription is cancelled at the
+first limit; raw events are never retained or copied into Patchbay output, logs, or artifacts. The command temporarily enables
+the public VM timeline streams it needs and restores the previous stream set on success or failure.
+
+This is a VM observation (`factSource=uiObserved`), not an App catalog command. Direct HTTP returns
+the stable `profilingVmServiceRequired` code rather than fabricating equivalent facts. Older VMs
+that do not expose the required public RPCs/streams return `performanceProfilingUnavailable`.
+
+`net profile` currently returns `networkProfilingUnavailable` without collecting anything. In the
+reviewed `vm_service 15.2.0` API, the public HTTP profile response already contains bodies, headers,
+cookies, and query values before the caller can filter it. Collecting that response and redacting
+afterwards would violate Patchbay's collection-time privacy boundary, so no network capability is
+published until a public pre-filtered RPC or an injected privacy-safe collector exists.
+
 `ui tap <identifier>` is a one-step replacement for `ui semantics tree` + `ui semantics action`:
 resolution, generation checking, and dispatch all happen in one pass on the app side, so the CLI
 neither constructs a nodeId nor supplies a default generation. `--generation` is optional; passing
@@ -155,10 +211,11 @@ expected/current), so an empty rejection never pushes the caller back to a whole
 
 ### UI Target Declaration Reconciliation
 
-`ui verify-manifest <file>` reads a JSON manifest maintained by the consumer and reconciles it
-against the catalog's `uiTargets`, reporting three classes of discrepancy: `declaredNotMounted`,
+`ui verify-manifest <file>` reads a JSON or YAML manifest maintained by the consumer and reconciles
+`catalogTarget` entries against the catalog's `uiTargets` and `semanticsIdentifier` entries against
+the existing live `ui.semantics.tree`, reporting three classes of discrepancy: `declaredNotMounted`,
 `mountedNotDeclared`, and `propertyMismatch`. The comparison happens entirely on the CLI side: it
-adds no wire command and uses only the catalog; when a `destination` appears in the manifest, it
+adds no wire command and uses only the existing catalog/tree surfaces; when a `destination` appears in the manifest, it
 additionally reads `navigation.current` once for scope filtering. For the schema, field semantics,
 `destination` filtering rules, and the "not mounted ≠ missing" boundary, see the
 [usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#ui-目标声明对账ui-verify-manifest) (currently in Chinese); the
@@ -168,9 +225,33 @@ example file is at
 Full agreement exits `0`; any class of discrepancy in the report exits `7` — the app side answered
 everything normally, so it is neither a rejection (`5`) nor a typed failure (`6`). An unreadable or
 invalid manifest fails closed with exit code `64`, and `--json` gives `manifestInvalid` /
-`manifestUnreadable` plus a `details.field` pointing at the exact location. Human-readable output
+`manifestUnreadable` plus a `details.field` pointing at the exact location. Input format is selected
+only by a lowercase `.json`, `.yaml`, or `.yml` extension; unknown extensions are not sniffed. YAML
+uses safe parsing without recovery, aliases, or explicit tags, and both formats share the 1 MiB,
+64-level, and 200,000-node parser budgets (mapping keys included). Syntax errors include one-based `line` / `column` without
+echoing file content. Human-readable output
 lists the discrepancy entries directly; inside `repl` each line takes only one line and reports
 counts.
+
+`--navigate` is the explicit side-effecting walkthrough mode. It visits v2 destinations in manifest
+order, asks only for destination ids declared by `navigation.catalog`, confirms each arrival with the
+closed `ui.wait navigationDestination` condition, and then runs the same reconciliation. Per-screen
+and total budgets default to 5 s and 120 s (`--screen-timeout-ms`, max 120 s;
+`--total-timeout-ms`, max 10 min). It stops after the first failure unless
+`--continue-on-error` is present. `--restore` makes a bounded best-effort return to the initial
+destination; a restore failure is a machine-readable notice and never replaces the walkthrough exit
+code. The JSON report preserves `visited`, `passed`, `failed`, `skipped`, per-screen `reasonCode`, and
+`finalDestination`. Hosts without the complete declared navigation surface retain current-screen
+verification and report `navigationMode: unavailable`; the CLI never probes support by interpreting
+an error shape.
+
+Manifest v2 keeps the namespaces independent: `kind` / `sensitive` are valid only for
+`catalogTarget`, while `semanticsIdentifier` stores only its stable identifier. A unique live match
+reports the observed `nodeId`, `generation`, and tree revision; no match is `declaredNotMounted`, and
+multiple matches fail closed as `uiSemanticsIdentifierAmbiguous`. Missing capability, truncated tree,
+and malformed tree payloads have distinct stable protocol codes. `ui targets --emit-manifest`
+includes unique live identifiers when the App declares the tree capability, but refuses ambiguous or
+cross-namespace IDs instead of inventing a representative.
 
 ### repl Sessions
 
@@ -222,6 +303,13 @@ which command name was invalid), and a missing command still preserves the app's
 number of commands. The full command name remains the protocol identity, and arbitrary consumer
 commands continue to use `exec <namespace.command>`.
 
+`describe <namespace.command>` reads that catalog only; it never invokes the command. Its JSON
+answer contains the complete command row, `schemaMode`, and the closed `retryEligibility` value
+`eligible`, `notDeclared`, or `notExternal`. When an external row declares a valid `retryPolicy`,
+the CLI retries only transport-unavailable/timeout failures, reusing one `requestId` for every
+attempt. App rejections, protocol failures, and any provider response are final and are never
+retried.
+
 Every RPC round trip has a budget, 30 seconds by default, adjustable with
 `--transport-timeout-ms` and applying to both transports; on exhaustion it fails with exit code `3`
 and the stable code `appUnresponsive` plus a remediation hint. `--timeout-ms` is the business wait
@@ -229,8 +317,12 @@ budget sent to the app, and a request that declares it widens this RPC's budget 
 wait plus one round trip" so it is not cut short by the default.
 
 Log filtering supports `--cursor`, `--direction`, `--limit`, comma-separated `--levels`/
-`--categories`, and ISO-8601 `--since`/`--until`. Capture supports `--pixel-ratio` and
-`--timeout-ms`. Every artifact download first writes a temp file in the same directory and
+`--categories`, and ISO-8601 `--since`/`--until`. Capture supports `--pixel-ratio`,
+`--after-frames` (1..120 Patchbay-observed Flutter frames), and `--timeout-ms`. If the host does
+not declare `captureAfterFrames`, the CLI omits that field and labels the response
+`captureMode=legacyImmediate`; it never guesses support from an error. `capture diff` compares two
+retained capture blob IDs of the same size and pixel format and returns counts plus a ratio, not a
+pass/fail verdict. Every artifact download first writes a temp file in the same directory and
 validates blob metadata, offsets, base64, total length, and SHA-256 chunk by chunk, renaming only
 after everything passes; an existing output is refused by default and replaced only with an
 explicit `--force`. Expiry, rejection, out-of-order chunks, hash errors, and interruptions never
@@ -244,21 +336,20 @@ leave a partial file under the final output name.
 - never write it into scripts, logs, snapshots, or anything you commit;
 - CLI errors report only the error category, never echoing the full URI.
 
-The launcher first writes a provisional record via atomic replace, then fills in the URI once it
-receives `app.debugPort`; only after the CLI connects and reads `ext.patchbay.identity` are
+The participating child first writes a provisional record via atomic replace, then fills in the URI
+once its own toolchain discovers it; only after the launcher connects and reads `ext.patchbay.identity` are
 `appInstanceId` and `isolateId` filled in. A complete record binds the session schema,
 `applicationId`, `appInstanceId`, `isolateId`, launcher PID, `wsUri`, build mode, creation time,
 worktree, and device ID. Records live in the current user's system temp directory by default, and
-`PATCHBAY_SESSION_DIR` can override that. The launcher still echoes `app.log`, `app.progress`, and
-stderr in human-readable form, but uniformly replaces any http/ws URI within them; `app.debugPort`
-only prints "session discovered" and never echoes the machine event payload.
+`PATCHBAY_SESSION_DIR` can override that. `patchbay launch` forwards child stdout/stderr as human
+output on stderr; stdout remains a stream of stable launcher machine frames.
 
 A live PID only means the launcher may still be running — it does not prove the app instance is
-still the same one. Any of the following deletes the record and returns a stable session error: a
-dead PID, an unreachable URI, or a schema/identity mismatch. When a hot restart produces
-`app.debugPort` again, the launcher atomically resets the identity it had filled in and the CLI
-must re-measure it; an explicit `--ws-uri` runs the same schema/isolate/appInstance identity check.
-The launcher deletes the records it owns on exit. On POSIX the directory and files are tightened to
+still the same one. A dead PID or schema/identity mismatch invalidates the record; a temporarily
+unreachable endpoint remains available for bounded recovery. On hot restart the launcher observes
+the changed App instance and re-pins the record before reuse. An explicit `--ws-uri` runs the same
+schema/isolate/appInstance identity check. The launcher deletes only pending records it owns on
+exit. On POSIX the directory and files are tightened to
 `0700` and `0600` respectively, and ordinary output, errors, and selection lists never contain a
 URI or token.
 

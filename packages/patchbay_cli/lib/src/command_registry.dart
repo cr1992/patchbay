@@ -27,6 +27,9 @@ enum PatchbayCommandTarget {
   /// `PatchbayClient.catalog` — the capability listing itself.
   clientCatalog,
 
+  /// A local projection of one live catalog row; invokes no App command.
+  localCatalogDescription,
+
   /// `PatchbayClient.snapshot` — the transport-level state read.
   clientSnapshot,
 
@@ -39,6 +42,12 @@ enum PatchbayCommandTarget {
   /// `PatchbayClient.focusTree` — Flutter SDK diagnostic passthrough.
   clientFocusTree,
 
+  /// Public VM Service timeline and memory RPCs reduced to a stable summary.
+  clientPerformanceProfile,
+
+  /// A stable refusal until a collection-before-redaction network RPC exists.
+  clientNetworkProfile,
+
   /// A verdict computed on this side of the wire from a catalog reading.
   ///
   /// The App is asked only for facts it already publishes — the UI target
@@ -46,6 +55,10 @@ enum PatchbayCommandTarget {
   /// The comparison and the exit code are the CLI's, which is what lets this
   /// command exist without a single new wire command.
   localManifestVerification,
+
+  /// A manifest draft computed on this side of the wire from live catalog
+  /// facts and the currently settled destination.
+  localManifestEmission,
 
   /// A reusable session: connect once, then run many of the targets above.
   ///
@@ -62,6 +75,9 @@ enum PatchbayCommandTarget {
   /// CLI cannot pick a session on its own.
   localSessionStore,
 
+  /// Starts and supervises one consumer child and its declared session.
+  localLauncher,
+
   /// A diagnosis that owns its own connection attempt.
   ///
   /// Every other target is dispatched *after* a successful dial, which is
@@ -72,6 +88,9 @@ enum PatchbayCommandTarget {
 
   /// An explicitly installed external JSON Lines permission driver.
   localPermissionDriver,
+
+  /// The local append-only trace store, read and written without dialling.
+  localTraceStore,
 }
 
 /// Mechanical mapping between CLI-friendly paths and stable protocol names.
@@ -81,6 +100,13 @@ enum PatchbayCommandTarget {
 /// catalog and the invoke response remains authoritative. This table is
 /// syntax, not a capability inventory.
 enum PatchbayFriendlyCommand {
+  launch(
+    null,
+    <String>['launch'],
+    summary: 'Supervise a consumer command and its declared Patchbay session.',
+    usageSuffix: '-- <consumer command>',
+    target: PatchbayCommandTarget.localLauncher,
+  ),
   identity(
     null,
     <String>['identity'],
@@ -92,6 +118,13 @@ enum PatchbayFriendlyCommand {
     <String>['catalog'],
     summary: 'List the commands and UI targets the App registers.',
     target: PatchbayCommandTarget.clientCatalog,
+  ),
+  describe(
+    null,
+    <String>['describe'],
+    summary: 'Describe one live service command and its retry eligibility.',
+    usageSuffix: '<service-command>',
+    target: PatchbayCommandTarget.localCatalogDescription,
   ),
   snapshot(
     null,
@@ -105,6 +138,13 @@ enum PatchbayFriendlyCommand {
     <String>['snapshot', 'wait'],
     summary: 'Wait App-side for a condition on one snapshot field.',
     usageSuffix: '<dot.path> --until <condition> [<json-value>]',
+    target: PatchbayCommandTarget.clientSnapshot,
+  ),
+  snapshotDiff(
+    null,
+    <String>['snapshot', 'diff'],
+    summary: 'Compare the current snapshot with a retained revision.',
+    usageSuffix: '--from <revision>',
     target: PatchbayCommandTarget.clientSnapshot,
   ),
   exec(
@@ -127,6 +167,12 @@ enum PatchbayFriendlyCommand {
         'Check session, connection, catalog and App lifecycle in one pass.',
     target: PatchbayCommandTarget.localDiagnostics,
   ),
+  permissionDoctor(
+    null,
+    <String>['doctor', 'permission'],
+    summary: 'Check the selected external permission driver and capabilities.',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
   permissionCapabilities(
     null,
     <String>['permission', 'capabilities'],
@@ -145,6 +191,13 @@ enum PatchbayFriendlyCommand {
     <String>['permission', 'normalize'],
     summary: 'Normalize one permission for an active debug/test session.',
     usageSuffix: '<permission> --state <state>',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
+  permissionReset(
+    null,
+    <String>['permission', 'reset'],
+    summary: 'Reset one permission for an active debug/test session.',
+    usageSuffix: '<permission>',
     target: PatchbayCommandTarget.localPermissionDriver,
   ),
   permissionExercise(
@@ -179,6 +232,55 @@ enum PatchbayFriendlyCommand {
     summary: 'Pin one session for commands that pass no --session.',
     usageSuffix: '<session-id> | --clear',
     target: PatchbayCommandTarget.localSessionStore,
+  ),
+  traceStart(
+    null,
+    <String>['trace', 'start'],
+    summary: 'Create a local append-only debug trace.',
+    usageSuffix: '--name <name> [--activate] [--pin]',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceMark(
+    null,
+    <String>['trace', 'mark'],
+    summary: 'Append an operator note to an active or explicit trace.',
+    usageSuffix: '<note>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceStop(
+    null,
+    <String>['trace', 'stop'],
+    summary: 'Finish an active or explicitly named trace.',
+    usageSuffix: '[trace-id]',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceShow(
+    null,
+    <String>['trace', 'show'],
+    summary: 'Read a trace timeline, including crash recovery facts.',
+    usageSuffix: '<trace-id>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceExport(
+    null,
+    <String>['trace', 'export'],
+    summary: 'Export a re-redacted portable trace directory.',
+    usageSuffix: '<trace-id> --output <directory>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceDiff(
+    null,
+    <String>['trace', 'diff'],
+    summary: 'Compare two traces by command identity and occurrence.',
+    usageSuffix: '<before-trace-id> <after-trace-id>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  tracePrune(
+    null,
+    <String>['trace', 'prune'],
+    summary: 'Remove ended, unpinned traces beyond the retention age.',
+    usageSuffix: '[--dry-run]',
+    target: PatchbayCommandTarget.localTraceStore,
   ),
   jobGet(
     'patchbay.job.get',
@@ -314,8 +416,16 @@ enum PatchbayFriendlyCommand {
     null,
     <String>['ui', 'verify-manifest'],
     summary: 'Reconcile a declared UI target manifest against the runtime.',
-    usageSuffix: '<manifest-file>',
+    usageSuffix:
+        '<manifest-file> [--navigate] [--continue-on-error] [--restore]',
     target: PatchbayCommandTarget.localManifestVerification,
+  ),
+  uiTargets(
+    null,
+    <String>['ui', 'targets'],
+    summary: 'Emit an editable manifest draft from mounted catalog targets.',
+    usageSuffix: '--emit-manifest',
+    target: PatchbayCommandTarget.localManifestEmission,
   ),
   // `on` and `off` are two spellings of one protocol command, exactly as
   // `ui wait <condition>` is six spellings of `ui.wait`: the boolean is the
@@ -356,6 +466,19 @@ enum PatchbayFriendlyCommand {
     summary: 'Read the Flutter focus tree diagnostic (SDK passthrough).',
     target: PatchbayCommandTarget.clientFocusTree,
   ),
+  performanceProfile(
+    null,
+    <String>['perf', 'profile'],
+    summary: 'Collect one bounded VM Service performance summary.',
+    usageSuffix: '[--duration-ms <ms>] [--sample-limit <events>]',
+    target: PatchbayCommandTarget.clientPerformanceProfile,
+  ),
+  networkProfile(
+    null,
+    <String>['net', 'profile'],
+    summary: 'Report whether privacy-safe network profiling is available.',
+    target: PatchbayCommandTarget.clientNetworkProfile,
+  ),
   logsQuery('logs.query', <String>[
     'logs',
     'query',
@@ -384,6 +507,12 @@ enum PatchbayFriendlyCommand {
     summary: 'Capture a registered Flutter UI target.',
     usageSuffix: '<target-id> <generation> --output <path>',
     artifact: PatchbayArtifactDisposition.payloadBlob,
+  ),
+  captureDiff(
+    'ui.capture.diff',
+    <String>['capture', 'diff'],
+    summary: 'Compare two Flutter capture artifacts pixel by pixel.',
+    usageSuffix: '<before-blob-id> <after-blob-id>',
   ),
   blobGet(
     'blob.metadata',
@@ -524,14 +653,61 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiWidgetTree ||
       PatchbayFriendlyCommand.uiRenderTree ||
       PatchbayFriendlyCommand.uiFocusTree ||
+      PatchbayFriendlyCommand.networkProfile ||
       PatchbayFriendlyCommand.repl ||
       PatchbayFriendlyCommand.doctor ||
       PatchbayFriendlyCommand.sessionsList ||
       PatchbayFriendlyCommand.sessionsPrune ||
-      PatchbayFriendlyCommand.permissionCapabilities => _noTail(
+      PatchbayFriendlyCommand.permissionCapabilities ||
+      PatchbayFriendlyCommand.tracePrune => _noTail(tail, <String, Object?>{
+        if (spec == PatchbayFriendlyCommand.tracePrune)
+          'dryRun': options.flag('dry-run'),
+      }),
+      PatchbayFriendlyCommand.permissionDoctor => _noTail(
         tail,
         const <String, Object?>{},
       ),
+      PatchbayFriendlyCommand.traceStart => _noTail(tail, <String, Object?>{
+        'name': options.option('name'),
+        'activate': options.flag('activate'),
+        'pinned': options.flag('pin'),
+      }),
+      PatchbayFriendlyCommand.traceMark => _atLeastOneTail(
+        tail,
+        (List<String> words) => <String, Object?>{'note': words.join(' ')},
+      ),
+      PatchbayFriendlyCommand.traceStop => _zeroOrOneTail(
+        tail,
+        (String? traceId) => <String, Object?>{'traceId': traceId},
+      ),
+      PatchbayFriendlyCommand.traceShow ||
+      PatchbayFriendlyCommand.traceExport => _oneTail(
+        tail,
+        (String traceId) => <String, Object?>{
+          'traceId': traceId,
+          if (spec == PatchbayFriendlyCommand.traceExport)
+            'includeArtifacts': options.flag('include-artifacts'),
+        },
+      ),
+      PatchbayFriendlyCommand.traceDiff => _twoTail(
+        tail,
+        (String before, String after) => <String, Object?>{
+          'before': before,
+          'after': after,
+        },
+      ),
+      PatchbayFriendlyCommand.describe => _oneTail(
+        tail,
+        (String command) => <String, Object?>{'command': command},
+      ),
+      PatchbayFriendlyCommand.launch => <String, Object?>{
+        'command': _launchCommand(tail),
+      },
+      PatchbayFriendlyCommand.performanceProfile =>
+        _noTail(tail, <String, Object?>{
+          'durationMs': _positiveInt(options, 'duration-ms', fallback: 10000),
+          'sampleLimit': _positiveInt(options, 'sample-limit', fallback: 10000),
+        }),
       // An omitted `--path` produces no arguments at all, which is what makes
       // the whole-snapshot read stay exactly the request it always was.
       PatchbayFriendlyCommand.snapshot => _noTail(tail, <String, Object?>{
@@ -541,8 +717,16 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         options,
       ),
+      PatchbayFriendlyCommand.snapshotDiff => _noTail(tail, <String, Object?>{
+        'fromRevision':
+            _optionalPositiveInt(options, 'from') ??
+            (throw const FormatException(
+              'snapshot diff requires --from <revision>',
+            )),
+      }),
       PatchbayFriendlyCommand.sessionUse => _sessionUseArguments(tail, options),
-      PatchbayFriendlyCommand.permissionStatus => _oneTail(
+      PatchbayFriendlyCommand.permissionStatus ||
+      PatchbayFriendlyCommand.permissionReset => _oneTail(
         tail,
         (String permission) => <String, Object?>{'permission': permission},
       ),
@@ -583,6 +767,14 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiVerifyManifest => _oneTail(
         tail,
         (String _) => const <String, Object?>{},
+      ),
+      PatchbayFriendlyCommand.uiTargets => _noTail(
+        tail,
+        options.flag('emit-manifest')
+            ? const <String, Object?>{}
+            : throw const FormatException(
+                '--emit-manifest is required for ui targets',
+              ),
       ),
       // `ttlMs` travels only with the enable: it is the lease on a switch that
       // is on, so sending it alongside `enabled: false` is a request the App
@@ -703,16 +895,25 @@ abstract final class PatchbayFriendlyCommandRegistry {
           ..._captureArguments(options),
         },
       ),
+      PatchbayFriendlyCommand.captureDiff => _twoTail(
+        tail,
+        (String beforeBlobId, String afterBlobId) => <String, Object?>{
+          'beforeBlobId': beforeBlobId,
+          'afterBlobId': afterBlobId,
+        },
+      ),
       PatchbayFriendlyCommand.blobGet || PatchbayFriendlyCommand.blobMetadata =>
         _oneTail(tail, (String blobId) => <String, Object?>{'blobId': blobId}),
     };
     final bool writesArtifact =
         spec.artifact != PatchbayArtifactDisposition.none;
+    final bool writesTraceExport = spec == PatchbayFriendlyCommand.traceExport;
     final String? outputPath = options.option('output');
-    if (writesArtifact && (outputPath == null || outputPath.isEmpty)) {
+    if ((writesArtifact || writesTraceExport) &&
+        (outputPath == null || outputPath.isEmpty)) {
       throw const FormatException('--output is required for this command');
     }
-    if (!writesArtifact && outputPath != null) {
+    if (!writesArtifact && !writesTraceExport && outputPath != null) {
       throw const FormatException('--output is not valid for this command');
     }
     return PatchbayFriendlyInvocation(
@@ -857,6 +1058,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'ttl-ms',
       'lease-ms',
       'pixel-ratio',
+      'after-frames',
       'output',
       'force',
       'clear',
@@ -866,6 +1068,19 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'state',
       'decision',
       'confirm-system-permission',
+      'emit-manifest',
+      'navigate',
+      'continue-on-error',
+      'restore',
+      'screen-timeout-ms',
+      'total-timeout-ms',
+      'name',
+      'activate',
+      'pin',
+      'dry-run',
+      'include-artifacts',
+      'duration-ms',
+      'sample-limit',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -876,6 +1091,17 @@ abstract final class PatchbayFriendlyCommandRegistry {
     }
     if (options.flag('force') && options.option('output') == null) {
       throw const FormatException('--force requires --output');
+    }
+    if (spec == PatchbayFriendlyCommand.uiVerifyManifest &&
+        !options.flag('navigate') &&
+        (options.flag('continue-on-error') ||
+            options.flag('restore') ||
+            options.wasParsed('screen-timeout-ms') ||
+            options.wasParsed('total-timeout-ms'))) {
+      throw const FormatException(
+        '--continue-on-error, --restore and walkthrough timeouts require '
+        '--navigate',
+      );
     }
   }
 
@@ -893,19 +1119,19 @@ abstract final class PatchbayFriendlyCommandRegistry {
   ) => switch (spec) {
     PatchbayFriendlyCommand.identity ||
     PatchbayFriendlyCommand.catalog ||
+    PatchbayFriendlyCommand.describe ||
     PatchbayFriendlyCommand.jobGet ||
     PatchbayFriendlyCommand.jobCancel ||
     PatchbayFriendlyCommand.uiWidgetTree ||
     PatchbayFriendlyCommand.uiRenderTree ||
     PatchbayFriendlyCommand.uiFocusTree ||
+    PatchbayFriendlyCommand.networkProfile ||
     PatchbayFriendlyCommand.navigationCatalog ||
     PatchbayFriendlyCommand.navigationCurrent ||
+    PatchbayFriendlyCommand.captureDiff ||
     PatchbayFriendlyCommand.uiInspectOff ||
     PatchbayFriendlyCommand.uiInspectStatus ||
     PatchbayFriendlyCommand.blobMetadata ||
-    // Nothing about the comparison is tunable: the manifest is the whole
-    // request, and the current destination comes from the App, not a flag.
-    PatchbayFriendlyCommand.uiVerifyManifest ||
     // A repl carries connection options and `--json`, which are global rather
     // than per-command; every command option belongs on the lines it runs.
     PatchbayFriendlyCommand.repl ||
@@ -919,8 +1145,18 @@ abstract final class PatchbayFriendlyCommandRegistry {
     // A release takes no lease, and a read takes nothing at all.
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
+    PatchbayFriendlyCommand.uiVerifyManifest => const <String>{
+      'navigate',
+      'continue-on-error',
+      'restore',
+      'screen-timeout-ms',
+      'total-timeout-ms',
+    },
+    PatchbayFriendlyCommand.uiTargets => const <String>{'emit-manifest'},
     PatchbayFriendlyCommand.permissionCapabilities ||
-    PatchbayFriendlyCommand.permissionStatus => const <String>{
+    PatchbayFriendlyCommand.permissionStatus ||
+    PatchbayFriendlyCommand.permissionDoctor ||
+    PatchbayFriendlyCommand.permissionReset => const <String>{
       'permission-driver',
       'device-id',
       'application-id',
@@ -942,12 +1178,32 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'decision',
       'confirm-system-permission',
     },
+    PatchbayFriendlyCommand.traceStart => const <String>{
+      'name',
+      'activate',
+      'pin',
+    },
+    PatchbayFriendlyCommand.traceMark ||
+    PatchbayFriendlyCommand.traceStop ||
+    PatchbayFriendlyCommand.traceShow => const <String>{},
+    PatchbayFriendlyCommand.traceExport => const <String>{
+      'output',
+      'include-artifacts',
+    },
+    PatchbayFriendlyCommand.traceDiff => const <String>{},
+    PatchbayFriendlyCommand.tracePrune => const <String>{'dry-run'},
+    PatchbayFriendlyCommand.launch => const <String>{'keep-awake'},
+    PatchbayFriendlyCommand.performanceProfile => const <String>{
+      'duration-ms',
+      'sample-limit',
+    },
     PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
     PatchbayFriendlyCommand.snapshot => const <String>{'path'},
     PatchbayFriendlyCommand.snapshotWait => const <String>{
       'until',
       'timeout-ms',
     },
+    PatchbayFriendlyCommand.snapshotDiff => const <String>{'from'},
     PatchbayFriendlyCommand.sessionUse => const <String>{'clear'},
     PatchbayFriendlyCommand.exec ||
     PatchbayFriendlyCommand.uiSemanticsTree => const <String>{'args', 'stdin'},
@@ -1002,6 +1258,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.captureRoot ||
     PatchbayFriendlyCommand.captureTarget => const <String>{
       'pixel-ratio',
+      'after-frames',
       'timeout-ms',
       'output',
       'force',
@@ -1161,6 +1418,13 @@ abstract final class PatchbayFriendlyCommandRegistry {
     };
   }
 
+  static List<String> _launchCommand(List<String> tail) {
+    if (tail.isEmpty) {
+      throw const FormatException('launch requires -- <consumer command>');
+    }
+    return List<String>.unmodifiable(tail);
+  }
+
   /// One JSON literal from the command line, refused rather than guessed at.
   ///
   /// The error names the fix because the failing case is always the same one:
@@ -1231,6 +1495,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
         if (_optionalNumber(options, 'pixel-ratio') case final num ratio)
           'pixelRatio': ratio,
         'timeoutMs': _positiveInt(options, 'timeout-ms', fallback: 5000),
+        if (_optionalPositiveInt(options, 'after-frames') case final int frames)
+          'afterFrames': frames,
       };
 
   static Map<String, Object?> _waitArguments(
@@ -1275,6 +1541,26 @@ abstract final class PatchbayFriendlyCommandRegistry {
       throw const FormatException('command requires two positional arguments');
     }
     return build(tail[0], tail[1]);
+  }
+
+  static Map<String, Object?> _zeroOrOneTail(
+    List<String> tail,
+    Map<String, Object?> Function(String?) build,
+  ) {
+    if (tail.length > 1) {
+      throw const FormatException('command accepts at most one argument');
+    }
+    return build(tail.isEmpty ? null : tail.single);
+  }
+
+  static Map<String, Object?> _atLeastOneTail(
+    List<String> tail,
+    Map<String, Object?> Function(List<String>) build,
+  ) {
+    if (tail.isEmpty) {
+      throw const FormatException('command requires an argument');
+    }
+    return build(tail);
   }
 
   static int? _optionalInt(ArgResults options, String name) {

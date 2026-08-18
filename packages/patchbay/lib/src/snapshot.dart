@@ -81,6 +81,33 @@ const Duration patchbaySnapshotWaitCeiling = Duration(minutes: 2);
 /// operator is usually debugging over a cable.
 const Duration patchbaySnapshotPollInterval = Duration(milliseconds: 100);
 
+/// Revisions retained per App instance for bounded snapshot diffing.
+const int patchbaySnapshotRevisionRetention = 32;
+
+/// Maximum number of path changes returned by one diff.
+const int patchbaySnapshotDiffMaxChanges = 500;
+
+/// Maximum encoded bytes returned by one diff.
+const int patchbaySnapshotDiffMaxEncodedBytes = 256 * 1024;
+
+/// A request for the changes since one host-observed snapshot revision.
+final class PatchbaySnapshotDiffRequest {
+  PatchbaySnapshotDiffRequest({required this.fromRevision}) {
+    if (fromRevision <= 0) {
+      throw const FormatException('fromRevision must be positive');
+    }
+  }
+
+  factory PatchbaySnapshotDiffRequest.fromWire(
+    PatchbaySnapshotDiffRequestWire wire,
+  ) => PatchbaySnapshotDiffRequest(fromRevision: wire.fromRevision);
+
+  final int fromRevision;
+
+  PatchbaySnapshotDiffRequestWire toWire() =>
+      PatchbaySnapshotDiffRequestWire(fromRevision: fromRevision);
+}
+
 /// Validated request for one snapshot field selection, optionally waited on.
 final class PatchbaySnapshotRequest {
   PatchbaySnapshotRequest({

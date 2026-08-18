@@ -6,6 +6,8 @@ import 'package:patchbay/patchbay.dart';
 import 'client.dart';
 
 const int patchbaySessionSchemaVersion = 1;
+const Duration patchbayPendingDefaultTtl = Duration(minutes: 5);
+const Duration patchbayPendingMaximumTtl = Duration(minutes: 30);
 
 /// What to do when more than one session is discoverable and none was named.
 const String patchbaySessionAmbiguousHint =
@@ -82,6 +84,11 @@ final class PatchbaySessionRecord {
     required this.createdAt,
     required this.workspacePath,
     required this.deviceId,
+    this.state,
+    this.ownerPid,
+    this.launchId,
+    this.observedAtMs,
+    this.expiresAtMs,
   });
 
   factory PatchbaySessionRecord.fromJson(Map<String, Object?> json) {
@@ -98,6 +105,11 @@ final class PatchbaySessionRecord {
     final createdAt = json['createdAt'];
     final workspacePath = json['workspacePath'];
     final deviceId = json['deviceId'];
+    final state = json['state'];
+    final ownerPid = json['ownerPid'];
+    final launchId = json['launchId'];
+    final observedAtMs = json['observedAtMs'];
+    final expiresAtMs = json['expiresAtMs'];
     if (sessionId is! String ||
         sessionId.isEmpty ||
         applicationId is! String ||
@@ -114,7 +126,16 @@ final class PatchbaySessionRecord {
         deviceId.isEmpty ||
         (appInstanceId != null && appInstanceId is! String) ||
         (isolateId != null && isolateId is! String) ||
-        (wsUri != null && wsUri is! String)) {
+        (wsUri != null && wsUri is! String) ||
+        (state != null &&
+            (state is! String ||
+                !PatchbaySessionStatus.values.any(
+                  (value) => value.name == state,
+                ))) ||
+        (ownerPid != null && (ownerPid is! int || ownerPid <= 0)) ||
+        (launchId != null && (launchId is! String || launchId.isEmpty)) ||
+        (observedAtMs != null && (observedAtMs is! int || observedAtMs < 0)) ||
+        (expiresAtMs != null && (expiresAtMs is! int || expiresAtMs < 0))) {
       throw const PatchbaySessionException('sessionRecordInvalid');
     }
     return PatchbaySessionRecord(
@@ -128,6 +149,13 @@ final class PatchbaySessionRecord {
       createdAt: DateTime.parse(createdAt).toUtc(),
       workspacePath: workspacePath,
       deviceId: deviceId,
+      state: state == null
+          ? null
+          : PatchbaySessionStatus.values.byName(state as String),
+      ownerPid: ownerPid as int?,
+      launchId: launchId as String?,
+      observedAtMs: observedAtMs as int?,
+      expiresAtMs: expiresAtMs as int?,
     );
   }
 
@@ -141,6 +169,11 @@ final class PatchbaySessionRecord {
   final DateTime createdAt;
   final String workspacePath;
   final String deviceId;
+  final PatchbaySessionStatus? state;
+  final int? ownerPid;
+  final String? launchId;
+  final int? observedAtMs;
+  final int? expiresAtMs;
 
   bool get isComplete =>
       appInstanceId != null && isolateId != null && wsUri != null;
@@ -172,19 +205,49 @@ final class PatchbaySessionRecord {
   String get choiceLabel =>
       '$sessionId app=$applicationId mode=$buildMode workspace=$workspaceName';
 
-  PatchbaySessionRecord completedWith(PatchbayRuntimeIdentity identity) =>
-      PatchbaySessionRecord(
-        sessionId: sessionId,
-        applicationId: identity.applicationId,
-        appInstanceId: identity.appInstanceId,
-        isolateId: identity.isolateId,
-        processId: processId,
-        wsUri: wsUri,
-        buildMode: buildMode,
-        createdAt: createdAt,
-        workspacePath: workspacePath,
-        deviceId: deviceId,
-      );
+  PatchbaySessionRecord completedWith(
+    PatchbayRuntimeIdentity identity, {
+    int? observedAtMs,
+  }) => PatchbaySessionRecord(
+    sessionId: sessionId,
+    applicationId: identity.applicationId,
+    appInstanceId: identity.appInstanceId,
+    isolateId: identity.isolateId,
+    processId: processId,
+    wsUri: wsUri,
+    buildMode: buildMode,
+    createdAt: createdAt,
+    workspacePath: workspacePath,
+    deviceId: deviceId,
+    state: PatchbaySessionStatus.live,
+    ownerPid: ownerPid,
+    launchId: launchId,
+    observedAtMs: observedAtMs ?? this.observedAtMs,
+    expiresAtMs: expiresAtMs,
+  );
+
+  /// Adds the child-discovered transport while keeping writer state pending.
+  /// The launcher changes it to live only after identity succeeds.
+  PatchbaySessionRecord withTransport(
+    String wsUri, {
+    required int observedAtMs,
+  }) => PatchbaySessionRecord(
+    sessionId: sessionId,
+    applicationId: applicationId,
+    appInstanceId: appInstanceId,
+    isolateId: isolateId,
+    processId: processId,
+    wsUri: wsUri,
+    buildMode: buildMode,
+    createdAt: createdAt,
+    workspacePath: workspacePath,
+    deviceId: deviceId,
+    state: state ?? PatchbaySessionStatus.pending,
+    ownerPid: ownerPid,
+    launchId: launchId,
+    observedAtMs: observedAtMs,
+    expiresAtMs: expiresAtMs,
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': patchbaySessionSchemaVersion,
@@ -198,7 +261,105 @@ final class PatchbaySessionRecord {
     'createdAt': createdAt.toUtc().toIso8601String(),
     'workspacePath': workspacePath,
     'deviceId': deviceId,
+    if (state != null) 'state': state!.name,
+    if (ownerPid != null) 'ownerPid': ownerPid,
+    if (launchId != null) 'launchId': launchId,
+    if (observedAtMs != null) 'observedAtMs': observedAtMs,
+    if (expiresAtMs != null) 'expiresAtMs': expiresAtMs,
   };
+}
+
+/// Additive child-declaration context injected by `patchbay launch`.
+final class PatchbayLaunchContext {
+  const PatchbayLaunchContext({
+    required this.sessionDirectory,
+    required this.launchId,
+    required this.ownerPid,
+  });
+
+  static const String sessionDirectoryKey = 'PATCHBAY_SESSION_DIR';
+  static const String launchIdKey = 'PATCHBAY_LAUNCH_ID';
+  static const String ownerPidKey = 'PATCHBAY_LAUNCH_OWNER_PID';
+
+  factory PatchbayLaunchContext.fromEnvironment(Map<String, String> values) {
+    final PatchbayLaunchContext? context = tryFromEnvironment(values);
+    if (context == null) {
+      throw const PatchbaySessionException('launchContextInvalid');
+    }
+    return context;
+  }
+
+  /// Returns no context when the consumer was not started by `patchbay launch`.
+  ///
+  /// A partially present declaration is invalid rather than silently treated
+  /// as standalone; that catches misspelled or stripped ownership variables.
+  static PatchbayLaunchContext? tryFromEnvironment(Map<String, String> values) {
+    final String? directory = values[sessionDirectoryKey];
+    final String? launchId = values[launchIdKey];
+    final String? rawOwnerPid = values[ownerPidKey];
+    if (directory == null && launchId == null && rawOwnerPid == null) {
+      return null;
+    }
+    final int? ownerPid = int.tryParse(rawOwnerPid ?? '');
+    if (directory == null ||
+        directory.isEmpty ||
+        launchId == null ||
+        launchId.isEmpty ||
+        ownerPid == null ||
+        ownerPid <= 0) {
+      throw const PatchbaySessionException('launchContextInvalid');
+    }
+    return PatchbayLaunchContext(
+      sessionDirectory: directory,
+      launchId: launchId,
+      ownerPid: ownerPid,
+    );
+  }
+
+  final String sessionDirectory;
+  final String launchId;
+  final int ownerPid;
+
+  PatchbaySessionStore get store => PatchbaySessionStore(sessionDirectory);
+
+  PatchbaySessionRecord pendingRecord({
+    required String sessionId,
+    required String applicationId,
+    required int processId,
+    required String buildMode,
+    required DateTime createdAt,
+    required String workspacePath,
+    required String deviceId,
+    Duration ttl = patchbayPendingDefaultTtl,
+  }) {
+    if (processId <= 0) {
+      throw const PatchbaySessionException('sessionRecordInvalid');
+    }
+    if (ttl <= Duration.zero || ttl > patchbayPendingMaximumTtl) {
+      throw const PatchbaySessionException('pendingTtlInvalid');
+    }
+    final int observed = createdAt.toUtc().millisecondsSinceEpoch;
+    return PatchbaySessionRecord(
+      sessionId: sessionId,
+      applicationId: applicationId,
+      appInstanceId: null,
+      isolateId: null,
+      processId: processId,
+      wsUri: null,
+      buildMode: buildMode,
+      createdAt: createdAt,
+      workspacePath: workspacePath,
+      deviceId: deviceId,
+      state: PatchbaySessionStatus.pending,
+      ownerPid: ownerPid,
+      launchId: launchId,
+      observedAtMs: observed,
+      expiresAtMs: observed + ttl.inMilliseconds,
+    );
+  }
+
+  bool owns(PatchbaySessionRecord record) =>
+      record.launchId == launchId && record.ownerPid == ownerPid;
 }
 
 final class PatchbaySessionStore {
@@ -337,6 +498,7 @@ final class PatchbaySessionStore {
 typedef PatchbayIdentityProbe =
     Future<PatchbayRuntimeIdentity> Function(Uri uri);
 typedef PatchbayPidProbe = bool Function(int processId);
+typedef PatchbaySessionClock = DateTime Function();
 
 final class PatchbayDiscoveredSession {
   const PatchbayDiscoveredSession({
@@ -419,13 +581,16 @@ final class PatchbaySessionResolver {
     PatchbaySessionStore? store,
     PatchbayIdentityProbe? identityProbe,
     PatchbayPidProbe? pidProbe,
+    PatchbaySessionClock? clock,
   }) : store = store ?? PatchbaySessionStore(),
        _identityProbe = identityProbe ?? _probeIdentity,
-       _pidProbe = pidProbe ?? _isProcessAlive;
+       _pidProbe = pidProbe ?? _isProcessAlive,
+       _clock = clock ?? DateTime.now;
 
   final PatchbaySessionStore store;
   final PatchbayIdentityProbe _identityProbe;
   final PatchbayPidProbe _pidProbe;
+  final PatchbaySessionClock _clock;
 
   /// The pinned session id, or `null` when nothing is pinned.
   String? get selection => store.readSelection();
@@ -507,6 +672,12 @@ final class PatchbaySessionResolver {
 
   PatchbaySessionStatus statusOf(PatchbaySessionRecord record) {
     if (!_pidProbe(record.processId)) return PatchbaySessionStatus.stale;
+    final int? expiresAtMs = record.expiresAtMs;
+    if (record.wsUri == null &&
+        expiresAtMs != null &&
+        expiresAtMs <= _clock().toUtc().millisecondsSinceEpoch) {
+      return PatchbaySessionStatus.stale;
+    }
     return record.wsUri == null
         ? PatchbaySessionStatus.pending
         : PatchbaySessionStatus.live;

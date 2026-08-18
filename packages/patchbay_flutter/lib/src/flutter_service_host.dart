@@ -15,10 +15,14 @@ final class PatchbayFlutterServiceHost {
     PatchbayInvocationSource? domainInvoke,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
   }) : _host = PatchbayServiceHost(
          applicationId: applicationId,
          appInstanceId: appInstanceId,
          registrar: registrar,
+         auditSink: auditSink,
+         onAuditSinkError: onAuditSinkError,
          registry: PatchbayCommandRegistry.combine(<PatchbayCommandRegistry>[
            _uiCommandRegistry(bridge),
            if (bridge.artifacts case final PatchbayArtifactService artifacts)
@@ -52,7 +56,10 @@ final class PatchbayFlutterServiceHost {
          // Dart host has no such gate and declares nothing, which is what lets
          // a client tell "this host does not report it" apart from "this App
          // reported unknown".
-         features: const <PatchbayFeature>{PatchbayFeature.lifecycleState},
+         features: <PatchbayFeature>{
+           PatchbayFeature.lifecycleState,
+           if (bridge.capture != null) PatchbayFeature.captureAfterFrames,
+         },
        );
 
   final PatchbayServiceHost _host;
@@ -62,6 +69,8 @@ final class PatchbayFlutterServiceHost {
   String get appInstanceId => _host.appInstanceId;
 
   int get schemaVersion => PatchbayServiceHost.schemaVersion;
+
+  List<PatchbayAuditEvent> get auditEvents => _host.auditEvents;
 
   Future<Map<String, Object?>> dispatchCatalog() => _host.dispatchCatalog();
 
@@ -248,6 +257,17 @@ final class PatchbayFlutterServiceHost {
         next(),
         PatchbayCaptureRequestWire.fromJson,
         (request, requestId) async => (await bridge.capture!.capture(
+          request,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.capture != null,
+      ),
+      _uiRegistration<PatchbayCaptureDiffRequestWire>(
+        next(),
+        PatchbayCaptureDiffRequestWire.fromJson,
+        (request, requestId) async => (await bridge.capture!.diff(
           request,
           requestId: requestId,
         )).toJson(),
@@ -721,6 +741,37 @@ final class PatchbayFlutterServiceHost {
             name: 'timeoutMs',
             type: PatchbayParameterType.integer,
             defaultValue: 5000,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'afterFrames',
+            type: PatchbayParameterType.integer,
+            defaultValue: 1,
+            summary:
+                'Observed Flutter frames after command admission before '
+                'capture; range 1..120.',
+          ),
+        ],
+      ),
+    if (captureEnabled)
+      PatchbayCommandDescriptor(
+        name: 'ui.capture.diff',
+        summary:
+            'Compare two bounded Flutter capture artifacts pixel by pixel.',
+        plane: PatchbayPlane.flutterUi,
+        mode: PatchbayCommandMode.readOnly,
+        sideEffect: PatchbaySideEffect.none,
+        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+        gates: captureGates,
+        parameters: const <PatchbayParameterDescriptor>[
+          PatchbayParameterDescriptor(
+            name: 'beforeBlobId',
+            type: PatchbayParameterType.string,
+            required: true,
+          ),
+          PatchbayParameterDescriptor(
+            name: 'afterBlobId',
+            type: PatchbayParameterType.string,
+            required: true,
           ),
         ],
       ),

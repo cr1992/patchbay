@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:test/test.dart';
@@ -25,10 +26,27 @@ import 'package:test/test.dart';
 import 'fixture/fake_client.dart';
 
 const String _legacyCorpus = 'test/golden/legacy_host_v0_2_0';
+const String _compatibilityCorpusRoot = 'test/golden';
 
 Map<String, Object?> _legacy(String name) =>
     jsonDecode(File('$_legacyCorpus/$name.json').readAsStringSync())
         as Map<String, Object?>;
+
+List<Directory> _versionedCorpora() =>
+    Directory(_compatibilityCorpusRoot)
+        .listSync()
+        .whereType<Directory>()
+        .where((directory) {
+          final String path = directory.path;
+          return path
+                  .split(Platform.pathSeparator)
+                  .last
+                  .startsWith('legacy_host_v') &&
+              File('$path/identity.json').existsSync() &&
+              File('$path/catalog.json').existsSync();
+        })
+        .toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
 
 /// 当前 host 真的吐出来的东西——不是手抄的一份「应该长这样」。
 PatchbayServiceHost _currentHost() => PatchbayServiceHost(
@@ -76,6 +94,60 @@ _readIdentityTheOldWay(Map<String, Object?> json) {
 /// 0.2.0 客户端每次 RPC 后的握手校验：`schemaVersion` 必须恰好是 1。
 bool _acceptedByOldSchemaCheck(Map<String, Object?> response) =>
     response['schemaVersion'] == 1;
+
+({String admission, Map<Object?, Object?> payload})? _readInvocationTheOldWay(
+  Map<String, Object?> response,
+) {
+  final Object? admission = response['admission'];
+  final Object? payload = response['payload'];
+  if (response['schemaVersion'] != 1 ||
+      admission is! String ||
+      payload is! Map<Object?, Object?>) {
+    return null;
+  }
+  return (admission: admission, payload: payload);
+}
+
+String _oldCanonicalJson(Object? value) {
+  Object? canonical(Object? item) {
+    if (item is Map<Object?, Object?>) {
+      final List<MapEntry<String, Object?>> entries =
+          <MapEntry<String, Object?>>[
+            for (final MapEntry<Object?, Object?> entry in item.entries)
+              MapEntry<String, Object?>('${entry.key}', canonical(entry.value)),
+          ]..sort((a, b) => a.key.compareTo(b.key));
+      return Map<String, Object?>.fromEntries(entries);
+    }
+    if (item is List<Object?>) {
+      return <Object?>[for (final Object? child in item) canonical(child)];
+    }
+    return item;
+  }
+
+  return jsonEncode(canonical(value));
+}
+
+String _oldCommandsDigest(Object? commands) {
+  final List<String> rows = <String>[
+    if (commands is List<Object?>)
+      for (final Object? row in commands) _oldCanonicalJson(row),
+  ]..sort();
+  return crypto.sha256.convert(utf8.encode('[${rows.join(',')}]')).toString();
+}
+
+String _oldDigestVerdict(Map<String, Object?> catalog) {
+  final Object? raw = catalog['catalogDigest'];
+  if (raw is! Map<Object?, Object?> ||
+      raw['algorithm'] != 'sha256' ||
+      raw['covers'] is! List<Object?>) {
+    return 'unsupported';
+  }
+  final List<Object?> covers = raw['covers']! as List<Object?>;
+  if (covers.length != 1 || covers.single != 'commands') return 'unsupported';
+  return raw['value'] == _oldCommandsDigest(catalog['commands'])
+      ? 'verified'
+      : 'mismatched';
+}
 
 /// 0.2.0 客户端读 catalog 命令表的方式。
 List<String> _readCommandsTheOldWay(Map<String, Object?> catalog) {
@@ -231,6 +303,49 @@ void main() {
     });
   });
 
+  group('版本化兼容语料可被当前 CLI 读取', () {
+    final List<Directory> corpora = _versionedCorpora();
+    test('至少保留一个真实历史版本', () {
+      expect(corpora, isNotEmpty);
+    });
+    for (final Directory corpus in corpora) {
+      final String name = corpus.path.split(Platform.pathSeparator).last;
+      test(name, () async {
+        final Map<String, Object?> identity =
+            jsonDecode(File('${corpus.path}/identity.json').readAsStringSync())
+                as Map<String, Object?>;
+        final Map<String, Object?> catalog =
+            jsonDecode(File('${corpus.path}/catalog.json').readAsStringSync())
+                as Map<String, Object?>;
+        final List<Map<String, Object?>> commands = <Map<String, Object?>>[
+          for (final Object? row in catalog['commands']! as List<Object?>)
+            Map<String, Object?>.from(row! as Map<Object?, Object?>),
+        ];
+        final Map<String, Object?> extras = <String, Object?>{...catalog}
+          ..remove('commands')
+          ..remove('uiTargets');
+        store.write(record());
+
+        final _Run result = await runDoctor(
+          FakePatchbayClient(
+            identityData: identity,
+            commands: commands,
+            uiTargets:
+                (catalog['uiTargets'] as List<Object?>?) ?? const <Object?>[],
+            catalogExtras: extras,
+            handle: (_, _) async => fakeCommandNotRegistered(),
+          ),
+        );
+
+        expect(
+          result.details('connection')['code'],
+          isNot('identityValidationFailed'),
+        );
+        expect(result.check('catalog')['verdict'], isNot('failed'));
+      });
+    }
+  });
+
   group('老 CLI ↔ 新 host（复刻 0.2.0 读法）', () {
     test('老读法仍然读得出 identity，多出来的字段被忽略', () {
       final Map<String, Object?> identity = _currentHost().identityResponse();
@@ -258,6 +373,138 @@ void main() {
 
       expect(catalog.keys, contains('catalogDigest'));
       expect(_readCommandsTheOldWay(catalog), <String>['ui.semantics.tree']);
+    });
+
+    test('catalog digest coverage remains exactly commands', () async {
+      final Map<String, Object?> catalog = await _currentHost()
+          .dispatchCatalog();
+      final Map<Object?, Object?> digest =
+          catalog['catalogDigest']! as Map<Object?, Object?>;
+
+      expect(digest['covers'], <String>['commands']);
+    });
+
+    test('old digest recursion includes unknown nested command fields', () {
+      final List<Object?> commands = <Object?>[
+        <String, Object?>{
+          'name': 'fixture.command',
+          'future': <String, Object?>{
+            'nested': <Object?>[
+              true,
+              <String, Object?>{'answer': 42},
+            ],
+          },
+        },
+      ];
+
+      expect(
+        _oldCommandsDigest(commands),
+        PatchbayCatalogDigest.ofCommands(commands).value,
+      );
+    });
+
+    test('0.3 digest reader verifies 0.4 nested command contracts', () {
+      final List<Object?> commands = <Object?>[
+        <String, Object?>{
+          'name': 'fixture.command',
+          'responseSchema': <String, Object?>{
+            'accepted': <String, Object?>{
+              'type': 'object',
+              'properties': <String, Object?>{
+                'session': <String, Object?>{
+                  'type': 'string',
+                  'nullable': true,
+                },
+              },
+              'required': <String>['session'],
+              'additionalProperties': false,
+            },
+          },
+          'retryPolicy': <String, Object?>{'maxAttempts': 2, 'backoffMs': 100},
+        },
+      ];
+      final Map<String, Object?> catalog = <String, Object?>{
+        'commands': commands,
+        'catalogDigest': PatchbayCatalogDigest.ofCommands(commands).toJson(),
+      };
+
+      expect(_oldDigestVerdict(catalog), 'verified');
+    });
+
+    test('0.3 digest reader rejects an expanded covers list', () {
+      const List<Object?> commands = <Object?>[];
+      final Map<String, Object?> catalog = <String, Object?>{
+        'commands': commands,
+        'catalogDigest': <String, Object?>{
+          ...PatchbayCatalogDigest.ofCommands(commands).toJson(),
+          'covers': <String>['commands', 'responseSchemas'],
+        },
+      };
+
+      expect(_oldDigestVerdict(catalog), 'unsupported');
+    });
+
+    test('0.3 digest reader transparently covers execution policy fields', () {
+      const List<Object?> commands = <Object?>[
+        <String, Object?>{
+          'name': 'fixture.command',
+          'factSources': <String>['deviceReported'],
+          'confirmationBudgetMs': 5000,
+          'unchangedEvidenceMaxAgeMs': 30000,
+          'weakConfirmationCompletes': false,
+        },
+      ];
+      final Map<String, Object?> catalog = <String, Object?>{
+        'commands': commands,
+        'catalogDigest': PatchbayCatalogDigest.ofCommands(commands).toJson(),
+      };
+
+      expect(_oldDigestVerdict(catalog), 'verified');
+      expect(
+        (catalog['catalogDigest']! as Map<Object?, Object?>)['covers'],
+        <String>['commands'],
+      );
+    });
+
+    test('0.3 invocation reader ignores the new schemaMode sibling', () async {
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'dev.patchbay.schema-compat',
+        catalog: () async => <String, Object?>{
+          'commands': <Object?>[
+            <String, Object?>{
+              'name': 'fixture.typed',
+              'responseSchema': <String, Object?>{
+                'accepted': <String, Object?>{
+                  'type': 'object',
+                  'properties': <String, Object?>{
+                    'ok': <String, Object?>{'type': 'boolean'},
+                  },
+                  'required': <String>['ok'],
+                  'additionalProperties': false,
+                },
+              },
+            },
+          ],
+        },
+        snapshot: () async => const <String, Object?>{},
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{'ok': true},
+        ).toJson(),
+      );
+      await host.dispatchCatalog();
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'fixture.typed',
+        const <String, Object?>{},
+        'compat-request',
+      );
+
+      expect(response['schemaMode'], 'validated');
+      expect(_readInvocationTheOldWay(response)?.admission, 'accepted');
+      expect(_readInvocationTheOldWay(response)?.payload, <String, Object?>{
+        'ok': true,
+      });
     });
   });
 

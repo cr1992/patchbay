@@ -1,13 +1,18 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 import 'dart:isolate';
 import 'dart:math';
 
+import 'audit.dart';
 import 'catalog_digest.dart';
+import 'command_descriptor.dart';
 import 'command_registry.dart';
+import 'execution_evidence.dart';
 import 'features.dart';
 import 'generated/core_wire.g.dart';
 import 'invocation.dart';
+import 'response_schema.dart';
 import 'snapshot.dart';
 import 'version.dart';
 
@@ -33,6 +38,8 @@ final class PatchbayServiceHost {
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    this.auditSink,
+    this.onAuditSinkError,
   }) : appInstanceId = appInstanceId ?? _nonce(),
        _catalog = catalog,
        _snapshot = snapshot,
@@ -74,7 +81,23 @@ final class PatchbayServiceHost {
   final PatchbayCommandRegistry _registry;
   final PatchbayExtensionRegistrar _registrar;
   final Set<PatchbayFeature> _declaredFeatures;
+  final PatchbayAuditSink? auditSink;
+  final PatchbayAuditSinkErrorHandler? onAuditSinkError;
+  final List<PatchbayAuditEvent> _auditLedger = <PatchbayAuditEvent>[];
+  final Map<(String, String), _ExternalInvocationRecord> _externalInvocations =
+      <(String, String), _ExternalInvocationRecord>{};
+  Map<String, PatchbayResponseSchema> _catalogResponseSchemas =
+      const <String, PatchbayResponseSchema>{};
+  Map<String, PatchbayExecutionContract> _catalogExecutionContracts =
+      const <String, PatchbayExecutionContract>{};
+  int _catalogReadGeneration = 0;
   bool _registered = false;
+  final List<_SnapshotRevision> _snapshotRevisions = <_SnapshotRevision>[];
+  var _nextSnapshotRevision = 0;
+
+  /// The newest 256 redacted command facts, in dispatch completion order.
+  List<PatchbayAuditEvent> get auditEvents =>
+      List<PatchbayAuditEvent>.unmodifiable(_auditLedger);
 
   /// Capabilities this host declares on the identity plane.
   ///
@@ -86,12 +109,14 @@ final class PatchbayServiceHost {
   /// the constructor.
   Set<PatchbayFeature> get features => <PatchbayFeature>{
     ..._coreFeatures,
+    if (_registry.hasResponseSchemas) PatchbayFeature.responseSchemas,
     ..._declaredFeatures,
   };
 
   static const Set<PatchbayFeature> _coreFeatures = <PatchbayFeature>{
     PatchbayFeature.catalogDigest,
     PatchbayFeature.snapshotSelectors,
+    PatchbayFeature.snapshotRevisionDiff,
   };
 
   /// Transport-neutral dispatch seam used by alternate, explicitly enabled
@@ -121,6 +146,21 @@ final class PatchbayServiceHost {
       final _SnapshotRead read = await _readSnapshot();
       return read.response;
     }
+    if (request.containsKey('fromRevision')) {
+      final PatchbaySnapshotDiffRequest diff;
+      try {
+        diff = PatchbaySnapshotDiffRequest.fromWire(
+          PatchbaySnapshotDiffRequestWire.fromJson(request),
+        );
+      } on FormatException catch (error) {
+        return _rejectionEnvelope(
+          'invalidSnapshotDiffRequest',
+          'The snapshot diff request violates the Patchbay contract.',
+          <String, Object?>{'reason': error.message},
+        );
+      }
+      return _diffSnapshot(diff);
+    }
     final PatchbaySnapshotRequest selection;
     try {
       selection = PatchbaySnapshotRequest.fromWire(
@@ -147,6 +187,7 @@ final class PatchbayServiceHost {
     if (read.violated) return read.response;
     return <String, Object?>{
       'schemaVersion': schemaVersion,
+      ...read.metadata,
       'selection': PatchbaySnapshotSelection.resolve(
         read.body,
         request.path,
@@ -195,6 +236,7 @@ final class PatchbayServiceHost {
       if (last.satisfies(condition, request.value)) {
         return <String, Object?>{
           'schemaVersion': schemaVersion,
+          ...read.metadata,
           'selection': last.toJson(),
           'wait': PatchbaySnapshotWaitWire(
             outcome: 'observed',
@@ -271,11 +313,99 @@ final class PatchbayServiceHost {
         ),
       );
     }
-    return _SnapshotRead.valid(<String, Object?>{
-      ...declared,
-      // Protocol-owned fields always win over consumer callback data.
+    final String canonical = patchbayCanonicalJson(declared);
+    _SnapshotRevision revision;
+    if (_snapshotRevisions.isNotEmpty &&
+        _snapshotRevisions.last.canonical == canonical) {
+      revision = _snapshotRevisions.last;
+    } else {
+      revision = _SnapshotRevision(
+        revision: ++_nextSnapshotRevision,
+        canonical: canonical,
+        body: Map<String, Object?>.from(
+          jsonDecode(canonical) as Map<String, Object?>,
+        ),
+      );
+      _snapshotRevisions.add(revision);
+      if (_snapshotRevisions.length > patchbaySnapshotRevisionRetention) {
+        _snapshotRevisions.removeAt(0);
+      }
+    }
+    final Map<String, Object?> metadata = <String, Object?>{
+      'snapshotRevision': revision.revision,
+      'revisionSource': 'hostObserved',
+      'factSource': PatchbayFactSourceWire.appRecorded.name,
+      'observedAt': DateTime.now().toUtc().toIso8601String(),
+      'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
+    };
+    return _SnapshotRead.valid(
+      <String, Object?>{
+        ...declared,
+        // Protocol-owned fields always win over consumer callback data.
+        'schemaVersion': schemaVersion,
+        ...metadata,
+      },
+      declared,
+      metadata,
+    );
+  }
+
+  Future<Map<String, Object?>> _diffSnapshot(
+    PatchbaySnapshotDiffRequest request,
+  ) async {
+    // Resolve the baseline before observing the current snapshot. A diff is
+    // only meaningful against a revision the caller could already have read;
+    // a fresh host must not create revision 1 from this very request and then
+    // pretend an old appInstance's revision 1 was available here.
+    _SnapshotRevision? baseline;
+    for (final _SnapshotRevision candidate in _snapshotRevisions) {
+      if (candidate.revision == request.fromRevision) baseline = candidate;
+    }
+    final _SnapshotRead read = await _readSnapshot();
+    if (read.violated) return read.response;
+    if (baseline == null) {
+      return _rejectionEnvelope(
+        'snapshotRevisionUnavailable',
+        'The requested snapshot revision is no longer retained in this App instance.',
+        <String, Object?>{
+          'fromRevision': request.fromRevision,
+          'oldestAvailableRevision': _snapshotRevisions.first.revision,
+          'snapshotRevision': _snapshotRevisions.last.revision,
+          'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
+        },
+      );
+    }
+    final _SnapshotDiff diff = _SnapshotDiff.between(
+      baseline.body,
+      _snapshotRevisions.last.body,
+    );
+    final Map<String, Object?> response = <String, Object?>{
       'schemaVersion': schemaVersion,
-    }, declared);
+      ...read.metadata,
+      'fromRevision': request.fromRevision,
+      'added': diff.added,
+      'changed': diff.changed,
+      'removed': diff.removed,
+      'limits': const <String, Object?>{
+        'maxChanges': patchbaySnapshotDiffMaxChanges,
+        'maxEncodedBytes': patchbaySnapshotDiffMaxEncodedBytes,
+      },
+    };
+    final int encodedBytes = utf8.encode(jsonEncode(response)).length;
+    if (diff.count > patchbaySnapshotDiffMaxChanges ||
+        encodedBytes > patchbaySnapshotDiffMaxEncodedBytes) {
+      return _rejectionEnvelope(
+        'snapshotDiffLimitExceeded',
+        'The snapshot diff exceeds the bounded response budget.',
+        <String, Object?>{
+          'changes': diff.count,
+          'encodedBytes': encodedBytes,
+          'maxChanges': patchbaySnapshotDiffMaxChanges,
+          'maxEncodedBytes': patchbaySnapshotDiffMaxEncodedBytes,
+        },
+      );
+    }
+    return response;
   }
 
   Map<String, Object?> _rejectionEnvelope(
@@ -301,9 +431,40 @@ final class PatchbayServiceHost {
     Map<String, Object?> arguments,
     String requestId,
   ) async {
+    var gateResult = 'notEvaluated';
+    var recordAudit = true;
+    final Map<String, Object?> result = await _dispatchInvoke(
+      command,
+      arguments,
+      requestId,
+      onGateResult: (String value) => gateResult = value,
+      onExternalDisposition: (String value) {
+        if (value == 'replay') recordAudit = false;
+      },
+    );
+    if (recordAudit) {
+      _recordAudit(
+        command: command,
+        requestId: requestId,
+        arguments: _withoutStdinProvenance(arguments),
+        gateResult: gateResult,
+        response: result,
+      );
+    }
+    return result;
+  }
+
+  Future<Map<String, Object?>> _dispatchInvoke(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    required void Function(String result) onGateResult,
+    required void Function(String disposition) onExternalDisposition,
+  }) async {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
     }
+    _CatalogRead? invocationCatalog;
     final Map<String, Object?> forwarded;
     if (arguments.isEmpty) {
       // No transmitted value can be sensitive and there is no meta key to
@@ -311,7 +472,7 @@ final class PatchbayServiceHost {
       // not start failing because a consumer catalog source is broken.
       forwarded = arguments;
     } else {
-      final _CatalogRead catalog = await _readCatalog();
+      final _CatalogRead catalog = invocationCatalog = await _readCatalog();
       if (catalog.violation case final Map<String, Object?> reason) {
         // The policy is only readable from the catalog. Without it the host
         // cannot prove a sensitive value arrived from stdin, so it fails closed
@@ -343,9 +504,39 @@ final class PatchbayServiceHost {
           ? arguments
           : _withoutStdinProvenance(arguments);
     }
-    final Map<String, Object?> result =
-        await _registry.tryDispatch(command, forwarded, requestId) ??
-        await _invoke(command, forwarded, requestId);
+    final Map<String, Object?>? registered = await _registry.tryDispatch(
+      command,
+      forwarded,
+      requestId,
+      onGateResult: onGateResult,
+    );
+    final Map<String, Object?> result;
+    if (registered != null) {
+      result = registered;
+    } else {
+      _CatalogRead? externalCatalog = invocationCatalog;
+      externalCatalog ??= await _readCatalog();
+      if (externalCatalog.violation case final Map<String, Object?> violation
+          when _invalidRetryPolicyTargets(violation, command)) {
+        return _invalidInvocationEnvelope(
+          requestId,
+          'catalogUnavailable',
+          <String, Object?>{'catalog': violation},
+        );
+      }
+      result = await _dispatchExternal(
+        command,
+        forwarded,
+        requestId,
+        onDisposition: onExternalDisposition,
+        retryPolicy: externalCatalog.violation == null
+            ? _retryPolicyFromCatalog(externalCatalog.response, command)
+            : null,
+      );
+      invocationCatalog ??= externalCatalog.violation == null
+          ? externalCatalog
+          : null;
+    }
     final PatchbayInvocationWire wire;
     try {
       wire = PatchbayInvocationWire.fromJson(result);
@@ -362,7 +553,195 @@ final class PatchbayServiceHost {
     if (semanticViolation != null) {
       return _invalidInvocationEnvelope(requestId, semanticViolation);
     }
-    return result;
+    PatchbayResponseSchema? responseSchema = _registry.responseSchemaFor(
+      command,
+    );
+    PatchbayExecutionContract? executionContract = _registry
+        .executionContractFor(command);
+    responseSchema ??= invocationCatalog == null
+        ? _catalogResponseSchemas[command]
+        : _responseSchemasFromCatalog(invocationCatalog.response)[command];
+    executionContract ??= invocationCatalog == null
+        ? _catalogExecutionContracts[command]
+        : _executionContractsFromCatalog(invocationCatalog.response)[command];
+    if (responseSchema == null &&
+        invocationCatalog == null &&
+        !_registry.handles(command)) {
+      // An argument-free external command did not need the catalog for input
+      // policy, but it may still have declared an output contract. Discover it
+      // after adapter dispatch so a broken catalog cannot make a legacy,
+      // argument-free command stop working; a valid declaration, however, is
+      // never bypassed merely because this was the first direct invocation.
+      final _CatalogRead discovered = await _readCatalog();
+      if (discovered.violation == null) {
+        responseSchema = _responseSchemasFromCatalog(
+          discovered.response,
+        )[command];
+        executionContract = _executionContractsFromCatalog(
+          discovered.response,
+        )[command];
+      } else if (_invalidCommandContractTargets(
+        discovered.violation!,
+        command,
+      )) {
+        return _invalidInvocationEnvelope(
+          requestId,
+          'catalogUnavailable',
+          <String, Object?>{'catalog': discovered.violation!},
+        );
+      }
+    }
+    PatchbayExecutionValidationResult executionValidation =
+        const PatchbayExecutionValidationResult();
+    if (wire.admission == PatchbayAdmissionWire.accepted) {
+      if (responseSchema != null) {
+        final List<PatchbayResponseValidationIssue> issues =
+            validatePatchbayResponsePayload(
+              responseSchema.accepted,
+              wire.payload,
+            );
+        if (issues.isNotEmpty) {
+          return <String, Object?>{
+            ..._responseSchemaViolation(requestId, issues),
+            'schemaMode': 'validated',
+          };
+        }
+      }
+      if (executionContract != null) {
+        executionValidation = validatePatchbayExecutionEvidence(
+          executionContract,
+          wire.payload,
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+        );
+        if (executionValidation.issues.isNotEmpty) {
+          return <String, Object?>{
+            ..._responseSchemaViolation(requestId, executionValidation.issues),
+            'schemaMode': responseSchema == null
+                ? 'legacyUnvalidated'
+                : 'validated',
+          };
+        }
+      }
+    }
+    return _withExecutionDetails(<String, Object?>{
+      ...result,
+      'schemaMode': responseSchema == null ? 'legacyUnvalidated' : 'validated',
+    }, executionValidation);
+  }
+
+  Future<Map<String, Object?>> _dispatchExternal(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    required PatchbayRetryPolicy? retryPolicy,
+    required void Function(String disposition) onDisposition,
+  }) async {
+    final (String, String) key = (command, requestId);
+    final String argumentDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
+      arguments,
+    ]).value;
+    final _ExternalInvocationRecord? existing = _externalInvocations[key];
+    if (existing != null) {
+      if (existing.argumentDigest != argumentDigest) {
+        onDisposition('rejection');
+        return _externalDuplicateRejection(requestId, 'requestIdConflict');
+      }
+      if (!existing.idempotent) {
+        onDisposition('rejection');
+        return _externalDuplicateRejection(requestId, 'duplicateRequestId');
+      }
+      onDisposition('replay');
+      return existing.response;
+    }
+    if (!_reserveExternalInvocationSlot()) {
+      onDisposition('rejection');
+      return _externalDuplicateRejection(requestId, 'requestLedgerFull');
+    }
+    onDisposition('owner');
+    final _ExternalInvocationRecord record = _ExternalInvocationRecord(
+      argumentDigest: argumentDigest,
+      idempotent: retryPolicy != null,
+    );
+    _externalInvocations[key] = record;
+    record.response = () async {
+      try {
+        return _freezeJsonMap(await _invoke(command, arguments, requestId));
+      } finally {
+        record.settled = true;
+      }
+    }();
+    return record.response;
+  }
+
+  bool _reserveExternalInvocationSlot() {
+    if (_externalInvocations.length < 256) return true;
+    for (final MapEntry<(String, String), _ExternalInvocationRecord> entry
+        in _externalInvocations.entries) {
+      if (!entry.value.settled) continue;
+      _externalInvocations.remove(entry.key);
+      return true;
+    }
+    return false;
+  }
+
+  static Map<String, Object?> _externalDuplicateRejection(
+    String requestId,
+    String code,
+  ) => PatchbayInvocation.rejected(
+    requestId: requestId,
+    rejection: PatchbayRejection(code: code),
+  ).toJson();
+
+  static Map<String, Object?> _freezeJsonMap(Map<String, Object?> value) =>
+      Map<String, Object?>.from(
+        jsonDecode(jsonEncode(value)) as Map<String, dynamic>,
+      );
+
+  void _recordAudit({
+    required String command,
+    required String requestId,
+    required Map<String, Object?> arguments,
+    required String gateResult,
+    required Map<String, Object?> response,
+  }) {
+    final PatchbayAuditEvent event = patchbayProjectAuditEvent(
+      command: command,
+      requestId: requestId,
+      arguments: arguments,
+      gateResult: gateResult,
+      response: response,
+    );
+    if (_auditLedger.length == 256) _auditLedger.removeAt(0);
+    _auditLedger.add(event);
+    final PatchbayAuditSink? sink = auditSink;
+    if (sink == null) return;
+    unawaited(
+      Future<void>.sync(() => sink(event)).catchError((
+        Object error,
+        StackTrace stackTrace,
+      ) {
+        try {
+          onAuditSinkError?.call(error, stackTrace, event);
+        } on Object {
+          // An observer of an already-isolated sink failure cannot change
+          // the command fact either.
+        }
+      }),
+    );
+  }
+
+  static PatchbayRetryPolicy? _retryPolicyFromCatalog(
+    Map<String, Object?> catalog,
+    String command,
+  ) {
+    final Object? rows = catalog['commands'];
+    if (rows is! List<Object?>) return null;
+    for (final Object? row in rows) {
+      if (row is! Map<Object?, Object?> || row['name'] != command) continue;
+      if (!row.containsKey('retryPolicy')) return null;
+      return PatchbayRetryPolicy.fromJson(row['retryPolicy']);
+    }
+    return null;
   }
 
   void register() {
@@ -495,10 +874,16 @@ final class PatchbayServiceHost {
   /// that quietly lost capabilities, which is the one failure mode a debugging
   /// protocol must never produce.
   Future<_CatalogRead> _readCatalog() async {
+    final int generation = ++_catalogReadGeneration;
     final Map<String, Object?> declared;
     try {
       declared = await _catalog();
     } on Object catch (error) {
+      if (generation == _catalogReadGeneration) {
+        _catalogResponseSchemas = const <String, PatchbayResponseSchema>{};
+        _catalogExecutionContracts =
+            const <String, PatchbayExecutionContract>{};
+      }
       // The type, never the message: a consumer error string is arbitrary App
       // data and this envelope goes back over the wire.
       return _CatalogRead.violated(<String, Object?>{
@@ -526,7 +911,18 @@ final class PatchbayServiceHost {
     final Map<String, Object?>? violation = _commandsViolation(
       catalog['commands'],
     );
-    if (violation != null) return _CatalogRead.violated(violation);
+    if (violation != null) {
+      if (generation == _catalogReadGeneration) {
+        _catalogResponseSchemas = const <String, PatchbayResponseSchema>{};
+        _catalogExecutionContracts =
+            const <String, PatchbayExecutionContract>{};
+      }
+      return _CatalogRead.violated(violation);
+    }
+    if (generation == _catalogReadGeneration) {
+      _catalogResponseSchemas = _responseSchemasFromCatalog(catalog);
+      _catalogExecutionContracts = _executionContractsFromCatalog(catalog);
+    }
     return _CatalogRead.valid(<String, Object?>{
       ...catalog,
       // Protocol-owned, and only ever attached to a catalog that passed
@@ -574,6 +970,52 @@ final class PatchbayServiceHost {
           'name': rawName,
           'reason': 'duplicateCommandName',
         });
+      } else if (entry case final Map<Object?, Object?> command) {
+        if (command.containsKey('responseSchema')) {
+          try {
+            final PatchbayResponseSchema schema =
+                PatchbayResponseSchema.fromJson(command['responseSchema']);
+            if (command['mode'] == 'job' &&
+                !schema.terminal.keys.toSet().containsAll(const <String>{
+                  'completed',
+                  'failed',
+                  'cancelled',
+                })) {
+              throw const FormatException('incomplete terminal schema');
+            }
+          } on Object {
+            violations.add(<String, Object?>{
+              'index': index,
+              'name': rawName,
+              'reason': 'invalidResponseSchema',
+            });
+          }
+        }
+        if (command.containsKey('retryPolicy')) {
+          try {
+            if (command['sideEffect'] != PatchbaySideEffectWire.external.name) {
+              throw const FormatException(
+                'retryPolicy requires external sideEffect',
+              );
+            }
+            PatchbayRetryPolicy.fromJson(command['retryPolicy']);
+          } on Object {
+            violations.add(<String, Object?>{
+              'index': index,
+              'name': rawName,
+              'reason': 'invalidRetryPolicy',
+            });
+          }
+        }
+        try {
+          PatchbayExecutionContract.fromCatalogRow(command);
+        } on Object {
+          violations.add(<String, Object?>{
+            'index': index,
+            'name': rawName,
+            'reason': 'invalidExecutionContract',
+          });
+        }
       }
     }
     if (violations.isEmpty) return null;
@@ -617,6 +1059,107 @@ final class PatchbayServiceHost {
       details: <String, Object?>{'reason': reason, ...details},
     ),
   ).toJson();
+
+  static Map<String, Object?> _responseSchemaViolation(
+    String requestId,
+    List<PatchbayResponseValidationIssue> issues,
+  ) {
+    final PatchbayResponseValidationIssue first = issues.first;
+    return _invalidInvocationEnvelope(
+      requestId,
+      first.reason,
+      <String, Object?>{
+        'field': first.field,
+        if (first.expected != null) 'expected': first.expected!,
+        'violations': issues
+            .map((PatchbayResponseValidationIssue issue) => issue.toJson())
+            .toList(growable: false),
+      },
+    );
+  }
+
+  static Map<String, PatchbayResponseSchema> _responseSchemasFromCatalog(
+    Map<String, Object?> catalog,
+  ) {
+    final Object? rows = catalog['commands'];
+    if (rows is! List<Object?>) return const <String, PatchbayResponseSchema>{};
+    final Map<String, PatchbayResponseSchema> schemas =
+        <String, PatchbayResponseSchema>{};
+    for (final Object? row in rows) {
+      if (row is! Map<Object?, Object?> ||
+          row['name'] is! String ||
+          !row.containsKey('responseSchema')) {
+        continue;
+      }
+      schemas[row['name']! as String] = PatchbayResponseSchema.fromJson(
+        row['responseSchema'],
+      );
+    }
+    return Map<String, PatchbayResponseSchema>.unmodifiable(schemas);
+  }
+
+  static Map<String, PatchbayExecutionContract> _executionContractsFromCatalog(
+    Map<String, Object?> catalog,
+  ) {
+    final Object? rows = catalog['commands'];
+    if (rows is! List<Object?>) {
+      return const <String, PatchbayExecutionContract>{};
+    }
+    return Map<String, PatchbayExecutionContract>.unmodifiable(<
+      String,
+      PatchbayExecutionContract
+    >{
+      for (final Object? row in rows)
+        if (row is Map<Object?, Object?> && row['name'] is String)
+          row['name']! as String: PatchbayExecutionContract.fromCatalogRow(row),
+    });
+  }
+
+  static Map<String, Object?> _withExecutionDetails(
+    Map<String, Object?> response,
+    PatchbayExecutionValidationResult validation,
+  ) {
+    if (!validation.legacyDispatchedConflict) return response;
+    final Object? existing = response['details'];
+    return <String, Object?>{
+      ...response,
+      'details': <String, Object?>{
+        if (existing is Map<Object?, Object?>)
+          for (final MapEntry<Object?, Object?> entry in existing.entries)
+            if (entry.key is String) entry.key! as String: entry.value,
+        'legacyDispatchedConflict': true,
+      },
+    };
+  }
+
+  static bool _invalidCommandContractTargets(
+    Map<String, Object?> violation,
+    String command,
+  ) {
+    final Object? rows = violation['violations'];
+    if (rows is! List<Object?>) return false;
+    return rows.any(
+      (Object? row) =>
+          row is Map<Object?, Object?> &&
+          row['name'] == command &&
+          (row['reason'] == 'invalidResponseSchema' ||
+              row['reason'] == 'invalidExecutionContract'),
+    );
+  }
+
+  static bool _invalidRetryPolicyTargets(
+    Map<String, Object?> violation,
+    String command,
+  ) {
+    final Object? rows = violation['violations'];
+    if (rows is! List<Object?>) return false;
+    return rows.any(
+      (Object? row) =>
+          row is Map<Object?, Object?> &&
+          row['name'] == command &&
+          row['reason'] == 'invalidRetryPolicy',
+    );
+  }
 
   static String? _invocationSemanticViolation(PatchbayInvocationWire wire) {
     if (wire.requestId.isEmpty) return 'emptyRequestId';
@@ -682,15 +1225,26 @@ final class _CatalogRead {
 /// One snapshot read: either the snapshot to serve, or the envelope that
 /// replaces it when the consumer source could not be read.
 final class _SnapshotRead {
-  const _SnapshotRead._(this.response, this.body, {required this.violated});
+  const _SnapshotRead._(
+    this.response,
+    this.body,
+    this.metadata, {
+    required this.violated,
+  });
 
   const _SnapshotRead.valid(
     Map<String, Object?> response,
     Map<String, Object?> body,
-  ) : this._(response, body, violated: false);
+    Map<String, Object?> metadata,
+  ) : this._(response, body, metadata, violated: false);
 
   const _SnapshotRead.violated(Map<String, Object?> response)
-    : this._(response, const <String, Object?>{}, violated: true);
+    : this._(
+        response,
+        const <String, Object?>{},
+        const <String, Object?>{},
+        violated: true,
+      );
 
   /// The snapshot, or the rejection envelope every caller receives instead.
   final Map<String, Object?> response;
@@ -706,8 +1260,65 @@ final class _SnapshotRead {
   /// host has no business guessing which of a consumer's keys is "really" the
   /// body — the shipped example publishes its state flat, others wrap it.
   final Map<String, Object?> body;
+  final Map<String, Object?> metadata;
   final bool violated;
 }
+
+final class _SnapshotRevision {
+  const _SnapshotRevision({
+    required this.revision,
+    required this.canonical,
+    required this.body,
+  });
+
+  final int revision;
+  final String canonical;
+  final Map<String, Object?> body;
+}
+
+final class _SnapshotDiff {
+  _SnapshotDiff._(this.added, this.changed, this.removed);
+
+  factory _SnapshotDiff.between(Object? before, Object? after) {
+    final List<Map<String, Object?>> added = <Map<String, Object?>>[];
+    final List<Map<String, Object?>> changed = <Map<String, Object?>>[];
+    final List<Map<String, Object?>> removed = <Map<String, Object?>>[];
+    void walk(String path, Object? left, Object? right) {
+      if (patchbayJsonEquals(left, right)) return;
+      if (left is Map<String, Object?> && right is Map<String, Object?>) {
+        final List<String> keys = <String>{...left.keys, ...right.keys}.toList()
+          ..sort();
+        for (final String key in keys) {
+          final String child = '$path/${_jsonPointerSegment(key)}';
+          if (!left.containsKey(key)) {
+            added.add(<String, Object?>{'path': child, 'after': right[key]});
+          } else if (!right.containsKey(key)) {
+            removed.add(<String, Object?>{'path': child, 'before': left[key]});
+          } else {
+            walk(child, left[key], right[key]);
+          }
+        }
+        return;
+      }
+      changed.add(<String, Object?>{
+        'path': path,
+        'before': left,
+        'after': right,
+      });
+    }
+
+    walk('', before, after);
+    return _SnapshotDiff._(added, changed, removed);
+  }
+
+  final List<Map<String, Object?>> added;
+  final List<Map<String, Object?>> changed;
+  final List<Map<String, Object?>> removed;
+  int get count => added.length + changed.length + removed.length;
+}
+
+String _jsonPointerSegment(String value) =>
+    value.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /// The envelope a provider-side contract failure is answered with.
 ///
@@ -727,6 +1338,18 @@ Map<String, Object?> _providerViolationEnvelope(
     details: violation,
   ).toJson(),
 };
+
+final class _ExternalInvocationRecord {
+  _ExternalInvocationRecord({
+    required this.argumentDigest,
+    required this.idempotent,
+  });
+
+  final String argumentDigest;
+  final bool idempotent;
+  late final Future<Map<String, Object?>> response;
+  bool settled = false;
+}
 
 /// The catalog-declared argument policy the host enforces before dispatch.
 final class _CommandPolicy {

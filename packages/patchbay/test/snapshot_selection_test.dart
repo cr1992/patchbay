@@ -55,15 +55,21 @@ void main() {
 
   group('field selection', () {
     test(
-      'a whole-snapshot read is unchanged when no request is sent',
+      'a whole-snapshot read keeps consumer fields and adds revision metadata',
       () async {
+        final Map<String, Object?> response = await hostWith(
+          deviceSnapshot,
+        ).dispatchSnapshot();
+        expect(response, containsPair('call', deviceSnapshot['call']));
+        expect(response, containsPair('battery', 41));
         expect(
-          await hostWith(deviceSnapshot).dispatchSnapshot(),
-          <String, Object?>{
-            ...deviceSnapshot,
-            'schemaVersion': PatchbayServiceHost.schemaVersion,
-          },
+          response,
+          containsPair('schemaVersion', PatchbayServiceHost.schemaVersion),
         );
+        expect(response, containsPair('snapshotRevision', 1));
+        expect(response, containsPair('revisionSource', 'hostObserved'));
+        expect(response, containsPair('factSource', 'appRecorded'));
+        expect(response['observedAt'], isA<String>());
       },
     );
 
@@ -609,6 +615,37 @@ void main() {
 
       expect(selectionOf(response)['value'], 'device-7');
     });
+
+    test(
+      'routes the separate diff request through the shared dispatcher',
+      () async {
+        var value = 1;
+        final PatchbayServiceHost host = hostServing(
+          () async => <String, Object?>{'value': value},
+        );
+        await host.handleSnapshot(
+          PatchbayServiceHost.snapshotMethod,
+          const <String, String>{'isolateId': 'isolates/1'},
+        );
+        value = 2;
+        final ServiceExtensionResponse wire = await host.handleSnapshot(
+          PatchbayServiceHost.snapshotMethod,
+          <String, String>{
+            'isolateId': 'isolates/1',
+            PatchbayServiceHost.snapshotRequestKey: jsonEncode(
+              PatchbaySnapshotDiffRequest(fromRevision: 1).toWire().toJson(),
+            ),
+          },
+        );
+        final Map<String, Object?> response = Map<String, Object?>.from(
+          jsonDecode(wire.result!) as Map<String, dynamic>,
+        );
+        expect(response['snapshotRevision'], 2);
+        expect(response['changed'], <Object?>[
+          <String, Object?>{'path': '/value', 'before': 1, 'after': 2},
+        ]);
+      },
+    );
 
     test('still serves the whole snapshot without a request', () async {
       expect(

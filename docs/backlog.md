@@ -27,7 +27,7 @@
 | PB-040-06 | CLI 注册 / 帮助表改由命令 descriptor 生成 | `packages/patchbay_cli/lib/src/cli.dart` 的手写 switch 臂是 0.3.0 并行开发中最大的一类冲突源 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | PB-040-07 | README / 文档命令参考表由 descriptor / help 输出生成 | 双语 README 与包 README 的命令表靠人肉逐字节核对保持一致 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | PB-040-08 | 幂等 retryPolicy；审计 sink；CLI `describe` | dogfood（`doctor` 已实现） | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-09 | DevTools 借用剩余两批：perf VM RPC → net 画像 | 第一批 inspect 开关已合入 main；net 画像仍需冻结脱敏口径 | 0.4.0 | 已排期 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md)；DG-040-03 |
+| PB-040-09 | DevTools 借用剩余两批：perf VM RPC → net 画像 | perf 的公开 VM RPC 有界摘要实现中；net 因 `vm_service 15.2.0` 无采集前过滤 body/header/query 的公开 API 而阻塞，不能先收全量再脱敏 | 0.4.0 | 实现中 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md)；DG-040-03 |
 | PB-040-10 | snapshot revision / diff | dogfood（低优先级） | 0.4.0 | 已排期 | [视觉证据](proposals/0.4.0/visual-evidence.md) |
 | PB-040-11 | launcher 监督循环与显式 pending session | 首个接入方已落项目级重连监督，第二接入方已集成 session store | 0.4.0 | 已排期 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
 | PB-040-12 | `ui verify-manifest` 按 destination 逐屏巡检 | v1 只对账当前挂载态；巡检会驱动导航并改变 App 状态 | 0.4.0 | 已排期 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
@@ -41,7 +41,7 @@
 | PB-040-20 | CHANGELOG 碎片化：每 MR 一文件 + `release_prep` 聚合 | 0.3.0 并行分支持续冲突根 CHANGELOG | 0.4.0 | 实现中 | 规范与 MR 流程已落地，自动聚合待实现 |
 | PB-040-21 | 统一执行证据模型：区分未发送、已发送未确认、同值无变化、设备已确认 | DP 同值写入时设备不回报，已造成回归误判 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md)；DG-040-05 |
 | PB-040-22 | command/job 响应 schema | `--json` 只稳定外层信封，自由 `Map` 仍迫使脚本到处判空 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-23 | 调试轨迹持久化：以 traceId 记录跨命令 session、请求/响应、job、执行证据、人工标记与 artifact，支持查看、导出和 diff | 一次调试的细节目前散落在终端历史、临时 JSON 和 App 内存中，无法复盘或比较回归 | 0.4.0 | 已排期 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
+| PB-040-23 | 调试轨迹持久化：以 traceId 记录 CLI 实际观察到的跨命令 session、请求/响应、job、执行证据、人工标记与 artifact，支持查看、导出和 diff；host-only audit 不自动回传 | 一次调试的细节目前散落在终端历史、临时 JSON 和 App 内存中，无法复盘或比较回归 | 0.4.0 | 实现中 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
 | PB-040-24 | 从调试轨迹生成 scenario 并受控回放 | 跑通的操作链需要沉淀为自动化，但应等待 recorder、权限 driver 和真实轨迹 schema 稳定 | — | 待排期 | [未来回放](proposals/future/trace-replay.md)；DG-040-06 |
 | PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 normalize/exercise/fail 策略建立权限前置条件 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 已排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07 |
 | PB-040-26 | 系统权限弹窗 driver 与恢复协议：Android adb/UiAutomator、iOS simctl/XCUITest，处理后重新握手和解析目标 | Patchbay 只能观察 Flutter UI；系统弹窗会遮挡目标或改变 lifecycle，当前只能超时或等待人工处理 | 0.4.0 | 已排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07 |

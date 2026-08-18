@@ -266,19 +266,36 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientCatalog ||
         PatchbayCommandTarget.clientSnapshot =>
           'Available on any connected Patchbay transport.',
+        PatchbayCommandTarget.localCatalogDescription =>
+          'Available on any connected Patchbay transport; reads the live '
+              'catalog and invokes no App command.',
         PatchbayCommandTarget.clientWidgetTree ||
         PatchbayCommandTarget.clientRenderTree ||
         PatchbayCommandTarget.clientFocusTree =>
           'Only on the VM Service transport, and only while the Flutter SDK '
               'registers the extension.',
+        PatchbayCommandTarget.clientPerformanceProfile =>
+          'Only on the VM Service transport when the public timeline and '
+              'memory RPCs are available; direct HTTP does not fabricate it.',
+        PatchbayCommandTarget.clientNetworkProfile =>
+          'Unavailable until a public collector can discard body, auth and '
+              'query values before collection.',
         PatchbayCommandTarget.clientReplSession =>
           'Available on any connected Patchbay transport except direct HTTP, '
               'whose token would have to share stdin with the commands.',
         PatchbayCommandTarget.localSessionStore =>
           'Always available: it needs no App, no connection and no catalog.',
+        PatchbayCommandTarget.localTraceStore =>
+          'Always available: it reads and writes the local trace store and '
+              'never dials the App.',
+        PatchbayCommandTarget.localLauncher =>
+          'Always available: the child declares the session it supervises.',
         PatchbayCommandTarget.localManifestVerification =>
           'Available on any connected Patchbay transport; a manifest that '
               'scopes entries to a destination also needs navigation.current.',
+        PatchbayCommandTarget.localManifestEmission =>
+          'Available when the connected App catalogs navigation.current and '
+              'reports a settled destination.',
         PatchbayCommandTarget.localDiagnostics =>
           'Always available: a connection it cannot open is one of its '
               'findings, not a precondition.',
@@ -292,39 +309,57 @@ abstract final class PatchbayCommandHelp {
   ///
   /// Client targets deliberately print no extension name: those names live in
   /// the transport and would go stale if help kept its own copy.
-  static String protocolLine(PatchbayFriendlyCommand command) =>
-      switch (command.target) {
-        PatchbayCommandTarget.declaredServiceCommand =>
-          'Service command: ${command.serviceCommand}',
-        PatchbayCommandTarget.callerServiceCommand =>
-          'Service command: the <service-command> argument',
-        PatchbayCommandTarget.clientIdentity ||
-        PatchbayCommandTarget.clientCatalog ||
-        PatchbayCommandTarget.clientSnapshot =>
-          'Served by the transport handshake, not by an App catalog command.',
-        PatchbayCommandTarget.clientWidgetTree ||
-        PatchbayCommandTarget.clientRenderTree ||
-        PatchbayCommandTarget.clientFocusTree =>
-          'Flutter SDK diagnostic passthrough, not an App catalog command.',
-        PatchbayCommandTarget.clientReplSession =>
-          'Reads command lines from stdin and runs each over one connection; '
-              'every line reports its own exit code.',
-        PatchbayCommandTarget.localSessionStore =>
-          'Reads and writes the local launcher session directory '
-              '(--session-dir); it never dials the App.',
-        PatchbayCommandTarget.localManifestVerification =>
-          'Compares the manifest against the UI targets the catalog publishes; '
-              'the verdict is computed locally and exits '
-              '${PatchbayExitCode.verificationDeviation} when the report lists '
-              'a deviation.',
-        PatchbayCommandTarget.localDiagnostics =>
-          'Reads the session directory, dials the App itself, then reads the '
-              'catalog, the snapshot and one read-only UI probe. Every failure '
-              'becomes a finding; the exit code is the class of the first one.',
-        PatchbayCommandTarget.localPermissionDriver =>
-          'Uses the versioned JSON Lines external driver protocol. The CLI '
-              'does not operate native system UI itself.',
-      };
+  static String protocolLine(
+    PatchbayFriendlyCommand command,
+  ) => switch (command.target) {
+    PatchbayCommandTarget.declaredServiceCommand =>
+      'Service command: ${command.serviceCommand}',
+    PatchbayCommandTarget.callerServiceCommand =>
+      'Service command: the <service-command> argument',
+    PatchbayCommandTarget.clientIdentity ||
+    PatchbayCommandTarget.clientCatalog ||
+    PatchbayCommandTarget.clientSnapshot =>
+      'Served by the transport handshake, not by an App catalog command.',
+    PatchbayCommandTarget.localCatalogDescription =>
+      'Reads one row from the live catalog and invokes no service command.',
+    PatchbayCommandTarget.clientWidgetTree ||
+    PatchbayCommandTarget.clientRenderTree ||
+    PatchbayCommandTarget.clientFocusTree =>
+      'Flutter SDK diagnostic passthrough, not an App catalog command.',
+    PatchbayCommandTarget.clientPerformanceProfile =>
+      'Uses public VM Service timeline and memory RPCs, then emits only a '
+          'bounded Patchbay summary; it is not an App catalog command.',
+    PatchbayCommandTarget.clientNetworkProfile =>
+      'Does not call the current VM Service HTTP profiler because it '
+          'collects sensitive fields before filtering.',
+    PatchbayCommandTarget.clientReplSession =>
+      'Reads command lines from stdin and runs each over one connection; '
+          'every line reports its own exit code.',
+    PatchbayCommandTarget.localSessionStore =>
+      'Reads and writes the local launcher session directory '
+          '(--session-dir); it never dials the App.',
+    PatchbayCommandTarget.localLauncher =>
+      'Starts one child with additive PATCHBAY_LAUNCH_* environment and '
+          'supervises only the session that child declares.',
+    PatchbayCommandTarget.localTraceStore =>
+      'Reads and writes append-only local trace files (--trace-dir); it '
+          'never invokes an App command.',
+    PatchbayCommandTarget.localManifestVerification =>
+      'Compares the manifest against the UI targets the catalog publishes; '
+          'the verdict is computed locally and exits '
+          '${PatchbayExitCode.verificationDeviation} when the report lists '
+          'a deviation.',
+    PatchbayCommandTarget.localManifestEmission =>
+      'Reads the live catalog and navigation.current, then emits a local '
+          'v2 draft with coverage mountedOnly; it invokes no write command.',
+    PatchbayCommandTarget.localDiagnostics =>
+      'Reads the session directory, dials the App itself, then reads the '
+          'catalog, the snapshot and one read-only UI probe. Every failure '
+          'becomes a finding; the exit code is the class of the first one.',
+    PatchbayCommandTarget.localPermissionDriver =>
+      'Uses the versioned JSON Lines external driver protocol. The CLI '
+          'does not operate native system UI itself.',
+  };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[
     ...command.path,
@@ -346,8 +381,11 @@ abstract final class PatchbayCommandHelp {
       if (option == null) {
         throw StateError('friendly option --$name is missing from the parser');
       }
+      final String spelling = name == 'keep-awake'
+          ? '--[no-]keep-awake'
+          : '--$name';
       output.writeln(
-        '  --${name.padRight(16)} ${option.help ?? ''}'.trimRight(),
+        '  ${spelling.padRight(18)} ${option.help ?? ''}'.trimRight(),
       );
     }
   }

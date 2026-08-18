@@ -4,6 +4,9 @@ import 'package:patchbay/patchbay.dart';
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
+import 'request_id.dart';
+import 'performance_profile.dart';
+
 final class PatchbayProtocolException implements Exception {
   const PatchbayProtocolException(
     this.code, {
@@ -138,7 +141,19 @@ abstract interface class PatchbayClient {
   Future<void> close();
 }
 
-final class PatchbayConnection implements PatchbayClient {
+/// Optional client surface for the separately capability-gated diff request.
+///
+/// Kept out of [PatchbayClient] so adding PB-040-10 does not break third-party
+/// test or transport adapters that implemented the published 0.3 interface.
+abstract interface class PatchbaySnapshotDiffClient {
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision});
+}
+
+final class PatchbayConnection
+    implements
+        PatchbayClient,
+        PatchbayProfilingClient,
+        PatchbaySnapshotDiffClient {
   PatchbayConnection._(
     this._service,
     this.isolateId,
@@ -150,7 +165,6 @@ final class PatchbayConnection implements PatchbayClient {
   final String isolateId;
   final Set<String> _extensionRPCs;
   final PatchbayRuntimeIdentity runtimeIdentity;
-  int _nextRequest = 0;
 
   static const String _inspectorTreeExtension =
       'ext.flutter.inspector.getRootWidgetTree';
@@ -248,6 +262,19 @@ final class PatchbayConnection implements PatchbayClient {
               },
       );
 
+  @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) =>
+      _call(
+        PatchbayServiceHost.snapshotMethod,
+        arguments: <String, Object?>{
+          PatchbayServiceHost.snapshotRequestKey: jsonEncode(
+            PatchbaySnapshotDiffRequest(
+              fromRevision: fromRevision,
+            ).toWire().toJson(),
+          ),
+        },
+      );
+
   /// Reads Flutter's own diagnostic extensions without translating their
   /// SDK-specific schema into the stable Patchbay protocol.
   @override
@@ -298,6 +325,28 @@ final class PatchbayConnection implements PatchbayClient {
   );
 
   @override
+  Future<Map<String, Object?>> performanceProfile(
+    PatchbayPerformanceProfileRequest request,
+  ) => PatchbayVmPerformanceProfiler(
+    source: PatchbayVmServicePerformanceSource(_service),
+  ).collect(isolateId: isolateId, request: request);
+
+  /// The public `vm_service` HTTP profiler returns bodies, headers, cookies and
+  /// query values before a caller can filter them. Collecting that response and
+  /// redacting afterwards would cross the accepted privacy boundary, so this
+  /// transport publishes no network capability and refuses with one stable
+  /// code instead of touching the RPC.
+  @override
+  Future<Map<String, Object?>> networkProfile() async =>
+      throw const PatchbayProtocolException(
+        'networkProfilingUnavailable',
+        details: <String, Object?>{
+          'reason': 'privacySafeVmRpcUnavailable',
+          'reviewedVmServicePackage': '15.2.0',
+        },
+      );
+
+  @override
   Future<Map<String, Object?>> invoke({
     required String command,
     required Map<String, Object?> arguments,
@@ -309,7 +358,7 @@ final class PatchbayConnection implements PatchbayClient {
     if (requestId != null && requestId.isEmpty) {
       throw const PatchbayProtocolException('requestIdValidationFailed');
     }
-    final String id = requestId ?? 'patchbay-cli-vm-${++_nextRequest}';
+    final String id = requestId ?? patchbayCliRequestId('vm');
     final Map<String, Object?> result = await _call(
       PatchbayServiceHost.invokeMethod,
       arguments: <String, Object?>{

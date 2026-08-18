@@ -2284,12 +2284,14 @@ final class PatchbayCaptureRequestWire {
     required this.generation,
     required this.pixelRatio,
     required this.timeoutMs,
+    required this.afterFrames,
   });
 
   final String? targetId;
   final int? generation;
   final num? pixelRatio;
   final int? timeoutMs;
+  final int? afterFrames;
 
   factory PatchbayCaptureRequestWire.fromJson(
     Map<String, Object?> json, {
@@ -2300,6 +2302,7 @@ final class PatchbayCaptureRequestWire {
       'generation',
       'pixelRatio',
       'timeoutMs',
+      'afterFrames',
     }, path);
     return PatchbayCaptureRequestWire(
       targetId: json['targetId'] == null
@@ -2314,6 +2317,9 @@ final class PatchbayCaptureRequestWire {
       timeoutMs: json['timeoutMs'] == null
           ? null
           : _wireInt(json['timeoutMs'], '$path.timeoutMs'),
+      afterFrames: json['afterFrames'] == null
+          ? null
+          : _wireInt(json['afterFrames'], '$path.afterFrames'),
     );
   }
 
@@ -2322,6 +2328,7 @@ final class PatchbayCaptureRequestWire {
     if (generation != null) 'generation': generation!,
     if (pixelRatio != null) 'pixelRatio': pixelRatio!,
     if (timeoutMs != null) 'timeoutMs': timeoutMs!,
+    if (afterFrames != null) 'afterFrames': afterFrames!,
   };
 }
 
@@ -2335,6 +2342,12 @@ final class PatchbayCaptureResultWire {
     required this.width,
     required this.height,
     required this.pixelRatio,
+    required this.pixelFormat,
+    required this.capturedAt,
+    required this.requestedFrames,
+    required this.observedFrames,
+    required this.maxPixels,
+    required this.maxBytes,
     required this.warnings,
     required this.blob,
   });
@@ -2347,6 +2360,12 @@ final class PatchbayCaptureResultWire {
   final int width;
   final int height;
   final num pixelRatio;
+  final String pixelFormat;
+  final String capturedAt;
+  final int requestedFrames;
+  final int observedFrames;
+  final int maxPixels;
+  final int maxBytes;
   final List<PatchbayCaptureWarningWire> warnings;
   final PatchbayBlobMetadataWire blob;
 
@@ -2363,6 +2382,12 @@ final class PatchbayCaptureResultWire {
       'width',
       'height',
       'pixelRatio',
+      'pixelFormat',
+      'capturedAt',
+      'requestedFrames',
+      'observedFrames',
+      'maxPixels',
+      'maxBytes',
       'warnings',
       'blob',
     }, path);
@@ -2385,6 +2410,15 @@ final class PatchbayCaptureResultWire {
       width: _wireInt(json['width'], '$path.width'),
       height: _wireInt(json['height'], '$path.height'),
       pixelRatio: _wireNum(json['pixelRatio'], '$path.pixelRatio'),
+      pixelFormat: _wireString(json['pixelFormat'], '$path.pixelFormat'),
+      capturedAt: _wireString(json['capturedAt'], '$path.capturedAt'),
+      requestedFrames: _wireInt(
+        json['requestedFrames'],
+        '$path.requestedFrames',
+      ),
+      observedFrames: _wireInt(json['observedFrames'], '$path.observedFrames'),
+      maxPixels: _wireInt(json['maxPixels'], '$path.maxPixels'),
+      maxBytes: _wireInt(json['maxBytes'], '$path.maxBytes'),
       warnings: _wireList(json['warnings'], '$path.warnings')
           .map(
             (item) => PatchbayCaptureWarningWire.fromJson(
@@ -2409,8 +2443,142 @@ final class PatchbayCaptureResultWire {
     'width': width,
     'height': height,
     'pixelRatio': pixelRatio,
+    'pixelFormat': pixelFormat,
+    'capturedAt': capturedAt,
+    'requestedFrames': requestedFrames,
+    'observedFrames': observedFrames,
+    'maxPixels': maxPixels,
+    'maxBytes': maxBytes,
     'warnings': warnings.map((item) => item.toJson()).toList(growable: false),
     'blob': blob.toJson(),
+  };
+}
+
+final class PatchbayCaptureDiffRequestWire {
+  const PatchbayCaptureDiffRequestWire({
+    required this.beforeBlobId,
+    required this.afterBlobId,
+  });
+
+  final String beforeBlobId;
+  final String afterBlobId;
+
+  factory PatchbayCaptureDiffRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'beforeBlobId', 'afterBlobId'}, path);
+    return PatchbayCaptureDiffRequestWire(
+      beforeBlobId: _wireString(json['beforeBlobId'], '$path.beforeBlobId'),
+      afterBlobId: _wireString(json['afterBlobId'], '$path.afterBlobId'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'beforeBlobId': beforeBlobId,
+    'afterBlobId': afterBlobId,
+  };
+}
+
+final class PatchbayCaptureDiffResultWire {
+  const PatchbayCaptureDiffResultWire({
+    required this.outcome,
+    required this.source,
+    required this.beforeBlobId,
+    required this.afterBlobId,
+    required this.width,
+    required this.height,
+    required this.pixelFormat,
+    required this.changedPixels,
+    required this.totalPixels,
+    required this.differenceRatio,
+    required this.comparedAt,
+    required this.maxPixels,
+    required this.maxBytes,
+    required this.warnings,
+  });
+
+  final String outcome;
+  final PatchbayFactSourceWire source;
+  final String beforeBlobId;
+  final String afterBlobId;
+  final int width;
+  final int height;
+  final String pixelFormat;
+  final int changedPixels;
+  final int totalPixels;
+  final num differenceRatio;
+  final String comparedAt;
+  final int maxPixels;
+  final int maxBytes;
+  final List<PatchbayCaptureWarningWire> warnings;
+
+  factory PatchbayCaptureDiffResultWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'beforeBlobId',
+      'afterBlobId',
+      'width',
+      'height',
+      'pixelFormat',
+      'changedPixels',
+      'totalPixels',
+      'differenceRatio',
+      'comparedAt',
+      'maxPixels',
+      'maxBytes',
+      'warnings',
+    }, path);
+    return PatchbayCaptureDiffResultWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      beforeBlobId: _wireString(json['beforeBlobId'], '$path.beforeBlobId'),
+      afterBlobId: _wireString(json['afterBlobId'], '$path.afterBlobId'),
+      width: _wireInt(json['width'], '$path.width'),
+      height: _wireInt(json['height'], '$path.height'),
+      pixelFormat: _wireString(json['pixelFormat'], '$path.pixelFormat'),
+      changedPixels: _wireInt(json['changedPixels'], '$path.changedPixels'),
+      totalPixels: _wireInt(json['totalPixels'], '$path.totalPixels'),
+      differenceRatio: _wireNum(
+        json['differenceRatio'],
+        '$path.differenceRatio',
+      ),
+      comparedAt: _wireString(json['comparedAt'], '$path.comparedAt'),
+      maxPixels: _wireInt(json['maxPixels'], '$path.maxPixels'),
+      maxBytes: _wireInt(json['maxBytes'], '$path.maxBytes'),
+      warnings: _wireList(json['warnings'], '$path.warnings')
+          .map(
+            (item) => PatchbayCaptureWarningWire.fromJson(
+              item,
+              path: '$path.warnings[]',
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'beforeBlobId': beforeBlobId,
+    'afterBlobId': afterBlobId,
+    'width': width,
+    'height': height,
+    'pixelFormat': pixelFormat,
+    'changedPixels': changedPixels,
+    'totalPixels': totalPixels,
+    'differenceRatio': differenceRatio,
+    'comparedAt': comparedAt,
+    'maxPixels': maxPixels,
+    'maxBytes': maxBytes,
+    'warnings': warnings.map((item) => item.toJson()).toList(growable: false),
   };
 }
 
@@ -2560,6 +2728,26 @@ final class PatchbaySnapshotRequestWire {
     if (until != null) 'until': until!.toJson(),
     if (value != null) 'value': _wireJson(value!, r'$.value'),
     if (timeoutMs != null) 'timeoutMs': timeoutMs!,
+  };
+}
+
+final class PatchbaySnapshotDiffRequestWire {
+  const PatchbaySnapshotDiffRequestWire({required this.fromRevision});
+
+  final int fromRevision;
+
+  factory PatchbaySnapshotDiffRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'fromRevision'}, path);
+    return PatchbaySnapshotDiffRequestWire(
+      fromRevision: _wireInt(json['fromRevision'], '$path.fromRevision'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'fromRevision': fromRevision,
   };
 }
 

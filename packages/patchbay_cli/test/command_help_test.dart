@@ -9,6 +9,15 @@ Matcher _listsGroup(String group) =>
     matches(RegExp('^  $group +\\d+ commands?\$', multiLine: true));
 
 void main() {
+  test('launcher help exposes the local keep-awake override pair', () {
+    final String help = PatchbayCommandHelp.render(
+      patchbayCliParser(),
+      <String>['launch'],
+    );
+
+    expect(help, contains('--[no-]keep-awake'));
+  });
+
   test('navigation group help matches the declaration-derived snapshot', () {
     expect(
       PatchbayCommandHelp.render(patchbayCliParser(), <String>['navigation']),
@@ -80,8 +89,10 @@ Availability is still decided by the running App catalog.
       // `catalog`, `snapshot`, `exec` and `job` were dispatchable commands
       // with no help at all. The freeze is now the full dispatchable surface.
       expect(groups, <String>{
+        'launch',
         'identity',
         'catalog',
+        'describe',
         'snapshot',
         'exec',
         'repl',
@@ -90,11 +101,14 @@ Availability is still decided by the running App catalog.
         'job',
         'session',
         'sessions',
+        'trace',
         'navigation',
         'ui',
         'logs',
         'capture',
         'blob',
+        'perf',
+        'net',
       });
       for (final String group in groups) {
         // Matched against the group listing, not anywhere in the page: prose
@@ -181,6 +195,8 @@ Availability is still decided by the running App catalog.
       'logs',
       'capture',
       'blob',
+      'perf',
+      'net',
     ]) {
       expect(root.stdout, _listsGroup(group), reason: group);
     }

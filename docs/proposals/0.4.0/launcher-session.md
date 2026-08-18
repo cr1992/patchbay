@@ -30,6 +30,16 @@ PID 探活加 URI 有无派生出来的 `status` 关系必须写明：前者是 
 冲突时以观测为准。老记录没有 `state` 时按现有探活逻辑读取；新 writer 必须先写 `pending`，identity
 握手成功后原子替换为 `live`。
 
+`launch` 采用公开的 child-declaration 契约，不解析某一种设备工具的私有 stdout，也不凭空补
+`applicationId/deviceId`：launcher 启动子进程时注入既有 `PATCHBAY_SESSION_DIR`，以及新增的
+`PATCHBAY_LAUNCH_ID`、`PATCHBAY_LAUNCH_OWNER_PID`。参与接入的 child/consumer 通过
+`PatchbayLaunchContext.tryFromEnvironment` 读取三者，并使用 `pendingRecord` 写入包含全部既有必填
+metadata 的记录；其中 `processId` 必须由 child 显式传入真实 consumer/App 进程，拿到 transport 后以
+`withTransport` 原子更新。`ownerPid` 是 launcher PID，不是 App PID；两者不得互相代填。launcher 只监督
+同时匹配 `launchId + ownerPid` 的记录。三项都不存在表示普通独立启动，部分存在
+则是 `launchContextInvalid`，不得猜测。无参与 child 在预算耗尽后以 `failed/sessionNotDeclared` 收尾。
+这套声明不新增 metadata 命令行 flags，也不占用 child stdout 的私有 frame。
+
 **session 记录的 `schemaVersion` 保持 `1`，新字段一律松读追加。** 这不是风格偏好：现有 reader 遇到
 不认识的 `schemaVersion` 会抛，而目录扫描把解析失败的文件**直接删除**。所以升一次版本号的实际
 后果是——装着老 CLI 的那台机器会悄悄删掉新 launcher 刚写下的会话记录。这是比 wire 面更容易踩的
@@ -50,6 +60,8 @@ live -> disconnected -> retrying | completed
 - 同一 `launchId` 只认一个 owner；PID 存活只证明 launcher 仍在，不证明 App ready。
 - 重试使用带抖动指数退避：首次等待 200 ms，每次翻倍并封顶 5 s，抖动取计算值的 `[50%,100%]`；默认
   总预算 120 s。预算耗尽以类型化 `launchFailed` 收尾。时钟与随机源必须可注入，测试不能靠真实等待。
+- `live` 后的健康观测固定为 5 s cadence，不沿用恢复退避轮询；从 `live` 转为不可达时，恢复退避重新从
+  200 ms 起步。identity probe 必须与 child 退出及剩余预算竞速，不能让一次无响应连接突破总预算。
 - pending 记录默认 TTL 为 5 min；launcher 每次有效状态推进都刷新 `observedAtMs`，但单纯读取不续期。
   配置可把总预算和 TTL 调小，不能分别超过 10 min 与 30 min。
 - 监督期间发现别的 session 不自动切换，只在 machine frame 中报告候选。
@@ -68,11 +80,19 @@ platform channel，给 `patchbay_flutter` 加插件或第三方 wakelock 依赖�
 
 所以 PB-040-03 在 0.4.0 的增量**只在 CLI/launcher 侧**：
 
-- 只有显式 `--keep-awake` 或项目配置策略开启时才申请租约，租约绑定 `launchId + sessionId`；
-- 续租发生在**命令成功之后**，不用独立心跳定时器——读一眼状态就续租会让“租约何时过期”取决于
-  有没有人在看，这正是 `ui.keepAwake.status` 刻意不续租的理由；
-- 正常退出、静默超时、App detach 或租约到期时释放；
+- 全局可否定 flag 为 `--[no-]keep-awake`；本地默认只读环境变量 `PATCHBAY_KEEP_AWAKE`
+  （`true/false`、`on/off` 或 `1/0`），未配置时关闭，显式 `--no-keep-awake` 优先级最高；
+- 0.4 不再引入第二套可调租约：策略申请沿用 App 已冻结的 10 分钟默认租约，最大值仍为 2 小时；
+  launcher 只在既有 5 秒健康观测中于半租期续租，不另起高频心跳，租约绑定当前 `launchId + sessionId`；
+- 普通 one-shot / REPL 命令只在**命令成功之后**续租；`ui keep-awake on|off|status` 自己就是租约操作，
+  不触发隐式续租，尤其不能让读一眼 `status` 改变过期时间；
+- 正常退出、child 结束、监督失败、信号取消都尽力显式 release；连接已断时必须输出
+  `releaseUnconfirmed`，不能伪称释放成功，最终仍由 App 租约到期静默兜底；
 - `--no-keep-awake` 必须覆盖任何本地默认值，供息屏行为本身的测试使用。
+
+普通命令的结构化结果在策略实际执行时增加 `localKeepAwake`；launcher machine frame 增加同形的
+`keepAwake: {state, success, reasonCode?}`。续租拒绝或无法确认时普通命令以类型化失败退出，launcher 则
+继续监督 App、但在 frame 中保留失败事实；两者都不输出 transport URI 或 token。
 
 capability 沿用既有表达：`ui.keepAwake.status` 的 `wired: false` 与 `keepAwakeNotWired` 已经能说明
 “这个 App 没接线”，不新增 feature 名。release 构建继续不注册命令、不创建平台句柄。
@@ -81,6 +101,7 @@ capability 沿用既有表达：`ui.keepAwake.status` 的 `wired: false` 与 `ke
 
 - 新 CLI 遇不支持 pending schema 的接入方，使用既有探活并标记 `sessionMode: legacy`。
 - 老 CLI 忽略新 session 字段；writer 保持既有必填字段语义与 `schemaVersion: 1`。
+- 不参与 child 不会被 launcher 误认；它仍可沿用旧 writer 独立写记录，但 `patchbay launch` 不拥有它。
 - keep-awake 未接线时按既有 `keepAwakeNotWired` 显式拒绝，不假装策略已生效。
 - VM/direct 只影响连接方式，不改变监督状态和 reasonCode。
 

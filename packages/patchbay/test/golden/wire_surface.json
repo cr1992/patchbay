@@ -4,6 +4,8 @@
     "PatchbayBlobChunkWire",
     "PatchbayBlobMetadataWire",
     "PatchbayJobWaitResultWire",
+    "PatchbayNavigationCatalogWire",
+    "PatchbaySemanticsSnapshotWire",
     "PatchbaySnapshotRequestWire",
     "PatchbayUiTargetDescriptorWire",
     "PatchbayUiTargetKindWire"
@@ -536,7 +538,8 @@
         "targetId",
         "generation",
         "pixelRatio",
-        "timeoutMs"
+        "timeoutMs",
+        "afterFrames"
       ]
     },
     "PatchbayCaptureResultWire": {
@@ -550,8 +553,40 @@
         "width",
         "height",
         "pixelRatio",
+        "pixelFormat",
+        "capturedAt",
+        "requestedFrames",
+        "observedFrames",
+        "maxPixels",
+        "maxBytes",
         "warnings",
         "blob"
+      ]
+    },
+    "PatchbayCaptureDiffRequestWire": {
+      "kind": "object",
+      "fields": [
+        "beforeBlobId",
+        "afterBlobId"
+      ]
+    },
+    "PatchbayCaptureDiffResultWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "beforeBlobId",
+        "afterBlobId",
+        "width",
+        "height",
+        "pixelFormat",
+        "changedPixels",
+        "totalPixels",
+        "differenceRatio",
+        "comparedAt",
+        "maxPixels",
+        "maxBytes",
+        "warnings"
       ]
     },
     "PatchbayKeepAwakeRequestWire": {
@@ -581,6 +616,12 @@
         "until",
         "value",
         "timeoutMs"
+      ]
+    },
+    "PatchbaySnapshotDiffRequestWire": {
+      "kind": "object",
+      "fields": [
+        "fromRevision"
       ]
     },
     "PatchbaySnapshotSelectionWire": {

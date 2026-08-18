@@ -64,6 +64,15 @@ const String examplePubspecPath = '$examplePath/pubspec.yaml';
 const String exampleOverridesPath = '$examplePath/pubspec_overrides.yaml';
 const String exampleLockPath = '$examplePath/pubspec.lock';
 const String compatMatrixPath = 'docs/compat-matrix.md';
+const String hostSurfaceGoldenPath =
+    'packages/patchbay/test/golden/host_surface.json';
+const String compatibilityCorpusPath = 'packages/patchbay_cli/test/golden';
+const String packageVersionSourcePath =
+    'packages/patchbay/lib/src/version.dart';
+const List<String> releaseReadmePaths = <String>[
+  'README.md',
+  'README.zh-CN.md',
+];
 const String serviceHostPath = 'packages/patchbay/lib/src/service_host.dart';
 const String invocationPath = 'packages/patchbay/lib/src/invocation.dart';
 const String workflowPath = '.github/workflows/ci.yml';
@@ -140,6 +149,10 @@ final class PackageManifest {
 final class ReleaseInputs {
   const ReleaseInputs({
     required this.packages,
+    required this.hostSurfaceGolden,
+    required this.compatibilityCorpus,
+    required this.packageVersionSource,
+    required this.readmes,
     required this.changelog,
     required this.examplePubspec,
     required this.exampleOverrides,
@@ -151,6 +164,12 @@ final class ReleaseInputs {
   });
 
   final Map<String, PackageManifest> packages;
+  final String hostSurfaceGolden;
+
+  /// `packages/patchbay_cli/test/golden` 下的相对文件路径与内容。
+  final Map<String, String> compatibilityCorpus;
+  final String packageVersionSource;
+  final Map<String, String> readmes;
   final String changelog;
   final String examplePubspec;
   final String? exampleOverrides;
@@ -191,11 +210,19 @@ final class CompatRow {
 
 // ===== 版本号与 caret 约束 =====
 
-/// 只认本仓在用的 `X.Y.Z`。预发布号 / build 号不在本仓体例内，遇到即当非法。
+/// 本仓发版使用的 SemVer；RC 与正式版本走同一条定版链。
 final class Version implements Comparable<Version> {
-  const Version(this.major, this.minor, this.patch);
+  const Version(
+    this.major,
+    this.minor,
+    this.patch, {
+    this.prerelease,
+    this.build,
+  });
 
-  static final RegExp _pattern = RegExp(r'^(\d+)\.(\d+)\.(\d+)$');
+  static final RegExp _pattern = RegExp(
+    r'^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$',
+  );
 
   static Version? tryParse(String text) {
     final RegExpMatch? match = _pattern.firstMatch(text.trim());
@@ -204,12 +231,16 @@ final class Version implements Comparable<Version> {
       int.parse(match.group(1)!),
       int.parse(match.group(2)!),
       int.parse(match.group(3)!),
+      prerelease: match.group(4),
+      build: match.group(5),
     );
   }
 
   final int major;
   final int minor;
   final int patch;
+  final String? prerelease;
+  final String? build;
 
   /// `^X.Y.Z` 的上界：0.x 走 minor 边界，其余走 major 边界。
   Version get caretUpperBound =>
@@ -219,11 +250,39 @@ final class Version implements Comparable<Version> {
   int compareTo(Version other) {
     if (major != other.major) return major.compareTo(other.major);
     if (minor != other.minor) return minor.compareTo(other.minor);
-    return patch.compareTo(other.patch);
+    if (patch != other.patch) return patch.compareTo(other.patch);
+    final String? left = prerelease;
+    final String? right = other.prerelease;
+    if (left == null && right == null) return 0;
+    if (left == null) return 1;
+    if (right == null) return -1;
+    final List<String> leftParts = left.split('.');
+    final List<String> rightParts = right.split('.');
+    for (
+      var index = 0;
+      index < leftParts.length && index < rightParts.length;
+      index += 1
+    ) {
+      final String leftPart = leftParts[index];
+      final String rightPart = rightParts[index];
+      if (leftPart == rightPart) continue;
+      final int? leftNumber = int.tryParse(leftPart);
+      final int? rightNumber = int.tryParse(rightPart);
+      if (leftNumber != null && rightNumber != null) {
+        return leftNumber.compareTo(rightNumber);
+      }
+      if (leftNumber != null) return -1;
+      if (rightNumber != null) return 1;
+      return leftPart.compareTo(rightPart);
+    }
+    return leftParts.length.compareTo(rightParts.length);
   }
 
   @override
-  String toString() => '$major.$minor.$patch';
+  String toString() =>
+      '$major.$minor.$patch'
+      '${prerelease == null ? '' : '-$prerelease'}'
+      '${build == null ? '' : '+$build'}';
 }
 
 /// `^X.Y.Z` 形式的约束是否接纳 [version]；不是 caret 形式返回 null（交人工判断）。
@@ -283,6 +342,78 @@ String applyPubspecVersion(String yaml, String version) {
     throw const FormatException('pubspec 缺 version 字段');
   }
   return yaml.replaceFirst(pattern, 'version: $version');
+}
+
+final RegExp _packageVersionPattern = RegExp(
+  r"(const\s+String\s+patchbayPackageVersion\s*=\s*')([^']+)(';)",
+);
+
+/// 只改写对外作为 `serverVersion` 暴露的随包版本常量。
+///
+/// 缺失或出现多份都拒绝，避免在常量改名后静默写入一个无效位置。
+String applyPackageVersionSource(String source, String version) {
+  final List<RegExpMatch> matches = _packageVersionPattern
+      .allMatches(source)
+      .toList(growable: false);
+  if (matches.length != 1) {
+    throw FormatException(
+      '应恰好找到一个 patchbayPackageVersion，实际 ${matches.length} 个',
+    );
+  }
+  final RegExpMatch match = matches.single;
+  return source.replaceRange(
+    match.start,
+    match.end,
+    '${match.group(1)}$version${match.group(3)}',
+  );
+}
+
+final List<RegExp> _managedReadmeVersionPatterns = <RegExp>[
+  RegExp(
+    r'(^> \*\*(?:Project status:|项目状态：)\*\* `v)([^`]+)(`)',
+    multiLine: true,
+  ),
+  RegExp(r'(^\s*ref:\s*patchbay-v)([^\s]+)(\s*$)', multiLine: true),
+  RegExp(r'(--git-ref\s+patchbay-v)([^\s]+)(\s+--git-path)'),
+];
+
+final RegExp _managedReadmeArtifactPattern = RegExp(
+  r'(/releases/download/patchbay-v)([^/]+)(/patchbay-)([^/\s]+?)(-(?:linux|macos|windows)-)',
+);
+
+/// 同步 README 中明确由发版流程管理的状态、Git 安装 ref 与 AOT 下载版本。
+///
+/// 每个锚点必须恰好出现一次；README 结构漂移时 fail-closed，而不是泛化替换文档里的历史版本。
+String applyReadmeVersionReferences(String markdown, String version) {
+  var result = markdown;
+  for (final RegExp pattern in _managedReadmeVersionPatterns) {
+    final List<RegExpMatch> matches = pattern
+        .allMatches(result)
+        .toList(growable: false);
+    if (matches.length != 1) {
+      throw FormatException(
+        'README 版本锚点应恰好出现一次，实际 ${matches.length} 个：$pattern',
+      );
+    }
+    final RegExpMatch match = matches.single;
+    result = result.replaceRange(
+      match.start,
+      match.end,
+      '${match.group(1)}$version${match.group(3)}',
+    );
+  }
+  final List<RegExpMatch> artifacts = _managedReadmeArtifactPattern
+      .allMatches(result)
+      .toList(growable: false);
+  if (artifacts.length != 1) {
+    throw FormatException('README AOT 下载锚点应恰好出现一次，实际 ${artifacts.length} 个');
+  }
+  final RegExpMatch artifact = artifacts.single;
+  return result.replaceRange(
+    artifact.start,
+    artifact.end,
+    '${artifact.group(1)}$version${artifact.group(3)}$version${artifact.group(5)}',
+  );
 }
 
 /// 删掉 `publish_to: none` 这一行——**发布开关**，只在显式 `--enable-publish` 时执行。
@@ -1064,10 +1195,62 @@ CompatRow buildCompatRow(String version, ReleaseInputs inputs) => CompatRow(
 
 String requireVersion(String version) {
   if (Version.tryParse(version) == null) {
-    throw FormatException('版本号必须是 X.Y.Z：$version');
+    throw FormatException('版本号必须是 SemVer（X.Y.Z，可带 prerelease/build）：$version');
   }
   return version;
 }
+
+const JsonEncoder _fixtureJson = JsonEncoder.withIndent('  ');
+
+String compatibilityCorpusDirectory(String version) {
+  requireVersion(version);
+  return 'legacy_host_v${version.replaceAll('.', '_')}';
+}
+
+/// 从当前 host 实际输出的 surface golden 冻结可供未来 CLI 读取的历史语料。
+///
+/// `host_surface.json` 由真实 [PatchbayServiceHost] 生成，是唯一真源；这里只把其中 identity
+/// 与 catalog 拆成既有兼容语料格式，并把动态版本占位符换成将要发布的版本。
+Map<String, String> renderCompatibilityFixtures(
+  String version,
+  String hostSurfaceGolden,
+) {
+  requireVersion(version);
+  final Object? decoded = jsonDecode(hostSurfaceGolden);
+  if (decoded is! Map<String, Object?>) {
+    throw const FormatException('host surface golden 顶层必须是 JSON object');
+  }
+  final Object? identityValue = decoded['identity'];
+  final Object? catalogValue = decoded['catalog'];
+  if (identityValue is! Map<String, Object?> ||
+      catalogValue is! Map<String, Object?>) {
+    throw const FormatException(
+      'host surface golden 必须同时包含 identity / catalog object',
+    );
+  }
+  if (identityValue['serverVersion'] != '<patchbayPackageVersion>') {
+    throw const FormatException(
+      'host surface golden 的 identity.serverVersion 必须来自 <patchbayPackageVersion>',
+    );
+  }
+  final Map<String, Object?> identity = <String, Object?>{
+    ...identityValue,
+    'serverVersion': version,
+  };
+  final String directory = compatibilityCorpusDirectory(version);
+  String render(Map<String, Object?> value) =>
+      '${_fixtureJson.convert(value)}\n';
+  return <String, String>{
+    '$directory/identity.json': render(identity),
+    '$directory/catalog.json': render(catalogValue),
+  };
+}
+
+bool _isHandwrittenHistoricalCorpus(ReleaseInputs inputs, String directory) =>
+    inputs.compatibilityCorpus['$directory/README.md']?.contains(
+      '手写冻结的历史 wire',
+    ) ??
+    false;
 
 /// 定版四件套 + 包内 CHANGELOG + pub 发布静态门的全部判定。
 ///
@@ -1081,6 +1264,8 @@ List<ReleaseCheck> evaluateRelease({
   requireVersion(version);
   return <ReleaseCheck>[
     _checkVersionParity(version, inputs),
+    _checkVersionReferences(version, inputs),
+    _checkCompatibilityFixture(version, inputs),
     _checkSchemaParity(inputs),
     _checkChangelog(version, inputs),
     _checkPackageChangelogs(version, inputs),
@@ -1092,6 +1277,93 @@ List<ReleaseCheck> evaluateRelease({
     _checkPublishSwitch(inputs),
     ..._checkPublishManifest(inputs),
   ];
+}
+
+ReleaseCheck _checkCompatibilityFixture(String version, ReleaseInputs inputs) {
+  final String targetDirectory = compatibilityCorpusDirectory(version);
+  if (_isHandwrittenHistoricalCorpus(inputs, targetDirectory)) {
+    return ReleaseCheck.skipped(
+      'protocol-compat-fixture',
+      '$targetDirectory/ 是不可再生成的手写历史语料；不会用当前 host 覆写',
+      hard: true,
+    );
+  }
+  late final Map<String, String> expected;
+  try {
+    expected = renderCompatibilityFixtures(version, inputs.hostSurfaceGolden);
+  } on FormatException catch (error) {
+    return ReleaseCheck.failed(
+      'protocol-compat-fixture',
+      '无法从 $hostSurfaceGoldenPath 冻结语料：${error.message}',
+      hard: true,
+    );
+  }
+  final String directory = '$targetDirectory/';
+  final Set<String> present = inputs.compatibilityCorpus.keys
+      .where((path) => path.startsWith(directory))
+      .toSet();
+  final List<String> problems = <String>[
+    for (final MapEntry<String, String> entry in expected.entries)
+      if (!present.contains(entry.key))
+        '${entry.key}=缺失'
+      else if (inputs.compatibilityCorpus[entry.key] != entry.value)
+        '${entry.key}=漂移',
+    for (final String path
+        in present.difference(expected.keys.toSet()).toList()..sort())
+      '$path=非受管文件',
+  ];
+  if (problems.isEmpty) {
+    return ReleaseCheck.ok(
+      'protocol-compat-fixture',
+      '$directory 的 identity / catalog 已冻结且与本版协议面一致',
+      hard: true,
+    );
+  }
+  return ReleaseCheck.failed(
+    'protocol-compat-fixture',
+    '${problems.join('；')}（`--apply` 可原子生成）',
+    hard: true,
+  );
+}
+
+ReleaseCheck _checkVersionReferences(String version, ReleaseInputs inputs) {
+  final stale = <String>[];
+  try {
+    final String expected = applyPackageVersionSource(
+      inputs.packageVersionSource,
+      version,
+    );
+    if (expected != inputs.packageVersionSource) {
+      stale.add('patchbayPackageVersion');
+    }
+  } on FormatException catch (error) {
+    stale.add('patchbayPackageVersion（${error.message}）');
+  }
+  for (final String path in releaseReadmePaths) {
+    final String? readme = inputs.readmes[path];
+    if (readme == null) {
+      stale.add('$path（缺文件）');
+      continue;
+    }
+    try {
+      if (applyReadmeVersionReferences(readme, version) != readme) {
+        stale.add(path);
+      }
+    } on FormatException catch (error) {
+      stale.add('$path（${error.message}）');
+    }
+  }
+  if (stale.isEmpty) {
+    return ReleaseCheck.ok(
+      'version-references',
+      '`patchbayPackageVersion` 与两份 README 版本引用均为 $version',
+    );
+  }
+  return ReleaseCheck.failed(
+    'version-references',
+    '版本引用未同步到 $version：${stale.join('、')}（`--apply` 可代改）',
+    hard: true,
+  );
 }
 
 ReleaseCheck _checkVersionParity(String version, ReleaseInputs inputs) {
@@ -1614,7 +1886,7 @@ void main(List<String> arguments) {
 
 const String _usage = '''
 用法：
-  dart run packages/patchbay/bin/release_prep.dart --version X.Y.Z (--check|--apply)
+  dart run packages/patchbay/bin/release_prep.dart --version <SemVer> (--check|--apply)
 
 可选：
   --date YYYY-MM-DD        CHANGELOG 落款日期，默认今天
@@ -1731,6 +2003,16 @@ ReleaseInputs _read(String root) {
     return file.existsSync() ? file.readAsStringSync() : null;
   }
 
+  Map<String, String> readCompatibilityCorpus() {
+    final Directory directory = Directory('$root/$compatibilityCorpusPath');
+    if (!directory.existsSync()) return const <String, String>{};
+    return <String, String>{
+      for (final File file
+          in directory.listSync(recursive: true).whereType<File>())
+        file.path.substring(directory.path.length + 1): file.readAsStringSync(),
+    };
+  }
+
   return ReleaseInputs(
     packages: <String, PackageManifest>{
       for (final String name in releasePackages)
@@ -1745,6 +2027,12 @@ ReleaseInputs _read(String root) {
           overrides: readOptional(overridesPathOf(name)),
           changelog: readOptional(packageChangelogPathOf(name)),
         ),
+    },
+    hostSurfaceGolden: read(hostSurfaceGoldenPath),
+    compatibilityCorpus: readCompatibilityCorpus(),
+    packageVersionSource: read(packageVersionSourcePath),
+    readmes: <String, String>{
+      for (final String path in releaseReadmePaths) path: read(path),
     },
     changelog: read(changelogPath),
     examplePubspec: read(examplePubspecPath),
@@ -1926,6 +2214,40 @@ void _applyToDisk(String root, _Options options) {
   );
   stage(changelogPath, inputs.changelog, rootChangelog);
 
+  final Map<String, String> compatibilityFixtures = renderCompatibilityFixtures(
+    options.version,
+    inputs.hostSurfaceGolden,
+  );
+  final String targetCorpusDirectory = compatibilityCorpusDirectory(
+    options.version,
+  );
+  if (_isHandwrittenHistoricalCorpus(inputs, targetCorpusDirectory)) {
+    throw FormatException('$targetCorpusDirectory/ 是手写冻结的历史语料，拒绝用当前 host 覆写');
+  }
+  for (final MapEntry<String, String> entry in compatibilityFixtures.entries) {
+    final String relative = '$compatibilityCorpusPath/${entry.key}';
+    stage(relative, inputs.compatibilityCorpus[entry.key], entry.value);
+  }
+  final String corpusDirectory = '$targetCorpusDirectory/';
+  final List<String> obsoleteFixturePaths = inputs.compatibilityCorpus.keys
+      .where(
+        (path) =>
+            path.startsWith(corpusDirectory) &&
+            !compatibilityFixtures.containsKey(path),
+      )
+      .map((path) => '$compatibilityCorpusPath/$path')
+      .toList(growable: false);
+
+  stage(
+    packageVersionSourcePath,
+    inputs.packageVersionSource,
+    applyPackageVersionSource(inputs.packageVersionSource, options.version),
+  );
+  for (final String path in releaseReadmePaths) {
+    final String before = inputs.readmes[path]!;
+    stage(path, before, applyReadmeVersionReferences(before, options.version));
+  }
+
   for (final String name in releasePackages) {
     final PackageManifest manifest = inputs.packages[name]!;
     var pubspec = applyInternalConstraints(
@@ -1972,6 +2294,7 @@ void _applyToDisk(String root, _Options options) {
   final Set<String> transactionPaths = <String>{
     ...writes.keys,
     ...fragmentPaths,
+    ...obsoleteFixturePaths,
   };
   final snapshots = <String, List<int>?>{
     for (final String relative in transactionPaths)
@@ -1988,6 +2311,9 @@ void _applyToDisk(String root, _Options options) {
     }
     // 删除最后进行；任一删除失败会恢复此前写入与已经删除的碎片。
     for (final String relative in fragmentPaths) {
+      File('$root/$relative').deleteSync();
+    }
+    for (final String relative in obsoleteFixturePaths) {
       File('$root/$relative').deleteSync();
     }
   } on Object catch (error) {
@@ -2015,6 +2341,7 @@ void _applyToDisk(String root, _Options options) {
   final List<String> changed = <String>[
     ...writes.keys,
     ...fragmentPaths.map((path) => '$path（已消费删除）'),
+    ...obsoleteFixturePaths.map((path) => '$path（已删除漂移文件）'),
   ];
 
   stdout

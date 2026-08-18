@@ -45,6 +45,7 @@ enum PatchbayPermissionOperation {
   capabilities,
   status,
   normalize,
+  reset,
   exercise,
   fail,
 }

@@ -5,6 +5,7 @@
     "features": [
       "catalogDigest",
       "lifecycleState",
+      "snapshotRevisionDiff",
       "snapshotSelectors"
     ],
     "applicationId": "dev.patchbay.golden",

@@ -12,14 +12,29 @@ import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
+import 'keep_awake_policy.dart';
+import 'launcher.dart';
+import 'performance_profile.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
 import 'repl.dart';
+import 'request_id.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
 import 'sensitive_input.dart';
 import 'session.dart';
+import 'trace.dart';
 import 'ui_manifest.dart';
+
+const Symbol _traceZoneInitializedKey = #patchbayTraceZoneInitialized;
+const Symbol _traceRecorderKey = #patchbayTraceRecorder;
+const Symbol _traceIncludeLegacyPayloadKey = #patchbayTraceIncludeLegacyPayload;
+
+PatchbayTraceRecorder? get _traceRecorder =>
+    Zone.current[_traceRecorderKey] as PatchbayTraceRecorder?;
+
+bool get _traceIncludesLegacyPayload =>
+    Zone.current[_traceIncludeLegacyPayloadKey] == true;
 
 /// Runs one CLI invocation.
 ///
@@ -33,7 +48,19 @@ Future<int> runPatchbayCli(
   StringSink? output,
   StringSink? errorOutput,
   PatchbayPermissionCommandRunner? permissionCommands,
+  Map<String, String>? environment,
 }) async {
+  if (Zone.current[_traceZoneInitializedKey] != true) {
+    return _runPatchbayCliWithTrace(
+      arguments,
+      connect: connect,
+      replInput: replInput,
+      output: output,
+      errorOutput: errorOutput,
+      permissionCommands: permissionCommands,
+      environment: environment,
+    );
+  }
   final StringSink out = output ?? stdout;
   final StringSink error = errorOutput ?? stderr;
   final ArgParser parser = patchbayCliParser();
@@ -54,6 +81,14 @@ Future<int> runPatchbayCli(
   }
 
   final bool json = parsed.flag('json');
+  PatchbayKeepAwakePolicy? keepAwakePolicy;
+  PatchbayKeepAwakePolicy resolveKeepAwakePolicy() =>
+      keepAwakePolicy ??= PatchbayKeepAwakePolicy.resolve(
+        commandLine: parsed.wasParsed('keep-awake')
+            ? parsed.flag('keep-awake')
+            : null,
+        environment: environment ?? Platform.environment,
+      );
   PatchbayClient? connection;
   try {
     if (_helpTopic(parsed) case final List<String> topic) {
@@ -64,12 +99,70 @@ Future<int> runPatchbayCli(
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
     }
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localLauncher) {
+      final PatchbayFriendlyInvocation invocation =
+          PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+      final String launchId =
+          'launch-${pid}-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+      final Completer<void> cancellation = Completer<void>();
+      final List<StreamSubscription<ProcessSignal>> signalSubscriptions =
+          <StreamSubscription<ProcessSignal>>[];
+      void watch(ProcessSignal signal) {
+        try {
+          signalSubscriptions.add(
+            signal.watch().listen((_) {
+              if (!cancellation.isCompleted) cancellation.complete();
+            }),
+          );
+        } on Object {
+          // Some signals are unavailable on Windows. Lease expiry remains the
+          // crash-safe release path there.
+        }
+      }
+
+      watch(ProcessSignal.sigint);
+      watch(ProcessSignal.sigterm);
+      try {
+        final PatchbayLaunchResult result =
+            await PatchbayLauncherSupervisor(
+              store: PatchbaySessionStore(parsed.option('session-dir')),
+            ).run(
+              command: List<String>.from(
+                invocation.arguments['command']! as List<Object?>,
+              ),
+              launchId: launchId,
+              ownerPid: pid,
+              onFrame: (PatchbayLaunchFrame frame) =>
+                  out.writeln(jsonEncode(frame.toJson())),
+              onHumanLine: error.writeln,
+              keepAwakePolicy: resolveKeepAwakePolicy(),
+              cancellation: cancellation.future,
+            );
+        return result.exitCode;
+      } finally {
+        for (final StreamSubscription<ProcessSignal> subscription
+            in signalSubscriptions) {
+          await subscription.cancel();
+        }
+      }
+    }
     // Session bookkeeping answers before any transport exists: these commands
     // are what an operator reaches for when the CLI cannot pick a session, so
     // dialling first would make them unavailable exactly when they are needed.
     if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
         PatchbayCommandTarget.localSessionStore) {
       final _LocalOutcome outcome = _runLocalSessionCommand(parsed);
+      out.writeln(
+        json
+            ? const JsonEncoder.withIndent('  ').convert(outcome.response)
+            : outcome.text,
+      );
+      return PatchbayExitCode.accepted;
+    }
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localTraceStore) {
+      final _LocalOutcome outcome = _runLocalTraceCommand(parsed);
       out.writeln(
         json
             ? const JsonEncoder.withIndent('  ').convert(outcome.response)
@@ -143,7 +236,22 @@ Future<int> runPatchbayCli(
         // One connection, every line: this closure is the only thing the loop
         // can reach, so a later command has no way to open a second one.
         execute: (ArgResults line) async {
-          final _Outcome outcome = await _executeOnce(connection!, line);
+          final PatchbayTraceRecorder? trace = _traceRecorder;
+          final PatchbayFriendlyCommand? lineSpec =
+              PatchbayFriendlyCommandRegistry.specFor(line.rest);
+          final String? runId = trace == null || lineSpec == null
+              ? null
+              : trace.commandStarted(
+                  lineSpec.path.join(' '),
+                  transport: _traceTransport(parsed),
+                );
+          final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
+            connection!,
+            line,
+            await _executeOnce(connection, line),
+            resolveKeepAwakePolicy(),
+          );
+          if (runId != null) trace!.commandFinished(runId, outcome.exitCode);
           return PatchbayReplOutcome(outcome.response, outcome.exitCode);
         },
         out: out,
@@ -154,10 +262,11 @@ Future<int> runPatchbayCli(
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
-    final _Outcome outcome = await _executeOnce(
+    final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
       connection,
       parsed,
-      manifest: manifest,
+      await _executeOnce(connection, parsed, manifest: manifest),
+      resolveKeepAwakePolicy(),
     );
     _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
     return outcome.exitCode;
@@ -282,6 +391,15 @@ Future<int> runPatchbayCli(
           ? PatchbayExitCode.usage
           : PatchbayExitCode.typedFailure,
     );
+  } on PatchbayTraceException catch (failure) {
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay trace error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
+      exitCode: PatchbayExitCode.protocol,
+    );
   } on Object catch (failure) {
     // VM Service URIs and direct bearer tokens are authentication material.
     // Socket exceptions can echo endpoints, so expose only the stable type.
@@ -299,6 +417,189 @@ Future<int> runPatchbayCli(
   } finally {
     await closePatchbayQuietly(connection);
   }
+}
+
+Future<int> _runPatchbayCliWithTrace(
+  List<String> arguments, {
+  Future<PatchbayClient> Function(ArgResults options)? connect,
+  Stream<String>? replInput,
+  StringSink? output,
+  StringSink? errorOutput,
+  PatchbayPermissionCommandRunner? permissionCommands,
+  Map<String, String>? environment,
+}) async {
+  final ArgResults? parsed = _tryParseForTrace(arguments);
+  final PatchbayFriendlyCommand? spec = parsed == null
+      ? null
+      : PatchbayFriendlyCommandRegistry.specFor(parsed.rest);
+  if (parsed == null ||
+      spec == null ||
+      spec.target == PatchbayCommandTarget.localTraceStore ||
+      _helpTopic(parsed) != null) {
+    return runZoned(
+      () => runPatchbayCli(
+        arguments,
+        connect: connect,
+        replInput: replInput,
+        output: output,
+        errorOutput: errorOutput,
+        permissionCommands: permissionCommands,
+        environment: environment,
+      ),
+      zoneValues: const <Object?, Object?>{_traceZoneInitializedKey: true},
+    );
+  }
+
+  final StringSink out = output ?? stdout;
+  final StringSink error = errorOutput ?? stderr;
+  final bool json = parsed.flag('json');
+  try {
+    final PatchbayTraceStore store = PatchbayTraceStore(
+      parsed.option('trace-dir'),
+    );
+    final String? traceId = store.resolve(parsed.option('trace'));
+    if (traceId == null) {
+      return runZoned(
+        () => runPatchbayCli(
+          arguments,
+          connect: connect,
+          replInput: replInput,
+          output: output,
+          errorOutput: errorOutput,
+          permissionCommands: permissionCommands,
+          environment: environment,
+        ),
+        zoneValues: const <Object?, Object?>{_traceZoneInitializedKey: true},
+      );
+    }
+    final bool includeLegacy = _confirmLegacyPayload(parsed);
+    final PatchbayTraceRecorder recorder = store.recorder(traceId);
+    final String runId = recorder.commandStarted(
+      spec.path.join(' '),
+      transport: _traceTransport(parsed),
+    );
+    if (_traceSessionRef(parsed) case final Map<String, Object?> sessionRef) {
+      recorder.sessionObserved(sessionRef);
+    }
+    final int exitCode = await runZoned(
+      () => runPatchbayCli(
+        arguments,
+        connect: connect,
+        replInput: replInput,
+        output: output,
+        errorOutput: errorOutput,
+        permissionCommands: permissionCommands,
+        environment: environment,
+      ),
+      zoneValues: <Object?, Object?>{
+        _traceZoneInitializedKey: true,
+        _traceRecorderKey: recorder,
+        _traceIncludeLegacyPayloadKey: includeLegacy,
+      },
+    );
+    recorder.commandFinished(runId, exitCode);
+    return exitCode;
+  } on FormatException catch (failure) {
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: failure.message,
+      envelope: _usageEnvelope(failure),
+      exitCode: PatchbayExitCode.usage,
+    );
+  } on PatchbayTraceException catch (failure) {
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay trace error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
+      exitCode: PatchbayExitCode.protocol,
+    );
+  }
+}
+
+ArgResults? _tryParseForTrace(List<String> arguments) {
+  try {
+    return patchbayCliParser().parse(arguments);
+  } on FormatException {
+    return null;
+  }
+}
+
+bool _confirmLegacyPayload(ArgResults parsed) {
+  if (!parsed.flag('include-legacy-payload')) return false;
+  if (parsed.flag('stdin') || parsed.flag('direct-token-stdin')) {
+    throw const FormatException(
+      '--include-legacy-payload cannot share stdin with command or direct '
+      'credential input',
+    );
+  }
+  if (!stdin.hasTerminal) {
+    if (!parsed.flag('allow-non-tty-legacy-payload')) {
+      throw const FormatException(
+        '--include-legacy-payload requires a TTY confirmation; automation '
+        'must also pass --allow-non-tty-legacy-payload',
+      );
+    }
+    return true;
+  }
+  stderr.write(
+    'Legacy host payloads have no persistence metadata. Type INCLUDE to '
+    'store their re-redacted values: ',
+  );
+  final String? confirmation = stdin.readLineSync();
+  if (confirmation == null) {
+    throw const FormatException(
+      '--include-legacy-payload requires a TTY confirmation; automation '
+      'must also pass --allow-non-tty-legacy-payload',
+    );
+  }
+  if (confirmation != 'INCLUDE') {
+    throw const FormatException('legacy payload confirmation refused');
+  }
+  return true;
+}
+
+String _traceTransport(ArgResults parsed) {
+  if (parsed.option('direct-endpoint') != null) return 'direct';
+  return 'vmService';
+}
+
+Map<String, Object?>? _traceSessionRef(ArgResults parsed) {
+  if (parsed.option('direct-endpoint') != null) {
+    return <String, Object?>{
+      'mode': 'direct',
+      'applicationId': parsed.option('direct-application-id'),
+      'appInstanceId': parsed.option('direct-app-instance-id'),
+    };
+  }
+  if (parsed.option('session') case final String sessionId) {
+    return <String, Object?>{'mode': 'launcher', 'sessionId': sessionId};
+  }
+  if (parsed.option('ws-uri') != null) {
+    return const <String, Object?>{'mode': 'explicitVmService'};
+  }
+  final PatchbaySessionStore sessions = PatchbaySessionStore(
+    parsed.option('session-dir'),
+  );
+  final List<PatchbaySessionRecord> records = sessions.readAll();
+  final String? selected = sessions.readSelection();
+  PatchbaySessionRecord? record;
+  for (final PatchbaySessionRecord candidate in records) {
+    if (candidate.sessionId == selected) record = candidate;
+  }
+  record ??= records.length == 1 ? records.single : null;
+  if (record == null) return null;
+  return <String, Object?>{
+    'mode': 'launcher',
+    'sessionId': record.sessionId,
+    'applicationId': record.applicationId,
+    'appInstanceId': record.appInstanceId,
+    'deviceId': record.deviceId,
+    'buildMode': record.buildMode,
+  };
 }
 
 /// Reports one failure on both channels and returns its exit code.
@@ -389,6 +690,13 @@ Future<_Outcome> _executeOnce(
               outputPath: artifact.outputPath,
               force: artifact.force,
             );
+        _traceRecorder?.attachArtifact(
+          localPath: downloaded.path,
+          blobId: downloaded.blobId,
+          sha256Value: downloaded.sha256,
+          length: downloaded.length,
+          contentType: downloaded.contentType,
+        );
         output = <String, Object?>{
           ...output,
           'localArtifact': downloaded.toJson(),
@@ -409,6 +717,41 @@ Future<_Outcome> _executeOnce(
   }
 }
 
+Future<_Outcome> _renewKeepAwakeAfterSuccess(
+  PatchbayClient connection,
+  ArgResults parsed,
+  _Outcome outcome,
+  PatchbayKeepAwakePolicy policy,
+) async {
+  if (!policy.enabled || outcome.exitCode != PatchbayExitCode.accepted) {
+    return outcome;
+  }
+  final String? serviceCommand = PatchbayFriendlyCommandRegistry.specFor(
+    parsed.rest,
+  )?.serviceCommand;
+  // Generated active specs are the authority after command-surface sync; the
+  // deprecated enum façade is not guaranteed to preserve object identity.
+  if (serviceCommand == 'ui.keepAwake.set' ||
+      serviceCommand == 'ui.keepAwake.status') {
+    return outcome;
+  }
+  final PatchbayKeepAwakeAttempt renewal = await requestPatchbayKeepAwake(
+    connection,
+    enabled: true,
+    lease: policy.lease,
+  );
+  final String originalSummary =
+      outcome.summary ?? patchbayResponseSummary(outcome.response);
+  final String keepAwakeSummary = renewal.reasonCode == null
+      ? 'keepAwake=${renewal.state}'
+      : 'keepAwake=${renewal.state} reason=${renewal.reasonCode}';
+  return _Outcome(
+    <String, Object?>{...outcome.response, 'localKeepAwake': renewal.toJson()},
+    renewal.success ? outcome.exitCode : PatchbayExitCode.typedFailure,
+    summary: '$originalSummary $keepAwakeSummary',
+  );
+}
+
 ArgParser patchbayCliParser() => ArgParser()
   ..addFlag(
     'help',
@@ -418,6 +761,28 @@ ArgParser patchbayCliParser() => ArgParser()
   )
   ..addOption('ws-uri', help: 'VM Service http(s) or ws(s) URI.')
   ..addOption('session', help: 'Select one discovered Patchbay session ID.')
+  ..addOption(
+    'trace',
+    help: 'Append this command to an explicit local debug trace ID.',
+  )
+  ..addOption(
+    'trace-dir',
+    help: 'Override the local Patchbay trace directory.',
+    hide: true,
+  )
+  ..addFlag(
+    'include-legacy-payload',
+    defaultsTo: false,
+    help:
+        'Persist re-redacted values from legacy hosts after explicit '
+        'confirmation.',
+  )
+  ..addFlag(
+    'allow-non-tty-legacy-payload',
+    defaultsTo: false,
+    help: 'Explicitly allow legacy payload persistence without a TTY.',
+    hide: true,
+  )
   ..addOption(
     'session-dir',
     help: 'Override the Patchbay launcher session directory.',
@@ -455,6 +820,10 @@ ArgParser patchbayCliParser() => ArgParser()
         'Dot path into the snapshot (a.b.c); answers that field or subtree '
         'instead of the whole snapshot.',
   )
+  ..addOption(
+    'from',
+    help: 'Retained snapshot revision used as the diff baseline.',
+  )
   ..addOption('args', help: 'JSON object passed to a domain command.')
   ..addFlag(
     'stdin',
@@ -467,6 +836,13 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Wait for a returned jobId to reach a terminal event.',
   )
   ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
+  ..addFlag(
+    'keep-awake',
+    defaultsTo: false,
+    help:
+        'Renew the App keep-awake lease after successful commands; launch '
+        'also holds it for the supervised session. Disabled by default.',
+  )
   ..addOption('revision', help: 'Observed navigation revision.')
   ..addOption(
     'generation',
@@ -504,7 +880,40 @@ ArgParser patchbayCliParser() => ArgParser()
         'own when it runs out. Omit to use the App-declared default.',
   )
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
+  ..addOption(
+    'duration-ms',
+    help: 'Performance profile window in milliseconds (1..60000).',
+  )
+  ..addOption(
+    'sample-limit',
+    help: 'Maximum VM timeline events summarized (1..10000).',
+  )
+  ..addOption(
+    'after-frames',
+    help: 'Capture after this many Patchbay-observed Flutter frames (1..120).',
+  )
   ..addOption('output', help: 'Local artifact output path.')
+  ..addOption('name', help: 'Human-readable local trace name.')
+  ..addFlag(
+    'activate',
+    defaultsTo: false,
+    help: 'Select the new trace for this workspace.',
+  )
+  ..addFlag(
+    'pin',
+    defaultsTo: false,
+    help: 'Exclude the new trace from retention pruning.',
+  )
+  ..addFlag(
+    'dry-run',
+    defaultsTo: false,
+    help: 'Report retention candidates without deleting them.',
+  )
+  ..addFlag(
+    'include-artifacts',
+    defaultsTo: true,
+    help: 'Include content-addressed artifacts in a trace export.',
+  )
   ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.')
   ..addFlag(
     'clear',
@@ -540,6 +949,38 @@ ArgParser patchbayCliParser() => ArgParser()
     defaultsTo: false,
     negatable: false,
     help: 'Explicitly confirm an exercise allow system permission action.',
+  )
+  ..addFlag(
+    'emit-manifest',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Emit a v2 draft covering only targets mounted right now.',
+  )
+  ..addFlag(
+    'navigate',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Opt in to navigation side effects and verify every destination.',
+  )
+  ..addFlag(
+    'continue-on-error',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Continue the destination walkthrough after a screen fails.',
+  )
+  ..addFlag(
+    'restore',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Try to restore the initial destination after a walkthrough.',
+  )
+  ..addOption(
+    'screen-timeout-ms',
+    help: 'Per-destination walkthrough budget (default 5000, max 120000).',
+  )
+  ..addOption(
+    'total-timeout-ms',
+    help: 'Whole walkthrough budget (default 120000, max 600000).',
   );
 
 List<String>? _helpTopic(ArgResults parsed) {
@@ -574,6 +1015,12 @@ void _validateGlobalShape(ArgResults parsed) {
   if (parsed.flag('stdin') && parsed.flag('direct-token-stdin')) {
     throw const FormatException(
       '--stdin and --direct-token-stdin cannot consume the same stdin',
+    );
+  }
+  if (parsed.flag('allow-non-tty-legacy-payload') &&
+      !parsed.flag('include-legacy-payload')) {
+    throw const FormatException(
+      '--allow-non-tty-legacy-payload requires --include-legacy-payload',
     );
   }
 }
@@ -738,6 +1185,127 @@ _LocalOutcome _useSession(
   }, 'pinned ${pinned.label}');
 }
 
+_LocalOutcome _runLocalTraceCommand(ArgResults parsed) {
+  _validateLocalTraceShape(parsed);
+  final PatchbayFriendlyInvocation friendly =
+      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+  final PatchbayTraceStore traces = PatchbayTraceStore(
+    parsed.option('trace-dir'),
+  );
+  final String? explicit = parsed.option('trace');
+  switch (friendly.spec) {
+    case PatchbayFriendlyCommand.traceStart:
+      if (explicit != null) {
+        throw const FormatException('trace start does not accept --trace');
+      }
+      final Object? name = friendly.arguments['name'];
+      if (name is! String || name.trim().isEmpty) {
+        throw const FormatException('trace start requires --name <name>');
+      }
+      final PatchbayTraceManifest manifest = traces.start(
+        name: name,
+        cliVersion: patchbayPackageVersion,
+        activate: friendly.arguments['activate'] == true,
+        pinned: friendly.arguments['pinned'] == true,
+      );
+      return _LocalOutcome(<String, Object?>{
+        'trace': manifest.toJson(),
+        'active': friendly.arguments['activate'] == true,
+      }, 'traceId: ${manifest.traceId}');
+    case PatchbayFriendlyCommand.traceMark:
+      final PatchbayTraceManifest manifest = traces.mark(
+        explicit,
+        friendly.arguments['note']! as String,
+      );
+      return _LocalOutcome(<String, Object?>{
+        'trace': manifest.toJson(),
+        'marked': true,
+      }, 'marked ${manifest.traceId}');
+    case PatchbayFriendlyCommand.traceStop:
+      final String? positional = friendly.arguments['traceId'] as String?;
+      if (positional != null && explicit != null && positional != explicit) {
+        throw const FormatException(
+          'trace stop positional id and --trace must match',
+        );
+      }
+      final PatchbayTraceManifest manifest = traces.stop(
+        positional ?? explicit,
+      );
+      return _LocalOutcome(<String, Object?>{
+        'trace': manifest.toJson(),
+        'stopped': true,
+      }, 'stopped ${manifest.traceId}');
+    case PatchbayFriendlyCommand.traceShow:
+      final PatchbayTraceReadResult result = traces.show(
+        friendly.arguments['traceId']! as String,
+      );
+      return _LocalOutcome(result.toJson(), _traceTimeline(result));
+    case PatchbayFriendlyCommand.traceExport:
+      final Map<String, Object?> result = traces.exportDirectory(
+        friendly.arguments['traceId']! as String,
+        friendly.outputPath!,
+        includeArtifacts: friendly.arguments['includeArtifacts'] == true,
+      );
+      return _LocalOutcome(
+        result,
+        'exported ${result['traceId']} to ${result['output']}',
+      );
+    case PatchbayFriendlyCommand.traceDiff:
+      final Map<String, Object?> result = traces.diff(
+        friendly.arguments['before']! as String,
+        friendly.arguments['after']! as String,
+      );
+      final int changes =
+          (result['added']! as List<Object?>).length +
+          (result['removed']! as List<Object?>).length +
+          (result['changed']! as List<Object?>).length;
+      return _LocalOutcome(result, 'trace diff: $changes change(s)');
+    case PatchbayFriendlyCommand.tracePrune:
+      final PatchbayTracePruneResult result = traces.prune(
+        dryRun: friendly.arguments['dryRun'] == true,
+      );
+      return _LocalOutcome(
+        result.toJson(),
+        result.dryRun
+            ? 'would prune ${result.candidates.length} trace(s)'
+            : 'pruned ${result.candidates.length} trace(s)',
+      );
+    default:
+      throw StateError('unexpected local trace command ${friendly.spec.name}');
+  }
+}
+
+void _validateLocalTraceShape(ArgResults parsed) {
+  for (final String name in const <String>[
+    'ws-uri',
+    'session',
+    'direct-endpoint',
+    'direct-token-stdin',
+  ]) {
+    if (!parsed.wasParsed(name)) continue;
+    throw FormatException(
+      '--$name does not apply to a local trace-store command',
+    );
+  }
+}
+
+String _traceTimeline(PatchbayTraceReadResult result) {
+  final List<String> lines = <String>[
+    '${result.manifest.traceId} ${result.manifest.name} '
+        '${result.manifest.ended ? 'finished' : 'active'} '
+        'integrity=${result.integrity}',
+    for (final PatchbayTraceEvent event in result.events)
+      '${event.sequence.toString().padLeft(4)} '
+          '+${event.elapsedMs}ms ${event.type}'
+          '${event.requestId == null ? '' : ' request=${event.requestId}'}'
+          '${event.jobId == null ? '' : ' job=${event.jobId}'}',
+    if (result.truncatedTail) 'warning: truncatedTail',
+    for (final String digest in result.missingArtifacts)
+      'warning: missing artifact $digest',
+  ];
+  return lines.join('\n');
+}
+
 String? _selectedId(List<PatchbaySessionListing> listings) {
   for (final PatchbaySessionListing listing in listings) {
     if (listing.selected) return listing.record.sessionId;
@@ -780,7 +1348,22 @@ Future<_Execution> _execute(
       return _Execution(await connection.identity());
     case PatchbayCommandTarget.clientCatalog:
       return _Execution(await connection.catalog());
+    case PatchbayCommandTarget.localCatalogDescription:
+      return _Execution(
+        _describeCatalogCommand(
+          await connection.catalog(),
+          friendly.arguments['command']! as String,
+        ),
+      );
     case PatchbayCommandTarget.clientSnapshot:
+      if (friendly.spec == PatchbayFriendlyCommand.snapshotDiff) {
+        return _Execution(
+          await _snapshotDiff(
+            connection,
+            friendly.arguments['fromRevision']! as int,
+          ),
+        );
+      }
       final PatchbaySnapshotRequest? selection = _selection(friendly);
       return _Execution(
         selection == null
@@ -793,6 +1376,27 @@ Future<_Execution> _execute(
       return _Execution(await connection.renderTree());
     case PatchbayCommandTarget.clientFocusTree:
       return _Execution(await connection.focusTree());
+    case PatchbayCommandTarget.clientPerformanceProfile:
+      final PatchbayProfilingClient profiling = _profilingClient(
+        connection,
+        capability: 'performanceProfile',
+      );
+      final PatchbayPerformanceProfileRequest request =
+          PatchbayPerformanceProfileRequest(
+            duration: Duration(
+              milliseconds: friendly.arguments['durationMs']! as int,
+            ),
+            eventLimit: friendly.arguments['sampleLimit']! as int,
+          );
+      request.validate();
+      return _Execution(await profiling.performanceProfile(request));
+    case PatchbayCommandTarget.clientNetworkProfile:
+      return _Execution(
+        await _profilingClient(
+          connection,
+          capability: 'networkProfile',
+        ).networkProfile(),
+      );
     case PatchbayCommandTarget.localManifestVerification:
       // A one-shot invocation parsed this before it dialled; a repl line
       // arrives with the connection already open and nothing parsed yet, so
@@ -800,6 +1404,9 @@ Future<_Execution> _execute(
       final PatchbayUiManifest verified =
           manifest ?? _readUiManifest(friendly.manifestPath!);
       final Map<String, Object?> catalog = await connection.catalog();
+      if (parsed.flag('navigate')) {
+        return _walkUiManifest(connection, catalog, verified, parsed);
+      }
       String? destination;
       if (verified.usesDestinations) {
         final Map<String, Object?> current = await _invokeAgainstCatalog(
@@ -819,10 +1426,37 @@ Future<_Execution> _execute(
         }
         destination = _navigationDestination(current);
       }
+      PatchbayUiManifestSemanticsRuntime? semantics;
+      if (verified.requiresSemanticsAt(destination)) {
+        if (_CatalogCommand.find(catalog, 'ui.semantics.tree') == null) {
+          throw const PatchbayProtocolException(
+            'manifestSemanticsUnavailable',
+            details: <String, Object?>{
+              'reason':
+                  'the App does not declare ui.semantics.tree, so the CLI '
+                  'cannot verify semanticsIdentifier entries',
+            },
+          );
+        }
+        final Map<String, Object?> observed = await _invokeAgainstCatalog(
+          connection,
+          catalog,
+          'ui.semantics.tree',
+          const <String, Object?>{},
+        );
+        if (observed['admission'] == 'rejected') {
+          return _Execution(
+            _withSource(observed, 'semanticsSource'),
+            catalog: catalog,
+          );
+        }
+        semantics = _manifestSemanticsRuntime(observed);
+      }
       final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
         manifest: verified,
         runtime: decodePatchbayCatalogUiTargets(catalog),
         currentDestination: destination,
+        semantics: semantics,
       );
       return _Execution(
         report.toJson(),
@@ -831,6 +1465,60 @@ Future<_Execution> _execute(
             ? PatchbayExitCode.verificationDeviation
             : PatchbayExitCode.accepted,
         summary: report.humanReport,
+      );
+    case PatchbayCommandTarget.localManifestEmission:
+      final Map<String, Object?> catalog = await connection.catalog();
+      final Map<String, Object?> current = await _invokeAgainstCatalog(
+        connection,
+        catalog,
+        'navigation.current',
+        const <String, Object?>{},
+      );
+      if (current['admission'] == 'rejected') {
+        return _Execution(
+          _withSource(current, 'destinationSource'),
+          catalog: catalog,
+        );
+      }
+      final String? destination = _navigationDestination(current);
+      if (destination == null || destination.isEmpty) {
+        throw const PatchbayProtocolException(
+          'manifestDestinationUnavailable',
+          details: <String, Object?>{
+            'reason':
+                'navigation.current did not report a settled destination; '
+                'the CLI will not invent one for a manifest draft',
+          },
+        );
+      }
+      PatchbayUiManifestSemanticsRuntime? semantics;
+      if (_CatalogCommand.find(catalog, 'ui.semantics.tree') != null) {
+        final Map<String, Object?> observed = await _invokeAgainstCatalog(
+          connection,
+          catalog,
+          'ui.semantics.tree',
+          const <String, Object?>{},
+        );
+        if (observed['admission'] == 'rejected') {
+          return _Execution(
+            _withSource(observed, 'semanticsSource'),
+            catalog: catalog,
+          );
+        }
+        semantics = _manifestSemanticsRuntime(observed);
+      }
+      final Map<String, Object?> draft = emitPatchbayMountedUiManifest(
+        runtime: decodePatchbayCatalogUiTargets(catalog),
+        destination: destination,
+        semantics: semantics,
+      );
+      return _Execution(
+        draft,
+        catalog: catalog,
+        exitCode: PatchbayExitCode.accepted,
+        // A manifest is an artifact intended to be redirected and edited, not
+        // a response to collapse into a one-line human summary.
+        summary: const JsonEncoder.withIndent('  ').convert(draft),
       );
     case PatchbayCommandTarget.clientReplSession:
       // `runPatchbayCli` routes a repl to its own loop before dispatch, and
@@ -841,6 +1529,10 @@ Future<_Execution> _execute(
       // Answered before the dial, and refused inside a repl, so this arm is
       // unreachable for the same reason the one above is.
       throw StateError('session-directory commands run without a connection');
+    case PatchbayCommandTarget.localTraceStore:
+      throw StateError('trace-store commands run without a connection');
+    case PatchbayCommandTarget.localLauncher:
+      throw StateError('launcher runs without a connection');
     case PatchbayCommandTarget.localDiagnostics:
       // Answered before the dial as well: doctor dials for itself so that a
       // failed dial becomes a finding instead of ending the command.
@@ -856,6 +1548,21 @@ Future<_Execution> _execute(
       final Map<String, Object?> catalog = await connection.catalog();
       _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
       Map<String, Object?> arguments = friendly.arguments;
+      String? captureMode;
+      if ((friendly.spec == PatchbayFriendlyCommand.captureRoot ||
+              friendly.spec == PatchbayFriendlyCommand.captureTarget) &&
+          arguments.containsKey('afterFrames')) {
+        final Set<String>? features = patchbayDeclaredFeatures(
+          await connection.identity(),
+        );
+        if (features?.contains(PatchbayFeature.captureAfterFrames.name) ==
+            true) {
+          captureMode = 'observedFrames';
+        } else {
+          arguments = <String, Object?>{...arguments}..remove('afterFrames');
+          captureMode = 'legacyImmediate';
+        }
+      }
       if (friendly.resolvesRevision) {
         final Map<String, Object?> current = await _invokeAgainstCatalog(
           connection,
@@ -874,13 +1581,23 @@ Future<_Execution> _execute(
           'revision': _navigationRevision(current),
         };
       }
-      final Map<String, Object?> response = await _invokeCataloged(
+      Map<String, Object?> response = await _invokeCataloged(
         connection,
         catalog,
         command,
         arguments,
         wait: parsed.flag('wait'),
       );
+      if (captureMode != null) {
+        response = <String, Object?>{
+          ...response,
+          'captureMode': captureMode,
+          if (captureMode == 'legacyImmediate')
+            'captureNotice':
+                'host did not declare captureAfterFrames; captured in legacy '
+                'immediate mode',
+        };
+      }
       return _Execution(
         friendly.resolvesRevision ? _withRevisionSource(response) : response,
         catalog: catalog,
@@ -893,6 +1610,735 @@ Future<_Execution> _execute(
               ),
       );
   }
+}
+
+const String _manifestWalkthroughSchema = 'uiManifestWalkthroughReport';
+const Duration _defaultManifestScreenBudget = Duration(seconds: 5);
+const Duration _maximumManifestScreenBudget = Duration(minutes: 2);
+const Duration _defaultManifestTotalBudget = Duration(minutes: 2);
+const Duration _maximumManifestTotalBudget = Duration(minutes: 10);
+
+/// Runs the explicitly side-effecting, destination-ordered manifest audit.
+///
+/// Navigation admission remains consumer-owned: this code only asks for ids
+/// that appeared in both the manifest and `navigation.catalog`. A successful
+/// `navigation.go` is followed by the closed `navigationDestination` wait;
+/// arbitrary readiness expressions never enter the request.
+Future<_Execution> _walkUiManifest(
+  PatchbayClient connection,
+  Map<String, Object?> initialCatalog,
+  PatchbayUiManifest manifest,
+  ArgResults parsed,
+) async {
+  final Duration screenBudget = _manifestWalkthroughBudget(
+    parsed,
+    'screen-timeout-ms',
+    fallback: _defaultManifestScreenBudget,
+    maximum: _maximumManifestScreenBudget,
+  );
+  final Duration totalBudget = _manifestWalkthroughBudget(
+    parsed,
+    'total-timeout-ms',
+    fallback: _defaultManifestTotalBudget,
+    maximum: _maximumManifestTotalBudget,
+  );
+  final bool continueOnError = parsed.flag('continue-on-error');
+  final bool restoreRequested = parsed.flag('restore');
+  const Set<String> requiredCommands = <String>{
+    'navigation.catalog',
+    'navigation.current',
+    'navigation.go',
+    'ui.wait',
+  };
+  final Set<String> missingCommands = <String>{
+    for (final String command in requiredCommands)
+      if (_CatalogCommand.find(initialCatalog, command) == null) command,
+  };
+
+  // An older host is not probed for a request it never declared. If it can
+  // still name the current destination, preserve the existing one-screen
+  // verifier; otherwise only an unscoped v1 manifest can be truthfully
+  // reconciled without inventing which destination is mounted.
+  if (missingCommands.isNotEmpty || manifest.destinations.isEmpty) {
+    if (_CatalogCommand.find(initialCatalog, 'navigation.current') != null ||
+        !manifest.usesDestinations) {
+      final _Execution current = await _verifyManifestCurrent(
+        connection,
+        initialCatalog,
+        manifest,
+      );
+      return _Execution(
+        <String, Object?>{
+          ...current.response,
+          'navigationMode': 'unavailable',
+          'navigationUnavailableReason': manifest.destinations.isEmpty
+              ? 'manifestDestinationsUnavailable'
+              : 'navigationCapabilityUnavailable',
+          if (missingCommands.isNotEmpty)
+            'missingCommands': missingCommands.toList()..sort(),
+        },
+        catalog: initialCatalog,
+        exitCode: current.exitCode,
+        summary:
+            'navigation unavailable; ${current.summary ?? 'current-screen verification only'}',
+      );
+    }
+    return _Execution(
+      <String, Object?>{
+        'schema': _manifestWalkthroughSchema,
+        'navigationMode': 'unavailable',
+        'reasonCode': 'navigationCapabilityUnavailable',
+        'missingCommands': missingCommands.toList()..sort(),
+        'visited': const <String>[],
+        'passed': const <String>[],
+        'failed': const <String>[],
+        'skipped': manifest.destinations,
+        'destinations': <Map<String, Object?>>[
+          for (final String destination in manifest.destinations)
+            <String, Object?>{
+              'destinationId': destination,
+              'status': 'skipped',
+              'reasonCode': 'navigationCapabilityUnavailable',
+            },
+        ],
+        'restore': <String, Object?>{
+          'requested': restoreRequested,
+          'attempted': false,
+        },
+        'finalDestination': null,
+      },
+      catalog: initialCatalog,
+      exitCode: PatchbayExitCode.typedFailure,
+      summary: 'navigation unavailable; no destination-scoped verdict emitted',
+    );
+  }
+
+  final Stopwatch total = Stopwatch()..start();
+  final List<String> visited = <String>[];
+  final List<String> passed = <String>[];
+  final List<String> failed = <String>[];
+  final List<String> skipped = <String>[];
+  final List<Map<String, Object?>> destinations = <Map<String, Object?>>[];
+  final List<Map<String, Object?>> notices = <Map<String, Object?>>[];
+  int primaryExitCode = PatchbayExitCode.accepted;
+
+  final Map<String, Object?> navigationCatalogResponse =
+      await _invokeWalkthroughWait(
+        connection,
+        initialCatalog,
+        'navigation.catalog',
+        const <String, Object?>{},
+        deadline: totalBudget - total.elapsed,
+        total: total,
+        totalBudget: totalBudget,
+        timeoutCode: 'manifestWalkthroughTotalTimeout',
+      );
+  if (patchbayExitCodeFor(navigationCatalogResponse) !=
+      PatchbayExitCode.accepted) {
+    return _walkthroughPreludeRejected(
+      manifest,
+      initialCatalog,
+      restoreRequested,
+      navigationCatalogResponse,
+      'navigationCatalogRejected',
+    );
+  }
+  final PatchbayNavigationCatalogWire navigationCatalog =
+      _decodeNavigationCatalog(navigationCatalogResponse);
+  final Map<String, PatchbayDestinationDescriptorWire> descriptors =
+      <String, PatchbayDestinationDescriptorWire>{
+        for (final PatchbayDestinationDescriptorWire descriptor
+            in navigationCatalog.destinations)
+          descriptor.id: descriptor,
+      };
+
+  final Map<String, Object?> initialCurrent = await _invokeWalkthroughWait(
+    connection,
+    initialCatalog,
+    'navigation.current',
+    const <String, Object?>{},
+    deadline: totalBudget - total.elapsed,
+    total: total,
+    totalBudget: totalBudget,
+    timeoutCode: 'manifestWalkthroughTotalTimeout',
+  );
+  if (patchbayExitCodeFor(initialCurrent) != PatchbayExitCode.accepted) {
+    return _walkthroughPreludeRejected(
+      manifest,
+      initialCatalog,
+      restoreRequested,
+      initialCurrent,
+      'navigationCurrentRejected',
+    );
+  }
+  final String? initialDestination = _navigationDestination(initialCurrent);
+
+  var stopped = false;
+  for (var index = 0; index < manifest.destinations.length; index += 1) {
+    final String destination = manifest.destinations[index];
+    if (stopped) {
+      skipped.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'skipped',
+        'reasonCode': 'stoppedAfterFailure',
+      });
+      continue;
+    }
+    if (total.elapsed >= totalBudget) {
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': 'manifestWalkthroughTotalTimeout',
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        PatchbayExitCode.typedFailure,
+      );
+      stopped = true;
+      continue;
+    }
+
+    final PatchbayDestinationDescriptorWire? descriptor =
+        descriptors[destination];
+    final String? descriptorFailure = descriptor == null
+        ? 'manifestDestinationNotDeclared'
+        : descriptor.ambiguous
+        ? 'navigationDestinationAmbiguous'
+        : !descriptor.operations.contains(PatchbayNavigationOperationWire.go)
+        ? 'navigationGoUnsupported'
+        : null;
+    if (descriptorFailure != null) {
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': descriptorFailure,
+        if (descriptor != null) 'descriptorGates': descriptor.gates,
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        PatchbayExitCode.rejected,
+      );
+      stopped = !continueOnError;
+      continue;
+    }
+
+    final Stopwatch screen = Stopwatch()..start();
+    final Duration currentTimeout = _remainingWalkthroughBudget(
+      screenBudget,
+      screen.elapsed,
+      totalBudget,
+      total.elapsed,
+    );
+    final Map<String, Object?> current = await _invokeWalkthroughWait(
+      connection,
+      initialCatalog,
+      'navigation.current',
+      const <String, Object?>{},
+      deadline: currentTimeout,
+      total: total,
+      totalBudget: totalBudget,
+    );
+    Map<String, Object?>? failure;
+    if (patchbayExitCodeFor(current) != PatchbayExitCode.accepted) {
+      failure = current;
+    } else {
+      final Duration navigationTimeout = _remainingWalkthroughBudget(
+        screenBudget,
+        screen.elapsed,
+        totalBudget,
+        total.elapsed,
+      );
+      if (navigationTimeout <= Duration.zero) {
+        failure = _localWalkthroughFailure('manifestWalkthroughScreenTimeout');
+      } else {
+        final Map<String, Object?> navigation = await _invokeWalkthroughWait(
+          connection,
+          initialCatalog,
+          'navigation.go',
+          <String, Object?>{
+            'destinationId': destination,
+            'revision': _navigationRevision(current),
+            'timeoutMs': navigationTimeout.inMilliseconds,
+          },
+          deadline: navigationTimeout,
+          total: total,
+          totalBudget: totalBudget,
+        );
+        if (patchbayExitCodeFor(navigation) != PatchbayExitCode.accepted) {
+          failure = navigation;
+        } else {
+          final Duration stableTimeout = _remainingWalkthroughBudget(
+            screenBudget,
+            screen.elapsed,
+            totalBudget,
+            total.elapsed,
+          );
+          if (stableTimeout <= Duration.zero) {
+            failure = _localWalkthroughFailure(
+              'manifestWalkthroughScreenTimeout',
+            );
+          } else {
+            final Map<String, Object?> stable = await _invokeWalkthroughWait(
+              connection,
+              initialCatalog,
+              'ui.wait',
+              <String, Object?>{
+                'condition': 'navigationDestination',
+                'timeoutMs': stableTimeout.inMilliseconds,
+                'destinationId': destination,
+              },
+              deadline: stableTimeout,
+              total: total,
+              totalBudget: totalBudget,
+            );
+            if (patchbayExitCodeFor(stable) != PatchbayExitCode.accepted) {
+              failure = stable;
+            }
+          }
+        }
+      }
+    }
+
+    if (failure == null && total.elapsed >= totalBudget) {
+      failure = _localWalkthroughFailure('manifestWalkthroughTotalTimeout');
+    } else if (failure == null && screen.elapsed >= screenBudget) {
+      failure = _localWalkthroughFailure('manifestWalkthroughScreenTimeout');
+    }
+
+    if (failure != null) {
+      final String reason = _walkthroughFailureCode(failure);
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': reason,
+        'descriptorGates': descriptor!.gates,
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        patchbayExitCodeFor(failure),
+      );
+      stopped = reason == 'manifestWalkthroughTotalTimeout' || !continueOnError;
+      continue;
+    }
+
+    visited.add(destination);
+    PatchbayUiManifestSemanticsRuntime? semantics;
+    Map<String, Object?>? verificationFailure;
+    Map<String, Object?>? screenCatalog;
+    final Duration catalogTimeout = _remainingWalkthroughBudget(
+      screenBudget,
+      screen.elapsed,
+      totalBudget,
+      total.elapsed,
+    );
+    if (catalogTimeout.inMilliseconds < 1) {
+      verificationFailure = _localWalkthroughFailure(
+        total.elapsed >= totalBudget
+            ? 'manifestWalkthroughTotalTimeout'
+            : 'manifestWalkthroughScreenTimeout',
+      );
+    } else {
+      try {
+        screenCatalog = await connection.catalog().timeout(catalogTimeout);
+      } on TimeoutException {
+        verificationFailure = _localWalkthroughFailure(
+          total.elapsed >= totalBudget
+              ? 'manifestWalkthroughTotalTimeout'
+              : 'manifestWalkthroughScreenTimeout',
+        );
+      }
+    }
+    if (verificationFailure == null &&
+        manifest.requiresSemanticsAt(destination)) {
+      if (_CatalogCommand.find(screenCatalog!, 'ui.semantics.tree') == null) {
+        verificationFailure = _localWalkthroughFailure(
+          'manifestSemanticsUnavailable',
+        );
+      } else {
+        final Duration semanticsTimeout = _remainingWalkthroughBudget(
+          screenBudget,
+          screen.elapsed,
+          totalBudget,
+          total.elapsed,
+        );
+        final Map<String, Object?> observed = await _invokeWalkthroughWait(
+          connection,
+          screenCatalog,
+          'ui.semantics.tree',
+          const <String, Object?>{},
+          deadline: semanticsTimeout,
+          total: total,
+          totalBudget: totalBudget,
+        );
+        if (patchbayExitCodeFor(observed) != PatchbayExitCode.accepted) {
+          verificationFailure = observed;
+        } else {
+          semantics = _manifestSemanticsRuntime(observed);
+        }
+      }
+    }
+    if (verificationFailure != null) {
+      final String reason = _walkthroughFailureCode(verificationFailure);
+      failed.add(destination);
+      destinations.add(<String, Object?>{
+        'destinationId': destination,
+        'status': 'failed',
+        'reasonCode': reason,
+        'descriptorGates': descriptor!.gates,
+      });
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        patchbayExitCodeFor(verificationFailure),
+      );
+      stopped = reason == 'manifestWalkthroughTotalTimeout' || !continueOnError;
+      continue;
+    }
+    final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
+      manifest: manifest,
+      runtime: decodePatchbayCatalogUiTargets(screenCatalog!),
+      currentDestination: destination,
+      semantics: semantics,
+    );
+    if (report.hasDeviation) {
+      failed.add(destination);
+      primaryExitCode = _firstFailure(
+        primaryExitCode,
+        PatchbayExitCode.verificationDeviation,
+      );
+      stopped = !continueOnError;
+    } else {
+      passed.add(destination);
+    }
+    destinations.add(<String, Object?>{
+      'destinationId': destination,
+      'status': report.hasDeviation ? 'failed' : 'passed',
+      'reasonCode': report.hasDeviation ? 'manifestDeviation' : 'verified',
+      'descriptorGates': descriptor!.gates,
+      'report': report.toJson(),
+    });
+  }
+
+  final Map<String, Object?> restore = <String, Object?>{
+    'requested': restoreRequested,
+    'attempted': false,
+  };
+  String? finalDestination;
+  Map<String, Object?>? finalCurrent;
+  try {
+    finalCurrent = await _invokeWalkthroughWait(
+      connection,
+      initialCatalog,
+      'navigation.current',
+      const <String, Object?>{},
+      deadline: totalBudget - total.elapsed,
+      total: total,
+      totalBudget: totalBudget,
+    );
+    if (patchbayExitCodeFor(finalCurrent) == PatchbayExitCode.accepted) {
+      finalDestination = _navigationDestination(finalCurrent);
+    }
+  } on Object {
+    // The primary walkthrough result remains authoritative; the notice below
+    // names that final position could not be observed without exposing a URI.
+  }
+  if (restoreRequested &&
+      initialDestination != null &&
+      finalDestination != initialDestination) {
+    final Duration remaining = _remainingWalkthroughBudget(
+      screenBudget,
+      Duration.zero,
+      totalBudget,
+      total.elapsed,
+    );
+    if (remaining.inMilliseconds < 1 ||
+        finalCurrent == null ||
+        patchbayExitCodeFor(finalCurrent) != PatchbayExitCode.accepted) {
+      restore['reasonCode'] = 'manifestRestoreBudgetUnavailable';
+      notices.add(const <String, Object?>{
+        'code': 'manifestRestoreFailed',
+        'reasonCode': 'manifestRestoreBudgetUnavailable',
+      });
+    } else {
+      restore['attempted'] = true;
+      final Map<String, Object?> response = await _invokeWalkthroughWait(
+        connection,
+        initialCatalog,
+        'navigation.go',
+        <String, Object?>{
+          'destinationId': initialDestination,
+          'revision': _navigationRevision(finalCurrent),
+          'timeoutMs': remaining.inMilliseconds,
+        },
+        deadline: remaining,
+        total: total,
+        totalBudget: totalBudget,
+      );
+      if (patchbayExitCodeFor(response) != PatchbayExitCode.accepted) {
+        final String reason = _walkthroughFailureCode(response);
+        restore['reasonCode'] = reason;
+        notices.add(<String, Object?>{
+          'code': 'manifestRestoreFailed',
+          'reasonCode': reason,
+        });
+      } else {
+        restore['outcome'] = 'restored';
+        finalDestination = initialDestination;
+      }
+      final Map<String, Object?> observed = await _invokeWalkthroughWait(
+        connection,
+        initialCatalog,
+        'navigation.current',
+        const <String, Object?>{},
+        deadline: totalBudget - total.elapsed,
+        total: total,
+        totalBudget: totalBudget,
+      );
+      if (patchbayExitCodeFor(observed) == PatchbayExitCode.accepted) {
+        finalDestination = _navigationDestination(observed);
+      }
+    }
+  }
+
+  final Map<String, Object?> response = <String, Object?>{
+    'schema': _manifestWalkthroughSchema,
+    'navigationMode': 'walkthrough',
+    'visited': visited,
+    'passed': passed,
+    'failed': failed,
+    'skipped': skipped,
+    'destinations': destinations,
+    'initialDestination': initialDestination,
+    'finalDestination': finalDestination,
+    'restore': restore,
+    if (notices.isNotEmpty) 'notices': notices,
+  };
+  return _Execution(
+    response,
+    catalog: initialCatalog,
+    exitCode: primaryExitCode,
+    summary:
+        'visited=${visited.length} passed=${passed.length} '
+        'failed=${failed.length} skipped=${skipped.length} '
+        'finalDestination=${finalDestination ?? 'none'}',
+  );
+}
+
+Future<_Execution> _verifyManifestCurrent(
+  PatchbayClient connection,
+  Map<String, Object?> catalog,
+  PatchbayUiManifest manifest,
+) async {
+  String? destination;
+  if (manifest.usesDestinations) {
+    final Map<String, Object?> current = await _invokeAgainstCatalog(
+      connection,
+      catalog,
+      'navigation.current',
+      const <String, Object?>{},
+    );
+    if (current['admission'] == 'rejected') {
+      return _Execution(
+        _withSource(current, 'destinationSource'),
+        catalog: catalog,
+      );
+    }
+    destination = _navigationDestination(current);
+  }
+  PatchbayUiManifestSemanticsRuntime? semantics;
+  if (manifest.requiresSemanticsAt(destination)) {
+    if (_CatalogCommand.find(catalog, 'ui.semantics.tree') == null) {
+      throw const PatchbayProtocolException('manifestSemanticsUnavailable');
+    }
+    final Map<String, Object?> observed = await _invokeAgainstCatalog(
+      connection,
+      catalog,
+      'ui.semantics.tree',
+      const <String, Object?>{},
+    );
+    if (observed['admission'] == 'rejected') {
+      return _Execution(
+        _withSource(observed, 'semanticsSource'),
+        catalog: catalog,
+      );
+    }
+    semantics = _manifestSemanticsRuntime(observed);
+  }
+  final PatchbayUiManifestReport report = verifyPatchbayUiManifest(
+    manifest: manifest,
+    runtime: decodePatchbayCatalogUiTargets(catalog),
+    currentDestination: destination,
+    semantics: semantics,
+  );
+  return _Execution(
+    report.toJson(),
+    catalog: catalog,
+    exitCode: report.hasDeviation
+        ? PatchbayExitCode.verificationDeviation
+        : PatchbayExitCode.accepted,
+    summary: report.humanReport,
+  );
+}
+
+Duration _manifestWalkthroughBudget(
+  ArgResults parsed,
+  String name, {
+  required Duration fallback,
+  required Duration maximum,
+}) {
+  final String? raw = parsed.option(name);
+  if (raw == null) return fallback;
+  final int? milliseconds = int.tryParse(raw);
+  if (milliseconds == null ||
+      milliseconds <= 0 ||
+      milliseconds > maximum.inMilliseconds) {
+    throw FormatException(
+      '--$name must be an integer from 1 to ${maximum.inMilliseconds}',
+    );
+  }
+  return Duration(milliseconds: milliseconds);
+}
+
+Duration _remainingWalkthroughBudget(
+  Duration screenBudget,
+  Duration screenElapsed,
+  Duration totalBudget,
+  Duration totalElapsed,
+) {
+  final Duration screenRemaining = screenBudget - screenElapsed;
+  final Duration totalRemaining = totalBudget - totalElapsed;
+  return screenRemaining < totalRemaining ? screenRemaining : totalRemaining;
+}
+
+int _firstFailure(int current, int next) =>
+    current == PatchbayExitCode.accepted ? next : current;
+
+Map<String, Object?> _localWalkthroughFailure(String code) => <String, Object?>{
+  'outcome': 'failed',
+  'failure': <String, Object?>{'code': code},
+};
+
+Future<Map<String, Object?>> _invokeWalkthroughWait(
+  PatchbayClient connection,
+  Map<String, Object?> catalog,
+  String command,
+  Map<String, Object?> arguments, {
+  required Duration deadline,
+  required Stopwatch total,
+  required Duration totalBudget,
+  String? timeoutCode,
+}) async {
+  if (deadline.inMilliseconds < 1) {
+    return _localWalkthroughFailure(
+      timeoutCode ??
+          (total.elapsed >= totalBudget
+              ? 'manifestWalkthroughTotalTimeout'
+              : 'manifestWalkthroughScreenTimeout'),
+    );
+  }
+  try {
+    return await _invokeAgainstCatalog(
+      connection,
+      catalog,
+      command,
+      arguments,
+      deadline: deadline,
+    ).timeout(deadline);
+  } on TimeoutException {
+    return _localWalkthroughFailure(
+      timeoutCode ??
+          (total.elapsed >= totalBudget
+              ? 'manifestWalkthroughTotalTimeout'
+              : 'manifestWalkthroughScreenTimeout'),
+    );
+  }
+}
+
+String _walkthroughFailureCode(Map<String, Object?> response) {
+  final Object? rejection = response['rejection'];
+  if (rejection is Map<Object?, Object?> && rejection['code'] is String) {
+    return rejection['code']! as String;
+  }
+  final Object? failure = response['failure'];
+  if (failure is Map<Object?, Object?> && failure['code'] is String) {
+    return failure['code']! as String;
+  }
+  return 'manifestWalkthroughFailed';
+}
+
+PatchbayNavigationCatalogWire _decodeNavigationCatalog(
+  Map<String, Object?> response,
+) {
+  final Object? payload = response['payload'];
+  if (payload is! Map<String, Object?>) {
+    throw const PatchbayProtocolException('navigationCatalogContractViolated');
+  }
+  try {
+    return PatchbayNavigationCatalogWire.fromJson(payload);
+  } on FormatException catch (failure) {
+    throw PatchbayProtocolException(
+      'navigationCatalogContractViolated',
+      details: <String, Object?>{'reason': failure.message},
+    );
+  }
+}
+
+_Execution _walkthroughPreludeRejected(
+  PatchbayUiManifest manifest,
+  Map<String, Object?> catalog,
+  bool restoreRequested,
+  Map<String, Object?> rejection,
+  String fallbackCode,
+) {
+  final String code =
+      _walkthroughFailureCode(rejection) == 'manifestWalkthroughFailed'
+      ? fallbackCode
+      : _walkthroughFailureCode(rejection);
+  return _Execution(
+    <String, Object?>{
+      'schema': _manifestWalkthroughSchema,
+      'navigationMode': 'walkthrough',
+      'reasonCode': code,
+      'visited': const <String>[],
+      'passed': const <String>[],
+      'failed': const <String>[],
+      'skipped': manifest.destinations,
+      'destinations': <Map<String, Object?>>[
+        for (final String destination in manifest.destinations)
+          <String, Object?>{
+            'destinationId': destination,
+            'status': 'skipped',
+            'reasonCode': code,
+          },
+      ],
+      'restore': <String, Object?>{
+        'requested': restoreRequested,
+        'attempted': false,
+      },
+      'finalDestination': null,
+    },
+    catalog: catalog,
+    exitCode: patchbayExitCodeFor(rejection),
+    summary: 'walkthrough refused: $code',
+  );
+}
+
+PatchbayProfilingClient _profilingClient(
+  PatchbayClient client, {
+  required String capability,
+}) {
+  if (client is PatchbayProfilingClient) {
+    return client as PatchbayProfilingClient;
+  }
+  throw PatchbayProtocolException(
+    capability == 'networkProfile'
+        ? 'networkProfilingUnavailable'
+        : 'profilingVmServiceRequired',
+    details: <String, Object?>{'capability': capability},
+  );
 }
 
 /// Stable code for "this App is too old to understand a snapshot selector".
@@ -918,6 +2364,32 @@ Future<Map<String, Object?>> _selectedSnapshot(
     return _snapshotSelectorUnsupported();
   }
   return connection.snapshot(request: request);
+}
+
+Future<Map<String, Object?>> _snapshotDiff(
+  PatchbayClient connection,
+  int fromRevision,
+) async {
+  final Set<String>? features = patchbayDeclaredFeatures(
+    await connection.identity(),
+  );
+  if (!(features?.contains(PatchbayFeature.snapshotRevisionDiff.name) ??
+      false)) {
+    final Map<String, Object?> snapshot = await connection.snapshot();
+    return <String, Object?>{
+      ...snapshot,
+      'snapshotMode': 'legacyFull',
+      'notice':
+          'This App does not declare snapshot revision diff support; returned '
+          'the full snapshot without sending a diff request.',
+    };
+  }
+  if (connection is! PatchbaySnapshotDiffClient) {
+    throw const PatchbayProtocolException('snapshotDiffClientUnavailable');
+  }
+  return (connection as PatchbaySnapshotDiffClient).snapshotDiff(
+    fromRevision: fromRevision,
+  );
 }
 
 /// The refusal above, in the same typed shape the App's own rejections use.
@@ -1017,6 +2489,21 @@ String? _navigationDestination(Map<String, Object?> response) {
   return destination as String?;
 }
 
+PatchbayUiManifestSemanticsRuntime _manifestSemanticsRuntime(
+  Map<String, Object?> response,
+) {
+  final Object? payload = response['payload'];
+  if (payload is! Map<String, Object?>) {
+    throw const PatchbayProtocolException(
+      'manifestSemanticsContractViolated',
+      details: <String, Object?>{
+        'reason': 'ui.semantics.tree did not return an object payload',
+      },
+    );
+  }
+  return decodePatchbayManifestSemantics(payload);
+}
+
 /// Parses the manifest of a one-shot `ui verify-manifest`, or returns `null`.
 ///
 /// Ordering, not convenience: this runs before the dial so that a manifest the
@@ -1051,9 +2538,29 @@ PatchbayUiManifest? _preReadUiManifest(ArgResults parsed) {
 /// travels with it because "which file, and why not" is the whole content of
 /// this failure. No part of the file itself does.
 PatchbayUiManifest _readUiManifest(String path) {
-  final String source;
+  final PatchbayUiManifestFormat format = switch (path) {
+    final String value when value.endsWith('.json') =>
+      PatchbayUiManifestFormat.json,
+    final String value when value.endsWith('.yaml') || value.endsWith('.yml') =>
+      PatchbayUiManifestFormat.yaml,
+    _ => throw PatchbayUiManifestException(
+      'manifestFormatUnsupported',
+      details: const <String, Object?>{
+        'reason': 'manifest extension must be .json, .yaml, or .yml',
+      },
+    ),
+  };
+  final List<int> bytes;
   try {
-    source = File(path).readAsStringSync();
+    final RandomAccessFile file = File(path).openSync();
+    try {
+      // Never allocate from the file's claimed length and never read more than
+      // one byte beyond the accepted budget, including if the file changes
+      // between open and read.
+      bytes = file.readSync(patchbayUiManifestMaximumBytes + 1);
+    } finally {
+      file.closeSync();
+    }
   } on FileSystemException catch (failure) {
     throw PatchbayUiManifestException(
       'manifestUnreadable',
@@ -1071,7 +2578,29 @@ PatchbayUiManifest _readUiManifest(String path) {
       },
     );
   }
-  return PatchbayUiManifest.parse(source);
+  if (bytes.length > patchbayUiManifestMaximumBytes) {
+    throw const PatchbayUiManifestException(
+      'manifestResourceLimit',
+      details: <String, Object?>{
+        'reason': 'manifest byte limit exceeded',
+        'limit': patchbayUiManifestMaximumBytes,
+      },
+    );
+  }
+  final String source;
+  try {
+    source = utf8.decode(bytes);
+  } on FormatException {
+    throw const PatchbayUiManifestException(
+      'manifestInvalid',
+      details: <String, Object?>{
+        'reason': 'manifest must be valid UTF-8',
+        'line': 1,
+        'column': 1,
+      },
+    );
+  }
+  return PatchbayUiManifest.parseSource(source, format: format);
 }
 
 /// Refuses to send a catalog-declared sensitive parameter through argv.
@@ -1115,15 +2644,68 @@ Future<Map<String, Object?>> _invokeCataloged(
   );
   final bool serverWaitAvailable =
       _CatalogCommand.find(catalog, 'patchbay.job.wait') != null;
-  return wait
-      ? await _waitForJob(
-          connection,
-          catalog,
-          admission,
-          descriptor?.suggestedWaitTimeout,
-          serverWaitAvailable: serverWaitAvailable,
-        )
-      : admission;
+  if (!wait) return admission;
+  final Map<String, Object?> terminal = await _waitForJob(
+    connection,
+    catalog,
+    admission,
+    descriptor?.suggestedWaitTimeout,
+    serverWaitAvailable: serverWaitAvailable,
+  );
+  return _validateTerminalPayload(terminal, descriptor);
+}
+
+Map<String, Object?> _validateTerminalPayload(
+  Map<String, Object?> response,
+  _CatalogCommand? descriptor,
+) {
+  if (descriptor == null || response['admission'] != 'accepted') {
+    return response;
+  }
+  final List<PatchbayResponseValidationIssue> issues =
+      <PatchbayResponseValidationIssue>[];
+  if (descriptor.responseSchema case final PatchbayResponseSchema schema) {
+    issues.addAll(validatePatchbayTerminalPayload(schema, response['payload']));
+  }
+  final PatchbayExecutionValidationResult execution =
+      _validateTerminalExecution(response, descriptor.executionContract);
+  issues.addAll(execution.issues);
+  if (issues.isNotEmpty) return _cliResponseSchemaViolation(response, issues);
+  return _withCliExecutionDetails(<String, Object?>{
+    ...response,
+    'schemaMode': descriptor.responseSchema == null
+        ? 'legacyUnvalidated'
+        : 'validated',
+  }, execution);
+}
+
+PatchbayExecutionValidationResult _validateTerminalExecution(
+  Map<String, Object?> response,
+  PatchbayExecutionContract contract,
+) {
+  final Object? payload = response['payload'];
+  final Object? events = payload is Map<Object?, Object?>
+      ? payload['events']
+      : null;
+  if (events is! List<Object?> || events.isEmpty) {
+    return const PatchbayExecutionValidationResult();
+  }
+  final Object? event = events.last;
+  if (event is! Map<Object?, Object?> || event['phase'] is! String) {
+    return const PatchbayExecutionValidationResult();
+  }
+  final Object? rawAt = event['at'];
+  final DateTime? at = rawAt is String ? DateTime.tryParse(rawAt) : null;
+  final int eventIndex = events.length - 1;
+  return validatePatchbayExecutionEvidence(
+    contract,
+    event['payload'],
+    path:
+        r'$.payload.events'
+        '[$eventIndex].payload',
+    terminalPhase: event['phase']! as String,
+    nowMs: at?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
+  );
 }
 
 /// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
@@ -1145,18 +2727,216 @@ Future<Map<String, Object?>> _invokeAgainstCatalog(
   Duration? deadline,
 }) async {
   final bool cataloged = _CatalogCommand.find(catalog, command) != null;
-  final Map<String, Object?> response = await connection.invoke(
-    command: command,
-    arguments: arguments,
-    deadline: deadline,
-  );
+  final PatchbayRetryPolicy? retryPolicy = _retryPolicyFor(catalog, command);
+  final PatchbayTraceRecorder? trace = _traceRecorder;
+  String? issuedRequestId;
+  final Map<String, Object?> response;
+  if (retryPolicy == null) {
+    issuedRequestId = trace == null ? null : patchbayCliRequestId('trace');
+    response = await connection.invoke(
+      command: command,
+      arguments: arguments,
+      requestId: issuedRequestId,
+      deadline: deadline,
+    );
+  } else {
+    final String requestId = patchbayCliRequestId('retry');
+    issuedRequestId = requestId;
+    Map<String, Object?>? answer;
+    for (var attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+      try {
+        answer = await connection.invoke(
+          command: command,
+          arguments: arguments,
+          requestId: requestId,
+          deadline: deadline,
+        );
+        break;
+      } on PatchbayTransportException catch (failure) {
+        if (!_isRetryableTransportFailure(failure)) rethrow;
+        if (attempt == retryPolicy.maxAttempts) rethrow;
+        if (retryPolicy.backoffMs > 0) {
+          await Future<void>.delayed(
+            Duration(milliseconds: retryPolicy.backoffMs),
+          );
+        }
+      }
+    }
+    response = answer!;
+  }
   if (!cataloged && !_isCommandNotRegistered(response)) {
     throw PatchbayProtocolException(
       'catalogInvocationDrift',
       details: _driftDetails(command, catalog, response),
     );
   }
-  return response;
+  final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
+  final PatchbayResponseSchema? responseSchema = descriptor?.responseSchema;
+  PatchbayExecutionValidationResult execution =
+      const PatchbayExecutionValidationResult();
+  final List<PatchbayResponseValidationIssue> issues =
+      <PatchbayResponseValidationIssue>[];
+  if (response['admission'] == 'accepted') {
+    if (responseSchema != null) {
+      issues.addAll(
+        validatePatchbayResponsePayload(
+          responseSchema.accepted,
+          response['payload'],
+        ),
+      );
+    }
+    if (issues.isEmpty && descriptor != null) {
+      execution = validatePatchbayExecutionEvidence(
+        descriptor.executionContract,
+        response['payload'],
+        nowMs: DateTime.now().millisecondsSinceEpoch,
+      );
+      issues.addAll(execution.issues);
+    }
+  }
+  final Map<String, Object?> result = issues.isNotEmpty
+      ? _cliResponseSchemaViolation(response, issues)
+      : _withCliExecutionDetails(<String, Object?>{
+          ...response,
+          'schemaMode': responseSchema == null
+              ? 'legacyUnvalidated'
+              : 'validated',
+        }, execution);
+  if (trace != null) {
+    final Object? rawRow = _catalogRow(catalog, command);
+    final String descriptorDigest = rawRow == null
+        ? 'uncataloged'
+        : PatchbayCatalogDigest.ofCommands(<Object?>[rawRow]).value;
+    final Object? responseRequestId = result['requestId'];
+    final String requestId = responseRequestId is String
+        ? responseRequestId
+        : issuedRequestId ?? '';
+    trace.admission(
+      command: command,
+      requestId: requestId,
+      arguments: arguments,
+      sensitiveParameters: descriptor?.sensitiveParameters ?? const <String>{},
+      descriptorDigest: descriptorDigest,
+      response: result,
+      includeLegacyPayload: _traceIncludesLegacyPayload,
+    );
+  }
+  return result;
+}
+
+Map<String, Object?> _withCliExecutionDetails(
+  Map<String, Object?> response,
+  PatchbayExecutionValidationResult validation,
+) {
+  if (!validation.legacyDispatchedConflict) return response;
+  final Object? existing = response['details'];
+  return <String, Object?>{
+    ...response,
+    'details': <String, Object?>{
+      if (existing is Map<Object?, Object?>)
+        for (final MapEntry<Object?, Object?> entry in existing.entries)
+          if (entry.key is String) entry.key! as String: entry.value,
+      'legacyDispatchedConflict': true,
+    },
+  };
+}
+
+bool _isRetryableTransportFailure(PatchbayTransportException failure) =>
+    const <String>{
+      patchbayAppUnresponsiveCode,
+      'transportError',
+      'transportUnavailable',
+      'socketClosed',
+    }.contains(failure.code);
+
+PatchbayRetryPolicy? _retryPolicyFor(
+  Map<String, Object?> catalog,
+  String command,
+) {
+  final Map<Object?, Object?>? row = _catalogRow(catalog, command);
+  if (row == null || !row.containsKey('retryPolicy')) return null;
+  if (row['sideEffect'] != 'external') {
+    throw const PatchbayProtocolException('catalogRetryPolicyInvalid');
+  }
+  try {
+    return PatchbayRetryPolicy.fromJson(row['retryPolicy']);
+  } on FormatException {
+    throw const PatchbayProtocolException('catalogRetryPolicyInvalid');
+  }
+}
+
+Map<String, Object?> _describeCatalogCommand(
+  Map<String, Object?> catalog,
+  String command,
+) {
+  final Map<Object?, Object?>? row = _catalogRow(catalog, command);
+  if (row == null) {
+    throw PatchbayProtocolException(
+      'commandNotRegistered',
+      details: <String, Object?>{'command': command},
+    );
+  }
+  final String retryEligibility;
+  if (row['sideEffect'] != 'external') {
+    retryEligibility = 'notExternal';
+  } else if (!row.containsKey('retryPolicy')) {
+    retryEligibility = 'notDeclared';
+  } else {
+    _retryPolicyFor(catalog, command);
+    retryEligibility = 'eligible';
+  }
+  return <String, Object?>{
+    'command': <String, Object?>{
+      for (final MapEntry<Object?, Object?> entry in row.entries)
+        '${entry.key}': entry.value,
+    },
+    'schemaMode': row.containsKey('responseSchema')
+        ? 'validated'
+        : 'legacyUnvalidated',
+    'retryEligibility': retryEligibility,
+  };
+}
+
+Map<Object?, Object?>? _catalogRow(
+  Map<String, Object?> catalog,
+  String command,
+) {
+  final Object? rows = catalog['commands'];
+  if (rows is! List<Object?>) return null;
+  for (final Object? row in rows) {
+    if (row is Map<Object?, Object?> && row['name'] == command) return row;
+  }
+  return null;
+}
+
+Map<String, Object?> _cliResponseSchemaViolation(
+  Map<String, Object?> response,
+  List<PatchbayResponseValidationIssue> issues,
+) {
+  final List<PatchbayResponseValidationIssue> capped = issues
+      .take(patchbayResponseValidationMaxIssues)
+      .toList(growable: false);
+  final PatchbayResponseValidationIssue first = capped.first;
+  return <String, Object?>{
+    'schemaVersion': response['schemaVersion'] ?? 1,
+    'requestId': response['requestId'] ?? '',
+    'admission': 'rejected',
+    'payload': const <String, Object?>{},
+    'notice': null,
+    'jobId': response['jobId'],
+    'rejection': <String, Object?>{
+      'code': 'providerProtocolViolation',
+      'details': <String, Object?>{
+        'reason': first.reason,
+        'field': first.field,
+        if (first.expected != null) 'expected': first.expected!,
+        'violations': capped
+            .map((PatchbayResponseValidationIssue issue) => issue.toJson())
+            .toList(growable: false),
+      },
+    },
+    'schemaMode': 'validated',
+  };
 }
 
 /// What the host already said about the catalog this invoke disagreed with.
@@ -1347,10 +3127,17 @@ int _positiveOption(ArgResults options, String name) {
 /// which value may never touch argv, and how large a `blob.read` chunk the host
 /// will accept — are the App's to make, not the CLI's to hardcode.
 final class _CatalogCommand {
-  const _CatalogCommand(this.suggestedWaitTimeout, this._parameters);
+  const _CatalogCommand(
+    this.suggestedWaitTimeout,
+    this._parameters,
+    this.responseSchema,
+    this.executionContract,
+  );
 
   final Duration? suggestedWaitTimeout;
   final List<Map<Object?, Object?>> _parameters;
+  final PatchbayResponseSchema? responseSchema;
+  final PatchbayExecutionContract executionContract;
 
   Set<String> get sensitiveParameters => <String>{
     for (final Map<Object?, Object?> parameter in _parameters)
@@ -1384,6 +3171,10 @@ final class _CatalogCommand {
             for (final Object? parameter in parameters)
               if (parameter is Map<Object?, Object?>) parameter,
         ],
+        row.containsKey('responseSchema')
+            ? PatchbayResponseSchema.fromJson(row['responseSchema'])
+            : null,
+        PatchbayExecutionContract.fromCatalogRow(row),
       );
     }
     return null;

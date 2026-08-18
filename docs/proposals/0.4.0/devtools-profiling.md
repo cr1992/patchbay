@@ -20,9 +20,32 @@ inspect 已能借用 VM Service，但性能和网络问题仍需跳回 DevTools 
 
 ## 契约与预算
 
-采集命令声明 `durationMs` 和采样上限，返回 jobId；终态 payload 带窗口、样本数、丢弃数和
-`factSource: appRecorded`。perf/net 各有独立 capability。direct 连接仍由 host 调用同一采集器，不另造
-HTTP 代理或抓包路径。
+### perf 当前交付形态
+
+`perf profile` 是 CLI 对**已经连接的 VM Service** 发起的一次同步有限窗口观测，不注册 App catalog
+命令，也不伪装成 host job。它只调用 `vm_service` 的公开 `getVMTimelineFlags`、
+`setVMTimelineFlags`、`getVMTimelineMicros`、`streamListen` / `streamCancel` 与 `getMemoryUsage` RPC：临时补齐
+`Dart` / `Embedder` / `GC` stream，结束或失败时恢复原 stream 集合。输出是
+`patchbay.performanceProfile.v1` 有界摘要，`factSource: uiObserved`，不转发原始 timeline event。
+
+请求声明 `durationMs`（默认 10 s，范围 1..60000）和 `sampleLimit`（默认/最大 10000）；结果固定包含
+窗口、接收/处理/丢弃事件数、截断标记、frame build/raster 耗时摘要、16 ms jank 计数、两次 heap
+观测与新/老生代 GC 计数。已处理事件的计量预算最大 8 MiB；事件数或字节任一先到即停止汇总并明确
+`truncated: true`。timeline event 逐批到达即汇总，不保留原始事件列表；达到预算就取消订阅，原始
+事件不进入 Patchbay artifact、日志或输出。
+
+direct 没有 VM timeline collector，必须返回 `profilingVmServiceRequired`，不得用 App snapshot 或
+HTTP 往返时间伪造同口径。未来只有接入方注入与 VM 版同输入、同聚合器的 host collector 后，才可在
+direct 发布 perf capability；届时再把长窗口采集升级为 host job + artifact/snapshot 引用。
+
+### net 的实现阻断
+
+CLI 保留 `net profile` 入口，但当前稳定返回 `networkProfilingUnavailable`，不发布 net capability、
+不调用网络画像 RPC。仓内解析的 `vm_service 15.2.0` 只有 `getHttpProfile` /
+`getHttpProfileRequest`：公开返回类型 `HttpProfileRequest` 在调用方介入前已经包含 request/response
+body、headers、cookies 与带 query 值的 URI，且 RPC 没有采集前排除这些字段的参数。先取回再脱敏正是
+本提案否决的方案，因此不能接。等待公开 API 支持采集前字段过滤，或接入方提供只产生已脱敏事件的
+host collector 后，再实现下述 net 契约。
 
 net 的 URL 默认只保留 scheme 类别、host 哈希和 path 段形状。header/body 永不进入原始缓冲。达到事件
 数或字节上限后停止收集并报告 `truncated: true`，不能静默丢样。
@@ -66,7 +89,11 @@ descriptor 白名单内的键名（排序去重），其余归一成 `queryKeyCo
 - 仓内提交一份**冻结脱敏样本**：含 token、邮箱、UUID、中文业务路径、长 query 的输入，与期望输出
   golden。四条 path 归一化规则与 query 白名单各有正反用例。
 - 断言 hot restart 前后同一 host 的哈希不同（盐已更换），防止有人把它当稳定标识用。
-- 压测覆盖事件上限、取消和超时；VM/direct 返回相同聚合口径。
+- perf 压测覆盖事件/字节上限、超时与失败时 stream 恢复；direct 明确返回
+  `profilingVmServiceRequired`。未来 host-injected collector 开放 direct 前，必须证明它与 VM 路径使用
+  同一聚合器；当前 direct 不伪造结果。
+- net 脱敏 golden 与两接入方书面确认留作 net collector 的合入闸；当前阻断 MR 不用 fake source
+  冒充已交付，也不把收全量后的纯脱敏函数接到生产路径。
 - 接入方评审的产物是**对上述 golden 的书面确认**（记入 MR 描述），不是一次口头 review；至少一个
   接入方确认 perf、两个确认 net，net 才可合入。
 
