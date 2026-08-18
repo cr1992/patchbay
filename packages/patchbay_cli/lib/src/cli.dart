@@ -12,6 +12,8 @@ import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
+import 'keep_awake_policy.dart';
+import 'launcher.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
 import 'repl.dart';
@@ -45,6 +47,7 @@ Future<int> runPatchbayCli(
   StringSink? output,
   StringSink? errorOutput,
   PatchbayPermissionCommandRunner? permissionCommands,
+  Map<String, String>? environment,
 }) async {
   if (Zone.current[_traceZoneInitializedKey] != true) {
     return _runPatchbayCliWithTrace(
@@ -54,6 +57,7 @@ Future<int> runPatchbayCli(
       output: output,
       errorOutput: errorOutput,
       permissionCommands: permissionCommands,
+      environment: environment,
     );
   }
   final StringSink out = output ?? stdout;
@@ -76,6 +80,14 @@ Future<int> runPatchbayCli(
   }
 
   final bool json = parsed.flag('json');
+  PatchbayKeepAwakePolicy? keepAwakePolicy;
+  PatchbayKeepAwakePolicy resolveKeepAwakePolicy() =>
+      keepAwakePolicy ??= PatchbayKeepAwakePolicy.resolve(
+        commandLine: parsed.wasParsed('keep-awake')
+            ? parsed.flag('keep-awake')
+            : null,
+        environment: environment ?? Platform.environment,
+      );
   PatchbayClient? connection;
   try {
     if (_helpTopic(parsed) case final List<String> topic) {
@@ -85,6 +97,54 @@ Future<int> runPatchbayCli(
     _validateGlobalShape(parsed);
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
+    }
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localLauncher) {
+      final PatchbayFriendlyInvocation invocation =
+          PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+      final String launchId =
+          'launch-${pid}-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+      final Completer<void> cancellation = Completer<void>();
+      final List<StreamSubscription<ProcessSignal>> signalSubscriptions =
+          <StreamSubscription<ProcessSignal>>[];
+      void watch(ProcessSignal signal) {
+        try {
+          signalSubscriptions.add(
+            signal.watch().listen((_) {
+              if (!cancellation.isCompleted) cancellation.complete();
+            }),
+          );
+        } on Object {
+          // Some signals are unavailable on Windows. Lease expiry remains the
+          // crash-safe release path there.
+        }
+      }
+
+      watch(ProcessSignal.sigint);
+      watch(ProcessSignal.sigterm);
+      try {
+        final PatchbayLaunchResult result =
+            await PatchbayLauncherSupervisor(
+              store: PatchbaySessionStore(parsed.option('session-dir')),
+            ).run(
+              command: List<String>.from(
+                invocation.arguments['command']! as List<Object?>,
+              ),
+              launchId: launchId,
+              ownerPid: pid,
+              onFrame: (PatchbayLaunchFrame frame) =>
+                  out.writeln(jsonEncode(frame.toJson())),
+              onHumanLine: error.writeln,
+              keepAwakePolicy: resolveKeepAwakePolicy(),
+              cancellation: cancellation.future,
+            );
+        return result.exitCode;
+      } finally {
+        for (final StreamSubscription<ProcessSignal> subscription
+            in signalSubscriptions) {
+          await subscription.cancel();
+        }
+      }
     }
     // Session bookkeeping answers before any transport exists: these commands
     // are what an operator reaches for when the CLI cannot pick a session, so
@@ -184,7 +244,12 @@ Future<int> runPatchbayCli(
                   lineSpec.path.join(' '),
                   transport: _traceTransport(parsed),
                 );
-          final _Outcome outcome = await _executeOnce(connection!, line);
+          final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
+            connection!,
+            line,
+            await _executeOnce(connection, line),
+            resolveKeepAwakePolicy(),
+          );
           if (runId != null) trace!.commandFinished(runId, outcome.exitCode);
           return PatchbayReplOutcome(outcome.response, outcome.exitCode);
         },
@@ -196,10 +261,11 @@ Future<int> runPatchbayCli(
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
-    final _Outcome outcome = await _executeOnce(
+    final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
       connection,
       parsed,
-      manifest: manifest,
+      await _executeOnce(connection, parsed, manifest: manifest),
+      resolveKeepAwakePolicy(),
     );
     _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
     return outcome.exitCode;
@@ -359,6 +425,7 @@ Future<int> _runPatchbayCliWithTrace(
   StringSink? output,
   StringSink? errorOutput,
   PatchbayPermissionCommandRunner? permissionCommands,
+  Map<String, String>? environment,
 }) async {
   final ArgResults? parsed = _tryParseForTrace(arguments);
   final PatchbayFriendlyCommand? spec = parsed == null
@@ -376,6 +443,7 @@ Future<int> _runPatchbayCliWithTrace(
         output: output,
         errorOutput: errorOutput,
         permissionCommands: permissionCommands,
+        environment: environment,
       ),
       zoneValues: const <Object?, Object?>{_traceZoneInitializedKey: true},
     );
@@ -398,6 +466,7 @@ Future<int> _runPatchbayCliWithTrace(
           output: output,
           errorOutput: errorOutput,
           permissionCommands: permissionCommands,
+          environment: environment,
         ),
         zoneValues: const <Object?, Object?>{_traceZoneInitializedKey: true},
       );
@@ -419,6 +488,7 @@ Future<int> _runPatchbayCliWithTrace(
         output: output,
         errorOutput: errorOutput,
         permissionCommands: permissionCommands,
+        environment: environment,
       ),
       zoneValues: <Object?, Object?>{
         _traceZoneInitializedKey: true,
@@ -646,6 +716,41 @@ Future<_Outcome> _executeOnce(
   }
 }
 
+Future<_Outcome> _renewKeepAwakeAfterSuccess(
+  PatchbayClient connection,
+  ArgResults parsed,
+  _Outcome outcome,
+  PatchbayKeepAwakePolicy policy,
+) async {
+  if (!policy.enabled || outcome.exitCode != PatchbayExitCode.accepted) {
+    return outcome;
+  }
+  final String? serviceCommand = PatchbayFriendlyCommandRegistry.specFor(
+    parsed.rest,
+  )?.serviceCommand;
+  // Generated active specs are the authority after command-surface sync; the
+  // deprecated enum façade is not guaranteed to preserve object identity.
+  if (serviceCommand == 'ui.keepAwake.set' ||
+      serviceCommand == 'ui.keepAwake.status') {
+    return outcome;
+  }
+  final PatchbayKeepAwakeAttempt renewal = await requestPatchbayKeepAwake(
+    connection,
+    enabled: true,
+    lease: policy.lease,
+  );
+  final String originalSummary =
+      outcome.summary ?? patchbayResponseSummary(outcome.response);
+  final String keepAwakeSummary = renewal.reasonCode == null
+      ? 'keepAwake=${renewal.state}'
+      : 'keepAwake=${renewal.state} reason=${renewal.reasonCode}';
+  return _Outcome(
+    <String, Object?>{...outcome.response, 'localKeepAwake': renewal.toJson()},
+    renewal.success ? outcome.exitCode : PatchbayExitCode.typedFailure,
+    summary: '$originalSummary $keepAwakeSummary',
+  );
+}
+
 ArgParser patchbayCliParser() => ArgParser()
   ..addFlag(
     'help',
@@ -726,6 +831,13 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Wait for a returned jobId to reach a terminal event.',
   )
   ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
+  ..addFlag(
+    'keep-awake',
+    defaultsTo: false,
+    help:
+        'Renew the App keep-awake lease after successful commands; launch '
+        'also holds it for the supervised session. Disabled by default.',
+  )
   ..addOption('revision', help: 'Observed navigation revision.')
   ..addOption(
     'generation',
@@ -1373,6 +1485,8 @@ Future<_Execution> _execute(
       throw StateError('session-directory commands run without a connection');
     case PatchbayCommandTarget.localTraceStore:
       throw StateError('trace-store commands run without a connection');
+    case PatchbayCommandTarget.localLauncher:
+      throw StateError('launcher runs without a connection');
     case PatchbayCommandTarget.localDiagnostics:
       // Answered before the dial as well: doctor dials for itself so that a
       // failed dial becomes a finding instead of ending the command.

@@ -20,6 +20,25 @@ PatchbayFriendlyInvocation _resolve(
 }
 
 void main() {
+  test('launch preserves the consumer command after the option boundary', () {
+    final PatchbayFriendlyInvocation invocation = _resolve(<String>[
+      'launch',
+      '--',
+      'flutter',
+      'run',
+      '--vmservice-out-file',
+      '.dart_tool/patchbay/vmservice.txt',
+    ]);
+
+    expect(invocation.spec, PatchbayFriendlyCommand.launch);
+    expect(invocation.arguments['command'], <String>[
+      'flutter',
+      'run',
+      '--vmservice-out-file',
+      '.dart_tool/patchbay/vmservice.txt',
+    ]);
+  });
+
   test('friendly command paths are unique and every declaration resolves', () {
     final Set<String> paths = <String>{};
     for (final PatchbayFriendlyCommand spec in PatchbayFriendlyCommand.values) {
@@ -27,6 +46,7 @@ void main() {
       final List<String> words = <String>[
         ...spec.path,
         ...switch (spec) {
+          PatchbayFriendlyCommand.launch => <String>['fake-consumer'],
           PatchbayFriendlyCommand.exec ||
           PatchbayFriendlyCommand.describe => <String>['fixture.command'],
           PatchbayFriendlyCommand.jobGet ||

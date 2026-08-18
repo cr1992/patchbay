@@ -444,20 +444,39 @@ delegate 只在真正发生状态翻转时被调用，不会连着两次收到�
 
 ### 6. 会话自动发现（可选）
 
-自动发现不是 `flutter run` 自带行为，需要一层启动器把 VM Service URI 写成会话记录。推荐让
-`flutter run` 自己把 URI 落盘，启动器只监视这个文件：
+自动发现不是 `flutter run` 自带行为。`patchbay launch -- <consumer command>` 负责有界监督，consumer
+仍负责提供真实的 App/device metadata 并声明自己的 session。推荐让 `flutter run` 自己把 URI 落盘：
 
 ```console
 $ flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
 ```
 
-读到 URI 后用 `patchbay_cli` 的 session writer（`PatchbaySessionStore` + `PatchbaySessionRecord`）
-写记录，`appInstanceId` 由 CLI 首次连上后补齐。这条路径不接管 `flutter run` 的 stdio：`r` / `R` /
-`q` 与热重载输出照旧，启动器解析出问题也只影响发现，不会连交互一起毁掉。
+`patchbay launch` 向 child 注入 `PATCHBAY_SESSION_DIR`、`PATCHBAY_LAUNCH_ID`、
+`PATCHBAY_LAUNCH_OWNER_PID`。接入方用 `PatchbayLaunchContext.tryFromEnvironment` 判断是否处于受监督
+启动；三项全无表示普通启动，部分存在则拒绝。参与 child 用 `pendingRecord` 写带完整必填 metadata 的
+pending 记录，并显式传入真实 consumer/App `processId`；这个 PID 与 launcher `ownerPid` 各自独立。读到
+URI 后用 `withTransport` 原子更新。launcher 不伪造 metadata、不解析 stdout 私有帧，
+只认 `launchId + ownerPid` 都匹配的记录；identity 成功后才写入 `appInstanceId/isolateId` 并进入 `live`。
 
-包住 `flutter run --machine` 再解析 machine frame 仍然可行（它额外提供 `app.debugPort` 等事件），
-但那要求启动器接管 stdio 并自行转发按键，实测更脆，不是推荐路径。没有启动器时始终使用
-`--ws-uri`。
+```console
+$ patchbay launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+$ PATCHBAY_KEEP_AWAKE=true patchbay launch -- flutter run ... # 本地默认开启
+$ patchbay --no-keep-awake launch -- flutter run ...          # 显式覆盖本地默认
+```
+
+stdout 是稳定 machine frame；child stdout/stderr 作为人读日志转发到 stderr。没有执行上述声明步骤的
+child 不会被猜成当前 App，而是在默认 120 秒预算耗尽后以 `failed/sessionNotDeclared` 终止。退避从
+200 ms 指数增长、封顶 5 s 并带 `[50%,100%]` 抖动；hot restart 会重新校验并重锚 App instance。
+稳定 `live` 状态每 5 秒观测一次；断连时恢复退避从 200 ms 重新起步，单次 identity probe 也受剩余
+总预算和 child 退出约束。
+consumer 内部仍可解析自己所用工具链的输出，但这是接入方实现，不是 launcher 的私有协议。没有
+声明接入时始终使用 `--ws-uri` 或既有独立 session writer。
+
+launcher 默认不碰亮屏租约。传全局 `--keep-awake`，或把本地环境变量 `PATCHBAY_KEEP_AWAKE` 设为
+`true/on/1` 后，它只在会话真正进入 `live` 才申请 10 分钟租约，并借既有健康观测在半租期续租；没有
+第二条高频心跳。`--no-keep-awake` 总是覆盖环境默认。正常退出、child 结束、失败和信号取消会尽力
+显式归还；若连接已断，machine frame 会写 `releaseUnconfirmed`，最终由 App 端租约到期兜底，CLI 不会
+把“请求没送达”打印成“已释放”。
 
 ## CLI 手册
 
@@ -634,12 +653,19 @@ $ patchbay ui keep-awake on                       # 默认租约（App 声明，
 $ patchbay ui keep-awake on --lease-ms 7200000    # 显式租约，上限 2 小时
 $ patchbay ui keep-awake status                   # 只读，不续租
 $ patchbay ui keep-awake off                      # 立刻归还，不等租约
+$ patchbay --keep-awake identity                  # 命令成功后按本地策略续租
 ```
 
 `on` / `off` 是同一条协议命令 `ui.keepAwake.set` 的两种拼法，`enabled` 由**你敲的那个词**决定而不是
 参数——`off` 不可能被一个多余的 flag 变成一次开启。`--lease-ms` 只属于 `on`：释放不带租约，读什么
 都不带。不传 `--lease-ms` 时 CLI 什么都不发，默认值在 App 的 catalog descriptor 里，CLI 侧不留第二份
 （留了就是会过期的那份）。
+
+全局 `--[no-]keep-awake` 是 CLI/launcher 的**本地策略**，不改变上述显式命令的协议。策略默认关闭，
+也可用 `PATCHBAY_KEEP_AWAKE=true` 设为本机默认；显式 `--no-keep-awake` 优先。普通 one-shot / REPL
+命令只在本条命令成功后续租，`on`、`off`、`status` 都不会再触发第二次隐式操作。执行过策略的 JSON
+结果带 `localKeepAwake`；拒绝或断连分别写稳定 state/reason，并以类型化失败退出，避免把业务命令成功
+误报成“常亮也成功”。
 
 各 `outcome`：`engaged`（本次开启）、`renewed`（已经押着，只是续租，不会再调一次 delegate）、
 `released`、`unchanged`（本来就没押着）、`observed`（`status`）。`source` 恒为 `appRecorded`——它说的

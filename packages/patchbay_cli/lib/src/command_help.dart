@@ -282,6 +282,8 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.localTraceStore =>
           'Always available: it reads and writes the local trace store and '
               'never dials the App.',
+        PatchbayCommandTarget.localLauncher =>
+          'Always available: the child declares the session it supervises.',
         PatchbayCommandTarget.localManifestVerification =>
           'Available on any connected Patchbay transport; a manifest that '
               'scopes entries to a destination also needs navigation.current.',
@@ -324,6 +326,9 @@ abstract final class PatchbayCommandHelp {
     PatchbayCommandTarget.localSessionStore =>
       'Reads and writes the local launcher session directory '
           '(--session-dir); it never dials the App.',
+    PatchbayCommandTarget.localLauncher =>
+      'Starts one child with additive PATCHBAY_LAUNCH_* environment and '
+          'supervises only the session that child declares.',
     PatchbayCommandTarget.localTraceStore =>
       'Reads and writes append-only local trace files (--trace-dir); it '
           'never invokes an App command.',
@@ -364,8 +369,11 @@ abstract final class PatchbayCommandHelp {
       if (option == null) {
         throw StateError('friendly option --$name is missing from the parser');
       }
+      final String spelling = name == 'keep-awake'
+          ? '--[no-]keep-awake'
+          : '--$name';
       output.writeln(
-        '  --${name.padRight(16)} ${option.help ?? ''}'.trimRight(),
+        '  ${spelling.padRight(18)} ${option.help ?? ''}'.trimRight(),
       );
     }
   }

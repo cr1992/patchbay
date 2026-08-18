@@ -394,6 +394,37 @@ void main() {
       expect(store.readSelection(), isNull);
     });
 
+    test('prune deterministically removes an expired pending record', () {
+      final DateTime now = DateTime.utc(2026, 8, 18);
+      const PatchbayLaunchContext context = PatchbayLaunchContext(
+        sessionDirectory: '/unused',
+        launchId: 'launch-expired',
+        ownerPid: 4242,
+      );
+      store.write(
+        context.pendingRecord(
+          sessionId: 'expired',
+          applicationId: 'dev.patchbay.fixture',
+          processId: 4242,
+          buildMode: 'debug',
+          createdAt: now.subtract(const Duration(minutes: 6)),
+          workspacePath: '/repo/worktree',
+          deviceId: 'device-1',
+        ),
+      );
+      store.writeSelection('expired');
+
+      final PatchbaySessionPruneResult result = PatchbaySessionResolver(
+        store: store,
+        pidProbe: (_) => true,
+        clock: () => now,
+      ).prune();
+
+      expect(result.removed, <String>['expired']);
+      expect(result.selectionCleared, isTrue);
+      expect(store.readSelection(), isNull);
+    });
+
     test('use refuses an id that has no record', () {
       store.write(_record('worktree-a'));
 

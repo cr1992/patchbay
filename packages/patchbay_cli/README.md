@@ -64,6 +64,33 @@ dart run bin/patchbay.dart --json snapshot
 dart run bin/patchbay.dart --json exec <namespace.command>
 ```
 
+To make startup and recovery one bounded operation, launch an integrated consumer through the CLI:
+
+```text
+dart run bin/patchbay.dart launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+dart run bin/patchbay.dart --keep-awake launch -- flutter run ...
+PATCHBAY_KEEP_AWAKE=true dart run bin/patchbay.dart launch -- flutter run ...
+dart run bin/patchbay.dart --no-keep-awake launch -- flutter run ...
+```
+
+The child reads `PATCHBAY_SESSION_DIR`, `PATCHBAY_LAUNCH_ID`, and
+`PATCHBAY_LAUNCH_OWNER_PID` with `PatchbayLaunchContext.tryFromEnvironment`, then writes the full
+pending record using `pendingRecord` and adds its transport with `withTransport`. The launcher does
+not invent application/device metadata: the child must pass the real consumer/App `processId`,
+which is distinct from the launcher `ownerPid`. It also does not parse a private stdout frame. It supervises only a record
+whose launch ID and owner PID both match; a child that does not declare one fails in bounded time as
+`sessionNotDeclared`. Machine frames stay on stdout and child/human output is forwarded to stderr.
+Stable live sessions are observed every five seconds; a disconnect restarts recovery at the initial
+200 ms backoff, and each identity probe is bounded by both child exit and the remaining budget.
+
+The screen-awake policy is off by default. Global `--keep-awake`, or a local
+`PATCHBAY_KEEP_AWAKE=true/on/1`, acquires the existing ten-minute lease only after the launcher is
+`live` and renews it at half-lease through the existing health observation. `--no-keep-awake`
+overrides that local default. Successful one-shot / REPL commands may renew under the same policy,
+while explicit `ui keep-awake on|off|status` commands never trigger a second implicit operation.
+Terminal paths and signal cancellation attempt release; on disconnect the machine frame / JSON says
+`releaseUnconfirmed` or `renewalUnconfirmed`, with App-side lease expiry remaining the final fallback.
+
 When any of the steps above does not work, run the health check first — it dials out itself, so a
 failed connection is one of its findings rather than the end of the command:
 
@@ -276,21 +303,20 @@ leave a partial file under the final output name.
 - never write it into scripts, logs, snapshots, or anything you commit;
 - CLI errors report only the error category, never echoing the full URI.
 
-The launcher first writes a provisional record via atomic replace, then fills in the URI once it
-receives `app.debugPort`; only after the CLI connects and reads `ext.patchbay.identity` are
+The participating child first writes a provisional record via atomic replace, then fills in the URI
+once its own toolchain discovers it; only after the launcher connects and reads `ext.patchbay.identity` are
 `appInstanceId` and `isolateId` filled in. A complete record binds the session schema,
 `applicationId`, `appInstanceId`, `isolateId`, launcher PID, `wsUri`, build mode, creation time,
 worktree, and device ID. Records live in the current user's system temp directory by default, and
-`PATCHBAY_SESSION_DIR` can override that. The launcher still echoes `app.log`, `app.progress`, and
-stderr in human-readable form, but uniformly replaces any http/ws URI within them; `app.debugPort`
-only prints "session discovered" and never echoes the machine event payload.
+`PATCHBAY_SESSION_DIR` can override that. `patchbay launch` forwards child stdout/stderr as human
+output on stderr; stdout remains a stream of stable launcher machine frames.
 
 A live PID only means the launcher may still be running — it does not prove the app instance is
-still the same one. Any of the following deletes the record and returns a stable session error: a
-dead PID, an unreachable URI, or a schema/identity mismatch. When a hot restart produces
-`app.debugPort` again, the launcher atomically resets the identity it had filled in and the CLI
-must re-measure it; an explicit `--ws-uri` runs the same schema/isolate/appInstance identity check.
-The launcher deletes the records it owns on exit. On POSIX the directory and files are tightened to
+still the same one. A dead PID or schema/identity mismatch invalidates the record; a temporarily
+unreachable endpoint remains available for bounded recovery. On hot restart the launcher observes
+the changed App instance and re-pins the record before reuse. An explicit `--ws-uri` runs the same
+schema/isolate/appInstance identity check. The launcher deletes only pending records it owns on
+exit. On POSIX the directory and files are tightened to
 `0700` and `0600` respectively, and ordinary output, errors, and selection lists never contain a
 URI or token.
 
