@@ -383,6 +383,28 @@ void main() {
       expect(_oldDigestVerdict(catalog), 'unsupported');
     });
 
+    test('0.3 digest reader transparently covers execution policy fields', () {
+      const List<Object?> commands = <Object?>[
+        <String, Object?>{
+          'name': 'fixture.command',
+          'factSources': <String>['deviceReported'],
+          'confirmationBudgetMs': 5000,
+          'unchangedEvidenceMaxAgeMs': 30000,
+          'weakConfirmationCompletes': false,
+        },
+      ];
+      final Map<String, Object?> catalog = <String, Object?>{
+        'commands': commands,
+        'catalogDigest': PatchbayCatalogDigest.ofCommands(commands).toJson(),
+      };
+
+      expect(_oldDigestVerdict(catalog), 'verified');
+      expect(
+        (catalog['catalogDigest']! as Map<Object?, Object?>)['covers'],
+        <String>['commands'],
+      );
+    });
+
     test('0.3 invocation reader ignores the new schemaMode sibling', () async {
       final PatchbayServiceHost host = PatchbayServiceHost(
         applicationId: 'dev.patchbay.schema-compat',

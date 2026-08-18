@@ -3,6 +3,7 @@ import 'dart:async';
 import 'command_dispatch_scope.dart';
 import 'command_descriptor.dart';
 import 'command_registry.dart';
+import 'execution_evidence.dart';
 import 'facts.dart';
 import 'generated/core_wire.g.dart';
 import 'response_schema.dart';
@@ -259,6 +260,9 @@ final class PatchbayJobRegistry {
       source: source,
       operation: operation ?? descriptor?.name ?? command,
       responseSchema: _freezeResponseSchema(descriptor?.responseSchema),
+      executionContract: _freezeExecutionContract(
+        descriptor?.executionContract,
+      ),
       body: body,
       cancel: cancel,
     );
@@ -316,6 +320,9 @@ final class PatchbayJobRegistry {
       responseSchema: _freezeResponseSchema(
         registry.responseSchemaFor(command),
       ),
+      executionContract: _freezeExecutionContract(
+        registry.executionContractFor(command),
+      ),
       body: body,
       cancel: cancel,
     );
@@ -325,6 +332,7 @@ final class PatchbayJobRegistry {
     required PatchbayFactSource source,
     required String? operation,
     required PatchbayResponseSchema? responseSchema,
+    required PatchbayExecutionContract? executionContract,
     required PatchbayJobBody body,
     PatchbayJobCancellation? cancel,
   }) {
@@ -336,6 +344,7 @@ final class PatchbayJobRegistry {
       cancel: cancel,
       operation: operation,
       responseSchema: responseSchema,
+      executionContract: executionContract,
     );
     _records[jobId] = record;
     _append(
@@ -391,11 +400,22 @@ final class PatchbayJobRegistry {
   static PatchbayResponseSchema? _freezeResponseSchema(
     PatchbayResponseSchema? schema,
   ) {
-    // Freeze nested maps now. Completion must not consult a mutable catalog or
-    // observe a consumer mutating schema collections while the job is running.
     return schema == null
         ? null
         : PatchbayResponseSchema.fromJson(schema.toJson());
+  }
+
+  /// Freezes execution policy at admission alongside the response schema.
+  static PatchbayExecutionContract? _freezeExecutionContract(
+    PatchbayExecutionContract? contract,
+  ) {
+    if (contract == null) return null;
+    return PatchbayExecutionContract(
+      factSources: Set<PatchbayFactSource>.unmodifiable(contract.factSources),
+      unchangedEvidenceMaxAgeMs: contract.unchangedEvidenceMaxAgeMs,
+      confirmationBudgetMs: contract.confirmationBudgetMs,
+      weakConfirmationCompletes: contract.weakConfirmationCompletes,
+    );
   }
 
   /// Drops the oldest settled jobs once the ledger exceeds [retainedJobs].
@@ -639,12 +659,19 @@ final class PatchbayJobRegistry {
     Map<String, Object?> payload = const <String, Object?>{},
     String? reason,
   }) {
+    final DateTime at = _now();
     final ({Map<String, Object?> payload, String? reason}) terminal =
-        _validatedTerminal(record, phase, payload: payload, reason: reason);
+        _validatedTerminal(
+          record,
+          phase,
+          payload: payload,
+          reason: reason,
+          at: at,
+        );
     record.events.add(
       PatchbayJobEvent(
         sequence: record.events.length + 1,
-        at: _now(),
+        at: at,
         phase: phase,
         source: source,
         operation: operation,
@@ -666,25 +693,48 @@ final class PatchbayJobRegistry {
     PatchbayJobPhase phase, {
     required Map<String, Object?> payload,
     required String? reason,
+    required DateTime at,
   }) {
     final PatchbayResponseSchema? responseSchema = record.responseSchema;
-    if (phase == PatchbayJobPhase.running || responseSchema == null) {
+    final PatchbayExecutionContract? executionContract =
+        record.executionContract;
+    if (phase == PatchbayJobPhase.running ||
+        (responseSchema == null && executionContract == null)) {
       return (payload: payload, reason: reason);
     }
-    final PatchbayResponseValueSchema? schema =
-        responseSchema.terminal[phase.name];
-    final List<PatchbayResponseValidationIssue> issues = schema == null
-        ? <PatchbayResponseValidationIssue>[
-            PatchbayResponseValidationIssue(
-              field: r'$.phase',
-              reason: 'unknownVariant',
-              expected: responseSchema.terminal.keys.join('|'),
-            ),
-          ]
-        : validatePatchbayResponsePayload(schema, payload);
+    final List<PatchbayResponseValidationIssue> issues =
+        <PatchbayResponseValidationIssue>[];
+    if (responseSchema != null) {
+      final PatchbayResponseValueSchema? schema =
+          responseSchema.terminal[phase.name];
+      issues.addAll(
+        schema == null
+            ? <PatchbayResponseValidationIssue>[
+                PatchbayResponseValidationIssue(
+                  field: r'$.phase',
+                  reason: 'unknownVariant',
+                  expected: responseSchema.terminal.keys.join('|'),
+                ),
+              ]
+            : validatePatchbayResponsePayload(schema, payload),
+      );
+    }
+    if (executionContract != null) {
+      issues.addAll(
+        validatePatchbayExecutionEvidence(
+          executionContract,
+          payload,
+          terminalPhase: phase.name,
+          nowMs: at.millisecondsSinceEpoch,
+        ).issues,
+      );
+    }
     if (issues.isEmpty) return (payload: payload, reason: reason);
 
-    final PatchbayResponseValidationIssue first = issues.first;
+    final List<PatchbayResponseValidationIssue> capped = issues
+        .take(patchbayResponseValidationMaxIssues)
+        .toList(growable: false);
+    final PatchbayResponseValidationIssue first = capped.first;
     return (
       payload: <String, Object?>{
         'rejection': <String, Object?>{
@@ -693,7 +743,7 @@ final class PatchbayJobRegistry {
             'reason': first.reason,
             'field': first.field,
             if (first.expected != null) 'expected': first.expected!,
-            'violations': issues
+            'violations': capped
                 .map((PatchbayResponseValidationIssue issue) => issue.toJson())
                 .toList(growable: false),
           },
@@ -713,11 +763,13 @@ final class _PatchbayJobRecord {
     required this.cancel,
     required this.operation,
     required this.responseSchema,
+    required this.executionContract,
   });
 
   final PatchbayJobCancellation? cancel;
   final String? operation;
   final PatchbayResponseSchema? responseSchema;
+  final PatchbayExecutionContract? executionContract;
   final List<PatchbayJobEvent> events = <PatchbayJobEvent>[];
   final Set<Completer<void>> waiters = <Completer<void>>{};
 }

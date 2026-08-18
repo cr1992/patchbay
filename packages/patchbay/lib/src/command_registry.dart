@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'command_dispatch_scope.dart';
 import 'command_descriptor.dart';
+import 'execution_evidence.dart';
 import 'invocation.dart';
 import 'response_schema.dart';
 
@@ -110,6 +111,9 @@ final class PatchbayCommandRegistry {
   PatchbayResponseSchema? responseSchemaFor(String command) =>
       _registrations[command]?.descriptor.responseSchema;
 
+  PatchbayExecutionContract? executionContractFor(String command) =>
+      _registrations[command]?.descriptor.executionContract;
+
   List<PatchbayCommandDescriptor> get descriptors =>
       List<PatchbayCommandDescriptor>.unmodifiable(
         _registrations.values
@@ -163,6 +167,15 @@ final class PatchbayCommandRegistry {
         <String, PatchbayCommandRegistration<Object?>>{};
     for (final PatchbayCommandRegistration<Object?> registration
         in registrations) {
+      validatePatchbayExecutionContract(
+        registration.descriptor.executionContract,
+      );
+      if (registration.descriptor.weakConfirmationCompletes &&
+          registration.descriptor.mode != PatchbayCommandMode.job) {
+        throw ArgumentError(
+          'weakConfirmationCompletes is only valid for job commands',
+        );
+      }
       if (registration.descriptor.responseSchema
           case final PatchbayResponseSchema schema) {
         validatePatchbayResponseSchema(schema);

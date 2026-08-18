@@ -244,6 +244,37 @@ dispatch scope 跟随 async handler，嵌套或并发 dispatch 不会串用 desc
 违规，会在写 ledger **之前**被替换成不含原值的 `providerProtocolViolation`。未绑定
 `commandRegistry` 且不声明 command 的旧 job 继续保留 0.3 free-payload 行为。
 
+需要表达设备执行结果的命令还要在 payload 中使用统一的 `execution` 对象。descriptor 按实际能力声明
+`confirmationBudgetMs`（`1..120000`）、`unchangedEvidenceMaxAgeMs`（`1..300000`）以及默认关闭的
+`weakConfirmationCompletes`：
+
+```dart
+final descriptor = PatchbayCommandDescriptor(
+  // 其余字段略
+  confirmationBudgetMs: 5000,
+  unchangedEvidenceMaxAgeMs: 30000,
+  weakConfirmationCompletes: false,
+);
+
+final payload = <String, Object?>{
+  'execution': <String, Object?>{
+    'classification': 'unchanged',
+    'factSource': 'appRecorded',
+    'observedAtMs': null,
+    'reasonCode': null,
+    'priorValueSource': 'deviceReported',
+    'priorObservedAtMs': priorObservedAt.millisecondsSinceEpoch,
+  },
+};
+```
+
+四种 classification 只有 `notSent`、`sentUnconfirmed`、`unchanged`、`deviceConfirmed`。job 终态中前两种
+默认只能落 `failed`，后两种只能落 `completed`；只有显式开启弱确认时 `sentUnconfirmed` 才能 completed。
+0.4 中 `deviceConfirmed` 的 factSource 只能是 `deviceReported`，`uiObserved` 不能升级成设备确认。
+`reasonCode` 若非空，必须在 `responseSchema` 的 string `allowedValues` 中封闭声明。新 `execution` 与旧
+`dispatched` 冲突时以新证据为准，并在响应 `details.legacyDispatchedConflict` 留痕；退出码仍按 job 终态，
+不会把“已发送”当成“已完成”。
+
 达到 `maxRunningJobs` 时，`start()` 会在 body 启动前抛出 `PatchbayJobCapacityExceeded`。adapter 应把它
 转换成稳定 rejection（例如 `jobCapacityExceeded`），不要排入无界队列。取消 callback 超时后任务仍是
 running；只有 controller 提供了真实终态，才能写入 completed / failed / cancelled。

@@ -99,6 +99,32 @@ void main() {
     expect(unknownVariant.first.field, r'$.payload.kind');
   });
 
+  test('nullable string allowedValues closes execution reason codes', () {
+    const PatchbayResponseValueSchema reasonCode = PatchbayResponseValueSchema(
+      type: PatchbayResponseType.string,
+      nullable: true,
+      allowedValues: <String>{'deviceOffline', 'confirmationExpired'},
+    );
+    final PatchbayResponseValueSchema roundTripped =
+        PatchbayResponseValueSchema.fromJson(reasonCode.toJson());
+
+    expect(validatePatchbayResponsePayload(roundTripped, null), isEmpty);
+    expect(
+      validatePatchbayResponsePayload(roundTripped, 'deviceOffline'),
+      isEmpty,
+    );
+    expect(
+      validatePatchbayResponsePayload(roundTripped, 'vendor-secret').single,
+      isA<PatchbayResponseValidationIssue>()
+          .having((issue) => issue.reason, 'reason', 'unknownVariant')
+          .having(
+            (issue) => issue.toJson().toString(),
+            'redacted issue',
+            isNot(contains('vendor-secret')),
+          ),
+    );
+  });
+
   test(
     'terminal envelope defects fail closed with allowed reasons and paths',
     () {

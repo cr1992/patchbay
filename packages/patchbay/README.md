@@ -272,6 +272,16 @@ ledger. An invalid provider payload is replaced with a value-free `providerProto
 invalid payload itself is never retained. A registry constructed without `commandRegistry` and a
 job started without `command` keep the 0.3 free-payload behavior.
 
+Commands that publish device execution evidence use the closed `execution.classification` values
+`notSent`, `sentUnconfirmed`, `unchanged`, and `deviceConfirmed`. Configure confirmation and stale
+same-value evidence on `PatchbayCommandDescriptor` with `confirmationBudgetMs`,
+`unchangedEvidenceMaxAgeMs`, and the opt-in `weakConfirmationCompletes`. A `deviceConfirmed` result
+must come from `deviceReported`; UI observation remains domain evidence and cannot upgrade device
+confirmation. Nullable `reasonCode` strings are closed with the response schema's `allowedValues`.
+Host, bound job ledger, and CLI run the same semantic validator. Legacy commands with no execution
+object stay readable, and when `execution` conflicts with `dispatched`, execution wins while the
+response records `details.legacyDispatchedConflict`.
+
 If the consumer's async API only means "the request has been sent", you cannot mark `completed`
 when that Future returns; you must keep observing domain state until the app can give a real
 terminal state. `suggestedWaitTimeoutMs` only suggests an observation window to the client — it

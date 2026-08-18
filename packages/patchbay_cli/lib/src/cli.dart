@@ -1067,21 +1067,60 @@ Future<Map<String, Object?>> _invokeCataloged(
     descriptor?.suggestedWaitTimeout,
     serverWaitAvailable: serverWaitAvailable,
   );
-  return _validateTerminalPayload(terminal, descriptor?.responseSchema);
+  return _validateTerminalPayload(terminal, descriptor);
 }
 
 Map<String, Object?> _validateTerminalPayload(
   Map<String, Object?> response,
-  PatchbayResponseSchema? responseSchema,
+  _CatalogCommand? descriptor,
 ) {
-  if (responseSchema == null || response['admission'] != 'accepted') {
+  if (descriptor == null || response['admission'] != 'accepted') {
     return response;
   }
   final List<PatchbayResponseValidationIssue> issues =
-      validatePatchbayTerminalPayload(responseSchema, response['payload']);
-  return issues.isEmpty
-      ? <String, Object?>{...response, 'schemaMode': 'validated'}
-      : _cliResponseSchemaViolation(response, issues);
+      <PatchbayResponseValidationIssue>[];
+  if (descriptor.responseSchema case final PatchbayResponseSchema schema) {
+    issues.addAll(validatePatchbayTerminalPayload(schema, response['payload']));
+  }
+  final PatchbayExecutionValidationResult execution =
+      _validateTerminalExecution(response, descriptor.executionContract);
+  issues.addAll(execution.issues);
+  if (issues.isNotEmpty) return _cliResponseSchemaViolation(response, issues);
+  return _withCliExecutionDetails(<String, Object?>{
+    ...response,
+    'schemaMode': descriptor.responseSchema == null
+        ? 'legacyUnvalidated'
+        : 'validated',
+  }, execution);
+}
+
+PatchbayExecutionValidationResult _validateTerminalExecution(
+  Map<String, Object?> response,
+  PatchbayExecutionContract contract,
+) {
+  final Object? payload = response['payload'];
+  final Object? events = payload is Map<Object?, Object?>
+      ? payload['events']
+      : null;
+  if (events is! List<Object?> || events.isEmpty) {
+    return const PatchbayExecutionValidationResult();
+  }
+  final Object? event = events.last;
+  if (event is! Map<Object?, Object?> || event['phase'] is! String) {
+    return const PatchbayExecutionValidationResult();
+  }
+  final Object? rawAt = event['at'];
+  final DateTime? at = rawAt is String ? DateTime.tryParse(rawAt) : null;
+  final int eventIndex = events.length - 1;
+  return validatePatchbayExecutionEvidence(
+    contract,
+    event['payload'],
+    path:
+        r'$.payload.events'
+        '[$eventIndex].payload',
+    terminalPhase: event['phase']! as String,
+    nowMs: at?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
+  );
 }
 
 /// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
@@ -1116,27 +1155,61 @@ Future<Map<String, Object?>> _invokeAgainstCatalog(
   }
   final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
   final PatchbayResponseSchema? responseSchema = descriptor?.responseSchema;
-  if (responseSchema == null) {
-    return <String, Object?>{...response, 'schemaMode': 'legacyUnvalidated'};
-  }
+  PatchbayExecutionValidationResult execution =
+      const PatchbayExecutionValidationResult();
   if (response['admission'] == 'accepted') {
-    final List<PatchbayResponseValidationIssue> issues =
-        validatePatchbayResponsePayload(
-          responseSchema.accepted,
-          response['payload'],
-        );
-    if (issues.isNotEmpty) {
-      return _cliResponseSchemaViolation(response, issues);
+    if (responseSchema != null) {
+      final List<PatchbayResponseValidationIssue> issues =
+          validatePatchbayResponsePayload(
+            responseSchema.accepted,
+            response['payload'],
+          );
+      if (issues.isNotEmpty) {
+        return _cliResponseSchemaViolation(response, issues);
+      }
+    }
+    if (descriptor != null) {
+      execution = validatePatchbayExecutionEvidence(
+        descriptor.executionContract,
+        response['payload'],
+        nowMs: DateTime.now().millisecondsSinceEpoch,
+      );
+      if (execution.issues.isNotEmpty) {
+        return _cliResponseSchemaViolation(response, execution.issues);
+      }
     }
   }
-  return <String, Object?>{...response, 'schemaMode': 'validated'};
+  return _withCliExecutionDetails(<String, Object?>{
+    ...response,
+    'schemaMode': responseSchema == null ? 'legacyUnvalidated' : 'validated',
+  }, execution);
+}
+
+Map<String, Object?> _withCliExecutionDetails(
+  Map<String, Object?> response,
+  PatchbayExecutionValidationResult validation,
+) {
+  if (!validation.legacyDispatchedConflict) return response;
+  final Object? existing = response['details'];
+  return <String, Object?>{
+    ...response,
+    'details': <String, Object?>{
+      if (existing is Map<Object?, Object?>)
+        for (final MapEntry<Object?, Object?> entry in existing.entries)
+          if (entry.key is String) entry.key! as String: entry.value,
+      'legacyDispatchedConflict': true,
+    },
+  };
 }
 
 Map<String, Object?> _cliResponseSchemaViolation(
   Map<String, Object?> response,
   List<PatchbayResponseValidationIssue> issues,
 ) {
-  final PatchbayResponseValidationIssue first = issues.first;
+  final List<PatchbayResponseValidationIssue> capped = issues
+      .take(patchbayResponseValidationMaxIssues)
+      .toList(growable: false);
+  final PatchbayResponseValidationIssue first = capped.first;
   return <String, Object?>{
     'schemaVersion': response['schemaVersion'] ?? 1,
     'requestId': response['requestId'] ?? '',
@@ -1150,7 +1223,7 @@ Map<String, Object?> _cliResponseSchemaViolation(
         'reason': first.reason,
         'field': first.field,
         if (first.expected != null) 'expected': first.expected!,
-        'violations': issues
+        'violations': capped
             .map((PatchbayResponseValidationIssue issue) => issue.toJson())
             .toList(growable: false),
       },
@@ -1351,11 +1424,13 @@ final class _CatalogCommand {
     this.suggestedWaitTimeout,
     this._parameters,
     this.responseSchema,
+    this.executionContract,
   );
 
   final Duration? suggestedWaitTimeout;
   final List<Map<Object?, Object?>> _parameters;
   final PatchbayResponseSchema? responseSchema;
+  final PatchbayExecutionContract executionContract;
 
   Set<String> get sensitiveParameters => <String>{
     for (final Map<Object?, Object?> parameter in _parameters)
@@ -1392,6 +1467,7 @@ final class _CatalogCommand {
         row.containsKey('responseSchema')
             ? PatchbayResponseSchema.fromJson(row['responseSchema'])
             : null,
+        PatchbayExecutionContract.fromCatalogRow(row),
       );
     }
     return null;

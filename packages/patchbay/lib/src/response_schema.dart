@@ -12,6 +12,7 @@ final class PatchbayResponseValueSchema {
     this.items,
     this.discriminator,
     this.variants = const <String, PatchbayResponseValueSchema>{},
+    this.allowedValues = const <String>{},
   });
 
   final PatchbayResponseType type;
@@ -24,10 +25,13 @@ final class PatchbayResponseValueSchema {
   /// Object field selecting one member of [variants].
   final String? discriminator;
   final Map<String, PatchbayResponseValueSchema> variants;
+  final Set<String> allowedValues;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'type': type.name,
     if (nullable) 'nullable': true,
+    if (allowedValues.isNotEmpty)
+      'allowedValues': allowedValues.toList(growable: false)..sort(),
     if (type == PatchbayResponseType.object) ...<String, Object?>{
       'properties': <String, Object?>{
         for (final MapEntry<String, PatchbayResponseValueSchema> entry
@@ -62,6 +66,7 @@ final class PatchbayResponseValueSchema {
     final Set<String> allowedKeys = <String>{
       'type',
       'nullable',
+      if (type == PatchbayResponseType.string) 'allowedValues',
       if (type == PatchbayResponseType.object) ...<String>{
         'properties',
         'required',
@@ -85,9 +90,25 @@ final class PatchbayResponseValueSchema {
     final Set<String> required = <String>{};
     final Map<String, PatchbayResponseValueSchema> variants =
         <String, PatchbayResponseValueSchema>{};
+    final Set<String> allowedValues = <String>{};
     PatchbayResponseValueSchema? items;
     String? discriminator;
     var additionalProperties = false;
+    if (type == PatchbayResponseType.string &&
+        value.containsKey('allowedValues')) {
+      final Object? rawAllowed = value['allowedValues'];
+      if (rawAllowed is! List<Object?> ||
+          rawAllowed.isEmpty ||
+          rawAllowed.any((Object? entry) => entry is! String)) {
+        throw const FormatException(
+          'allowedValues must be a non-empty string array',
+        );
+      }
+      allowedValues.addAll(rawAllowed.cast<String>());
+      if (allowedValues.length != rawAllowed.length) {
+        throw const FormatException('allowedValues must be unique');
+      }
+    }
     if (type == PatchbayResponseType.object) {
       final Object? rawProperties = value['properties'];
       if (rawProperties is! Map<Object?, Object?>) {
@@ -163,6 +184,7 @@ final class PatchbayResponseValueSchema {
       items: items,
       discriminator: discriminator,
       variants: Map<String, PatchbayResponseValueSchema>.unmodifiable(variants),
+      allowedValues: Set<String>.unmodifiable(allowedValues),
     );
   }
 }
@@ -424,6 +446,10 @@ void _checkSchemaLimits(PatchbayResponseSchema schema) {
         node.additionalProperties) {
       throw ArgumentError('object response keywords require object type');
     }
+    if (node.type != PatchbayResponseType.string &&
+        node.allowedValues.isNotEmpty) {
+      throw ArgumentError('allowedValues requires string type');
+    }
     if (node.type == PatchbayResponseType.array && node.items == null) {
       throw ArgumentError('array response schema requires items');
     }
@@ -494,6 +520,19 @@ void _validateValue(
         field: path,
         reason: 'wrongType',
         expected: schema.type.name,
+      ),
+    );
+    return;
+  }
+  if (schema.type == PatchbayResponseType.string &&
+      schema.allowedValues.isNotEmpty &&
+      !schema.allowedValues.contains(value)) {
+    final List<String> expected = schema.allowedValues.toList()..sort();
+    issues.add(
+      PatchbayResponseValidationIssue(
+        field: path,
+        reason: 'unknownVariant',
+        expected: expected.join('|'),
       ),
     );
     return;

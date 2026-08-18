@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'catalog_digest.dart';
 import 'command_registry.dart';
+import 'execution_evidence.dart';
 import 'features.dart';
 import 'generated/core_wire.g.dart';
 import 'invocation.dart';
@@ -77,6 +78,8 @@ final class PatchbayServiceHost {
   final Set<PatchbayFeature> _declaredFeatures;
   Map<String, PatchbayResponseSchema> _catalogResponseSchemas =
       const <String, PatchbayResponseSchema>{};
+  Map<String, PatchbayExecutionContract> _catalogExecutionContracts =
+      const <String, PatchbayExecutionContract>{};
   int _catalogReadGeneration = 0;
   bool _registered = false;
 
@@ -370,9 +373,14 @@ final class PatchbayServiceHost {
     PatchbayResponseSchema? responseSchema = _registry.responseSchemaFor(
       command,
     );
+    PatchbayExecutionContract? executionContract = _registry
+        .executionContractFor(command);
     responseSchema ??= invocationCatalog == null
         ? _catalogResponseSchemas[command]
         : _responseSchemasFromCatalog(invocationCatalog.response)[command];
+    executionContract ??= invocationCatalog == null
+        ? _catalogExecutionContracts[command]
+        : _executionContractsFromCatalog(invocationCatalog.response)[command];
     if (responseSchema == null &&
         invocationCatalog == null &&
         !_registry.handles(command)) {
@@ -386,7 +394,10 @@ final class PatchbayServiceHost {
         responseSchema = _responseSchemasFromCatalog(
           discovered.response,
         )[command];
-      } else if (_invalidResponseSchemaTargets(
+        executionContract = _executionContractsFromCatalog(
+          discovered.response,
+        )[command];
+      } else if (_invalidCommandContractTargets(
         discovered.violation!,
         command,
       )) {
@@ -397,23 +408,42 @@ final class PatchbayServiceHost {
         );
       }
     }
-    if (responseSchema == null) {
-      return <String, Object?>{...result, 'schemaMode': 'legacyUnvalidated'};
-    }
+    PatchbayExecutionValidationResult executionValidation =
+        const PatchbayExecutionValidationResult();
     if (wire.admission == PatchbayAdmissionWire.accepted) {
-      final List<PatchbayResponseValidationIssue> issues =
-          validatePatchbayResponsePayload(
-            responseSchema.accepted,
-            wire.payload,
-          );
-      if (issues.isNotEmpty) {
-        return <String, Object?>{
-          ..._responseSchemaViolation(requestId, issues),
-          'schemaMode': 'validated',
-        };
+      if (responseSchema != null) {
+        final List<PatchbayResponseValidationIssue> issues =
+            validatePatchbayResponsePayload(
+              responseSchema.accepted,
+              wire.payload,
+            );
+        if (issues.isNotEmpty) {
+          return <String, Object?>{
+            ..._responseSchemaViolation(requestId, issues),
+            'schemaMode': 'validated',
+          };
+        }
+      }
+      if (executionContract != null) {
+        executionValidation = validatePatchbayExecutionEvidence(
+          executionContract,
+          wire.payload,
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+        );
+        if (executionValidation.issues.isNotEmpty) {
+          return <String, Object?>{
+            ..._responseSchemaViolation(requestId, executionValidation.issues),
+            'schemaMode': responseSchema == null
+                ? 'legacyUnvalidated'
+                : 'validated',
+          };
+        }
       }
     }
-    return <String, Object?>{...result, 'schemaMode': 'validated'};
+    return _withExecutionDetails(<String, Object?>{
+      ...result,
+      'schemaMode': responseSchema == null ? 'legacyUnvalidated' : 'validated',
+    }, executionValidation);
   }
 
   void register() {
@@ -553,6 +583,8 @@ final class PatchbayServiceHost {
     } on Object catch (error) {
       if (generation == _catalogReadGeneration) {
         _catalogResponseSchemas = const <String, PatchbayResponseSchema>{};
+        _catalogExecutionContracts =
+            const <String, PatchbayExecutionContract>{};
       }
       // The type, never the message: a consumer error string is arbitrary App
       // data and this envelope goes back over the wire.
@@ -584,11 +616,14 @@ final class PatchbayServiceHost {
     if (violation != null) {
       if (generation == _catalogReadGeneration) {
         _catalogResponseSchemas = const <String, PatchbayResponseSchema>{};
+        _catalogExecutionContracts =
+            const <String, PatchbayExecutionContract>{};
       }
       return _CatalogRead.violated(violation);
     }
     if (generation == _catalogReadGeneration) {
       _catalogResponseSchemas = _responseSchemasFromCatalog(catalog);
+      _catalogExecutionContracts = _executionContractsFromCatalog(catalog);
     }
     return _CatalogRead.valid(<String, Object?>{
       ...catalog,
@@ -637,25 +672,34 @@ final class PatchbayServiceHost {
           'name': rawName,
           'reason': 'duplicateCommandName',
         });
-      } else if (entry case final Map<Object?, Object?> command
-          when command.containsKey('responseSchema')) {
-        try {
-          final PatchbayResponseSchema schema = PatchbayResponseSchema.fromJson(
-            command['responseSchema'],
-          );
-          if (command['mode'] == 'job' &&
-              !schema.terminal.keys.toSet().containsAll(const <String>{
-                'completed',
-                'failed',
-                'cancelled',
-              })) {
-            throw const FormatException('incomplete terminal schema');
+      } else if (entry case final Map<Object?, Object?> command) {
+        if (command.containsKey('responseSchema')) {
+          try {
+            final PatchbayResponseSchema schema =
+                PatchbayResponseSchema.fromJson(command['responseSchema']);
+            if (command['mode'] == 'job' &&
+                !schema.terminal.keys.toSet().containsAll(const <String>{
+                  'completed',
+                  'failed',
+                  'cancelled',
+                })) {
+              throw const FormatException('incomplete terminal schema');
+            }
+          } on Object {
+            violations.add(<String, Object?>{
+              'index': index,
+              'name': rawName,
+              'reason': 'invalidResponseSchema',
+            });
           }
+        }
+        try {
+          PatchbayExecutionContract.fromCatalogRow(command);
         } on Object {
           violations.add(<String, Object?>{
             'index': index,
             'name': rawName,
-            'reason': 'invalidResponseSchema',
+            'reason': 'invalidExecutionContract',
           });
         }
       }
@@ -740,7 +784,41 @@ final class PatchbayServiceHost {
     return Map<String, PatchbayResponseSchema>.unmodifiable(schemas);
   }
 
-  static bool _invalidResponseSchemaTargets(
+  static Map<String, PatchbayExecutionContract> _executionContractsFromCatalog(
+    Map<String, Object?> catalog,
+  ) {
+    final Object? rows = catalog['commands'];
+    if (rows is! List<Object?>) {
+      return const <String, PatchbayExecutionContract>{};
+    }
+    return Map<String, PatchbayExecutionContract>.unmodifiable(<
+      String,
+      PatchbayExecutionContract
+    >{
+      for (final Object? row in rows)
+        if (row is Map<Object?, Object?> && row['name'] is String)
+          row['name']! as String: PatchbayExecutionContract.fromCatalogRow(row),
+    });
+  }
+
+  static Map<String, Object?> _withExecutionDetails(
+    Map<String, Object?> response,
+    PatchbayExecutionValidationResult validation,
+  ) {
+    if (!validation.legacyDispatchedConflict) return response;
+    final Object? existing = response['details'];
+    return <String, Object?>{
+      ...response,
+      'details': <String, Object?>{
+        if (existing is Map<Object?, Object?>)
+          for (final MapEntry<Object?, Object?> entry in existing.entries)
+            if (entry.key is String) entry.key! as String: entry.value,
+        'legacyDispatchedConflict': true,
+      },
+    };
+  }
+
+  static bool _invalidCommandContractTargets(
     Map<String, Object?> violation,
     String command,
   ) {
@@ -750,7 +828,8 @@ final class PatchbayServiceHost {
       (Object? row) =>
           row is Map<Object?, Object?> &&
           row['name'] == command &&
-          row['reason'] == 'invalidResponseSchema',
+          (row['reason'] == 'invalidResponseSchema' ||
+              row['reason'] == 'invalidExecutionContract'),
     );
   }
 

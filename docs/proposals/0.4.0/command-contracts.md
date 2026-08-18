@@ -92,7 +92,8 @@ CLI 侧的命令表因此仍然是**语法**，不是能力清单；本提案消
 - `notSent`：有证据表明发送动作未发生；终态必须为 `failed`。
 - `sentUnconfirmed`：发送动作已发生，但确认预算内未观察到设备事实；要求确认的命令必须 `failed`，
   允许弱确认的命令可 `completed`，但 descriptor 必须显式声明 `weakConfirmationCompletes: true`，
-  默认为否。
+  默认为否。该策略只对 `mode: job` 有效；即时命令声明它属于无效 descriptor，注册与 catalog
+  解析都必须拒绝，避免同一分类在即时和 job 路径产生相反退出码。
 - `unchanged`：发送前已有可信的同值证据，且发送后没有相反设备事实；可以 `completed`。
 - `deviceConfirmed`：存在 `deviceReported` 或 descriptor 明示可接受的更强观测；可以 `completed`。
 
@@ -120,7 +121,9 @@ host 按 `providerProtocolViolation` 拒绝，`details.reason` 用既有封闭�
 
 0.3.x 已有接入方用 `payload.dispatched: false` 表达“没发出去”，CLI 也已按它判类型化失败。它是
 `notSent` 的遗留投影，本版不移除。两者同时出现且矛盾时，**以 `execution` 为准**，并在 `details` 里
-记 `legacyDispatchedConflict`；退出码语义不变。不写这条，同一份 payload 会有两套事实。
+记 `legacyDispatchedConflict`；只有 payload 确实带有类型化 `execution` 时才适用这条优先级。没有
+`execution` 的旧 payload 仍按 `dispatched: false` 判失败，即使 job 的末事件写成 `completed` 也不能
+把它升级为成功。不写这条，同一份 payload 会有两套事实。
 
 ## 兼容与降级
 

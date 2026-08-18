@@ -1,4 +1,5 @@
 import 'facts.dart';
+import 'execution_evidence.dart';
 import 'generated/core_wire.g.dart';
 import 'response_schema.dart';
 import 'ui_descriptor.dart';
@@ -59,6 +60,9 @@ final class PatchbayCommandDescriptor {
     this.parameters = const <PatchbayParameterDescriptor>[],
     this.gates = const <String>{},
     this.responseSchema,
+    this.unchangedEvidenceMaxAgeMs,
+    this.confirmationBudgetMs,
+    this.weakConfirmationCompletes = false,
   });
 
   final String name;
@@ -76,6 +80,16 @@ final class PatchbayCommandDescriptor {
   final List<PatchbayParameterDescriptor> parameters;
   final Set<String> gates;
   final PatchbayResponseSchema? responseSchema;
+  final int? unchangedEvidenceMaxAgeMs;
+  final int? confirmationBudgetMs;
+  final bool weakConfirmationCompletes;
+
+  PatchbayExecutionContract get executionContract => PatchbayExecutionContract(
+    factSources: factSources,
+    unchangedEvidenceMaxAgeMs: unchangedEvidenceMaxAgeMs,
+    confirmationBudgetMs: confirmationBudgetMs,
+    weakConfirmationCompletes: weakConfirmationCompletes,
+  );
 
   Map<String, Object?> toJson() {
     final List<PatchbayFactSourceWire> sortedFactSources =
@@ -97,6 +111,13 @@ final class PatchbayCommandDescriptor {
     if (responseSchema case final PatchbayResponseSchema schema) {
       json['responseSchema'] = schema.toJson();
     }
+    if (unchangedEvidenceMaxAgeMs case final int value) {
+      json['unchangedEvidenceMaxAgeMs'] = value;
+    }
+    if (confirmationBudgetMs case final int value) {
+      json['confirmationBudgetMs'] = value;
+    }
+    json['weakConfirmationCompletes'] = weakConfirmationCompletes;
     return json;
   }
 }
