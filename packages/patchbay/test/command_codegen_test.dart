@@ -204,10 +204,10 @@ void main() {
   });
 
   test('the committed example contract is still current', () async {
-    // The repo ships one command contract and its generated file so that
-    // `--check` has something to gate in CI. Keeping the assertion here as
-    // well means a generator change that shifts the output is caught by
-    // `dart test`, not only by the pipeline job.
+    // The repo freezes the complete generated surface by digest rather than
+    // carrying a large implementation that nothing imports. `--check`
+    // recognizes this snapshot while retaining exact-file checks for normal
+    // consumer output.
     expect(
       await _run(
         File('contracts/example_commands.json'),
@@ -216,6 +216,21 @@ void main() {
       ),
       0,
     );
+  });
+
+  test('repository snapshot is compact and detects generated drift', () async {
+    final File contract = File('${temporary.path}/commands.json')
+      ..writeAsStringSync(jsonEncode(_fixtureContract()));
+    final File output = File('${temporary.path}/commands.g.dart');
+
+    expect(await _run(contract, output, '--write-snapshot'), 0);
+    final String snapshot = output.readAsStringSync();
+    expect(snapshot.split('\n'), hasLength(5));
+    expect(snapshot, contains('Generated Dart sha256:'));
+    expect(await _run(contract, output, '--check'), 0);
+
+    output.writeAsStringSync(snapshot.replaceFirst('sha256:', 'sha256: drift'));
+    expect(await _run(contract, output, '--check'), 1);
   });
 }
 
@@ -240,39 +255,9 @@ Set<String> _declaredCommandIds(String generated) {
       .toSet();
 }
 
-Map<String, Object?> _fixtureContract() => <String, Object?>{
-  'contractVersion': 2,
-  'apiPrefix': 'FixturePatchbay',
-  'descriptorImport': 'package:patchbay/patchbay.dart',
-  'permissions': <String>['fixtureAccess'],
-  'cancellations': <String>['fixtureStop'],
-  'profiles': <String, Object?>{
-    'job': <String, Object?>{
-      'mode': 'job',
-      'sideEffect': 'external',
-      'factSources': <String>['appRecorded'],
-      'gates': <String>['fixture.ready'],
-    },
-  },
-  'commands': <Object?>[
-    <String, Object?>{
-      'id': 'fixtureRun',
-      'name': 'fixture.run',
-      'summary': 'Run fixture',
-      'profile': 'job',
-      'permissions': <String>['fixtureAccess'],
-      'cancellation': 'fixtureStop',
-      'parameters': <Object?>[
-        <String, Object?>{'name': 'count', 'type': 'integer', 'default': 3},
-        <String, Object?>{
-          'name': 'secret',
-          'type': 'string',
-          'sensitive': true,
-        },
-      ],
-    },
-  ],
-};
+Map<String, Object?> _fixtureContract() =>
+    jsonDecode(File('contracts/example_commands.json').readAsStringSync())
+        as Map<String, Object?>;
 
 /// Runs the generator, by default from the package directory `dart test` uses.
 ///
