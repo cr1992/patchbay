@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:test/test.dart';
@@ -281,6 +282,93 @@ dependencies:
 ## 0.3.0 - 2026-08-20
 ''';
       expect(readChangelogState(outOfOrder, '0.3.0').releaseIsNewest, isFalse);
+    });
+  });
+
+  group('CHANGELOG 碎片', () {
+    ChangelogFragment fragment(String name, String content) =>
+        parseChangelogFragment(name, utf8.encode(content));
+
+    test('文件名严格遵守 change-id、part 与 type 的封闭格式', () {
+      expect(fragment('PB-040-20.cli.added.md', '- 新增命令。').type, 'added');
+      expect(fragment('BUG-20260817-01.fixed.md', '- 修复缺陷。').type, 'fixed');
+      for (final String invalid in <String>[
+        '40.added.md',
+        'PB-40-20.added.md',
+        'PB-040-20.CLI.added.md',
+        'PB-040-20.unknown.md',
+        'PB-040-20.added.markdown',
+      ]) {
+        expect(
+          () => fragment(invalid, '- 内容。'),
+          throwsA(isA<FormatException>()),
+          reason: invalid,
+        );
+      }
+    });
+
+    test('拒绝空正文、非法 UTF-8 与多个顶层项，允许缩进续段', () {
+      expect(
+        () => fragment('PB-040-20.added.md', '   '),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => parseChangelogFragment('PB-040-20.added.md', <int>[0xff]),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => fragment('PB-040-20.added.md', '- 第一条。\n- 第二条。'),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        fragment(
+          'PB-040-20.added.md',
+          '- **Breaking:** 改变行为。\n  请先迁移。',
+        ).content,
+        contains('请先迁移'),
+      );
+    });
+
+    test('按类型固定顺序建栏目，同栏目按文件名升序且保留已有正文', () {
+      const String root = '''
+# Changelog
+
+## Unreleased
+
+### Added
+
+- 已有条目。
+
+## 0.2.1 - 2026-08-14
+
+- 历史。
+''';
+      final String aggregated =
+          aggregateChangelogFragments(root, <ChangelogFragment>[
+            fragment('PB-040-20.z.fixed.md', '- Z 修复。'),
+            fragment('PB-040-20.changed.md', '- 行为变化。'),
+            fragment('PB-040-20.b.added.md', '- B 新增。'),
+            fragment('PB-040-20.a.added.md', '- A 新增。'),
+            fragment('PB-040-20.security.md', '- 安全收紧。'),
+          ]);
+      expect(aggregated, contains('- 已有条目。'));
+      expect(
+        aggregated.indexOf('- A 新增。'),
+        lessThan(aggregated.indexOf('- B 新增。')),
+      );
+      expect(
+        aggregated.indexOf('### Added'),
+        lessThan(aggregated.indexOf('### Changed')),
+      );
+      expect(
+        aggregated.indexOf('### Changed'),
+        lessThan(aggregated.indexOf('### Fixed')),
+      );
+      expect(
+        aggregated.indexOf('### Fixed'),
+        lessThan(aggregated.indexOf('### Security')),
+      );
+      expect(aggregated, contains('## 0.2.1 - 2026-08-14'));
     });
   });
 
@@ -973,6 +1061,71 @@ sdks:
       expect(again.stdout, contains('apply：无改动'));
     });
 
+    test('apply 稳定聚合后消费碎片、保留 README，重复执行幂等', () async {
+      _writeFragment(repo, 'PB-040-20.b.added.md', '- B 新增。\n');
+      _writeFragment(repo, 'PB-040-20.a.added.md', '- A 新增。\n');
+      _writeFragment(repo, 'PB-040-20.fixed.md', '- 修复问题。\n');
+
+      final ProcessResult applied = await _run(repo, '--apply');
+      expect(applied.exitCode, isNot(64));
+      final String root = File(
+        '${repo.path}/$changelogPath',
+      ).readAsStringSync();
+      expect(root.indexOf('- A 新增。'), lessThan(root.indexOf('- B 新增。')));
+      expect(root.indexOf('### Added'), lessThan(root.indexOf('### Fixed')));
+      expect(File('${repo.path}/changelog.d/README.md').existsSync(), isTrue);
+      expect(
+        Directory('${repo.path}/changelog.d').listSync().whereType<File>().map(
+          (file) => file.uri.pathSegments.last,
+        ),
+        <String>['README.md'],
+      );
+
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+      final ProcessResult again = await _run(repo, '--apply');
+      expect(again.stdout, contains('apply：无改动'));
+      expect(_releaseFileBytes(repo), before);
+    });
+
+    test('碎片校验失败时 check 可诊断，apply 不写文件也不部分删除', () async {
+      _writeFragment(repo, 'PB-040-20.added.md', '- 合法。\n');
+      _writeFragment(repo, 'PB-040-20.bad.md', '- 类型非法。\n');
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+
+      final ProcessResult checked = await _run(repo, '--check');
+      expect(checked.exitCode, 1);
+      expect(checked.stdout, contains('[未过] changelog-fragments'));
+      expect(checked.stdout, contains('PB-040-20.bad.md'));
+
+      final ProcessResult applied = await _run(repo, '--apply');
+      expect(applied.exitCode, 64);
+      expect(applied.stderr, contains('CHANGELOG 碎片校验失败'));
+      expect(_releaseFileBytes(repo), before);
+      expect(
+        File('${repo.path}/changelog.d/PB-040-20.added.md').existsSync(),
+        isTrue,
+      );
+      expect(
+        File('${repo.path}/changelog.d/PB-040-20.bad.md').existsSync(),
+        isTrue,
+      );
+    });
+
+    test('聚合失败时保留碎片与全部发布文件', () async {
+      _materialize(repo, _inputs(released: true));
+      _writeFragment(repo, 'PB-040-20.added.md', '- 不应被消费。\n');
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+
+      final ProcessResult applied = await _run(repo, '--apply');
+      expect(applied.exitCode, 64);
+      expect(applied.stderr, contains('恰好有一个 `## Unreleased`'));
+      expect(_releaseFileBytes(repo), before);
+      expect(
+        File('${repo.path}/changelog.d/PB-040-20.added.md').existsSync(),
+        isTrue,
+      );
+    });
+
     test('apply 会把 hosted 约束与 overrides 一起带到目标版本', () async {
       _materialize(repo, _inputs(publishable: true));
       await _run(repo, '--apply', version: '0.4.0');
@@ -1262,6 +1415,34 @@ void _materialize(Directory repo, ReleaseInputs inputs) {
   write(serviceHostPath, inputs.serviceHost);
   write(invocationPath, inputs.invocation);
   write(workflowPath, inputs.workflow);
+  write('changelog.d/README.md', '# CHANGELOG 碎片规范\n');
+}
+
+void _writeFragment(Directory repo, String name, String content) {
+  final File file = File('${repo.path}/changelog.d/$name');
+  file.parent.createSync(recursive: true);
+  file.writeAsStringSync(content);
+}
+
+Map<String, List<int>> _releaseFileBytes(Directory repo) {
+  final paths = <String>[
+    changelogPath,
+    exampleLockPath,
+    compatMatrixPath,
+    for (final String package in releasePackages) ...<String>[
+      pubspecPathOf(package),
+      packageChangelogPathOf(package),
+    ],
+    for (final File file in Directory(
+      '${repo.path}/changelog.d',
+    ).listSync().whereType<File>())
+      file.path.substring(repo.path.length + 1),
+  ]..sort();
+  return <String, List<int>>{
+    for (final String path in paths)
+      if (File('${repo.path}/$path').existsSync())
+        path: File('${repo.path}/$path').readAsBytesSync(),
+  };
 }
 
 Future<ProcessResult> _run(

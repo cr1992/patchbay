@@ -12,6 +12,7 @@
 // **只要有一条 warning 就退 65**（缺 LICENSE 是 error，缺 README / CHANGELOG / repository、
 // description 不在 60–180 字符都是 warning），所以这些项在此一律按「挡发布」对待。
 
+import 'dart:convert';
 import 'dart:io';
 
 // ===== 仓内坐标 =====
@@ -57,6 +58,7 @@ String packageChangelogPathOf(String package) =>
 const String repoBlobPrefix = 'https://github.com/cr1992/patchbay/blob/main/';
 
 const String changelogPath = 'CHANGELOG.md';
+const String changelogFragmentsPath = 'changelog.d';
 const String examplePath = 'packages/patchbay_flutter/example';
 const String examplePubspecPath = '$examplePath/pubspec.yaml';
 const String exampleOverridesPath = '$examplePath/pubspec_overrides.yaml';
@@ -668,6 +670,163 @@ String applyChangelogRelease(String markdown, String version, String date) {
     RegExp(r'^## Unreleased[ \t]*$', multiLine: true),
     '## $version - $date',
   );
+}
+
+const List<String> changelogFragmentTypes = <String>[
+  'added',
+  'changed',
+  'deprecated',
+  'removed',
+  'fixed',
+  'security',
+];
+
+const Map<String, String> _changelogFragmentHeadings = <String, String>{
+  'added': 'Added',
+  'changed': 'Changed',
+  'deprecated': 'Deprecated',
+  'removed': 'Removed',
+  'fixed': 'Fixed',
+  'security': 'Security',
+};
+
+final RegExp _changelogFragmentName = RegExp(
+  r'^(PB-[0-9]{3}-[0-9]{2}|BUG-[0-9]{8}-[0-9]{2})'
+  r'(\.[a-z0-9][a-z0-9-]*)?\.'
+  r'(added|changed|deprecated|removed|fixed|security)\.md$',
+);
+
+/// 一条已经通过文件名、UTF-8 与 Markdown 结构校验的 CHANGELOG 碎片。
+final class ChangelogFragment {
+  const ChangelogFragment({
+    required this.fileName,
+    required this.type,
+    required this.content,
+  });
+
+  final String fileName;
+  final String type;
+  final String content;
+}
+
+/// 校验并解析一条碎片。错误信息以文件名开头，便于 CI 直接定位。
+ChangelogFragment parseChangelogFragment(String fileName, List<int> bytes) {
+  final RegExpMatch? name = _changelogFragmentName.firstMatch(fileName);
+  if (name == null) {
+    throw FormatException('$fileName：文件名不符合 <change-id>[.<part>].<type>.md 规范');
+  }
+
+  late final String decoded;
+  try {
+    decoded = utf8.decode(bytes, allowMalformed: false);
+  } on FormatException {
+    throw FormatException('$fileName：内容不是合法 UTF-8');
+  }
+  final String content = decoded.trimRight();
+  if (content.isEmpty) throw FormatException('$fileName：正文为空');
+
+  final List<String> lines = content.split(RegExp(r'\r?\n'));
+  final RegExp item = RegExp(r'^(?:[-+*]|[0-9]+[.)])[ \t]+\S');
+  if (!item.hasMatch(lines.first)) {
+    throw FormatException('$fileName：正文必须以一条顶层 Markdown 列表项开始');
+  }
+  for (var index = 1; index < lines.length; index += 1) {
+    final String line = lines[index];
+    if (line.trim().isEmpty) continue;
+    if (!RegExp(r'^[ \t]+').hasMatch(line)) {
+      throw FormatException('$fileName：第 ${index + 1} 行形成第二条顶层内容；只允许首项的缩进续段');
+    }
+  }
+
+  return ChangelogFragment(
+    fileName: fileName,
+    type: name.group(3)!,
+    content: content,
+  );
+}
+
+/// 把有效碎片加入 `## Unreleased`。同类碎片只按文件名排序，已有正文原样保留。
+String aggregateChangelogFragments(
+  String markdown,
+  Iterable<ChangelogFragment> fragments,
+) {
+  final List<ChangelogFragment> sorted = fragments.toList()
+    ..sort((left, right) {
+      final int type = changelogFragmentTypes
+          .indexOf(left.type)
+          .compareTo(changelogFragmentTypes.indexOf(right.type));
+      return type != 0 ? type : left.fileName.compareTo(right.fileName);
+    });
+  if (sorted.isEmpty) return markdown;
+
+  final List<RegExpMatch> unreleased = RegExp(
+    r'^## Unreleased[ \t]*$',
+    multiLine: true,
+  ).allMatches(markdown).toList(growable: false);
+  if (unreleased.length != 1) {
+    throw FormatException(
+      '聚合碎片要求 CHANGELOG 恰好有一个 `## Unreleased` 段，实际 ${unreleased.length} 个',
+    );
+  }
+  final int bodyStart = unreleased.single.end;
+  final RegExpMatch? nextRelease = RegExp(
+    r'^## ',
+    multiLine: true,
+  ).firstMatch(markdown.substring(bodyStart));
+  final int bodyEnd = nextRelease == null
+      ? markdown.length
+      : bodyStart + nextRelease.start;
+  String body = markdown.substring(bodyStart, bodyEnd);
+
+  for (final String type in changelogFragmentTypes) {
+    final List<ChangelogFragment> typed = sorted
+        .where((fragment) => fragment.type == type)
+        .toList(growable: false);
+    if (typed.isEmpty) continue;
+    final String heading = _changelogFragmentHeadings[type]!;
+    final String additions = typed
+        .map((fragment) => fragment.content)
+        .join('\n\n');
+    final RegExp sectionHeading = RegExp(
+      '^### ${RegExp.escape(heading)}[ \\t]*\$',
+      multiLine: true,
+    );
+    final RegExpMatch? existing = sectionHeading.firstMatch(body);
+    if (existing != null) {
+      final RegExpMatch? nextHeading = RegExp(
+        r'^### ',
+        multiLine: true,
+      ).firstMatch(body.substring(existing.end));
+      final int sectionEnd = nextHeading == null
+          ? body.length
+          : existing.end + nextHeading.start;
+      final String current = body
+          .substring(existing.end, sectionEnd)
+          .trimRight();
+      final String replacement = '$current\n\n$additions\n\n';
+      body = body.replaceRange(existing.end, sectionEnd, replacement);
+      continue;
+    }
+
+    int insertion = body.length;
+    final int typeIndex = changelogFragmentTypes.indexOf(type);
+    for (final String later in changelogFragmentTypes.skip(typeIndex + 1)) {
+      final RegExpMatch? laterHeading = RegExp(
+        '^### ${RegExp.escape(_changelogFragmentHeadings[later]!)}[ \\t]*\$',
+        multiLine: true,
+      ).firstMatch(body);
+      if (laterHeading != null) {
+        insertion = laterHeading.start;
+        break;
+      }
+    }
+    final String block = '### $heading\n\n$additions\n\n';
+    final String before = body.substring(0, insertion).trimRight();
+    final String after = body.substring(insertion).trimLeft();
+    body = '${before.isEmpty ? '\n\n' : '$before\n\n'}$block$after';
+  }
+
+  return markdown.replaceRange(bodyStart, bodyEnd, body);
 }
 
 /// 包内 CHANGELOG 的前言。pub.dev 每个包页的 Changelog tab 读的是**包内**这份文件，
@@ -1598,6 +1757,60 @@ ReleaseInputs _read(String root) {
   );
 }
 
+final class _FragmentScan {
+  const _FragmentScan({required this.fragments, required this.errors});
+
+  final List<ChangelogFragment> fragments;
+  final List<String> errors;
+}
+
+_FragmentScan _readChangelogFragments(String root) {
+  final Directory directory = Directory('$root/$changelogFragmentsPath');
+  if (!directory.existsSync()) {
+    return const _FragmentScan(
+      fragments: <ChangelogFragment>[],
+      errors: <String>['changelog.d：目录不存在'],
+    );
+  }
+  final List<FileSystemEntity> entries = directory.listSync()
+    ..sort((left, right) => left.path.compareTo(right.path));
+  final fragments = <ChangelogFragment>[];
+  final errors = <String>[];
+  for (final FileSystemEntity entry in entries) {
+    final String name = entry.uri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .last;
+    if (name == 'README.md') continue;
+    if (entry is! File) {
+      errors.add('$name：changelog.d 除 README.md 外只能包含碎片文件');
+      continue;
+    }
+    try {
+      fragments.add(parseChangelogFragment(name, entry.readAsBytesSync()));
+    } on FormatException catch (error) {
+      errors.add(error.message);
+    } on FileSystemException catch (error) {
+      errors.add('$name：读取失败（${error.message}）');
+    }
+  }
+  return _FragmentScan(fragments: fragments, errors: errors);
+}
+
+ReleaseCheck _checkChangelogFragments(_FragmentScan scan) {
+  if (scan.errors.isNotEmpty) {
+    return ReleaseCheck.failed(
+      'changelog-fragments',
+      scan.errors.join('；'),
+      hard: true,
+    );
+  }
+  return ReleaseCheck.ok(
+    'changelog-fragments',
+    '${scan.fragments.length} 个碎片格式合法',
+    hard: true,
+  );
+}
+
 String? _gitPeeledSha(String root, String tag) {
   try {
     final ProcessResult result = Process.runSync('git', <String>[
@@ -1625,6 +1838,7 @@ void _run(List<String> arguments) {
     _applyToDisk(root, options);
   }
 
+  final _FragmentScan fragmentScan = _readChangelogFragments(root);
   final ReleaseInputs inputs = _read(root);
   final List<ReleaseCheck> checks = evaluateRelease(
     version: options.version,
@@ -1640,6 +1854,7 @@ void _run(List<String> arguments) {
     ready: green('publish-switch') && green('publish-manifest'),
   );
   final List<ReleaseCheck> all = <ReleaseCheck>[
+    _checkChangelogFragments(fragmentScan),
     ...checks,
     _formatGate(root),
     dryRun,
@@ -1688,24 +1903,28 @@ void _run(List<String> arguments) {
 }
 
 void _applyToDisk(String root, _Options options) {
+  final _FragmentScan fragmentScan = _readChangelogFragments(root);
+  if (fragmentScan.errors.isNotEmpty) {
+    throw FormatException('CHANGELOG 碎片校验失败：${fragmentScan.errors.join('；')}');
+  }
   final ReleaseInputs inputs = _read(root);
-  final changed = <String>[];
+  final writes = <String, String>{};
 
-  void write(String relative, String? before, String after) {
-    if (before == after) return;
-    final File file = File('$root/$relative');
-    file.parent.createSync(recursive: true);
-    file.writeAsStringSync(after);
-    changed.add(relative);
+  void stage(String relative, String? before, String after) {
+    if (before != after) writes[relative] = after;
   }
 
-  // 根表先落款，包内那份才能从「已含目标版本段」的根表派生。
-  final String rootChangelog = applyChangelogRelease(
+  // 所有转换先在内存完成。任一校验或聚合失败时，磁盘与碎片都还没有变化。
+  final String aggregated = aggregateChangelogFragments(
     inputs.changelog,
+    fragmentScan.fragments,
+  );
+  final String rootChangelog = applyChangelogRelease(
+    aggregated,
     options.version,
     options.date,
   );
-  write(changelogPath, inputs.changelog, rootChangelog);
+  stage(changelogPath, inputs.changelog, rootChangelog);
 
   for (final String name in releasePackages) {
     final PackageManifest manifest = inputs.packages[name]!;
@@ -1714,8 +1933,8 @@ void _applyToDisk(String root, _Options options) {
       options.version,
     );
     if (options.enablePublish) pubspec = applyRemovePublishTo(pubspec);
-    write(pubspecPathOf(name), manifest.pubspec, pubspec);
-    write(
+    stage(pubspecPathOf(name), manifest.pubspec, pubspec);
+    stage(
       packageChangelogPathOf(name),
       manifest.changelog,
       derivePackageChangelog(rootChangelog),
@@ -1731,14 +1950,14 @@ void _applyToDisk(String root, _Options options) {
     final bool satisfied = paths.entries.every(
       (entry) => present[entry.key] == entry.value,
     );
-    if (!satisfied) write(path, before, after);
+    if (!satisfied) stage(path, before, after);
   });
-  write(
+  stage(
     exampleLockPath,
     inputs.exampleLock,
     applyLockVersions(inputs.exampleLock, options.version),
   );
-  write(
+  stage(
     compatMatrixPath,
     inputs.compatMatrix,
     applyCompatMatrixRow(
@@ -1746,6 +1965,57 @@ void _applyToDisk(String root, _Options options) {
       buildCompatRow(options.version, inputs),
     ),
   );
+
+  final List<String> fragmentPaths = fragmentScan.fragments
+      .map((fragment) => '$changelogFragmentsPath/${fragment.fileName}')
+      .toList(growable: false);
+  final Set<String> transactionPaths = <String>{
+    ...writes.keys,
+    ...fragmentPaths,
+  };
+  final snapshots = <String, List<int>?>{
+    for (final String relative in transactionPaths)
+      relative: File('$root/$relative').existsSync()
+          ? File('$root/$relative').readAsBytesSync()
+          : null,
+  };
+
+  try {
+    for (final MapEntry<String, String> entry in writes.entries) {
+      final File file = File('$root/${entry.key}');
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(entry.value, flush: true);
+    }
+    // 删除最后进行；任一删除失败会恢复此前写入与已经删除的碎片。
+    for (final String relative in fragmentPaths) {
+      File('$root/$relative').deleteSync();
+    }
+  } on Object catch (error) {
+    final rollbackErrors = <String>[];
+    for (final String relative in transactionPaths.toList().reversed) {
+      final File file = File('$root/$relative');
+      try {
+        final List<int>? before = snapshots[relative];
+        if (before == null) {
+          if (file.existsSync()) file.deleteSync();
+        } else {
+          file.parent.createSync(recursive: true);
+          file.writeAsBytesSync(before, flush: true);
+        }
+      } on Object catch (rollbackError) {
+        rollbackErrors.add('$relative: $rollbackError');
+      }
+    }
+    throw FormatException(
+      'apply 写入失败，已回滚：$error'
+      '${rollbackErrors.isEmpty ? '' : '；回滚异常：${rollbackErrors.join('；')}'}',
+    );
+  }
+
+  final List<String> changed = <String>[
+    ...writes.keys,
+    ...fragmentPaths.map((path) => '$path（已消费删除）'),
+  ];
 
   stdout
     ..writeln(
