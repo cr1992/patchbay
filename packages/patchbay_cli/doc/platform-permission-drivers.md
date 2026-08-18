@@ -17,14 +17,14 @@ Android status/normalize/reset use adb package-manager facts. Exercise is only a
 
 iOS Simulator reset uses `simctl privacy`. simctl has no public authoritative status read, so status/normalize remain `permissionUnsupported` instead of turning a successful shell exit into a permission fact. Exercise is advertised only when an explicit XCUITest runner is configured; its one JSON result must bind device, application, permission, decision, handled state, and the observed platform state.
 
-## Moii app device checklist (post-code handoff)
+## Consumer app device checklist (post-code handoff)
 
-The 0.4.0 device gate uses **moii app**, not the Patchbay example:
+The 0.4.0 device gate uses a real consumer app, not the Patchbay example:
 
-1. Start a debug/profile moii app session and record its real session ID, application ID, device ID and driver path. Never reuse example identifiers.
+1. Start a debug/profile consumer app session and record its real session ID, application ID, device ID and driver path. Never reuse example identifiers.
 2. Run `patchbay --session <id> --permission-driver <path> --json doctor permission`.
-3. Android emulator and one adb device: camera/microphone/location/notifications status, normalize, reset, allow, deny and allow-once where the OS advertises them. Verify a wrong moii application/device is rejected before mutation.
-4. iOS Simulator: reset each supported protected resource. Run the configured XCUITest companion against moii app and archive unsupported resources as typed capability results. A signed iOS device run owns the final matrix.
-5. After every handled dialog, assert moii app resumed, the session reconnected, catalog was refreshed, and identifiers/generations were re-resolved. The original permission-triggering command must not be replayed automatically.
+3. Android emulator and one adb device: camera/microphone/location/notifications status, normalize, reset, allow, deny and allow-once where the OS advertises them. Verify a wrong consumer application/device is rejected before mutation.
+4. iOS Simulator: reset each supported protected resource. Run the configured XCUITest companion against the consumer app and archive unsupported resources as typed capability results. A signed iOS device run owns the final matrix.
+5. After every handled dialog, assert the consumer app resumed, the session reconnected, catalog was refreshed, and identifiers/generations were re-resolved. The original permission-triggering command must not be replayed automatically.
 
 SDK installation, test-runner build/signing and the device evidence above are the remaining true-device work; they are intentionally not simulated by unit fixtures.

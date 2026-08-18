@@ -33,7 +33,7 @@
       "status": "unavailable"
     },
     "application": {
-      "kind": "moiiApp",
+      "kind": "consumerApp",
       "status": "unavailable"
     }
   },
@@ -48,56 +48,56 @@
         "patchbay_flutter resolved offline with the candidate SDK",
         "flutter build hap stopped with Hvigor 00303168: SDK component missing"
       ],
-      "notice": "Example 仅作 package 构建预检；它不能替代 moii app 业务验收。"
+      "notice": "Example 仅作 package 构建预检；它不能替代接入方应用业务验收。"
     },
     "vmServiceAttach": {
-      "scope": "moiiDeviceAcceptance",
+      "scope": "consumerDeviceAcceptance",
       "status": "blockedByDevice",
       "blockers": [
         "device",
-        "moiiApp"
+        "consumerApp"
       ],
       "evidence": [],
-      "notice": "需要 moii app debug/profile HAP、HarmonyOS 真机与可达的 VM Service。"
+      "notice": "需要接入方应用 debug/profile HAP、HarmonyOS 真机与可达的 VM Service。"
     },
     "semanticsLifecycleArtifact": {
-      "scope": "moiiDeviceAcceptance",
+      "scope": "consumerDeviceAcceptance",
       "status": "blockedByDevice",
       "blockers": [
         "device",
-        "moiiApp"
+        "consumerApp"
       ],
       "evidence": [],
-      "notice": "必须在 moii app 上验证 Semantics、前后台 lifecycle 与 artifact 读取。"
+      "notice": "必须在接入方应用上验证 Semantics、前后台 lifecycle 与 artifact 读取。"
     },
     "appPermissionApi": {
-      "scope": "moiiDeviceAcceptance",
+      "scope": "consumerDeviceAcceptance",
       "status": "blockedByDevice",
       "blockers": [
         "device",
-        "moiiApp"
+        "consumerApp"
       ],
       "evidence": [],
-      "notice": "未读取或触发 moii app 的 camera/location 权限。"
+      "notice": "未读取或触发接入方应用的 camera/location 权限。"
     },
     "uiTestHypium": {
-      "scope": "moiiDeviceAcceptance",
+      "scope": "consumerDeviceAcceptance",
       "status": "blockedBySdk",
       "blockers": [
         "sdk",
         "device",
-        "moiiApp",
+        "consumerApp",
         "runner"
       ],
       "evidence": [],
       "notice": "未构建 UiTest/Hypium runner，未识别任何系统权限窗口。"
     },
     "hdcRecovery": {
-      "scope": "moiiDeviceAcceptance",
+      "scope": "consumerDeviceAcceptance",
       "status": "blockedByDevice",
       "blockers": [
         "device",
-        "moiiApp"
+        "consumerApp"
       ],
       "evidence": [],
       "notice": "hdc 可执行文件存在，但没有 HarmonyOS target，未执行断连、前后台或一次性授权回收。"

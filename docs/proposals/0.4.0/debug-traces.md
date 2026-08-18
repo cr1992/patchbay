@@ -164,7 +164,7 @@ audit sink 位于 App host，trace recorder 位于 CLI；若不新增 wire event
 - 敏感值 mutation 测试证明 stdin、token、wsUri 和 legacy payload 默认不落盘、不进入 export。
 - 0.3.x fixture 验证 legacy 形状；0.4 fixture 验证 response schema 与执行证据完整记录。
 - launcher 断连/重连后 trace 连续，且 session 变化可见。
-- moii app 作为首个真实接入方完成一次跨 session、job、artifact 的真机轨迹导出与 diff，不以 example
+- 首个真实业务接入方完成一次跨 session、job、artifact 的真机轨迹导出与 diff，不以 example
   代替；第二接入方再验证同一 portable schema。实际写回放需另做专项真机验收。
 
 ## 已裁决预算

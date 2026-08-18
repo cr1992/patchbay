@@ -44,11 +44,13 @@ void main() {
 
     expect(
       validateHarmonyPermissionFixture(fixture),
-      contains('supportStatus must be verified iff all six moii checks verify'),
+      contains(
+        'supportStatus must be verified iff all six consumer checks verify',
+      ),
     );
   });
 
-  test('schema freezes six checks, moii app and unsupported state', () {
+  test('schema freezes six checks, consumer app and unsupported state', () {
     final Map<String, Object?> schema =
         jsonDecode(File(schemaPath).readAsStringSync()) as Map<String, Object?>;
     final Map<String, Object?> properties =
@@ -68,7 +70,7 @@ void main() {
         application['properties']! as Map<String, Object?>;
     expect(
       (applicationProperties['kind']! as Map<String, Object?>)['const'],
-      'moiiApp',
+      'consumerApp',
     );
   });
 
