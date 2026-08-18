@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND.
 // ignore_for_file: curly_braces_in_flow_control_structures, prefer_null_aware_operators, unused_element, use_null_aware_elements
-// Contract: contracts/core_wire.json
+// Contract: packages/patchbay/contracts/core_wire.json
 // Generator: packages/patchbay/tool/wire_codegen.dart
 // Library: patchbay_core_wire
 
