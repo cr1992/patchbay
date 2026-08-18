@@ -47,6 +47,10 @@ enum PatchbayCommandTarget {
   /// command exist without a single new wire command.
   localManifestVerification,
 
+  /// A manifest draft computed on this side of the wire from live catalog
+  /// facts and the currently settled destination.
+  localManifestEmission,
+
   /// A reusable session: connect once, then run many of the targets above.
   ///
   /// It is declared here so help, option validation and the usage banner all
@@ -317,6 +321,13 @@ enum PatchbayFriendlyCommand {
     usageSuffix: '<manifest-file>',
     target: PatchbayCommandTarget.localManifestVerification,
   ),
+  uiTargets(
+    null,
+    <String>['ui', 'targets'],
+    summary: 'Emit an editable manifest draft from mounted catalog targets.',
+    usageSuffix: '--emit-manifest',
+    target: PatchbayCommandTarget.localManifestEmission,
+  ),
   // `on` and `off` are two spellings of one protocol command, exactly as
   // `ui wait <condition>` is six spellings of `ui.wait`: the boolean is the
   // argument, and the CLI path is what an operator types. `status` is a
@@ -583,6 +594,14 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiVerifyManifest => _oneTail(
         tail,
         (String _) => const <String, Object?>{},
+      ),
+      PatchbayFriendlyCommand.uiTargets => _noTail(
+        tail,
+        options.flag('emit-manifest')
+            ? const <String, Object?>{}
+            : throw const FormatException(
+                '--emit-manifest is required for ui targets',
+              ),
       ),
       // `ttlMs` travels only with the enable: it is the lease on a switch that
       // is on, so sending it alongside `enabled: false` is a request the App
@@ -866,6 +885,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'state',
       'decision',
       'confirm-system-permission',
+      'emit-manifest',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -919,6 +939,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     // A release takes no lease, and a read takes nothing at all.
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
+    PatchbayFriendlyCommand.uiTargets => const <String>{'emit-manifest'},
     PatchbayFriendlyCommand.permissionCapabilities ||
     PatchbayFriendlyCommand.permissionStatus => const <String>{
       'permission-driver',

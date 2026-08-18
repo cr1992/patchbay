@@ -279,6 +279,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.localManifestVerification =>
           'Available on any connected Patchbay transport; a manifest that '
               'scopes entries to a destination also needs navigation.current.',
+        PatchbayCommandTarget.localManifestEmission =>
+          'Available when the connected App catalogs navigation.current and '
+              'reports a settled destination.',
         PatchbayCommandTarget.localDiagnostics =>
           'Always available: a connection it cannot open is one of its '
               'findings, not a precondition.',
@@ -292,39 +295,43 @@ abstract final class PatchbayCommandHelp {
   ///
   /// Client targets deliberately print no extension name: those names live in
   /// the transport and would go stale if help kept its own copy.
-  static String protocolLine(PatchbayFriendlyCommand command) =>
-      switch (command.target) {
-        PatchbayCommandTarget.declaredServiceCommand =>
-          'Service command: ${command.serviceCommand}',
-        PatchbayCommandTarget.callerServiceCommand =>
-          'Service command: the <service-command> argument',
-        PatchbayCommandTarget.clientIdentity ||
-        PatchbayCommandTarget.clientCatalog ||
-        PatchbayCommandTarget.clientSnapshot =>
-          'Served by the transport handshake, not by an App catalog command.',
-        PatchbayCommandTarget.clientWidgetTree ||
-        PatchbayCommandTarget.clientRenderTree ||
-        PatchbayCommandTarget.clientFocusTree =>
-          'Flutter SDK diagnostic passthrough, not an App catalog command.',
-        PatchbayCommandTarget.clientReplSession =>
-          'Reads command lines from stdin and runs each over one connection; '
-              'every line reports its own exit code.',
-        PatchbayCommandTarget.localSessionStore =>
-          'Reads and writes the local launcher session directory '
-              '(--session-dir); it never dials the App.',
-        PatchbayCommandTarget.localManifestVerification =>
-          'Compares the manifest against the UI targets the catalog publishes; '
-              'the verdict is computed locally and exits '
-              '${PatchbayExitCode.verificationDeviation} when the report lists '
-              'a deviation.',
-        PatchbayCommandTarget.localDiagnostics =>
-          'Reads the session directory, dials the App itself, then reads the '
-              'catalog, the snapshot and one read-only UI probe. Every failure '
-              'becomes a finding; the exit code is the class of the first one.',
-        PatchbayCommandTarget.localPermissionDriver =>
-          'Uses the versioned JSON Lines external driver protocol. The CLI '
-              'does not operate native system UI itself.',
-      };
+  static String protocolLine(
+    PatchbayFriendlyCommand command,
+  ) => switch (command.target) {
+    PatchbayCommandTarget.declaredServiceCommand =>
+      'Service command: ${command.serviceCommand}',
+    PatchbayCommandTarget.callerServiceCommand =>
+      'Service command: the <service-command> argument',
+    PatchbayCommandTarget.clientIdentity ||
+    PatchbayCommandTarget.clientCatalog ||
+    PatchbayCommandTarget.clientSnapshot =>
+      'Served by the transport handshake, not by an App catalog command.',
+    PatchbayCommandTarget.clientWidgetTree ||
+    PatchbayCommandTarget.clientRenderTree ||
+    PatchbayCommandTarget.clientFocusTree =>
+      'Flutter SDK diagnostic passthrough, not an App catalog command.',
+    PatchbayCommandTarget.clientReplSession =>
+      'Reads command lines from stdin and runs each over one connection; '
+          'every line reports its own exit code.',
+    PatchbayCommandTarget.localSessionStore =>
+      'Reads and writes the local launcher session directory '
+          '(--session-dir); it never dials the App.',
+    PatchbayCommandTarget.localManifestVerification =>
+      'Compares the manifest against the UI targets the catalog publishes; '
+          'the verdict is computed locally and exits '
+          '${PatchbayExitCode.verificationDeviation} when the report lists '
+          'a deviation.',
+    PatchbayCommandTarget.localManifestEmission =>
+      'Reads the live catalog and navigation.current, then emits a local '
+          'v2 draft with coverage mountedOnly; it invokes no write command.',
+    PatchbayCommandTarget.localDiagnostics =>
+      'Reads the session directory, dials the App itself, then reads the '
+          'catalog, the snapshot and one read-only UI probe. Every failure '
+          'becomes a finding; the exit code is the class of the first one.',
+    PatchbayCommandTarget.localPermissionDriver =>
+      'Uses the versioned JSON Lines external driver protocol. The CLI '
+          'does not operate native system UI itself.',
+  };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[
     ...command.path,

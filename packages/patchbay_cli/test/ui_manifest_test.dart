@@ -86,6 +86,18 @@ Future<CliRun> _run(
   return (exitCode: exitCode, stdout: out.toString(), stderr: err.toString());
 }
 
+Future<CliRun> _emit(FakePatchbayClient client, {bool json = true}) async {
+  final StringBuffer out = StringBuffer();
+  final StringBuffer err = StringBuffer();
+  final int exitCode = await runPatchbayCli(
+    <String>[if (json) '--json', '--emit-manifest', 'ui', 'targets'],
+    connect: (_) async => client,
+    output: out,
+    errorOutput: err,
+  );
+  return (exitCode: exitCode, stdout: out.toString(), stderr: err.toString());
+}
+
 Map<String, Object?> _report(CliRun run) =>
     jsonDecode(run.stdout) as Map<String, Object?>;
 
@@ -112,6 +124,110 @@ File _exampleManifest() {
 }
 
 void main() {
+  group('live manifest emission', () {
+    test('emits a stable v2 draft for only mounted targets', () async {
+      final FakePatchbayClient client = _client(
+        destination: 'settings',
+        uiTargets: <Object?>[
+          _target('settings.zeta', sensitive: true),
+          _target('settings.hidden', mounted: false),
+          _target('settings.alpha', kind: PatchbayUiTargetKind.capture),
+        ],
+      );
+
+      final CliRun first = await _emit(client);
+      final CliRun second = await _emit(client);
+
+      expect(first.exitCode, PatchbayExitCode.accepted, reason: first.stderr);
+      expect(second.stdout, first.stdout);
+      expect(_report(first), <String, Object?>{
+        'version': 2,
+        'coverage': 'mountedOnly',
+        'destinations': <Object?>[
+          <String, Object?>{
+            'id': 'settings',
+            'targets': <Object?>[
+              <String, Object?>{
+                'namespace': 'catalogTarget',
+                'id': 'settings.alpha',
+                'kind': 'capture',
+                'sensitive': false,
+              },
+              <String, Object?>{
+                'namespace': 'catalogTarget',
+                'id': 'settings.zeta',
+                'kind': 'text',
+                'sensitive': true,
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    test('the emitted draft can be fed directly to verification', () async {
+      final FakePatchbayClient client = _client(
+        destination: 'login',
+        uiTargets: <Object?>[
+          _target('login.submit'),
+          _target('login.password', sensitive: true),
+        ],
+      );
+      final CliRun emitted = await _emit(client);
+
+      final CliRun verified = await _run(client, emitted.stdout);
+
+      expect(verified.exitCode, PatchbayExitCode.accepted);
+      expect(_stats(verified)['checked'], 2);
+      expect(_report(verified)['destination'], 'login');
+    });
+
+    test('human mode still prints the editable JSON document', () async {
+      final CliRun run = await _emit(
+        _client(destination: 'login'),
+        json: false,
+      );
+
+      expect(run.exitCode, PatchbayExitCode.accepted);
+      expect(jsonDecode(run.stdout), containsPair('version', 2));
+      expect(run.stdout, contains('\n  "coverage": "mountedOnly"'));
+    });
+
+    test('refuses to invent a destination for the draft', () async {
+      final CliRun run = await _emit(_client());
+
+      expect(run.exitCode, PatchbayExitCode.protocol);
+      final Map<String, Object?> error =
+          _report(run)['error']! as Map<String, Object?>;
+      expect(error['code'], 'manifestDestinationUnavailable');
+    });
+
+    test('a missing navigation capability stays a catalog refusal', () async {
+      final CliRun run = await _emit(_client(navigationCataloged: false));
+
+      expect(run.exitCode, PatchbayExitCode.protocol);
+      expect(_report(run)['destinationSource'], 'navigation.current');
+      expect(_report(run)['admission'], 'rejected');
+    });
+
+    test('v2 refuses namespaces this increment cannot verify', () {
+      expect(
+        () => PatchbayUiManifest.parse(
+          '{"version":2,"coverage":"mountedOnly","destinations":['
+          '{"id":"login","targets":[{"namespace":"semanticsIdentifier",'
+          '"id":"login.submit","kind":"text","sensitive":false}]}]}',
+        ),
+        throwsA(
+          isA<PatchbayUiManifestException>().having(
+            (PatchbayUiManifestException error) => error.details['field'],
+            'field',
+            r'$.destinations[0].targets[0].namespace',
+          ),
+        ),
+      );
+    });
+  });
+
   group('manifest parsing is fail-closed', () {
     test('a file that is not JSON names the syntax failure', () async {
       final CliRun run = await _run(_client(), 'targets: []');
@@ -226,7 +342,7 @@ void main() {
         ('{"targets": [{"id": "a.b"}]}', r'$.targets[0].kind'),
         ('{"targets": {}}', r'$.targets'),
         ('[]', r'$'),
-        ('{"version": 2, "targets": []}', r'$.version'),
+        ('{"version": 3, "targets": []}', r'$.version'),
         (
           '{"targets": [{"id": "a.b", "kind": "text", "sensitive": "yes"}]}',
           r'$.targets[0].sensitive',

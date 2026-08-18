@@ -98,20 +98,21 @@ final class PatchbayUiManifest {
         },
       );
     }
+    return switch (document['version']) {
+      2 => _parseV2(document),
+      null || 1 => _parseV1(document),
+      final Object version => throw PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'unsupported manifest version: $version',
+          'field': r'$.version',
+        },
+      ),
+    };
+  }
+
+  static PatchbayUiManifest _parseV1(Map<String, Object?> document) {
     _refuseUnknownKeys(document, const <String>{'version', 'targets'}, r'$');
-    if (document['version'] case final Object version) {
-      if (version != _schemaVersion) {
-        throw PatchbayUiManifestException(
-          'manifestInvalid',
-          details: <String, Object?>{
-            'reason':
-                'unsupported manifest version: this CLI defines '
-                '$_schemaVersion only',
-            'field': r'$.version',
-          },
-        );
-      }
-    }
     final Object? targets = document['targets'];
     if (targets is! List<Object?>) {
       throw const PatchbayUiManifestException(
@@ -124,7 +125,7 @@ final class PatchbayUiManifest {
     }
     final List<PatchbayUiManifestEntry> entries = <PatchbayUiManifestEntry>[];
     for (var index = 0; index < targets.length; index += 1) {
-      entries.add(_entry(targets[index], _targetField(index)));
+      entries.add(_v1Entry(targets[index], _targetField(index)));
     }
     _refuseConflictingIds(entries);
     return PatchbayUiManifest(
@@ -132,10 +133,90 @@ final class PatchbayUiManifest {
     );
   }
 
-  /// The only manifest version this CLI defines. `version` stays optional so a
-  /// hand-written file need not carry it, but a future number is refused rather
-  /// than read as if it were this one.
-  static const int _schemaVersion = 1;
+  static PatchbayUiManifest _parseV2(Map<String, Object?> document) {
+    _refuseUnknownKeys(document, const <String>{
+      'version',
+      'coverage',
+      'destinations',
+    }, r'$');
+    if (document['coverage'] != patchbayUiManifestMountedCoverage) {
+      throw const PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'coverage must be mountedOnly',
+          'field': r'$.coverage',
+        },
+      );
+    }
+    final Object? destinations = document['destinations'];
+    if (destinations is! List<Object?>) {
+      throw const PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'destinations must be a JSON array',
+          'field': r'$.destinations',
+        },
+      );
+    }
+    final List<PatchbayUiManifestEntry> entries = <PatchbayUiManifestEntry>[];
+    final Set<String> destinationIds = <String>{};
+    for (
+      var destinationIndex = 0;
+      destinationIndex < destinations.length;
+      destinationIndex += 1
+    ) {
+      final String field = '\$.destinations[$destinationIndex]';
+      final Object? value = destinations[destinationIndex];
+      if (value is! Map<String, Object?>) {
+        throw PatchbayUiManifestException(
+          'manifestInvalid',
+          details: <String, Object?>{
+            'reason': 'every destination must be a JSON object',
+            'field': field,
+          },
+        );
+      }
+      _refuseUnknownKeys(value, const <String>{'id', 'targets'}, field);
+      final String destination = _requiredText(value['id'], '$field.id');
+      if (!destinationIds.add(destination)) {
+        throw PatchbayUiManifestException(
+          'manifestInvalid',
+          details: <String, Object?>{
+            'reason': 'destination ids must be unique',
+            'field': '$field.id',
+            'id': destination,
+          },
+        );
+      }
+      final Object? targets = value['targets'];
+      if (targets is! List<Object?>) {
+        throw PatchbayUiManifestException(
+          'manifestInvalid',
+          details: <String, Object?>{
+            'reason': 'targets must be a JSON array',
+            'field': '$field.targets',
+          },
+        );
+      }
+      for (
+        var targetIndex = 0;
+        targetIndex < targets.length;
+        targetIndex += 1
+      ) {
+        entries.add(
+          _v2Entry(
+            targets[targetIndex],
+            '$field.targets[$targetIndex]',
+            destination,
+          ),
+        );
+      }
+    }
+    _refuseConflictingIds(entries);
+    return PatchbayUiManifest(
+      List<PatchbayUiManifestEntry>.unmodifiable(entries),
+    );
+  }
 
   final List<PatchbayUiManifestEntry> entries;
 
@@ -157,7 +238,7 @@ final class PatchbayUiManifest {
       .map((PatchbayUiTargetKindWire value) => value.name)
       .join(', ');
 
-  static PatchbayUiManifestEntry _entry(Object? value, String field) {
+  static PatchbayUiManifestEntry _v1Entry(Object? value, String field) {
     if (value is! Map<String, Object?>) {
       throw PatchbayUiManifestException(
         'manifestInvalid',
@@ -216,6 +297,43 @@ final class PatchbayUiManifest {
           ? null
           : _requiredText(value['destination'], '$field.destination'),
     );
+  }
+
+  static PatchbayUiManifestEntry _v2Entry(
+    Object? value,
+    String field,
+    String destination,
+  ) {
+    if (value is! Map<String, Object?>) {
+      throw PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'every target must be a JSON object',
+          'field': field,
+        },
+      );
+    }
+    _refuseUnknownKeys(value, const <String>{
+      'namespace',
+      'id',
+      'kind',
+      'sensitive',
+    }, field);
+    if (value['namespace'] != patchbayUiManifestCatalogNamespace) {
+      throw PatchbayUiManifestException(
+        'manifestInvalid',
+        details: <String, Object?>{
+          'reason': 'namespace must be catalogTarget in this CLI',
+          'field': '$field.namespace',
+        },
+      );
+    }
+    return _v1Entry(<String, Object?>{
+      'id': value['id'],
+      'kind': value['kind'],
+      'sensitive': value['sensitive'],
+      'destination': destination,
+    }, field);
   }
 
   static String _requiredText(Object? value, String field) {
@@ -478,6 +596,65 @@ final class PatchbayUiManifestReport {
 
 /// Marks a document the CLI computed itself rather than one an App answered.
 const String patchbayUiManifestReportSchema = 'uiManifestReport';
+
+/// The deliberately narrow coverage of an emitted draft.
+const String patchbayUiManifestMountedCoverage = 'mountedOnly';
+
+/// The only target namespace PB-040-15 can derive from the live catalog.
+const String patchbayUiManifestCatalogNamespace = 'catalogTarget';
+
+/// Builds an editable v2 draft from one observed, settled destination.
+///
+/// Only mounted catalog rows are evidence about the current screen. Registered
+/// but unmounted rows may belong to another screen, so including them would make
+/// a single live observation look like whole-App coverage. The caller must
+/// supply a destination the App actually reported; inventing one here would
+/// make the generated file impossible to verify honestly.
+Map<String, Object?> emitPatchbayMountedUiManifest({
+  required List<PatchbayUiTargetDescriptorWire> runtime,
+  required String destination,
+}) {
+  if (destination.isEmpty) {
+    throw const PatchbayProtocolException(
+      'manifestDestinationUnavailable',
+      details: <String, Object?>{
+        'reason':
+            'navigation.current did not report a settled destination; the '
+            'CLI will not invent one for a manifest draft',
+      },
+    );
+  }
+  final List<PatchbayUiTargetDescriptorWire> mounted =
+      runtime
+          .where((PatchbayUiTargetDescriptorWire target) => target.mounted)
+          .toList()
+        ..sort(
+          (
+            PatchbayUiTargetDescriptorWire left,
+            PatchbayUiTargetDescriptorWire right,
+          ) => left.id.compareTo(right.id),
+        );
+  return <String, Object?>{
+    'version': 2,
+    'coverage': patchbayUiManifestMountedCoverage,
+    'destinations': <Object?>[
+      <String, Object?>{
+        'id': destination,
+        'targets': <Object?>[
+          for (final PatchbayUiTargetDescriptorWire target in mounted)
+            <String, Object?>{
+              'namespace': patchbayUiManifestCatalogNamespace,
+              'id': target.id,
+              'kind': target.kind.toJson(),
+              'sensitive':
+                  target.sensitivePolicy ==
+                  PatchbaySensitivePolicyWire.redacted,
+            },
+        ],
+      },
+    ],
+  };
+}
 
 /// One summary line for a report [document].
 ///

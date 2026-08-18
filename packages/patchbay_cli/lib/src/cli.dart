@@ -541,6 +541,12 @@ ArgParser patchbayCliParser() => ArgParser()
     defaultsTo: false,
     negatable: false,
     help: 'Explicitly confirm an exercise allow system permission action.',
+  )
+  ..addFlag(
+    'emit-manifest',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Emit a v2 draft covering only targets mounted right now.',
   );
 
 List<String>? _helpTopic(ArgResults parsed) {
@@ -832,6 +838,43 @@ Future<_Execution> _execute(
             ? PatchbayExitCode.verificationDeviation
             : PatchbayExitCode.accepted,
         summary: report.humanReport,
+      );
+    case PatchbayCommandTarget.localManifestEmission:
+      final Map<String, Object?> catalog = await connection.catalog();
+      final Map<String, Object?> current = await _invokeAgainstCatalog(
+        connection,
+        catalog,
+        'navigation.current',
+        const <String, Object?>{},
+      );
+      if (current['admission'] == 'rejected') {
+        return _Execution(
+          _withSource(current, 'destinationSource'),
+          catalog: catalog,
+        );
+      }
+      final String? destination = _navigationDestination(current);
+      if (destination == null || destination.isEmpty) {
+        throw const PatchbayProtocolException(
+          'manifestDestinationUnavailable',
+          details: <String, Object?>{
+            'reason':
+                'navigation.current did not report a settled destination; '
+                'the CLI will not invent one for a manifest draft',
+          },
+        );
+      }
+      final Map<String, Object?> draft = emitPatchbayMountedUiManifest(
+        runtime: decodePatchbayCatalogUiTargets(catalog),
+        destination: destination,
+      );
+      return _Execution(
+        draft,
+        catalog: catalog,
+        exitCode: PatchbayExitCode.accepted,
+        // A manifest is an artifact intended to be redirected and edited, not
+        // a response to collapse into a one-line human summary.
+        summary: const JsonEncoder.withIndent('  ').convert(draft),
       );
     case PatchbayCommandTarget.clientReplSession:
       // `runPatchbayCli` routes a repl to its own loop before dispatch, and

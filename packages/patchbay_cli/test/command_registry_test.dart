@@ -90,6 +90,7 @@ void main() {
           '--decision',
           'deny',
         ],
+        if (spec == PatchbayFriendlyCommand.uiTargets) '--emit-manifest',
         ...words,
       ];
       final parsed = patchbayCliParser().parse(options);
@@ -438,6 +439,21 @@ void main() {
     ]);
     expect(
       () => PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('ui targets requires its explicit emission flag', () {
+    expect(
+      _resolve(<String>['--emit-manifest', 'ui', 'targets']).spec,
+      PatchbayFriendlyCommand.uiTargets,
+    );
+    expect(
+      () => _resolve(<String>['ui', 'targets']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>['--emit-manifest', 'catalog']),
       throwsA(isA<FormatException>()),
     );
   });
