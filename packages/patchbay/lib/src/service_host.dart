@@ -8,6 +8,7 @@ import 'command_registry.dart';
 import 'features.dart';
 import 'generated/core_wire.g.dart';
 import 'invocation.dart';
+import 'response_schema.dart';
 import 'snapshot.dart';
 import 'version.dart';
 
@@ -74,6 +75,9 @@ final class PatchbayServiceHost {
   final PatchbayCommandRegistry _registry;
   final PatchbayExtensionRegistrar _registrar;
   final Set<PatchbayFeature> _declaredFeatures;
+  Map<String, PatchbayResponseSchema> _catalogResponseSchemas =
+      const <String, PatchbayResponseSchema>{};
+  int _catalogReadGeneration = 0;
   bool _registered = false;
 
   /// Capabilities this host declares on the identity plane.
@@ -86,6 +90,7 @@ final class PatchbayServiceHost {
   /// the constructor.
   Set<PatchbayFeature> get features => <PatchbayFeature>{
     ..._coreFeatures,
+    if (_registry.hasResponseSchemas) PatchbayFeature.responseSchemas,
     ..._declaredFeatures,
   };
 
@@ -303,6 +308,7 @@ final class PatchbayServiceHost {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
     }
+    _CatalogRead? invocationCatalog;
     final Map<String, Object?> forwarded;
     if (arguments.isEmpty) {
       // No transmitted value can be sensitive and there is no meta key to
@@ -310,7 +316,7 @@ final class PatchbayServiceHost {
       // not start failing because a consumer catalog source is broken.
       forwarded = arguments;
     } else {
-      final _CatalogRead catalog = await _readCatalog();
+      final _CatalogRead catalog = invocationCatalog = await _readCatalog();
       if (catalog.violation case final Map<String, Object?> reason) {
         // The policy is only readable from the catalog. Without it the host
         // cannot prove a sensitive value arrived from stdin, so it fails closed
@@ -361,7 +367,29 @@ final class PatchbayServiceHost {
     if (semanticViolation != null) {
       return _invalidInvocationEnvelope(requestId, semanticViolation);
     }
-    return result;
+    PatchbayResponseSchema? responseSchema = _registry.responseSchemaFor(
+      command,
+    );
+    responseSchema ??= invocationCatalog == null
+        ? _catalogResponseSchemas[command]
+        : _responseSchemasFromCatalog(invocationCatalog.response)[command];
+    if (responseSchema == null) {
+      return <String, Object?>{...result, 'schemaMode': 'legacyUnvalidated'};
+    }
+    if (wire.admission == PatchbayAdmissionWire.accepted) {
+      final List<PatchbayResponseValidationIssue> issues =
+          validatePatchbayResponsePayload(
+            responseSchema.accepted,
+            wire.payload,
+          );
+      if (issues.isNotEmpty) {
+        return <String, Object?>{
+          ..._responseSchemaViolation(requestId, issues),
+          'schemaMode': 'validated',
+        };
+      }
+    }
+    return <String, Object?>{...result, 'schemaMode': 'validated'};
   }
 
   void register() {
@@ -494,10 +522,14 @@ final class PatchbayServiceHost {
   /// that quietly lost capabilities, which is the one failure mode a debugging
   /// protocol must never produce.
   Future<_CatalogRead> _readCatalog() async {
+    final int generation = ++_catalogReadGeneration;
     final Map<String, Object?> declared;
     try {
       declared = await _catalog();
     } on Object catch (error) {
+      if (generation == _catalogReadGeneration) {
+        _catalogResponseSchemas = const <String, PatchbayResponseSchema>{};
+      }
       // The type, never the message: a consumer error string is arbitrary App
       // data and this envelope goes back over the wire.
       return _CatalogRead.violated(<String, Object?>{
@@ -525,7 +557,15 @@ final class PatchbayServiceHost {
     final Map<String, Object?>? violation = _commandsViolation(
       catalog['commands'],
     );
-    if (violation != null) return _CatalogRead.violated(violation);
+    if (violation != null) {
+      if (generation == _catalogReadGeneration) {
+        _catalogResponseSchemas = const <String, PatchbayResponseSchema>{};
+      }
+      return _CatalogRead.violated(violation);
+    }
+    if (generation == _catalogReadGeneration) {
+      _catalogResponseSchemas = _responseSchemasFromCatalog(catalog);
+    }
     return _CatalogRead.valid(<String, Object?>{
       ...catalog,
       // Protocol-owned, and only ever attached to a catalog that passed
@@ -573,6 +613,27 @@ final class PatchbayServiceHost {
           'name': rawName,
           'reason': 'duplicateCommandName',
         });
+      } else if (entry case final Map<Object?, Object?> command
+          when command.containsKey('responseSchema')) {
+        try {
+          final PatchbayResponseSchema schema = PatchbayResponseSchema.fromJson(
+            command['responseSchema'],
+          );
+          if (command['mode'] == 'job' &&
+              !schema.terminal.keys.toSet().containsAll(const <String>{
+                'completed',
+                'failed',
+                'cancelled',
+              })) {
+            throw const FormatException('incomplete terminal schema');
+          }
+        } on Object {
+          violations.add(<String, Object?>{
+            'index': index,
+            'name': rawName,
+            'reason': 'invalidResponseSchema',
+          });
+        }
       }
     }
     if (violations.isEmpty) return null;
@@ -616,6 +677,44 @@ final class PatchbayServiceHost {
       details: <String, Object?>{'reason': reason, ...details},
     ),
   ).toJson();
+
+  static Map<String, Object?> _responseSchemaViolation(
+    String requestId,
+    List<PatchbayResponseValidationIssue> issues,
+  ) {
+    final PatchbayResponseValidationIssue first = issues.first;
+    return _invalidInvocationEnvelope(
+      requestId,
+      first.reason,
+      <String, Object?>{
+        'field': first.field,
+        if (first.expected != null) 'expected': first.expected!,
+        'violations': issues
+            .map((PatchbayResponseValidationIssue issue) => issue.toJson())
+            .toList(growable: false),
+      },
+    );
+  }
+
+  static Map<String, PatchbayResponseSchema> _responseSchemasFromCatalog(
+    Map<String, Object?> catalog,
+  ) {
+    final Object? rows = catalog['commands'];
+    if (rows is! List<Object?>) return const <String, PatchbayResponseSchema>{};
+    final Map<String, PatchbayResponseSchema> schemas =
+        <String, PatchbayResponseSchema>{};
+    for (final Object? row in rows) {
+      if (row is! Map<Object?, Object?> ||
+          row['name'] is! String ||
+          !row.containsKey('responseSchema')) {
+        continue;
+      }
+      schemas[row['name']! as String] = PatchbayResponseSchema.fromJson(
+        row['responseSchema'],
+      );
+    }
+    return Map<String, PatchbayResponseSchema>.unmodifiable(schemas);
+  }
 
   static String? _invocationSemanticViolation(PatchbayInvocationWire wire) {
     if (wire.requestId.isEmpty) return 'emptyRequestId';

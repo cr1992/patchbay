@@ -1,5 +1,6 @@
 import 'facts.dart';
 import 'generated/core_wire.g.dart';
+import 'response_schema.dart';
 import 'ui_descriptor.dart';
 
 enum PatchbayCommandMode { readOnly, immediate, job }
@@ -57,6 +58,7 @@ final class PatchbayCommandDescriptor {
     required this.factSources,
     this.parameters = const <PatchbayParameterDescriptor>[],
     this.gates = const <String>{},
+    this.responseSchema,
   });
 
   final String name;
@@ -73,13 +75,14 @@ final class PatchbayCommandDescriptor {
   final Set<PatchbayFactSource> factSources;
   final List<PatchbayParameterDescriptor> parameters;
   final Set<String> gates;
+  final PatchbayResponseSchema? responseSchema;
 
   Map<String, Object?> toJson() {
     final List<PatchbayFactSourceWire> sortedFactSources =
         factSources.map(_factSourceWire).toList(growable: false)
           ..sort((a, b) => a.name.compareTo(b.name));
     final List<String> sortedGates = gates.toList(growable: false)..sort();
-    return PatchbayCommandDescriptorWire(
+    final Map<String, Object?> json = PatchbayCommandDescriptorWire(
       name: name,
       summary: summary,
       plane: _planeWire(plane),
@@ -91,6 +94,10 @@ final class PatchbayCommandDescriptor {
           .map((value) => value._toWire())
           .toList(growable: false),
     ).toJson();
+    if (responseSchema case final PatchbayResponseSchema schema) {
+      json['responseSchema'] = schema.toJson();
+    }
+    return json;
   }
 }
 

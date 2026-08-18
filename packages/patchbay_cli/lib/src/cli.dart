@@ -1059,15 +1059,41 @@ Future<Map<String, Object?>> _invokeCataloged(
   );
   final bool serverWaitAvailable =
       _CatalogCommand.find(catalog, 'patchbay.job.wait') != null;
-  return wait
-      ? await _waitForJob(
-          connection,
-          catalog,
-          admission,
-          descriptor?.suggestedWaitTimeout,
-          serverWaitAvailable: serverWaitAvailable,
-        )
-      : admission;
+  if (!wait) return admission;
+  final Map<String, Object?> terminal = await _waitForJob(
+    connection,
+    catalog,
+    admission,
+    descriptor?.suggestedWaitTimeout,
+    serverWaitAvailable: serverWaitAvailable,
+  );
+  return _validateTerminalPayload(terminal, descriptor?.responseSchema);
+}
+
+Map<String, Object?> _validateTerminalPayload(
+  Map<String, Object?> response,
+  PatchbayResponseSchema? responseSchema,
+) {
+  if (responseSchema == null || response['admission'] != 'accepted') {
+    return response;
+  }
+  final Object? payload = response['payload'];
+  final Object? events = payload is Map<Object?, Object?>
+      ? payload['events']
+      : null;
+  if (events is! List<Object?> || events.isEmpty) return response;
+  final Object? last = events.last;
+  if (last is! Map<Object?, Object?>) return response;
+  final Object? phase = last['phase'];
+  final PatchbayResponseValueSchema? schema = phase is String
+      ? responseSchema.terminal[phase]
+      : null;
+  if (schema == null) return response;
+  final List<PatchbayResponseValidationIssue> issues =
+      validatePatchbayResponsePayload(schema, last['payload']);
+  return issues.isEmpty
+      ? <String, Object?>{...response, 'schemaMode': 'validated'}
+      : _cliResponseSchemaViolation(response, issues);
 }
 
 /// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
@@ -1100,7 +1126,49 @@ Future<Map<String, Object?>> _invokeAgainstCatalog(
       details: _driftDetails(command, catalog, response),
     );
   }
-  return response;
+  final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
+  final PatchbayResponseSchema? responseSchema = descriptor?.responseSchema;
+  if (responseSchema == null) {
+    return <String, Object?>{...response, 'schemaMode': 'legacyUnvalidated'};
+  }
+  if (response['admission'] == 'accepted') {
+    final List<PatchbayResponseValidationIssue> issues =
+        validatePatchbayResponsePayload(
+          responseSchema.accepted,
+          response['payload'],
+        );
+    if (issues.isNotEmpty) {
+      return _cliResponseSchemaViolation(response, issues);
+    }
+  }
+  return <String, Object?>{...response, 'schemaMode': 'validated'};
+}
+
+Map<String, Object?> _cliResponseSchemaViolation(
+  Map<String, Object?> response,
+  List<PatchbayResponseValidationIssue> issues,
+) {
+  final PatchbayResponseValidationIssue first = issues.first;
+  return <String, Object?>{
+    'schemaVersion': response['schemaVersion'] ?? 1,
+    'requestId': response['requestId'] ?? '',
+    'admission': 'rejected',
+    'payload': const <String, Object?>{},
+    'notice': null,
+    'jobId': response['jobId'],
+    'rejection': <String, Object?>{
+      'code': 'providerProtocolViolation',
+      'details': <String, Object?>{
+        'reason': first.reason,
+        'field': first.field,
+        if (first.expected != null) 'expected': first.expected!,
+        'violations': issues
+            .map((PatchbayResponseValidationIssue issue) => issue.toJson())
+            .toList(growable: false),
+      },
+    },
+    'schemaMode': 'validated',
+  };
 }
 
 /// What the host already said about the catalog this invoke disagreed with.
@@ -1291,10 +1359,15 @@ int _positiveOption(ArgResults options, String name) {
 /// which value may never touch argv, and how large a `blob.read` chunk the host
 /// will accept — are the App's to make, not the CLI's to hardcode.
 final class _CatalogCommand {
-  const _CatalogCommand(this.suggestedWaitTimeout, this._parameters);
+  const _CatalogCommand(
+    this.suggestedWaitTimeout,
+    this._parameters,
+    this.responseSchema,
+  );
 
   final Duration? suggestedWaitTimeout;
   final List<Map<Object?, Object?>> _parameters;
+  final PatchbayResponseSchema? responseSchema;
 
   Set<String> get sensitiveParameters => <String>{
     for (final Map<Object?, Object?> parameter in _parameters)
@@ -1328,6 +1401,9 @@ final class _CatalogCommand {
             for (final Object? parameter in parameters)
               if (parameter is Map<Object?, Object?>) parameter,
         ],
+        row.containsKey('responseSchema')
+            ? PatchbayResponseSchema.fromJson(row['responseSchema'])
+            : null,
       );
     }
     return null;

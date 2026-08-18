@@ -13,6 +13,7 @@ export 'src/generated/core_wire.g.dart';
 export 'src/invocation.dart';
 export 'src/jobs.dart';
 export 'src/navigation.dart';
+export 'src/response_schema.dart';
 export 'src/service_host.dart';
 export 'src/snapshot.dart';
 export 'src/ui_descriptor.dart';

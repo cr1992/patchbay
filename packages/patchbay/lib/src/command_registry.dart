@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'command_descriptor.dart';
 import 'invocation.dart';
+import 'response_schema.dart';
 
 typedef PatchbayCommandDecoder<T> = T Function(Map<String, Object?> arguments);
 typedef PatchbayCommandGate<T> =
@@ -99,6 +100,15 @@ final class PatchbayCommandRegistry {
 
   bool get isEmpty => _registrations.isEmpty;
 
+  bool get hasResponseSchemas => _registrations.values.any(
+    (PatchbayCommandRegistration<Object?> registration) =>
+        registration.available &&
+        registration.descriptor.responseSchema != null,
+  );
+
+  PatchbayResponseSchema? responseSchemaFor(String command) =>
+      _registrations[command]?.descriptor.responseSchema;
+
   List<PatchbayCommandDescriptor> get descriptors =>
       List<PatchbayCommandDescriptor>.unmodifiable(
         _registrations.values
@@ -148,6 +158,20 @@ final class PatchbayCommandRegistry {
         <String, PatchbayCommandRegistration<Object?>>{};
     for (final PatchbayCommandRegistration<Object?> registration
         in registrations) {
+      if (registration.descriptor.responseSchema
+          case final PatchbayResponseSchema schema) {
+        validatePatchbayResponseSchema(schema);
+        if (registration.descriptor.mode == PatchbayCommandMode.job &&
+            !schema.terminal.keys.toSet().containsAll(const <String>{
+              'completed',
+              'failed',
+              'cancelled',
+            })) {
+          throw ArgumentError(
+            'job response schema must declare every terminal phase',
+          );
+        }
+      }
       final String name = registration.descriptor.name;
       if (indexed.containsKey(name)) {
         throw ArgumentError.value(name, 'registrations', 'duplicate command');

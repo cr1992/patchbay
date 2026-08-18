@@ -26,6 +26,9 @@ enum PatchbayFeature {
   /// protocol, not by the consumer, so a host either has it or predates it.
   catalogDigest,
 
+  /// Catalog command descriptors can drive host-side response validation.
+  responseSchemas,
+
   /// `*LifecycleNotResumed` rejections carry `details.lifecycleState`.
   ///
   /// Declared by the Flutter host, which owns the lifecycle gate. A pure Dart
