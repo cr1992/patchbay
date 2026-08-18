@@ -172,6 +172,89 @@ final patchbayUiSemanticsTapCommandDescriptor = _ui(
   ],
 );
 
+final patchbayUiGesturePressHoldCommandDescriptor = _gesture(
+  'ui.gesture.pressHold',
+  'Press and hold inside a Semantics identifier target.',
+  'uiGesturePressHold',
+  'press-hold',
+  'Press and hold an anchored target.',
+  extraParameters: <PatchbayParameterDescriptor>[
+    _p('durationMs', PatchbayParameterType.integer, defaultValue: 500),
+  ],
+  extraOptions: const <String, String>{'durationMs': 'duration-ms'},
+  usageSuffix: '<identifier> <generation> --start <json> [--duration-ms <ms>]',
+);
+
+final patchbayUiGestureDragCommandDescriptor = _gesture(
+  'ui.gesture.drag',
+  'Drag through bounded target-local points.',
+  'uiGestureDrag',
+  'drag',
+  'Drag through an anchored target-local path.',
+  extraParameters: <PatchbayParameterDescriptor>[
+    _p('path', PatchbayParameterType.json, required: true),
+    _p('durationMs', PatchbayParameterType.integer, defaultValue: 300),
+  ],
+  extraOptions: const <String, String>{
+    'path': 'gesture-path',
+    'durationMs': 'duration-ms',
+  },
+  usageSuffix:
+      '<identifier> <generation> --start <json> --gesture-path <json> '
+      '[--duration-ms <ms>]',
+);
+
+final patchbayUiGestureFlingCommandDescriptor = _gesture(
+  'ui.gesture.fling',
+  'Fling from a target-local point with normalized velocity.',
+  'uiGestureFling',
+  'fling',
+  'Fling from an anchored target-local point.',
+  extraParameters: <PatchbayParameterDescriptor>[
+    _p('velocity', PatchbayParameterType.json, required: true),
+    _p('durationMs', PatchbayParameterType.integer, defaultValue: 100),
+  ],
+  extraOptions: const <String, String>{
+    'velocity': 'velocity',
+    'durationMs': 'duration-ms',
+  },
+  usageSuffix:
+      '<identifier> <generation> --start <json> --velocity <json> '
+      '[--duration-ms <ms>]',
+);
+
+PatchbayCommandDescriptor _gesture(
+  String name,
+  String summary,
+  String syntaxId,
+  String verb,
+  String cliSummary, {
+  required List<PatchbayParameterDescriptor> extraParameters,
+  required Map<String, String> extraOptions,
+  required String usageSuffix,
+}) => _ui(
+  name,
+  summary,
+  parameters: <PatchbayParameterDescriptor>[
+    _p('identifier', PatchbayParameterType.string, required: true),
+    _p('generation', PatchbayParameterType.integer, required: true),
+    _p('start', PatchbayParameterType.json, required: true),
+    ...extraParameters,
+  ],
+  cliSyntax: <PatchbayCliSyntax>[
+    PatchbayCliSyntax(
+      id: syntaxId,
+      path: <String>['ui', 'gesture', verb],
+      summary: cliSummary,
+      usageSuffix: usageSuffix,
+      positionalParameters: const <String>['identifier', 'generation'],
+      optionParameters: <String, String>{'start': 'start', ...extraOptions},
+      positiveParameters: const <String>{'durationMs'},
+      nonNegativeParameters: const <String>{'generation'},
+    ),
+  ],
+);
+
 final patchbayUiWaitCommandDescriptor = _ui(
   'ui.wait',
   'Wait for one bounded Flutter observation condition.',
@@ -458,6 +541,9 @@ final List<PatchbayCommandDescriptor> patchbayUiProtocolCliCommandDescriptors =
       patchbayUiSemanticsTreeCommandDescriptor,
       patchbayUiSemanticsActionCommandDescriptor,
       patchbayUiSemanticsTapCommandDescriptor,
+      patchbayUiGesturePressHoldCommandDescriptor,
+      patchbayUiGestureDragCommandDescriptor,
+      patchbayUiGestureFlingCommandDescriptor,
       patchbayUiWaitCommandDescriptor,
       patchbayUiKeepAwakeSetCommandDescriptor,
       patchbayUiKeepAwakeStatusCommandDescriptor,

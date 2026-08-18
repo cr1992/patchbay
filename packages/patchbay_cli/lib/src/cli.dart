@@ -848,6 +848,10 @@ ArgParser patchbayCliParser() => ArgParser()
     'generation',
     help: 'Expected semantics generation; refuses a target that already moved.',
   )
+  ..addOption('start', help: 'JSON target-local normalized gesture point.')
+  ..addOption('gesture-path', help: 'JSON array of target-local drag points.')
+  ..addOption('velocity', help: 'JSON normalized fling velocity vector.')
+  ..addOption('duration-ms', help: 'Bounded gesture duration in milliseconds.')
   ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
   ..addOption('cursor', help: 'Opaque structured-log cursor.')
   ..addOption(

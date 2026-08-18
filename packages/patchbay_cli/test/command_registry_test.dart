@@ -230,6 +230,11 @@ void main() {
           _ when spec.name == 'uiSemanticsAction' => <String>['42', '7', 'tap'],
           _ when spec.name == 'uiTap' => <String>['login.submit'],
           _
+              when spec.name == 'uiGesturePressHold' ||
+                  spec.name == 'uiGestureDrag' ||
+                  spec.name == 'uiGestureFling' =>
+            <String>['gesture.target', '1'],
+          _
               when spec.name == 'uiWaitSemanticsMounted' ||
                   spec.name == 'uiWaitSemanticsUnmounted' ||
                   spec.name == 'uiWaitDestination' =>
@@ -265,6 +270,20 @@ void main() {
         },
       ];
       final List<String> options = <String>[
+        if (spec.name == 'uiGesturePressHold' ||
+            spec.name == 'uiGestureDrag' ||
+            spec.name == 'uiGestureFling') ...<String>[
+          '--start',
+          '{"x":0.5,"y":0.5}',
+        ],
+        if (spec.name == 'uiGestureDrag') ...<String>[
+          '--gesture-path',
+          '[{"x":0.5,"y":0.4},{"x":0.5,"y":0.2}]',
+        ],
+        if (spec.name == 'uiGestureFling') ...<String>[
+          '--velocity',
+          '{"x":0,"y":-2}',
+        ],
         if (spec.protocolSyntax?.fencesNavigationRevision ?? false) ...<String>[
           '--revision',
           '1',
@@ -749,6 +768,83 @@ void main() {
       'ui.keepAwake.status',
     );
   });
+
+  test(
+    'generated anchored gesture syntax decodes normalized JSON arguments',
+    () {
+      final PatchbayFriendlyInvocation hold = _resolve(<String>[
+        '--start',
+        '{"x":0.5,"y":0.25}',
+        '--duration-ms',
+        '700',
+        'ui',
+        'gesture',
+        'press-hold',
+        'wheel',
+        '4',
+      ]);
+      final PatchbayFriendlyInvocation drag = _resolve(<String>[
+        '--start',
+        '{"x":0.5,"y":0.8}',
+        '--gesture-path',
+        '[{"x":0.5,"y":0.5},{"x":0.5,"y":0.2}]',
+        'ui',
+        'gesture',
+        'drag',
+        'sheet',
+        '9',
+      ]);
+      final PatchbayFriendlyInvocation fling = _resolve(<String>[
+        '--start',
+        '{"x":0.5,"y":0.5}',
+        '--velocity',
+        '{"x":0,"y":-4}',
+        'ui',
+        'gesture',
+        'fling',
+        'list',
+        '2',
+      ]);
+
+      expect(hold.serviceCommand, 'ui.gesture.pressHold');
+      expect(hold.arguments, <String, Object?>{
+        'identifier': 'wheel',
+        'generation': 4,
+        'start': <String, Object?>{'x': 0.5, 'y': 0.25},
+        'durationMs': 700,
+      });
+      expect(drag.serviceCommand, 'ui.gesture.drag');
+      expect(drag.arguments['durationMs'], 300);
+      expect((drag.arguments['path']! as List<Object?>), hasLength(2));
+      expect(fling.serviceCommand, 'ui.gesture.fling');
+      expect(fling.arguments['durationMs'], 100);
+      expect(fling.arguments['velocity'], <String, Object?>{'x': 0, 'y': -4});
+    },
+  );
+
+  test(
+    'anchored gesture CLI refuses omitted anchors and unrelated options',
+    () {
+      expect(
+        () => _resolve(<String>['ui', 'gesture', 'press-hold', 'wheel', '4']),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        () => _resolve(<String>[
+          '--velocity',
+          '{"x":1,"y":0}',
+          '--start',
+          '{"x":0.5,"y":0.5}',
+          'ui',
+          'gesture',
+          'drag',
+          'wheel',
+          '4',
+        ]),
+        throwsA(isA<FormatException>()),
+      );
+    },
+  );
 
   test('parser has no direct token argv option', () {
     expect(

@@ -73,6 +73,27 @@ final _GeneratedProtocolCommand _uiTapProtocolCommand =
       syntaxIndex: 0,
     );
 
+final _GeneratedProtocolCommand _uiGesturePressHoldProtocolCommand =
+    _GeneratedProtocolCommand(
+      descriptor: patchbayUiGesturePressHoldCommandDescriptor,
+      serviceName: 'ui.gesture.pressHold',
+      syntaxIndex: 0,
+    );
+
+final _GeneratedProtocolCommand _uiGestureDragProtocolCommand =
+    _GeneratedProtocolCommand(
+      descriptor: patchbayUiGestureDragCommandDescriptor,
+      serviceName: 'ui.gesture.drag',
+      syntaxIndex: 0,
+    );
+
+final _GeneratedProtocolCommand _uiGestureFlingProtocolCommand =
+    _GeneratedProtocolCommand(
+      descriptor: patchbayUiGestureFlingCommandDescriptor,
+      serviceName: 'ui.gesture.fling',
+      syntaxIndex: 0,
+    );
+
 final _GeneratedProtocolCommand _uiWaitSemanticsMountedProtocolCommand =
     _GeneratedProtocolCommand(
       descriptor: patchbayUiWaitCommandDescriptor,
@@ -186,6 +207,9 @@ final List<PatchbayFriendlyCommandSpec> _patchbayFriendlyCommands =
       _uiSemanticsTreeProtocolCommand,
       _uiSemanticsActionProtocolCommand,
       _uiTapProtocolCommand,
+      _uiGesturePressHoldProtocolCommand,
+      _uiGestureDragProtocolCommand,
+      _uiGestureFlingProtocolCommand,
       _uiWaitSemanticsMountedProtocolCommand,
       _uiWaitSemanticsUnmountedProtocolCommand,
       _uiWaitSemanticsValueProtocolCommand,

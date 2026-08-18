@@ -46,6 +46,9 @@ void main() {
     'ui.semantics.tree',
     'ui.semantics.action',
     'ui.semantics.tap',
+    'ui.gesture.pressHold',
+    'ui.gesture.drag',
+    'ui.gesture.fling',
     'ui.text.set',
     'ui.text.enter',
     'navigation.catalog',
@@ -326,6 +329,16 @@ void main() {
                         },
                       ).toJson(),
               'ui.text.set' || 'ui.text.enter' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'dispatched',
+                  'source': 'uiObserved',
+                  'arguments': args,
+                },
+              ).toJson(),
+              'ui.gesture.pressHold' ||
+              'ui.gesture.drag' ||
+              'ui.gesture.fling' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: <String, Object?>{
                   'outcome': 'dispatched',

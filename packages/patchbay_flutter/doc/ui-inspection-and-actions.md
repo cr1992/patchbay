@@ -87,8 +87,9 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
 - `increase`、`decrease`、`expand`、`collapse`；
 - `setText`，文本只能通过显式参数传入，敏感输入必须来自 stdin。
 
-`setSelection`、剪贴板、custom action、坐标手势和 `scrollToOffset` 当前不支持。它们的参数、
-隐私或跨 SDK 语义未冻结，不能用无类型 JSON 猜测补齐。
+`setSelection`、剪贴板、custom action、任意屏幕坐标和 `scrollToOffset` 当前不支持。它们的参数、
+隐私或跨 SDK 语义未冻结，不能用无类型 JSON 猜测补齐。锚定式指针手势走下述独立命令与 policy，
+不属于 Semantics action。
 
 ### 按 identifier 直接 tap
 
@@ -109,6 +110,22 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
   不出现在 catalog，也不可派发。
 
 结果同样只声明 `dispatched`，不冒充页面或领域完成。
+
+### 锚定式 press-hold / drag / fling
+
+`ui.gesture.pressHold|drag|fling` 先按稳定 Semantics `identifier` 找到唯一节点，并要求调用方携带该
+节点的 `generation`。起点、drag path 和 fling velocity 都以目标边界归一化；bridge 只在单次调用
+内部把它们换算成当前 view 的逻辑像素并合成 pointer event，换算后的坐标不进入响应、日志或轨迹。
+
+手势使用独立 `PatchbayGesturePolicy`。没有注入 policy 时三条命令都不进 catalog；policy 可附加 gate，
+也只能把 30 秒、64 点、20 倍目标尺寸/秒的固定上限继续收紧。门后会再次按 identifier 解析并核对同一
+generation，再执行生命周期、paint clip 和当前 hit-test 遮挡检查。真实 overlay、裁剪区域和不可映射的
+render anchor 均以 `uiGestureTargetObscured` fail-closed；custom paint、translucent hit behavior 与
+不拦截指针的 `IgnorePointer` 装饰层不会因此误拒。
+
+手势开始后不逐帧重解析。布局变化只在终态 payload 以 `layoutChangedDuringGesture` 报告；
+`outcome=dispatched` 仅证明 Flutter 收到了完整指针序列，业务完成仍需 snapshot、manifest 或 capture
+另行验证。
 
 Semantics action 是“沿 Flutter 已公开辅助功能 action 分派了一次”，不是业务成功：
 

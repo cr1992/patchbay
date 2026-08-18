@@ -30,6 +30,7 @@ final List<RegExp> _hostDeclarations = <RegExp>[
   RegExp(
     r"_textDescriptor\(\s*'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'",
   ),
+  RegExp(r"_gesture\(\s*'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'"),
   RegExp(r"command\s*==\s*'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'"),
   RegExp(r"'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'\s*=>"),
 ];

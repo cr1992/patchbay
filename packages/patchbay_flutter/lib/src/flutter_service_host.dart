@@ -223,6 +223,50 @@ final class PatchbayFlutterServiceHost {
         strictKeys: true,
         available: bridge.semantics.actionsEnabled,
       ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        (arguments) => _decodeGesture(arguments, PatchbayGestureKind.pressHold),
+        (request, requestId) async => (await bridge.gesture.pressHold(
+          identifier: request['identifier']! as String,
+          generation: request['generation']! as int,
+          start: request['start']! as Map<String, Object?>,
+          durationMs: request['durationMs'] as int? ?? 500,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.gesture.enabled,
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        (arguments) => _decodeGesture(arguments, PatchbayGestureKind.drag),
+        (request, requestId) async => (await bridge.gesture.drag(
+          identifier: request['identifier']! as String,
+          generation: request['generation']! as int,
+          start: request['start']! as Map<String, Object?>,
+          path: request['path']! as List<Object?>,
+          durationMs: request['durationMs'] as int? ?? 300,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.gesture.enabled,
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        (arguments) => _decodeGesture(arguments, PatchbayGestureKind.fling),
+        (request, requestId) async => (await bridge.gesture.fling(
+          identifier: request['identifier']! as String,
+          generation: request['generation']! as int,
+          start: request['start']! as Map<String, Object?>,
+          velocity: request['velocity']! as Map<String, Object?>,
+          durationMs: request['durationMs'] as int? ?? 100,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.gesture.enabled,
+      ),
       _uiRegistration<PatchbayUiWaitRequest>(
         next(),
         (arguments) => PatchbayUiWaitRequest.fromWire(
@@ -429,6 +473,36 @@ final class PatchbayFlutterServiceHost {
     return arguments;
   }
 
+  static Map<String, Object?> _decodeGesture(
+    Map<String, Object?> arguments,
+    PatchbayGestureKind kind,
+  ) {
+    final Set<String> keys = <String>{
+      'identifier',
+      'generation',
+      'start',
+      'durationMs',
+      if (kind == PatchbayGestureKind.drag) 'path',
+      if (kind == PatchbayGestureKind.fling) 'velocity',
+    };
+    _rejectUnexpected(arguments, keys);
+    if (arguments['identifier'] is! String ||
+        arguments['generation'] is! int ||
+        arguments['start'] is! Map ||
+        arguments['durationMs'] != null && arguments['durationMs'] is! int ||
+        kind == PatchbayGestureKind.drag && arguments['path'] is! List ||
+        kind == PatchbayGestureKind.fling && arguments['velocity'] is! Map) {
+      throw const FormatException('invalid anchored gesture arguments');
+    }
+    return <String, Object?>{
+      ...arguments,
+      'start': (arguments['start']! as Map).cast<String, Object?>(),
+      if (arguments['path'] case final List<Object?> path) 'path': path,
+      if (arguments['velocity'] case final Map velocity)
+        'velocity': velocity.cast<String, Object?>(),
+    };
+  }
+
   static Map<String, Object?> _decodeNavigationDestination(
     Map<String, Object?> arguments,
   ) {
@@ -498,6 +572,9 @@ final class PatchbayFlutterServiceHost {
     patchbayUiSemanticsTreeCommandDescriptor,
     patchbayUiSemanticsActionCommandDescriptor,
     patchbayUiSemanticsTapCommandDescriptor,
+    patchbayUiGesturePressHoldCommandDescriptor,
+    patchbayUiGestureDragCommandDescriptor,
+    patchbayUiGestureFlingCommandDescriptor,
     patchbayUiWaitCommandDescriptor,
     patchbayUiKeepAwakeSetCommandDescriptor.withRuntimeOverrides(
       gates: keepAwakeGates,

@@ -249,6 +249,13 @@ expected/current generation), and labels of obscured nodes are redacted in those
 a rejection must be actionable without becoming a second observation surface that bypasses the
 tree limits.
 
+Anchored `ui.gesture.pressHold|drag|fling` commands are a separate synthetic-pointer surface, not
+Semantics actions. They require an identifier, a caller-supplied Semantics generation, normalized
+target-local points, and an independent `PatchbayGesturePolicy`; without that policy they are not
+published. The bridge re-resolves after gates and rejects clipping or a blocking overlay before
+converting coordinates. Converted global coordinates remain invocation-local and never enter the
+response.
+
 For the detailed protocol, privacy boundaries, and staged exit conditions, see
 [`doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md) (currently in Chinese).
 
