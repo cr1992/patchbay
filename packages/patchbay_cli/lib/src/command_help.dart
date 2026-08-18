@@ -282,6 +282,10 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.localDiagnostics =>
           'Always available: a connection it cannot open is one of its '
               'findings, not a precondition.',
+        PatchbayCommandTarget.localPermissionDriver =>
+          'Requires an explicitly configured or PATH-discovered external '
+              'permission driver; write operations also require an active '
+              'debug/test session.',
       };
 
   /// What the CLI will actually call, phrased per dispatch target.
@@ -317,6 +321,9 @@ abstract final class PatchbayCommandHelp {
           'Reads the session directory, dials the App itself, then reads the '
               'catalog, the snapshot and one read-only UI probe. Every failure '
               'becomes a finding; the exit code is the class of the first one.',
+        PatchbayCommandTarget.localPermissionDriver =>
+          'Uses the versioned JSON Lines external driver protocol. The CLI '
+              'does not operate native system UI itself.',
       };
 
   static String _usage(PatchbayFriendlyCommand command) => <String>[

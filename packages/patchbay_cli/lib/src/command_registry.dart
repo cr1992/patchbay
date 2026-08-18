@@ -69,6 +69,9 @@ enum PatchbayCommandTarget {
   /// it was asked for. So `runPatchbayCli` hands this target the connection
   /// options rather than a connection, and it reports what happened to each.
   localDiagnostics,
+
+  /// An explicitly installed external JSON Lines permission driver.
+  localPermissionDriver,
 }
 
 /// Mechanical mapping between CLI-friendly paths and stable protocol names.
@@ -123,6 +126,40 @@ enum PatchbayFriendlyCommand {
     summary:
         'Check session, connection, catalog and App lifecycle in one pass.',
     target: PatchbayCommandTarget.localDiagnostics,
+  ),
+  permissionCapabilities(
+    null,
+    <String>['permission', 'capabilities'],
+    summary: 'Read the external driver capability matrix.',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
+  permissionStatus(
+    null,
+    <String>['permission', 'status'],
+    summary: 'Read one platform permission state.',
+    usageSuffix: '<permission>',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
+  permissionNormalize(
+    null,
+    <String>['permission', 'normalize'],
+    summary: 'Normalize one permission for an active debug/test session.',
+    usageSuffix: '<permission> --state <state>',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
+  permissionExercise(
+    null,
+    <String>['permission', 'exercise'],
+    summary: 'Exercise one declared system permission decision.',
+    usageSuffix: '<permission> --decision <decision>',
+    target: PatchbayCommandTarget.localPermissionDriver,
+  ),
+  permissionFail(
+    null,
+    <String>['permission', 'fail'],
+    summary: 'Fail when the current permission state differs.',
+    usageSuffix: '<permission> --state <state>',
+    target: PatchbayCommandTarget.localPermissionDriver,
   ),
   sessionsList(
     null,
@@ -490,7 +527,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.repl ||
       PatchbayFriendlyCommand.doctor ||
       PatchbayFriendlyCommand.sessionsList ||
-      PatchbayFriendlyCommand.sessionsPrune => _noTail(
+      PatchbayFriendlyCommand.sessionsPrune ||
+      PatchbayFriendlyCommand.permissionCapabilities => _noTail(
         tail,
         const <String, Object?>{},
       ),
@@ -504,6 +542,25 @@ abstract final class PatchbayFriendlyCommandRegistry {
         options,
       ),
       PatchbayFriendlyCommand.sessionUse => _sessionUseArguments(tail, options),
+      PatchbayFriendlyCommand.permissionStatus => _oneTail(
+        tail,
+        (String permission) => <String, Object?>{'permission': permission},
+      ),
+      PatchbayFriendlyCommand.permissionNormalize ||
+      PatchbayFriendlyCommand.permissionFail => _oneTail(
+        tail,
+        (String permission) => <String, Object?>{
+          'permission': permission,
+          'state': _requiredOption(options, 'state'),
+        },
+      ),
+      PatchbayFriendlyCommand.permissionExercise => _oneTail(
+        tail,
+        (String permission) => <String, Object?>{
+          'permission': permission,
+          'decision': _requiredOption(options, 'decision'),
+        },
+      ),
       // The service command already consumed the single positional above.
       PatchbayFriendlyCommand.exec => _domainArguments(
         options,
@@ -803,6 +860,12 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'output',
       'force',
       'clear',
+      'permission-driver',
+      'device-id',
+      'application-id',
+      'state',
+      'decision',
+      'confirm-system-permission',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -814,6 +877,14 @@ abstract final class PatchbayFriendlyCommandRegistry {
     if (options.flag('force') && options.option('output') == null) {
       throw const FormatException('--force requires --output');
     }
+  }
+
+  static String _requiredOption(ArgResults options, String name) {
+    final String? value = options.option(name);
+    if (value == null || value.isEmpty) {
+      throw FormatException('--$name is required for this command');
+    }
+    return value;
   }
 
   /// CLI options accepted by [spec]. Help and validation share this mapping.
@@ -848,6 +919,29 @@ abstract final class PatchbayFriendlyCommandRegistry {
     // A release takes no lease, and a read takes nothing at all.
     PatchbayFriendlyCommand.uiKeepAwakeOff ||
     PatchbayFriendlyCommand.uiKeepAwakeStatus => const <String>{},
+    PatchbayFriendlyCommand.permissionCapabilities ||
+    PatchbayFriendlyCommand.permissionStatus => const <String>{
+      'permission-driver',
+      'device-id',
+      'application-id',
+      'timeout-ms',
+    },
+    PatchbayFriendlyCommand.permissionNormalize ||
+    PatchbayFriendlyCommand.permissionFail => const <String>{
+      'permission-driver',
+      'device-id',
+      'application-id',
+      'timeout-ms',
+      'state',
+    },
+    PatchbayFriendlyCommand.permissionExercise => const <String>{
+      'permission-driver',
+      'device-id',
+      'application-id',
+      'timeout-ms',
+      'decision',
+      'confirm-system-permission',
+    },
     PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
     PatchbayFriendlyCommand.snapshot => const <String>{'path'},
     PatchbayFriendlyCommand.snapshotWait => const <String>{

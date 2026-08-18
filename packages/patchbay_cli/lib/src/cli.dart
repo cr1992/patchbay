@@ -13,6 +13,8 @@ import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
+import 'permission_command.dart';
+import 'permission_driver.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -31,6 +33,7 @@ Future<int> runPatchbayCli(
   Stream<String>? replInput,
   StringSink? output,
   StringSink? errorOutput,
+  PatchbayPermissionCommandRunner? permissionCommands,
 }) async {
   final StringSink out = output ?? stdout;
   final StringSink error = errorOutput ?? stderr;
@@ -96,6 +99,18 @@ Future<int> runPatchbayCli(
             : report.render().trimRight(),
       );
       return report.exitCode;
+    }
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localPermissionDriver) {
+      final PatchbayFriendlyInvocation invocation =
+          PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+      final PatchbayPermissionCommandOutcome outcome =
+          await (permissionCommands ?? PatchbayPermissionCommandRunner()).run(
+            parsed,
+            invocation,
+          );
+      _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
+      return outcome.exitCode;
     }
     final bool repl = _isRepl(parsed);
     if (repl) {
@@ -253,6 +268,20 @@ Future<int> runPatchbayCli(
       message: 'patchbay sensitive input error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code),
       exitCode: PatchbayExitCode.usage,
+    );
+  } on PatchbayPermissionDriverException catch (failure) {
+    if (failure.diagnostic case final String diagnostic) {
+      error.writeln(diagnostic);
+    }
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay permission driver error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
+      exitCode: failure.code == 'permissionTimeoutInvalid'
+          ? PatchbayExitCode.usage
+          : PatchbayExitCode.typedFailure,
     );
   } on Object catch (failure) {
     // VM Service URIs and direct bearer tokens are authentication material.
@@ -482,6 +511,36 @@ ArgParser patchbayCliParser() => ArgParser()
     'clear',
     defaultsTo: false,
     help: 'Unpin the selected session instead of selecting one.',
+  )
+  ..addOption(
+    'permission-driver',
+    help: 'Explicit external permission driver executable path.',
+  )
+  ..addOption('device-id', help: 'Explicit platform device selection.')
+  ..addOption('application-id', help: 'Explicit platform application ID.')
+  ..addOption(
+    'state',
+    allowed: <String>[
+      for (final PatchbayPermissionState state
+          in PatchbayPermissionState.values)
+        state.name,
+    ],
+    help: 'Desired or required closed permission state.',
+  )
+  ..addOption(
+    'decision',
+    allowed: <String>[
+      for (final PatchbayPermissionDecision decision
+          in PatchbayPermissionDecision.values)
+        decision.name,
+    ],
+    help: 'System permission decision for exercise.',
+  )
+  ..addFlag(
+    'confirm-system-permission',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Explicitly confirm an exercise allow system permission action.',
   );
 
 List<String>? _helpTopic(ArgResults parsed) {
@@ -787,6 +846,11 @@ Future<_Execution> _execute(
       // Answered before the dial as well: doctor dials for itself so that a
       // failed dial becomes a finding instead of ending the command.
       throw StateError('doctor owns its own connection');
+    case PatchbayCommandTarget.localPermissionDriver:
+      // Permission commands are handled before the App dial. A repl cannot
+      // spawn an external process because its connection/session identity is
+      // not the full launcher trust record required for writes.
+      throw StateError('permission commands own their external driver');
     case PatchbayCommandTarget.declaredServiceCommand:
     case PatchbayCommandTarget.callerServiceCommand:
       final String command = friendly.serviceCommand!;
