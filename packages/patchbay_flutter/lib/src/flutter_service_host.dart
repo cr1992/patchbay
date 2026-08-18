@@ -153,9 +153,6 @@ final class PatchbayFlutterServiceHost {
   ) {
     final Iterator<PatchbayCommandDescriptor> descriptors =
         _uiCommandDescriptors(
-          semanticsActionsEnabled: true,
-          navigationEnabled: true,
-          captureEnabled: true,
           captureGates: bridge.capture?.gateIds ?? const <String>{},
           keepAwakeGates: bridge.keepAwake.gateIds,
           inspectPolicy:
@@ -484,9 +481,6 @@ final class PatchbayFlutterServiceHost {
       <String, _UiArgumentShape>{
         for (final PatchbayCommandDescriptor descriptor
             in _uiCommandDescriptors(
-              semanticsActionsEnabled: true,
-              navigationEnabled: true,
-              captureEnabled: true,
               captureGates: const <String>{},
               keepAwakeGates: const <String>{},
               inspectPolicy: const PatchbayInspectPolicy(),
@@ -495,331 +489,61 @@ final class PatchbayFlutterServiceHost {
       };
 
   static List<PatchbayCommandDescriptor> _uiCommandDescriptors({
-    required bool semanticsActionsEnabled,
-    required bool navigationEnabled,
-    required bool captureEnabled,
     required Set<String> captureGates,
     required Set<String> keepAwakeGates,
-    required PatchbayInspectPolicy? inspectPolicy,
+    required PatchbayInspectPolicy inspectPolicy,
   }) => <PatchbayCommandDescriptor>[
-    const PatchbayCommandDescriptor(
-      name: 'ui.text.set',
-      summary: 'Set a registered Flutter text target without IME semantics.',
-      plane: PatchbayPlane.flutterUi,
-      mode: PatchbayCommandMode.immediate,
-      sideEffect: PatchbaySideEffect.appState,
-      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-      parameters: <PatchbayParameterDescriptor>[
-        PatchbayParameterDescriptor(
-          name: 'id',
-          type: PatchbayParameterType.string,
-          required: true,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'generation',
-          type: PatchbayParameterType.integer,
-          required: true,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'text',
-          type: PatchbayParameterType.string,
-          required: true,
-        ),
-      ],
-    ),
-    const PatchbayCommandDescriptor(
-      name: 'ui.text.enter',
-      summary: 'Enter text through the registered Flutter target policy.',
-      plane: PatchbayPlane.flutterUi,
-      mode: PatchbayCommandMode.immediate,
-      sideEffect: PatchbaySideEffect.appState,
-      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-      parameters: <PatchbayParameterDescriptor>[
-        PatchbayParameterDescriptor(
-          name: 'id',
-          type: PatchbayParameterType.string,
-          required: true,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'generation',
-          type: PatchbayParameterType.integer,
-          required: true,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'text',
-          type: PatchbayParameterType.string,
-          required: true,
-        ),
-      ],
-    ),
-    const PatchbayCommandDescriptor(
-      name: 'ui.semantics.tree',
-      summary: 'Observe the current Flutter Semantics tree.',
-      plane: PatchbayPlane.flutterUi,
-      mode: PatchbayCommandMode.readOnly,
-      sideEffect: PatchbaySideEffect.none,
-      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-      parameters: <PatchbayParameterDescriptor>[
-        PatchbayParameterDescriptor(
-          name: 'maxDepth',
-          type: PatchbayParameterType.integer,
-          defaultValue: 64,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'maxNodes',
-          type: PatchbayParameterType.integer,
-          defaultValue: 1000,
-        ),
-      ],
-    ),
-    if (semanticsActionsEnabled)
-      const PatchbayCommandDescriptor(
-        name: 'ui.semantics.action',
-        summary: 'Invoke an allowed action on an observed Semantics node.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.immediate,
-        sideEffect: PatchbaySideEffect.appState,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-        parameters: <PatchbayParameterDescriptor>[
-          PatchbayParameterDescriptor(
-            name: 'nodeId',
-            type: PatchbayParameterType.integer,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'generation',
-            type: PatchbayParameterType.integer,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'action',
-            type: PatchbayParameterType.enumeration,
-            required: true,
-            allowedValues: <String>[
-              'tap',
-              'focus',
-              'scrollUp',
-              'scrollDown',
-              'scrollLeft',
-              'scrollRight',
-              'setText',
-            ],
-          ),
-          PatchbayParameterDescriptor(
-            name: 'text',
-            type: PatchbayParameterType.string,
-          ),
-        ],
-      ),
-    if (semanticsActionsEnabled)
-      const PatchbayCommandDescriptor(
-        name: 'ui.semantics.tap',
-        summary:
-            'Resolve a stable Semantics identifier and tap it in one request.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.immediate,
-        sideEffect: PatchbaySideEffect.appState,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-        parameters: <PatchbayParameterDescriptor>[
-          PatchbayParameterDescriptor(
-            name: 'identifier',
-            type: PatchbayParameterType.string,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'generation',
-            type: PatchbayParameterType.integer,
-          ),
-        ],
-      ),
-    const PatchbayCommandDescriptor(
-      name: 'ui.wait',
-      summary: 'Wait for one bounded Flutter observation condition.',
-      plane: PatchbayPlane.flutterUi,
-      mode: PatchbayCommandMode.readOnly,
-      sideEffect: PatchbaySideEffect.none,
-      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-      parameters: <PatchbayParameterDescriptor>[
-        PatchbayParameterDescriptor(
-          name: 'condition',
-          type: PatchbayParameterType.enumeration,
-          required: true,
-          allowedValues: <String>[
-            'semanticsMounted',
-            'semanticsUnmounted',
-            'semanticsValue',
-            'navigationDestination',
-            'treeRevision',
-            'frameRevision',
-          ],
-        ),
-        PatchbayParameterDescriptor(
-          name: 'timeoutMs',
-          type: PatchbayParameterType.integer,
-          required: true,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'semanticsIdentifier',
-          type: PatchbayParameterType.string,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'value',
-          type: PatchbayParameterType.string,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'destinationId',
-          type: PatchbayParameterType.string,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'revision',
-          type: PatchbayParameterType.integer,
-        ),
-      ],
-    ),
-    // Cataloged whether or not a delegate is wired — see
-    // `PatchbayFlutterBridge.keepAwake` for why this one does not follow the
-    // "absent until injected" rule the two below do.
-    PatchbayCommandDescriptor(
-      name: 'ui.keepAwake.set',
-      summary: 'Hold the screen awake under a bounded lease, or release it.',
-      plane: PatchbayPlane.flutterUi,
-      mode: PatchbayCommandMode.immediate,
-      sideEffect: PatchbaySideEffect.appState,
-      // The App's own bookkeeping of what it asked its host to do. Patchbay
-      // never reads the platform back, so this is not a device report and must
-      // not be mistaken for one.
-      factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+    patchbayUiTextSetCommandDescriptor,
+    patchbayUiTextEnterCommandDescriptor,
+    patchbayUiSemanticsTreeCommandDescriptor,
+    patchbayUiSemanticsActionCommandDescriptor,
+    patchbayUiSemanticsTapCommandDescriptor,
+    patchbayUiWaitCommandDescriptor,
+    patchbayUiKeepAwakeSetCommandDescriptor.withRuntimeOverrides(
       gates: keepAwakeGates,
-      parameters: <PatchbayParameterDescriptor>[
-        const PatchbayParameterDescriptor(
-          name: 'enabled',
-          type: PatchbayParameterType.boolean,
-          required: true,
-        ),
-        PatchbayParameterDescriptor(
-          name: 'leaseMs',
-          type: PatchbayParameterType.integer,
-          defaultValue: PatchbayKeepAwakeBridge.defaultLease.inMilliseconds,
-          summary:
-              'Lease for this engagement; the App releases on its own when it '
-              'runs out. Only valid with enabled: true.',
-        ),
-      ],
+      parameterDefaults: <String, Object?>{
+        'leaseMs': PatchbayKeepAwakeBridge.defaultLease.inMilliseconds,
+      },
     ),
-    const PatchbayCommandDescriptor(
-      name: 'ui.keepAwake.status',
-      summary: 'Read the keep-awake hold the App is currently bookkeeping.',
+    patchbayUiKeepAwakeStatusCommandDescriptor,
+    patchbayUiCaptureCommandDescriptor.withRuntimeOverrides(
+      gates: captureGates,
+    ),
+    // 共享侧尚未收录 ui.capture.diff（它随 !54 才进 main），先保留内联声明；
+    // 与上面的 capture 一样跟随 captureGates，不再单独开关。
+    PatchbayCommandDescriptor(
+      name: 'ui.capture.diff',
+      summary: 'Compare two bounded Flutter capture artifacts pixel by pixel.',
       plane: PatchbayPlane.flutterUi,
       mode: PatchbayCommandMode.readOnly,
       sideEffect: PatchbaySideEffect.none,
-      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+      gates: captureGates,
+      parameters: const <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'beforeBlobId',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+        PatchbayParameterDescriptor(
+          name: 'afterBlobId',
+          type: PatchbayParameterType.string,
+          required: true,
+        ),
+      ],
     ),
-    if (captureEnabled)
-      PatchbayCommandDescriptor(
-        name: 'ui.capture',
-        summary: 'Capture a bounded Flutter repaint boundary as a PNG blob.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.readOnly,
-        sideEffect: PatchbaySideEffect.none,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-        gates: captureGates,
-        parameters: const <PatchbayParameterDescriptor>[
-          PatchbayParameterDescriptor(
-            name: 'targetId',
-            type: PatchbayParameterType.string,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'generation',
-            type: PatchbayParameterType.integer,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'pixelRatio',
-            type: PatchbayParameterType.number,
-            defaultValue: 1,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'timeoutMs',
-            type: PatchbayParameterType.integer,
-            defaultValue: 5000,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'afterFrames',
-            type: PatchbayParameterType.integer,
-            defaultValue: 1,
-            summary:
-                'Observed Flutter frames after command admission before '
-                'capture; range 1..120.',
-          ),
-        ],
-      ),
-    if (captureEnabled)
-      PatchbayCommandDescriptor(
-        name: 'ui.capture.diff',
-        summary:
-            'Compare two bounded Flutter capture artifacts pixel by pixel.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.readOnly,
-        sideEffect: PatchbaySideEffect.none,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
-        gates: captureGates,
-        parameters: const <PatchbayParameterDescriptor>[
-          PatchbayParameterDescriptor(
-            name: 'beforeBlobId',
-            type: PatchbayParameterType.string,
-            required: true,
-          ),
-          PatchbayParameterDescriptor(
-            name: 'afterBlobId',
-            type: PatchbayParameterType.string,
-            required: true,
-          ),
-        ],
-      ),
-    if (inspectPolicy != null) ...<PatchbayCommandDescriptor>[
-      const PatchbayCommandDescriptor(
-        name: 'ui.inspect.status',
-        summary: 'Read the on-device widget inspector select-mode switch.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.readOnly,
-        sideEffect: PatchbaySideEffect.none,
-        // The App's own record of a flag it holds, not a frame anyone watched
-        // arrive: `uiObserved` would claim the overlay reached the screen.
-        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-      ),
-      PatchbayCommandDescriptor(
-        name: 'ui.inspect.select',
-        summary:
-            'Turn the widget inspector select mode on or off, under a lease.',
-        plane: PatchbayPlane.flutterUi,
-        mode: PatchbayCommandMode.immediate,
-        sideEffect: PatchbaySideEffect.appState,
-        factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-        gates: inspectPolicy.gates,
-        parameters: <PatchbayParameterDescriptor>[
-          const PatchbayParameterDescriptor(
-            name: 'enabled',
-            type: PatchbayParameterType.boolean,
-            required: true,
-            summary: 'Whether taps on the device select widgets.',
-          ),
-          PatchbayParameterDescriptor(
-            name: 'ttlMs',
-            type: PatchbayParameterType.integer,
-            defaultValue: inspectPolicy.defaultLease.inMilliseconds,
-            summary:
-                'Lease for an enable; the App restores the switch when it '
-                'expires without a renewal. Only valid with enabled=true.',
-          ),
-        ],
-      ),
-    ],
-    if (navigationEnabled) ...<PatchbayCommandDescriptor>[
-      patchbayNavigationCatalogCommandDescriptor,
-      patchbayNavigationCurrentCommandDescriptor,
-      patchbayNavigationGoCommandDescriptor,
-      patchbayNavigationPushCommandDescriptor,
-      patchbayNavigationBackCommandDescriptor,
-    ],
+    patchbayUiInspectStatusCommandDescriptor,
+    patchbayUiInspectSelectCommandDescriptor.withRuntimeOverrides(
+      gates: inspectPolicy.gates,
+      parameterDefaults: <String, Object?>{
+        'ttlMs': inspectPolicy.defaultLease.inMilliseconds,
+      },
+    ),
+    patchbayNavigationCatalogCommandDescriptor,
+    patchbayNavigationCurrentCommandDescriptor,
+    patchbayNavigationGoCommandDescriptor,
+    patchbayNavigationPushCommandDescriptor,
+    patchbayNavigationBackCommandDescriptor,
   ];
 }
 

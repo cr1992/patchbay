@@ -21,10 +21,15 @@ final RegExp _serviceCommand = RegExp(
   r"'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'",
 );
 
-/// 服务方声明命令名的三种写法：descriptor 的 `name:`、路由前的 `command ==`、
-/// invoke switch 的 `'x' =>`。三种都算「这个名字在服务方真实存在」。
+/// 服务方声明命令名的写法：descriptor 的 `name:`、canonical UI descriptor
+/// factories 的 `_ui('x', ...)` / `_textDescriptor('x', ...)`、路由前的
+/// `command ==`、invoke switch 的 `'x' =>`。这些都算「这个名字在服务方真实存在」。
 final List<RegExp> _hostDeclarations = <RegExp>[
   RegExp(r"name:\s*'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'"),
+  RegExp(r"_ui\(\s*'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'"),
+  RegExp(
+    r"_textDescriptor\(\s*'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'",
+  ),
   RegExp(r"command\s*==\s*'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'"),
   RegExp(r"'((?:ui|navigation|logs|blob)\.[a-z][A-Za-z.]*)'\s*=>"),
 ];
@@ -85,6 +90,7 @@ const List<String> _hostSourcePaths = <String>[
   // PB-040-06 migrates protocol-owned descriptors here; the Flutter runtime
   // imports these exact objects instead of restating their command names.
   'lib/src/protocol_commands.dart',
+  'lib/src/ui_protocol_commands.dart',
 ];
 const String _fixtureHostPath = '../patchbay_cli/test/fixture/host.dart';
 
@@ -99,6 +105,23 @@ void main() {
           cliSources: const <String>["invoke('ui.wait')"],
           hostSources: const <String>[host],
           fixtureSource: fixture,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('canonical UI descriptor factory 算服务方声明', () {
+      expect(
+        checkCommandNameParity(
+          cliSources: const <String>[
+            "invoke('ui.wait')",
+            "invoke('ui.text.set')",
+          ],
+          hostSources: const <String>[
+            "_ui('ui.wait', 'Wait')",
+            "_textDescriptor('ui.text.set', 'Set')",
+          ],
+          fixtureSource: "'ui.wait' =>; 'ui.text.set' =>",
         ),
         isEmpty,
       );

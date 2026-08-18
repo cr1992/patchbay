@@ -1,6 +1,7 @@
 import 'command_descriptor.dart';
 import 'facts.dart';
 import 'ui_descriptor.dart';
+import 'ui_protocol_commands.dart';
 
 const PatchbayCommandDescriptor patchbayNavigationCatalogCommandDescriptor =
     PatchbayCommandDescriptor(
@@ -157,11 +158,12 @@ const PatchbayCommandDescriptor patchbayNavigationBackCommandDescriptor =
     );
 
 /// Protocol-owned descriptors currently migrated to generated CLI syntax.
-const List<PatchbayCommandDescriptor> patchbayProtocolCliCommandDescriptors =
+final List<PatchbayCommandDescriptor> patchbayProtocolCliCommandDescriptors =
     <PatchbayCommandDescriptor>[
       patchbayNavigationCatalogCommandDescriptor,
       patchbayNavigationCurrentCommandDescriptor,
       patchbayNavigationGoCommandDescriptor,
       patchbayNavigationPushCommandDescriptor,
       patchbayNavigationBackCommandDescriptor,
+      ...patchbayUiProtocolCliCommandDescriptors,
     ];

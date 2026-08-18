@@ -47,6 +47,39 @@ void main() {
     ]);
   });
 
+  test('published UI enum constants remain source-compatible facades', () {
+    const legacy = <PatchbayFriendlyCommand>[
+      PatchbayFriendlyCommand.uiWaitSemanticsMounted,
+      PatchbayFriendlyCommand.uiWaitSemanticsUnmounted,
+      PatchbayFriendlyCommand.uiWaitSemanticsValue,
+      PatchbayFriendlyCommand.uiWaitDestination,
+      PatchbayFriendlyCommand.uiWaitTreeRevision,
+      PatchbayFriendlyCommand.uiWaitFrameRevision,
+      PatchbayFriendlyCommand.uiTextSet,
+      PatchbayFriendlyCommand.uiTextEnter,
+      PatchbayFriendlyCommand.uiSemanticsTree,
+      PatchbayFriendlyCommand.uiSemanticsAction,
+      PatchbayFriendlyCommand.uiTap,
+      PatchbayFriendlyCommand.uiKeepAwakeOn,
+      PatchbayFriendlyCommand.uiKeepAwakeOff,
+      PatchbayFriendlyCommand.uiKeepAwakeStatus,
+      PatchbayFriendlyCommand.uiInspectOn,
+      PatchbayFriendlyCommand.uiInspectOff,
+      PatchbayFriendlyCommand.uiInspectStatus,
+      PatchbayFriendlyCommand.captureRoot,
+      PatchbayFriendlyCommand.captureTarget,
+    ];
+    for (final facade in legacy) {
+      expect(facade.isCompatibilityStub, isTrue, reason: facade.name);
+      expect(
+        PatchbayFriendlyCommandRegistry.commands.where(
+          (active) => active.path.join(' ') == facade.path.join(' '),
+        ),
+        hasLength(1),
+      );
+    }
+  });
+
   test('published navigation enum constants remain source compatible', () {
     const List<PatchbayFriendlyCommand> legacy = <PatchbayFriendlyCommand>[
       PatchbayFriendlyCommand.navigationCatalog,
@@ -116,12 +149,11 @@ void main() {
         );
       }
 
-      for (final PatchbayFriendlyCommandSpec command
-          in PatchbayFriendlyCommandRegistry.commands.where(
-            (PatchbayFriendlyCommandSpec command) =>
-                !migrated.containsKey(command),
-          )) {
-        expect(command.protocolDescriptor, isNull, reason: command.name);
+      for (final PatchbayFriendlyCommand command
+          in PatchbayFriendlyCommand.values) {
+        if (command.protocolDescriptor != null) {
+          expect(command.isCompatibilityStub, isTrue, reason: command.name);
+        }
       }
     },
   );
@@ -193,6 +225,24 @@ void main() {
             'tr_after_0123456789abcdef0123',
           ],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
+          _ when spec.name == 'uiTextSet' || spec.name == 'uiTextEnter' =>
+            <String>['field.id', '3', 'hello'],
+          _ when spec.name == 'uiSemanticsAction' => <String>['42', '7', 'tap'],
+          _ when spec.name == 'uiTap' => <String>['login.submit'],
+          _
+              when spec.name == 'uiWaitSemanticsMounted' ||
+                  spec.name == 'uiWaitSemanticsUnmounted' ||
+                  spec.name == 'uiWaitDestination' =>
+            <String>['screen.id'],
+          _ when spec.name == 'uiWaitSemanticsValue' => <String>[
+            'field.id',
+            'ready',
+          ],
+          _
+              when spec.name == 'uiWaitTreeRevision' ||
+                  spec.name == 'uiWaitFrameRevision' =>
+            <String>['7'],
+          _ when spec.name == 'captureTarget' => <String>['capture.id', '2'],
           _ when spec.name == 'navigationGo' || spec.name == 'navigationPush' =>
             <String>['settings'],
           PatchbayFriendlyCommand.uiWaitSemanticsMounted ||
@@ -434,7 +484,8 @@ void main() {
         ]);
         // Same declaration, same request: the alias is a spelling, not a
         // second command with a life of its own.
-        expect(byCondition.spec, spec, reason: condition);
+        expect(byCondition.spec.path, spec.path, reason: condition);
+        expect(byCondition.spec.serviceCommand, spec.serviceCommand);
         expect(
           byCondition.arguments,
           _resolve(<String>[...spec.path, ...tail]).arguments,
@@ -451,12 +502,12 @@ void main() {
       same(_protocol('navigationCurrent')),
     );
     expect(
-      _resolve(<String>['wait', 'semantics-mounted', 'app.ready']).spec,
-      PatchbayFriendlyCommand.uiWaitSemanticsMounted,
+      _resolve(<String>['wait', 'semantics-mounted', 'app.ready']).spec.path,
+      PatchbayFriendlyCommand.uiWaitSemanticsMounted.path,
     );
     expect(
-      _resolve(<String>['tap', 'login.submit']).spec,
-      PatchbayFriendlyCommand.uiTap,
+      _resolve(<String>['tap', 'login.submit']).spec.path,
+      PatchbayFriendlyCommand.uiTap.path,
     );
     // An alias word in an argument position stays an argument.
     expect(

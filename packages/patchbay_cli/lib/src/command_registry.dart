@@ -54,12 +54,22 @@ final class _GeneratedProtocolCommand implements PatchbayFriendlyCommandSpec {
   @override
   String get usageSuffix => syntax.usageSuffix;
   @override
-  PatchbayArtifactDisposition get artifact => PatchbayArtifactDisposition.none;
+  PatchbayArtifactDisposition get artifact =>
+      switch (syntax.artifactDisposition) {
+        PatchbayCliArtifactDisposition.none => PatchbayArtifactDisposition.none,
+        PatchbayCliArtifactDisposition.payloadBlob =>
+          PatchbayArtifactDisposition.payloadBlob,
+        PatchbayCliArtifactDisposition.responseBlob =>
+          PatchbayArtifactDisposition.responseBlob,
+      };
   @override
   PatchbayCommandTarget get target =>
       PatchbayCommandTarget.declaredServiceCommand;
   @override
-  String? get waitCondition => null;
+  String? get waitCondition => switch (syntax.fixedArguments['condition']) {
+    final String condition => condition,
+    _ => null,
+  };
   @override
   bool get fencesNavigationRevision => syntax.fencesNavigationRevision;
   @override
@@ -365,89 +375,103 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
   navigationPush.compatibility(_navigationPushProtocolCommand),
   @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
   navigationBack.compatibility(_navigationBackProtocolCommand),
-  uiWaitSemanticsMounted(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiWaitSemanticsMounted.compatibilityFrozen(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-mounted'],
     summary: 'Wait for a semantics identifier to mount.',
     usageSuffix: '<identifier>',
     waitCondition: 'semanticsMounted',
   ),
-  uiWaitSemanticsUnmounted(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiWaitSemanticsUnmounted.compatibilityFrozen(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-unmounted'],
     summary: 'Wait for a semantics identifier to unmount.',
     usageSuffix: '<identifier>',
     waitCondition: 'semanticsUnmounted',
   ),
-  uiWaitSemanticsValue(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiWaitSemanticsValue.compatibilityFrozen(
     'ui.wait',
     <String>['ui', 'wait', 'semantics-value'],
     summary: 'Wait for a semantics value.',
     usageSuffix: '<identifier> <value>',
     waitCondition: 'semanticsValue',
   ),
-  uiWaitDestination(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiWaitDestination.compatibilityFrozen(
     'ui.wait',
     <String>['ui', 'wait', 'destination'],
     summary: 'Wait for a navigation destination.',
     usageSuffix: '<destination-id>',
     waitCondition: 'navigationDestination',
   ),
-  uiWaitTreeRevision(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiWaitTreeRevision.compatibilityFrozen(
     'ui.wait',
     <String>['ui', 'wait', 'tree-revision'],
     summary: 'Wait for the semantics tree revision.',
     usageSuffix: '<revision>',
     waitCondition: 'treeRevision',
   ),
-  uiWaitFrameRevision(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiWaitFrameRevision.compatibilityFrozen(
     'ui.wait',
     <String>['ui', 'wait', 'frame-revision'],
     summary: 'Wait for the rendered frame revision.',
     usageSuffix: '<revision>',
     waitCondition: 'frameRevision',
   ),
-  uiTextSet(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiTextSet.compatibilityFrozen(
     'ui.text.set',
     <String>['ui', 'text', 'set'],
     summary: 'Replace the text of a registered input target.',
     usageSuffix: '<target-id> <generation> [text]',
   ),
-  uiTextEnter(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiTextEnter.compatibilityFrozen(
     'ui.text.enter',
     <String>['ui', 'text', 'enter'],
     summary: 'Type text into a registered input target and submit it.',
     usageSuffix: '<target-id> <generation> [text]',
   ),
-  uiSemanticsTree('ui.semantics.tree', <String>[
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiSemanticsTree.compatibilityFrozen('ui.semantics.tree', <String>[
     'ui',
     'semantics',
     'tree',
   ], summary: 'Read the Patchbay semantics tree.'),
-  uiSemanticsAction(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiSemanticsAction.compatibilityFrozen(
     'ui.semantics.action',
     <String>['ui', 'semantics', 'action'],
     summary: 'Dispatch a semantics action against an observed node.',
     usageSuffix: '<node-id> <generation> <action> [text]',
   ),
-  uiTap(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiTap.compatibilityFrozen(
     'ui.semantics.tap',
     <String>['ui', 'tap'],
     summary: 'Resolve a semantics identifier and tap it in one request.',
     usageSuffix: '<identifier> [--generation <generation>]',
   ),
-  uiKeepAwakeOn(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiKeepAwakeOn.compatibilityFrozen(
     'ui.keepAwake.set',
     <String>['ui', 'keep-awake', 'on'],
     summary: 'Ask the App to hold the screen awake for one bounded lease.',
     usageSuffix: '[--lease-ms <ms>]',
   ),
-  uiKeepAwakeOff(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiKeepAwakeOff.compatibilityFrozen(
     'ui.keepAwake.set',
     <String>['ui', 'keep-awake', 'off'],
     summary: 'Release the keep-awake hold now, without waiting for the lease.',
   ),
-  uiKeepAwakeStatus(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiKeepAwakeStatus.compatibilityFrozen(
     'ui.keepAwake.status',
     <String>['ui', 'keep-awake', 'status'],
     summary:
@@ -474,18 +498,21 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
   // argument, and the CLI path is what an operator types. `status` is a
   // separate declaration because it is a separate command — a read-only one
   // that changes nothing, which a shared descriptor could not honestly say.
-  uiInspectOn(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiInspectOn.compatibilityFrozen(
     'ui.inspect.select',
     <String>['ui', 'inspect', 'on'],
     summary: 'Turn widget select mode on for a lease, then it restores itself.',
     usageSuffix: '[--ttl-ms <ms>]',
   ),
-  uiInspectOff(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiInspectOff.compatibilityFrozen(
     'ui.inspect.select',
     <String>['ui', 'inspect', 'off'],
     summary: 'Turn widget select mode off and release the lease.',
   ),
-  uiInspectStatus(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  uiInspectStatus.compatibilityFrozen(
     'ui.inspect.status',
     <String>['ui', 'inspect', 'status'],
     summary: 'Read the widget select-mode switch and its lease.',
@@ -536,14 +563,16 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     usageSuffix: '--output <path>',
     artifact: PatchbayArtifactDisposition.payloadBlob,
   ),
-  captureRoot(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  captureRoot.compatibilityFrozen(
     'ui.capture',
     <String>['capture', 'root'],
     summary: 'Capture the Flutter root repaint boundary.',
     usageSuffix: '--output <path>',
     artifact: PatchbayArtifactDisposition.payloadBlob,
   ),
-  captureTarget(
+  @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
+  captureTarget.compatibilityFrozen(
     'ui.capture',
     <String>['capture', 'target'],
     summary: 'Capture a registered Flutter UI target.',
@@ -583,6 +612,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
        _usageSuffix = usageSuffix,
        _fencesNavigationRevision = fencesNavigationRevision,
        _compatibilityProtocol = null,
+       _isCompatibilityStub = false,
        assert(
          (_serviceCommand != null) ==
              (target == PatchbayCommandTarget.declaredServiceCommand),
@@ -605,7 +635,23 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
       artifact = PatchbayArtifactDisposition.none,
       target = PatchbayCommandTarget.declaredServiceCommand,
       waitCondition = null,
-      _fencesNavigationRevision = false;
+      _fencesNavigationRevision = false,
+      _isCompatibilityStub = true;
+
+  const PatchbayFriendlyCommand.compatibilityFrozen(
+    this._serviceCommand,
+    this._path, {
+    required String summary,
+    String usageSuffix = '',
+    this.artifact = PatchbayArtifactDisposition.none,
+    this.waitCondition,
+    bool fencesNavigationRevision = false,
+  }) : _summary = summary,
+       _usageSuffix = usageSuffix,
+       _fencesNavigationRevision = fencesNavigationRevision,
+       _compatibilityProtocol = null,
+       _isCompatibilityStub = true,
+       target = PatchbayCommandTarget.declaredServiceCommand;
 
   /// Stable protocol name, or `null` when the target does not declare one:
   /// `exec` takes it from the caller and the client targets are transport
@@ -616,6 +662,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
   final String _usageSuffix;
   final bool _fencesNavigationRevision;
   final _GeneratedProtocolCommand? _compatibilityProtocol;
+  final bool _isCompatibilityStub;
 
   @override
   String get name {
@@ -661,7 +708,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
   PatchbayCliSyntax? get protocolSyntax =>
       _compatibilityProtocol?.protocolSyntax;
 
-  bool get isCompatibilityStub => _compatibilityProtocol != null;
+  bool get isCompatibilityStub => _isCompatibilityStub;
 }
 
 final class PatchbayFriendlyInvocation {
@@ -742,7 +789,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     }
     final Map<String, Object?> arguments;
     if (spec.protocolSyntax != null) {
-      arguments = _protocolArguments(spec, tail, options);
+      arguments = _protocolArguments(spec, tail, options, readSensitiveInput);
     } else {
       arguments = switch (spec) {
         PatchbayFriendlyCommand.identity ||
@@ -1213,7 +1260,15 @@ abstract final class PatchbayFriendlyCommandRegistry {
   /// CLI options accepted by [spec]. Help and validation share this mapping.
   static Set<String> allowedOptions(PatchbayFriendlyCommandSpec spec) {
     if (spec.protocolSyntax case final PatchbayCliSyntax syntax) {
-      return syntax.optionParameters.values.toSet();
+      return <String>{
+        ...syntax.optionParameters.values,
+        if (syntax.inputMode == PatchbayCliInputMode.mergedJsonObject) 'args',
+        if (syntax.stdinParameter != null ||
+            syntax.inputMode == PatchbayCliInputMode.mergedJsonObject)
+          'stdin',
+        if (syntax.artifactDisposition !=
+            PatchbayCliArtifactDisposition.none) ...<String>{'output', 'force'},
+      };
     }
     return switch (spec) {
       PatchbayFriendlyCommand.identity ||
@@ -1389,12 +1444,23 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommandSpec spec,
     List<String> tail,
     ArgResults options,
+    String Function() readSensitiveInput,
   ) {
     final PatchbayCommandDescriptor descriptor = spec.protocolDescriptor!;
     final PatchbayCliSyntax syntax = spec.protocolSyntax!;
-    if (tail.length != syntax.positionalParameters.length) {
+    if (syntax.inputMode == PatchbayCliInputMode.mergedJsonObject) {
+      if (tail.isNotEmpty) {
+        throw FormatException(
+          '${spec.path.join(' ')} takes no positional arguments',
+        );
+      }
+      return _domainArguments(options, readSensitiveInput);
+    }
+    final int fixedCount = syntax.positionalParameters.length;
+    if (tail.length < fixedCount ||
+        syntax.trailingParameter == null && tail.length != fixedCount) {
       throw FormatException(
-        '${spec.path.join(' ')} requires ${syntax.positionalParameters.length} '
+        '${spec.path.join(' ')} requires $fixedCount '
         'positional argument(s)',
       );
     }
@@ -1407,18 +1473,37 @@ abstract final class PatchbayFriendlyCommandRegistry {
     final Map<String, Object?> arguments = <String, Object?>{
       ...syntax.fixedArguments,
     };
-    for (
-      var index = 0;
-      index < syntax.positionalParameters.length;
-      index += 1
-    ) {
+    for (var index = 0; index < fixedCount; index += 1) {
       final String name = syntax.positionalParameters[index];
       arguments[name] = _protocolValue(
         parameters[name]!,
         tail[index],
         name,
         positive: syntax.positiveParameters.contains(name),
+        nonNegative: syntax.nonNegativeParameters.contains(name),
       );
+    }
+    if (syntax.trailingParameter case final String trailingName) {
+      final bool include = switch (syntax.trailingWhen) {
+        final PatchbayCliEqualsCondition condition =>
+          arguments[condition.parameter] == condition.value,
+        null => true,
+      };
+      final List<String> trailing = tail.sublist(fixedCount);
+      if (!include && trailing.isNotEmpty) {
+        throw FormatException(
+          '${spec.path.join(' ')} has unexpected trailing arguments',
+        );
+      }
+      final bool fromStdin = options.flag('stdin');
+      if (include) {
+        arguments[trailingName] = fromStdin
+            ? readSensitiveInput()
+            : trailing.join(' ');
+      }
+      if (syntax.stdinMarkerParameter case final String marker) {
+        arguments[marker] = fromStdin;
+      }
     }
     for (final MapEntry<String, String> binding
         in syntax.optionParameters.entries) {
@@ -1428,10 +1513,12 @@ abstract final class PatchbayFriendlyCommandRegistry {
         arguments[binding.key] = _protocolValue(
           parameter,
           raw,
-          binding.value,
+          '--${binding.value}',
           positive: syntax.positiveParameters.contains(binding.key),
+          nonNegative: syntax.nonNegativeParameters.contains(binding.key),
         );
-      } else if (parameter.defaultValue != null) {
+      } else if (parameter.defaultValue != null &&
+          !syntax.omitOptionDefaults.contains(binding.key)) {
         arguments[binding.key] = parameter.defaultValue;
       }
     }
@@ -1454,21 +1541,30 @@ abstract final class PatchbayFriendlyCommandRegistry {
     String raw,
     String label, {
     required bool positive,
+    bool nonNegative = false,
   }) {
     switch (parameter.type) {
       case PatchbayParameterType.string || PatchbayParameterType.enumeration:
         return raw;
       case PatchbayParameterType.integer:
         final int? value = int.tryParse(raw);
-        if (value == null || positive && value <= 0) {
+        if (value == null ||
+            positive && value <= 0 ||
+            nonNegative && value < 0) {
           throw FormatException(
-            '$label must be ${positive ? 'a positive ' : 'an '}integer',
+            '$label must be ${positive
+                ? 'positive'
+                : nonNegative
+                ? 'a non-negative integer'
+                : 'an integer'}',
           );
         }
         return value;
       case PatchbayParameterType.number:
         final num? value = num.tryParse(raw);
-        if (value == null || positive && value <= 0) {
+        if (value == null ||
+            positive && value <= 0 ||
+            nonNegative && value < 0) {
           throw FormatException(
             '$label must be ${positive ? 'a positive ' : 'a '}number',
           );

@@ -44,4 +44,41 @@ void main() {
     expect(enabled.fixedArguments['enabled'], isTrue);
     expect(disabled.fixedArguments['enabled'], isFalse);
   });
+
+  test('runtime overrides cannot rebuild the stable command contract', () {
+    final PatchbayCommandDescriptor canonical =
+        patchbayUiInspectSelectCommandDescriptor;
+    final PatchbayCommandDescriptor runtime = canonical.withRuntimeOverrides(
+      gates: const <String>{'consumer.inspect'},
+      parameterDefaults: const <String, Object?>{'ttlMs': 1234},
+    );
+
+    expect(runtime.name, canonical.name);
+    expect(runtime.summary, canonical.summary);
+    expect(runtime.plane, canonical.plane);
+    expect(runtime.mode, canonical.mode);
+    expect(runtime.sideEffect, canonical.sideEffect);
+    expect(runtime.factSources, canonical.factSources);
+    expect(runtime.cliSyntax, canonical.cliSyntax);
+    expect(runtime.gates, const <String>{'consumer.inspect'});
+    expect(
+      runtime.parameters
+          .singleWhere(
+            (PatchbayParameterDescriptor parameter) =>
+                parameter.name == 'ttlMs',
+          )
+          .defaultValue,
+      1234,
+    );
+    expect(
+      runtime.parameters.map((parameter) => parameter.name),
+      canonical.parameters.map((parameter) => parameter.name),
+    );
+    expect(
+      () => canonical.withRuntimeOverrides(
+        parameterDefaults: const <String, Object?>{'undeclared': 1},
+      ),
+      throwsArgumentError,
+    );
+  });
 }

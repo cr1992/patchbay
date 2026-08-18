@@ -1549,8 +1549,9 @@ Future<_Execution> _execute(
       _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
       Map<String, Object?> arguments = friendly.arguments;
       String? captureMode;
-      if ((friendly.spec == PatchbayFriendlyCommand.captureRoot ||
-              friendly.spec == PatchbayFriendlyCommand.captureTarget) &&
+      // 重构后 capture 由生成的协议命令承载，枚举常量只是兼容外壳，
+      // 因此按服务命令名识别，而不是按枚举同一性。
+      if (friendly.spec.serviceCommand == 'ui.capture' &&
           arguments.containsKey('afterFrames')) {
         final Set<String>? features = patchbayDeclaredFeatures(
           await connection.identity(),

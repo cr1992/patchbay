@@ -63,6 +63,13 @@ String _render() {
         ...syntax.optionParameters.keys,
         ...syntax.fixedArguments.keys,
         ...syntax.positiveParameters,
+        ...syntax.nonNegativeParameters,
+        ...syntax.omitOptionDefaults,
+        if (syntax.trailingParameter case final String value) value,
+        if (syntax.stdinParameter case final String value) value,
+        if (syntax.stdinMarkerParameter case final String value) value,
+        if (syntax.trailingWhen case final PatchbayCliEqualsCondition condition)
+          condition.parameter,
       };
       final Set<String> unknown = referenced.difference(parameters);
       if (unknown.isNotEmpty) {
@@ -82,10 +89,19 @@ String _render() {
           '${descriptor.name} CLI syntax binds $duplicateBindings twice',
         );
       }
+      if (syntax.stdinParameter != null &&
+          syntax.stdinParameter != syntax.trailingParameter) {
+        throw StateError(
+          '${descriptor.name} stdin must replace trailing input',
+        );
+      }
       ids.add(syntax.id);
+      final String binding = descriptor.name.startsWith('navigation.')
+          ? 'const'
+          : 'final';
       out
         ..writeln(
-          'const _GeneratedProtocolCommand _${syntax.id}ProtocolCommand =',
+          '$binding _GeneratedProtocolCommand _${syntax.id}ProtocolCommand =',
         )
         ..writeln('    _GeneratedProtocolCommand(')
         ..writeln(
