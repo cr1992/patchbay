@@ -121,7 +121,8 @@ Future<void> closePatchbayQuietly(PatchbayClient? connection) async {
 /// It is a decorator, not a policy: it never retries, never reconnects and
 /// never reinterprets an answer that did arrive. The only thing it adds is an
 /// end to the waiting.
-final class PatchbayTimeoutClient implements PatchbayClient {
+final class PatchbayTimeoutClient
+    implements PatchbayClient, PatchbaySnapshotDiffClient {
   const PatchbayTimeoutClient(this._inner, {required this.rpcTimeout});
 
   final PatchbayClient _inner;
@@ -146,6 +147,20 @@ final class PatchbayTimeoutClient implements PatchbayClient {
         rpcTimeout: rpcTimeout,
         deadline: request?.timeout,
       );
+
+  @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) {
+    final PatchbayClient inner = _inner;
+    if (inner is! PatchbaySnapshotDiffClient) {
+      throw const PatchbayProtocolException('snapshotDiffClientUnavailable');
+    }
+    final PatchbaySnapshotDiffClient diffClient =
+        inner as PatchbaySnapshotDiffClient;
+    return awaitPatchbayRpc(
+      diffClient.snapshotDiff(fromRevision: fromRevision),
+      rpcTimeout: rpcTimeout,
+    );
+  }
 
   @override
   Future<Map<String, Object?>> invoke({

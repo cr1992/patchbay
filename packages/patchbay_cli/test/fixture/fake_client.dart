@@ -11,7 +11,8 @@ typedef FakeInvocation = ({String command, Map<String, Object?> arguments});
 /// the test controls, and the `connect` seam of `runPatchbayCli` is the only
 /// honest way in: it exercises the real dispatcher rather than a re-creation of
 /// it. Every invoke is recorded so a test can assert what actually went out.
-final class FakePatchbayClient implements PatchbayClient {
+final class FakePatchbayClient
+    implements PatchbayClient, PatchbaySnapshotDiffClient {
   FakePatchbayClient({
     required this.commands,
     required this.handle,
@@ -62,6 +63,7 @@ final class FakePatchbayClient implements PatchbayClient {
   /// arrived in the declared shape.
   final List<PatchbaySnapshotRequest?> snapshotRequests =
       <PatchbaySnapshotRequest?>[];
+  final List<int> snapshotDiffRequests = <int>[];
   int catalogReads = 0;
   bool closed = false;
 
@@ -93,6 +95,20 @@ final class FakePatchbayClient implements PatchbayClient {
         snapshotData,
         request.path,
       ).toJson(),
+    };
+  }
+
+  @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) async {
+    snapshotDiffRequests.add(fromRevision);
+    return <String, Object?>{
+      'schemaVersion': 1,
+      'fromRevision': fromRevision,
+      'snapshotRevision': fromRevision + 1,
+      'revisionSource': 'hostObserved',
+      'added': const <Object?>[],
+      'changed': const <Object?>[],
+      'removed': const <Object?>[],
     };
   }
 

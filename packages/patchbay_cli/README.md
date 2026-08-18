@@ -93,6 +93,9 @@ dart run bin/patchbay.dart --session <session-id> --json identity
 dart run bin/patchbay.dart --ws-uri <uri> --json identity
 dart run bin/patchbay.dart --ws-uri <uri> --json catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json snapshot
+
+# Compare the current full snapshot with a retained host-observed revision.
+dart run bin/patchbay.dart --ws-uri <uri> --json snapshot diff --from 7
 dart run bin/patchbay.dart --ws-uri <uri> --json exec <namespace.command>
 dart run bin/patchbay.dart --ws-uri <uri> --json --args '{"value":42}' exec <namespace.command>
 dart run bin/patchbay.dart --ws-uri <uri> --json --wait exec <namespace.command>

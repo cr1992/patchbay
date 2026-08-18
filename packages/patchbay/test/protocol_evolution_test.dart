@@ -63,6 +63,7 @@ void main() {
 
       expect(identity['features'], <String>[
         PatchbayFeature.catalogDigest.name,
+        PatchbayFeature.snapshotRevisionDiff.name,
         PatchbayFeature.snapshotSelectors.name,
       ]);
     });
@@ -78,6 +79,7 @@ void main() {
       expect(identity['features'], <String>[
         PatchbayFeature.catalogDigest.name,
         PatchbayFeature.lifecycleState.name,
+        PatchbayFeature.snapshotRevisionDiff.name,
         PatchbayFeature.snapshotSelectors.name,
       ]);
     });
@@ -93,6 +95,7 @@ void main() {
       expect(host.features, <PatchbayFeature>{
         PatchbayFeature.catalogDigest,
         PatchbayFeature.lifecycleState,
+        PatchbayFeature.snapshotRevisionDiff,
         PatchbayFeature.snapshotSelectors,
       });
     });

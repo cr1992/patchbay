@@ -43,6 +43,7 @@ void main() {
           ],
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
+          PatchbayFriendlyCommand.snapshotDiff => const <String>[],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
           PatchbayFriendlyCommand.navigationGo ||
@@ -76,6 +77,10 @@ void main() {
         if (spec == PatchbayFriendlyCommand.snapshotWait) ...<String>[
           '--until',
           'exists',
+        ],
+        if (spec == PatchbayFriendlyCommand.snapshotDiff) ...<String>[
+          '--from',
+          '1',
         ],
         ...words,
       ];

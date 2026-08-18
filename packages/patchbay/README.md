@@ -79,6 +79,14 @@ and the boundaries; it does not reimplement business logic for the CLI's benefit
 | `ext.patchbay.snapshot` | The read-only runtime snapshot supplied by the consumer |
 | `ext.patchbay.invoke` | Invoke a command present in the catalog |
 
+Every successful snapshot read now carries `snapshotRevision`,
+`revisionSource: hostObserved`, `factSource`, and `observedAt`. The revision is
+scoped to one `appInstanceId`: the host compares canonical full snapshots when
+they are read, keeps the number unchanged for equal content, and increments it
+only after it observes a change. The latest 32 changed revisions are retained
+for bounded diff requests; selectors share this revision space rather than
+creating per-path histories.
+
 Every payload carries a `schemaVersion`. `appInstanceId` is stable within one isolate and must
 change after a hot restart. On connecting, a client re-validates the schema, isolate, and app
 instance — it cannot judge a session still valid from a PID or a stale URI alone.

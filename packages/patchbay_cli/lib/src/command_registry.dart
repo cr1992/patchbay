@@ -104,6 +104,13 @@ enum PatchbayFriendlyCommand {
     usageSuffix: '<dot.path> --until <condition> [<json-value>]',
     target: PatchbayCommandTarget.clientSnapshot,
   ),
+  snapshotDiff(
+    null,
+    <String>['snapshot', 'diff'],
+    summary: 'Compare the current snapshot with a retained revision.',
+    usageSuffix: '--from <revision>',
+    target: PatchbayCommandTarget.clientSnapshot,
+  ),
   exec(
     null,
     <String>['exec'],
@@ -503,6 +510,13 @@ abstract final class PatchbayFriendlyCommandRegistry {
         tail,
         options,
       ),
+      PatchbayFriendlyCommand.snapshotDiff => _noTail(tail, <String, Object?>{
+        'fromRevision':
+            _optionalPositiveInt(options, 'from') ??
+            (throw const FormatException(
+              'snapshot diff requires --from <revision>',
+            )),
+      }),
       PatchbayFriendlyCommand.sessionUse => _sessionUseArguments(tail, options),
       // The service command already consumed the single positional above.
       PatchbayFriendlyCommand.exec => _domainArguments(
@@ -854,6 +868,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'until',
       'timeout-ms',
     },
+    PatchbayFriendlyCommand.snapshotDiff => const <String>{'from'},
     PatchbayFriendlyCommand.sessionUse => const <String>{'clear'},
     PatchbayFriendlyCommand.exec ||
     PatchbayFriendlyCommand.uiSemanticsTree => const <String>{'args', 'stdin'},
