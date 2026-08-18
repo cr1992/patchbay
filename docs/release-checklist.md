@@ -67,6 +67,8 @@ Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` + `flutter test`
 - [ ] `codegen_drift` —— `wire_codegen.dart --check` 同时确认 Dart 与 wire surface golden，
   `command_codegen.dart --check` 按提交形态确认生成物或紧凑快照无漂移
+- [ ] 本地 example 端到端预检全绿——CI 三个 job 都跑在无设备的容器里，证明不了「CLI 真的连上了一个跑
+  在设备上的 host」。这一项必须在接入方真机验收之前完成，不能用 CI 绿灯代替。
 - [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，三个 job 与上面一一对应）
 - [ ] README 的项目状态、安装示例与四包版本一致（`release_prep` 机检并可同步受管版本引用）
 
