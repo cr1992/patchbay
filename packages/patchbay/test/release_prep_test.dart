@@ -100,6 +100,112 @@ dependencies:
     });
   });
 
+  group('随版版本引用', () {
+    test('常量只改版本值且幂等，缺失或重复时拒绝', () {
+      const String source =
+          "// keep\nconst String patchbayPackageVersion = '0.2.1';\n// tail\n";
+      final String bumped = applyPackageVersionSource(source, '0.3.0');
+      expect(
+        bumped,
+        "// keep\nconst String patchbayPackageVersion = '0.3.0';\n// tail\n",
+      );
+      expect(applyPackageVersionSource(bumped, '0.3.0'), bumped);
+      expect(
+        () => applyPackageVersionSource('// missing\n', '0.3.0'),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => applyPackageVersionSource('$source$source', '0.3.0'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('README 只同步四个受管锚点，其他版本文本原样保留', () {
+      const String readme = '''
+> **Project status:** `v0.2.1`, keep
+historical patchbay-v0.1.0 stays
+      ref: patchbay-v0.2.1
+curl /releases/download/patchbay-v0.2.1/patchbay-0.2.1-macos-arm64
+--git-ref patchbay-v0.2.1 --git-path packages/patchbay_cli
+''';
+      final String bumped = applyReadmeVersionReferences(readme, '0.3.0');
+      expect(bumped, contains('`v0.3.0`'));
+      expect(bumped, contains('ref: patchbay-v0.3.0'));
+      expect(bumped, contains('/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64'));
+      expect(bumped, contains('--git-ref patchbay-v0.3.0'));
+      expect(bumped, contains('historical patchbay-v0.1.0 stays'));
+      expect(applyReadmeVersionReferences(bumped, '0.3.0'), bumped);
+    });
+
+    test('README AOT 文件名完整识别 prerelease SemVer，不在连字符处截断', () {
+      const String readme = '''
+> **Project status:** `v0.3.0`, keep
+      ref: patchbay-v0.3.0
+curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
+--git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+''';
+
+      final String bumped = applyReadmeVersionReferences(readme, '0.4.0-rc.1');
+
+      expect(bumped, contains('`v0.4.0-rc.1`'));
+      expect(bumped, contains('ref: patchbay-v0.4.0-rc.1'));
+      expect(
+        bumped,
+        contains('/patchbay-v0.4.0-rc.1/patchbay-0.4.0-rc.1-macos-arm64'),
+      );
+      expect(bumped, contains('--git-ref patchbay-v0.4.0-rc.1'));
+      expect(applyReadmeVersionReferences(bumped, '0.4.0-rc.1'), bumped);
+    });
+
+    test('README 受管锚点缺失时拒绝，不静默放过结构漂移', () {
+      expect(
+        () => applyReadmeVersionReferences('# Patchbay\n', '0.3.0'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
+  group('协议兼容语料', () {
+    test('从 host surface 唯一真源拆出 identity / catalog 并落入版本目录', () {
+      final Map<String, String> fixtures = renderCompatibilityFixtures(
+        '0.4.0-rc.1',
+        _hostSurface('0.3.0'),
+      );
+
+      expect(fixtures.keys, <String>{
+        'legacy_host_v0_4_0-rc_1/identity.json',
+        'legacy_host_v0_4_0-rc_1/catalog.json',
+      });
+      expect(jsonDecode(fixtures.values.first)['serverVersion'], '0.4.0-rc.1');
+      expect(
+        jsonDecode(
+          fixtures['legacy_host_v0_4_0-rc_1/catalog.json']!,
+        )['catalogDigest'],
+        isA<Map<String, Object?>>(),
+      );
+      expect(
+        renderCompatibilityFixtures('0.4.0-rc.1', _hostSurface('0.3.0')),
+        fixtures,
+      );
+    });
+
+    test('source golden 缺面或版本来源漂移时拒绝，不伪造语料', () {
+      expect(
+        () => renderCompatibilityFixtures('0.4.0', '{}'),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => renderCompatibilityFixtures(
+          '0.4.0',
+          _hostSurface(
+            '0.3.0',
+          ).replaceFirst('<patchbayPackageVersion>', '手写版本'),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
   group('caret 约束', () {
     test('0.x 走 minor 边界，1.x 走 major 边界', () {
       final Version zeroThreeOne = Version.tryParse('0.3.1')!;
@@ -115,11 +221,28 @@ dependencies:
       expect(caretAdmits('any', Version.tryParse('0.3.0')!), isNull);
     });
 
-    test('只接受 X.Y.Z', () {
+    test('接受正式与 prerelease/build SemVer，拒绝缺段或 v 前缀', () {
       expect(Version.tryParse('0.3'), isNull);
       expect(Version.tryParse('v0.3.0'), isNull);
-      expect(Version.tryParse('0.3.0-beta'), isNull);
+      expect(Version.tryParse('0.3.0-beta').toString(), '0.3.0-beta');
+      expect(
+        Version.tryParse('0.4.0-rc.1+build.7').toString(),
+        '0.4.0-rc.1+build.7',
+      );
       expect(Version.tryParse('0.3.0').toString(), '0.3.0');
+    });
+
+    test('prerelease 按 SemVer 排序且低于同核正式版本', () {
+      expect(
+        Version.tryParse(
+          '0.4.0-rc.1',
+        )!.compareTo(Version.tryParse('0.4.0-rc.2')!),
+        isNegative,
+      );
+      expect(
+        Version.tryParse('0.4.0-rc.2')!.compareTo(Version.tryParse('0.4.0')!),
+        isNegative,
+      );
     });
 
     test('约束不接纳目标版本才改写，接纳则原样（0.3.1 不动 ^0.3.0）', () {
@@ -1018,10 +1141,11 @@ sdks:
       });
     });
 
-    test('版本号必须是 X.Y.Z', () {
+    test('版本号必须是 SemVer', () {
       expect(() => requireVersion('0.3'), throwsA(isA<FormatException>()));
       expect(() => requireVersion('v0.3.0'), throwsA(isA<FormatException>()));
       expect(requireVersion('0.3.0'), '0.3.0');
+      expect(requireVersion('0.4.0-rc.1'), '0.4.0-rc.1');
     });
   });
 
@@ -1041,9 +1165,13 @@ sdks:
       expect(red.stdout, contains('[未过] example-lock'));
       expect(red.stdout, contains('[未过] compat-matrix-row'));
       expect(red.stdout, contains('[未过] package-changelog'));
+      expect(red.stdout, contains('[未过] version-references'));
+      expect(red.stdout, contains('[未过] protocol-compat-fixture'));
 
       final ProcessResult applied = await _run(repo, '--apply');
       expect(applied.stdout, contains('[通过] version-parity'));
+      expect(applied.stdout, contains('[通过] version-references'));
+      expect(applied.stdout, contains('[通过] protocol-compat-fixture'));
       expect(applied.stdout, contains('[通过] changelog-release'));
       expect(applied.stdout, contains('[通过] example-lock'));
       expect(applied.stdout, contains('[通过] compat-matrix-row'));
@@ -1084,6 +1212,133 @@ sdks:
       final Map<String, List<int>> before = _releaseFileBytes(repo);
       final ProcessResult again = await _run(repo, '--apply');
       expect(again.stdout, contains('apply：无改动'));
+      expect(_releaseFileBytes(repo), before);
+    });
+
+    test('RC 协议语料可重复冻结，正式版本使用独立目录', () async {
+      final ProcessResult rc = await _run(
+        repo,
+        '--apply',
+        version: '0.4.0-rc.1',
+      );
+      expect(rc.exitCode, isNot(64));
+      final File rcIdentity = File(
+        '${repo.path}/$compatibilityCorpusPath/'
+        'legacy_host_v0_4_0-rc_1/identity.json',
+      );
+      expect(rcIdentity.existsSync(), isTrue);
+      expect(
+        jsonDecode(rcIdentity.readAsStringSync())['serverVersion'],
+        '0.4.0-rc.1',
+      );
+      final Map<String, List<int>> rcFiles = _releaseFileBytes(repo);
+      final ProcessResult rcAgain = await _run(
+        repo,
+        '--apply',
+        version: '0.4.0-rc.1',
+      );
+      expect(rcAgain.stdout, contains('apply：无改动'));
+      expect(_releaseFileBytes(repo), rcFiles);
+
+      // 正式版不能覆盖 RC 语料；每个发布构建留下自己的不可变目录。
+      _materialize(repo, _inputs());
+      await _run(repo, '--apply', version: '0.4.0');
+      expect(
+        File(
+          '${repo.path}/$compatibilityCorpusPath/'
+          'legacy_host_v0_4_0/identity.json',
+        ).existsSync(),
+        isTrue,
+      );
+    });
+
+    test('check 检出协议语料缺失、内容漂移与非受管文件', () async {
+      _materialize(repo, _inputs(released: true));
+      final String directory = compatibilityCorpusDirectory('0.3.0');
+      final File identity = File(
+        '${repo.path}/$compatibilityCorpusPath/$directory/identity.json',
+      );
+      identity.writeAsStringSync(
+        identity.readAsStringSync().replaceFirst('0.3.0', '0.2.1'),
+      );
+      File(
+        '${repo.path}/$compatibilityCorpusPath/$directory/catalog.json',
+      ).deleteSync();
+      File(
+        '${repo.path}/$compatibilityCorpusPath/$directory/unmanaged.json',
+      ).writeAsStringSync('{}\n');
+
+      final ProcessResult checked = await _run(repo, '--check');
+
+      expect(checked.exitCode, 1);
+      expect(checked.stdout, contains('[未过] protocol-compat-fixture'));
+      expect(checked.stdout, contains('identity.json=漂移'));
+      expect(checked.stdout, contains('catalog.json=缺失'));
+      expect(checked.stdout, contains('unmanaged.json=非受管文件'));
+    });
+
+    test('协议源 golden 畸形时 apply 不写任何发布文件或消费碎片', () async {
+      _materialize(repo, _inputs(hostSurfaceGolden: '{}'));
+      _writeFragment(repo, 'PB-040-18.changed.md', '- 不应被消费。\n');
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+
+      final ProcessResult applied = await _run(repo, '--apply');
+
+      expect(applied.exitCode, 64);
+      expect(applied.stderr, contains('host surface golden'));
+      expect(_releaseFileBytes(repo), before);
+      expect(
+        File('${repo.path}/changelog.d/PB-040-18.changed.md').existsSync(),
+        isTrue,
+      );
+    });
+
+    test('apply 拒绝用当前 host 覆写手写冻结的旧版语料', () async {
+      _materialize(
+        repo,
+        _inputs(
+          compatibilityCorpus: const <String, String>{
+            'legacy_host_v0_2_0/README.md':
+                '# 冻结语料\n\n这些文件是**手写冻结的历史 wire**。\n',
+            'legacy_host_v0_2_0/identity.json': '{}\n',
+            'legacy_host_v0_2_0/catalog.json': '{}\n',
+          },
+        ),
+      );
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+
+      final ProcessResult applied = await _run(
+        repo,
+        '--apply',
+        version: '0.2.0',
+      );
+
+      expect(applied.exitCode, 64);
+      expect(applied.stderr, contains('拒绝用当前 host 覆写'));
+      expect(_releaseFileBytes(repo), before);
+    });
+
+    test('check 会逐项检出 README 或 serverVersion 常量漂移，且保持只读', () async {
+      _materialize(repo, _inputs(released: true));
+      final File readme = File('${repo.path}/README.zh-CN.md');
+      readme.writeAsStringSync(
+        readme.readAsStringSync().replaceFirst(
+          'patchbay-v0.3.0',
+          'patchbay-v0.2.1',
+        ),
+      );
+      final File versionSource = File('${repo.path}/$packageVersionSourcePath');
+      versionSource.writeAsStringSync(
+        versionSource.readAsStringSync().replaceFirst("'0.3.0'", "'0.2.1'"),
+      );
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+
+      final ProcessResult checked = await _run(repo, '--check');
+
+      expect(checked.exitCode, 1);
+      expect(checked.stdout, contains('[未过] version-references'));
+      expect(checked.stdout, contains('patchbayPackageVersion'));
+      expect(checked.stdout, contains('README.zh-CN.md'));
       expect(_releaseFileBytes(repo), before);
     });
 
@@ -1285,10 +1540,14 @@ ReleaseInputs _inputs({
   String description = _description,
   String exampleOverridePath = '../../patchbay',
   Set<String> dropOverrides = const <String>{},
+  String? hostSurfaceGolden,
+  Map<String, String>? compatibilityCorpus,
 }) {
   final String resolved = version ?? (released ? '0.3.0' : '0.2.1');
   final String constraints = constraintVersion ?? resolved;
   final String changelogVersion = packageChangelogVersion ?? resolved;
+  final String resolvedHostSurface =
+      hostSurfaceGolden ?? _hostSurface(resolved);
   final String newRow = released
       ? '| `$tagPrefix$resolved` | `$sha` | $matrixSchemaCell | 3.44.9 '
             '| `>=3.38.0` | $consumers |\n'
@@ -1328,6 +1587,18 @@ ReleaseInputs _inputs({
               ? '# Changelog\n\n## $changelogVersion - 2026-08-14\n\n见根表。\n'
               : null,
         ),
+    },
+    hostSurfaceGolden: resolvedHostSurface,
+    compatibilityCorpus:
+        compatibilityCorpus ??
+        (released
+            ? renderCompatibilityFixtures(resolved, resolvedHostSurface)
+            : const <String, String>{}),
+    packageVersionSource:
+        "const String patchbayPackageVersion = '$resolved';\n",
+    readmes: <String, String>{
+      'README.md': _releaseReadme(resolved, chinese: false),
+      'README.zh-CN.md': _releaseReadme(resolved, chinese: true),
     },
     changelog: released
         ? '# Changelog\n\n## $resolved - 2026-08-14\n\n### Added\n\n- 某条。\n'
@@ -1372,6 +1643,37 @@ ReleaseInputs _inputs({
   );
 }
 
+String _hostSurface(String version) => jsonEncode(<String, Object?>{
+  'identity': <String, Object?>{
+    'schemaVersion': 1,
+    'serverVersion': '<patchbayPackageVersion>',
+    'features': <String>['catalogDigest'],
+    'applicationId': 'dev.patchbay.fixture.$version',
+    'appInstanceId': 'fixture-instance',
+    'isolateId': '<runtime>',
+  },
+  'catalog': <String, Object?>{
+    'commands': <Object?>[
+      <String, Object?>{'name': 'fixture.command'},
+    ],
+    'uiTargets': <Object?>[],
+    'schemaVersion': 1,
+    'catalogDigest': <String, Object?>{
+      'algorithm': 'sha256',
+      'covers': <String>['commands'],
+      'value': 'fixture-digest',
+    },
+  },
+});
+
+String _releaseReadme(String version, {required bool chinese}) =>
+    '''
+> **${chinese ? '项目状态：' : 'Project status:'}** `v$version`, keep
+      ref: patchbay-v$version
+curl /releases/download/patchbay-v$version/patchbay-$version-macos-arm64
+--git-ref patchbay-v$version --git-path packages/patchbay_cli
+''';
+
 /// 从当前目录向上找仓根（CHANGELOG.md + packages/patchbay/pubspec.yaml）。
 ///
 /// `dart test` 在包目录跑、CI 也可能从仓根跑，两种 cwd 都要能定位到真实仓库。
@@ -1407,7 +1709,18 @@ void _materialize(Directory repo, ReleaseInputs inputs) {
     write(overridesPathOf(entry.key), entry.value.overrides);
     write(packageChangelogPathOf(entry.key), entry.value.changelog);
   }
+  write(hostSurfaceGoldenPath, inputs.hostSurfaceGolden);
+  final Directory corpus = Directory('${repo.path}/$compatibilityCorpusPath');
+  if (corpus.existsSync()) corpus.deleteSync(recursive: true);
+  for (final MapEntry<String, String> entry
+      in inputs.compatibilityCorpus.entries) {
+    write('$compatibilityCorpusPath/${entry.key}', entry.value);
+  }
   write(changelogPath, inputs.changelog);
+  write(packageVersionSourcePath, inputs.packageVersionSource);
+  for (final MapEntry<String, String> entry in inputs.readmes.entries) {
+    write(entry.key, entry.value);
+  }
   write(examplePubspecPath, inputs.examplePubspec);
   write(exampleOverridesPath, inputs.exampleOverrides);
   write(exampleLockPath, inputs.exampleLock);
@@ -1427,6 +1740,9 @@ void _writeFragment(Directory repo, String name, String content) {
 Map<String, List<int>> _releaseFileBytes(Directory repo) {
   final paths = <String>[
     changelogPath,
+    hostSurfaceGoldenPath,
+    packageVersionSourcePath,
+    ...releaseReadmePaths,
     exampleLockPath,
     compatMatrixPath,
     for (final String package in releasePackages) ...<String>[
@@ -1437,6 +1753,11 @@ Map<String, List<int>> _releaseFileBytes(Directory repo) {
       '${repo.path}/changelog.d',
     ).listSync().whereType<File>())
       file.path.substring(repo.path.length + 1),
+    if (Directory('${repo.path}/$compatibilityCorpusPath').existsSync())
+      for (final File file in Directory(
+        '${repo.path}/$compatibilityCorpusPath',
+      ).listSync(recursive: true).whereType<File>())
+        file.path.substring(repo.path.length + 1),
   ]..sort();
   return <String, List<int>>{
     for (final String path in paths)
