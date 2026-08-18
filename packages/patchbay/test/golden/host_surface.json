@@ -4,7 +4,8 @@
     "serverVersion": "<patchbayPackageVersion>",
     "features": [
       "catalogDigest",
-      "lifecycleState"
+      "lifecycleState",
+      "snapshotSelectors"
     ],
     "applicationId": "dev.patchbay.golden",
     "appInstanceId": "golden-instance",

@@ -247,6 +247,14 @@ final class PatchbayReplSession {
         'it as a one-shot instead',
       );
     }
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localPermissionDriver) {
+      throw const FormatException(
+        'permission commands are unavailable inside a repl session: they '
+        'use an external driver and write operations require a launcher '
+        'session trust record; run them as a one-shot instead',
+      );
+    }
   }
 
   void _writeResult(

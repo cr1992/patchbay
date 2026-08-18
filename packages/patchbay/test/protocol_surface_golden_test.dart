@@ -13,8 +13,7 @@
 /// 用 golden 把「面的形状」和「哪些类型正被客户端严格解码」一起钉住：改动本身不会被
 /// 阻止，但它一定会在 diff 里现形，评审时能看出踩的是哪一类。
 ///
-/// 更新 golden：`PATCHBAY_UPDATE_GOLDENS=1 dart test test/protocol_surface_golden_test.dart`
-/// —— 更新前先想清楚落在上面哪一类。
+/// 更新 wire golden：从仓根运行 `wire_codegen.dart --write`；更新前先想清楚落在上面哪一类。
 library;
 
 import 'dart:convert';
@@ -74,7 +73,7 @@ List<String> _dartSources(String directory) => Directory(directory)
     .map((File file) => file.readAsStringSync())
     .toList(growable: false);
 
-/// 比对 golden；`PATCHBAY_UPDATE_GOLDENS=1` 时改写。
+/// 比对 golden。测试只读，避免测试进程成为另一条生成路径。
 void expectGolden(
   String path,
   Map<String, Object?> actual, {
@@ -82,15 +81,10 @@ void expectGolden(
 }) {
   final String rendered = '${_pretty.convert(actual)}\n';
   final File golden = File(path);
-  if (Platform.environment['PATCHBAY_UPDATE_GOLDENS'] == '1') {
-    golden.parent.createSync(recursive: true);
-    golden.writeAsStringSync(rendered);
-    return;
-  }
   expect(
     golden.existsSync(),
     isTrue,
-    reason: '$path 缺失；用 PATCHBAY_UPDATE_GOLDENS=1 生成',
+    reason: '$path 缺失；wire surface 用 wire_codegen.dart --write 生成',
   );
   expect(golden.readAsStringSync(), rendered, reason: reason);
 }

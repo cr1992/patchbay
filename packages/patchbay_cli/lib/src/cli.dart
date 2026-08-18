@@ -5,7 +5,6 @@ import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
-import 'package:vm_service/vm_service.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
@@ -13,6 +12,8 @@ import 'command_help.dart';
 import 'command_registry.dart';
 import 'direct_connection.dart';
 import 'doctor.dart';
+import 'permission_command.dart';
+import 'permission_driver.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -31,6 +32,7 @@ Future<int> runPatchbayCli(
   Stream<String>? replInput,
   StringSink? output,
   StringSink? errorOutput,
+  PatchbayPermissionCommandRunner? permissionCommands,
 }) async {
   final StringSink out = output ?? stdout;
   final StringSink error = errorOutput ?? stderr;
@@ -96,6 +98,18 @@ Future<int> runPatchbayCli(
             : report.render().trimRight(),
       );
       return report.exitCode;
+    }
+    if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
+        PatchbayCommandTarget.localPermissionDriver) {
+      final PatchbayFriendlyInvocation invocation =
+          PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+      final PatchbayPermissionCommandOutcome outcome =
+          await (permissionCommands ?? PatchbayPermissionCommandRunner()).run(
+            parsed,
+            invocation,
+          );
+      _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
+      return outcome.exitCode;
     }
     final bool repl = _isRepl(parsed);
     if (repl) {
@@ -253,6 +267,20 @@ Future<int> runPatchbayCli(
       message: 'patchbay sensitive input error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code),
       exitCode: PatchbayExitCode.usage,
+    );
+  } on PatchbayPermissionDriverException catch (failure) {
+    if (failure.diagnostic case final String diagnostic) {
+      error.writeln(diagnostic);
+    }
+    return _fail(
+      out,
+      error,
+      json: json,
+      message: 'patchbay permission driver error: ${failure.code}',
+      envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
+      exitCode: failure.code == 'permissionTimeoutInvalid'
+          ? PatchbayExitCode.usage
+          : PatchbayExitCode.typedFailure,
     );
   } on Object catch (failure) {
     // VM Service URIs and direct bearer tokens are authentication material.
@@ -482,6 +510,36 @@ ArgParser patchbayCliParser() => ArgParser()
     'clear',
     defaultsTo: false,
     help: 'Unpin the selected session instead of selecting one.',
+  )
+  ..addOption(
+    'permission-driver',
+    help: 'Explicit external permission driver executable path.',
+  )
+  ..addOption('device-id', help: 'Explicit platform device selection.')
+  ..addOption('application-id', help: 'Explicit platform application ID.')
+  ..addOption(
+    'state',
+    allowed: <String>[
+      for (final PatchbayPermissionState state
+          in PatchbayPermissionState.values)
+        state.name,
+    ],
+    help: 'Desired or required closed permission state.',
+  )
+  ..addOption(
+    'decision',
+    allowed: <String>[
+      for (final PatchbayPermissionDecision decision
+          in PatchbayPermissionDecision.values)
+        decision.name,
+    ],
+    help: 'System permission decision for exercise.',
+  )
+  ..addFlag(
+    'confirm-system-permission',
+    defaultsTo: false,
+    negatable: false,
+    help: 'Explicitly confirm an exercise allow system permission action.',
   );
 
 List<String>? _helpTopic(ArgResults parsed) {
@@ -787,6 +845,11 @@ Future<_Execution> _execute(
       // Answered before the dial as well: doctor dials for itself so that a
       // failed dial becomes a finding instead of ending the command.
       throw StateError('doctor owns its own connection');
+    case PatchbayCommandTarget.localPermissionDriver:
+      // Permission commands are handled before the App dial. A repl cannot
+      // spawn an external process because its connection/session identity is
+      // not the full launcher trust record required for writes.
+      throw StateError('permission commands own their external driver');
     case PatchbayCommandTarget.declaredServiceCommand:
     case PatchbayCommandTarget.callerServiceCommand:
       final String command = friendly.serviceCommand!;
@@ -836,32 +899,25 @@ Future<_Execution> _execute(
 const String patchbaySnapshotSelectorUnsupportedCode =
     'snapshotSelectionUnsupportedByHost';
 
-/// One selector-bearing snapshot, with a version skew named rather than guessed.
+/// Sends one selector-bearing snapshot only when the host declared support.
 ///
-/// A host built before selectors existed has no idea what the extra `request`
-/// parameter is and refuses the message at the transport seam: the VM Service
-/// path answers `invalidParams`, the direct path a `protocolError`. Both escape
-/// as bare transport / protocol failures whose codes describe the plumbing
-/// rather than the cause, so the operator sees `exit 3` and goes looking for a
-/// dead socket instead of an App that predates the feature.
-///
-/// Only these two shapes are translated, and only when a selector was actually
-/// sent. Anything else keeps its own classification: a socket that died during
-/// a selector call is not a version skew, and blaming the App would send the
-/// operator to change a command that was never wrong.
+/// Identity capabilities are an open string set on the client: unknown names
+/// remain valid, while the one name this command understands is required. A
+/// missing declaration therefore degrades before the selector reaches the
+/// wire. Once declared, every failure from the snapshot RPC stays exactly what
+/// it was; a real transport or protocol failure must never be rewritten as a
+/// version skew.
 Future<Map<String, Object?>> _selectedSnapshot(
   PatchbayClient connection,
   PatchbaySnapshotRequest request,
 ) async {
-  try {
-    return await connection.snapshot(request: request);
-  } on RPCError catch (failure) {
-    if (failure.code != RPCErrorKind.kInvalidParams.code) rethrow;
-    return _snapshotSelectorUnsupported();
-  } on PatchbayProtocolException catch (failure) {
-    if (failure.code != 'protocolError') rethrow;
+  final Set<String>? features = patchbayDeclaredFeatures(
+    await connection.identity(),
+  );
+  if (!(features?.contains(PatchbayFeature.snapshotSelectors.name) ?? false)) {
     return _snapshotSelectorUnsupported();
   }
+  return connection.snapshot(request: request);
 }
 
 /// The refusal above, in the same typed shape the App's own rejections use.

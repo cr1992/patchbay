@@ -61,7 +61,8 @@ Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
 
 - [ ] `dart_packages` —— 排版与规划一致性门禁 + 三个纯 Dart 包 `dart analyze --fatal-infos` + `dart test`
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` + `flutter test`
-- [ ] `codegen_drift` —— `wire_codegen.dart --check` 与 `command_codegen.dart --check` 均无生成物/紧凑快照漂移
+- [ ] `codegen_drift` —— `wire_codegen.dart --check` 同时确认 Dart 与 wire surface golden，
+  `command_codegen.dart --check` 按提交形态确认生成物或紧凑快照无漂移
 - [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，三个 job 与上面一一对应）
 - [ ] README 的项目状态、安装示例与四包版本一致（脚本不判 README 文案）
 

@@ -58,6 +58,59 @@ void main() {
   });
 
   test(
+    'every published UI descriptor is owned by the same dispatcher',
+    () async {
+      final List<String> externalCalls = <String>[];
+      final PatchbayFlutterServiceHost host = PatchbayFlutterServiceHost(
+        applicationId: 'dev.patchbay.flutter.registry-test',
+        bridge: _allowedBridge(PatchbayUiRegistry()),
+        domainCatalog: () async => <String, Object?>{
+          'commands': <Object?>[
+            <String, Object?>{'name': 'device.status'},
+          ],
+        },
+        domainInvoke: (command, arguments, requestId) async {
+          externalCalls.add(command);
+          return PatchbayInvocation.accepted(requestId: requestId).toJson();
+        },
+      );
+      final Map<String, Object?> catalog = await host.dispatchCatalog();
+      final List<String> protocolCommands = <String>[
+        for (final Map<String, Object?> command
+            in (catalog['commands']! as List<Object?>)
+                .cast<Map<String, Object?>>())
+          if ((command['name']! as String).startsWith('ui.'))
+            command['name']! as String,
+      ];
+
+      for (final String command in protocolCommands) {
+        await host.dispatchInvoke(command, const <String, Object?>{
+          '__registryProbe': true,
+        }, 'probe-$command');
+      }
+      expect(externalCalls, isEmpty);
+
+      final Map<String, Object?> unavailable = await host.dispatchInvoke(
+        'ui.capture',
+        const <String, Object?>{},
+        'unavailable-protocol-probe',
+      );
+      expect(
+        unavailable['rejection'],
+        containsPair('code', 'commandNotRegistered'),
+      );
+      expect(externalCalls, isEmpty);
+
+      await host.dispatchInvoke(
+        'device.status',
+        const <String, Object?>{},
+        'external-probe',
+      );
+      expect(externalCalls, <String>['device.status']);
+    },
+  );
+
+  test(
     'service catalog exposes semantics action only with consumer policy',
     () async {
       final Map<String, ServiceExtensionHandler> handlers =

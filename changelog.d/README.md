@@ -115,8 +115,4 @@ BUG-20260817-01.fixed.md
 6. 运行 `release_prep --apply`，把 Unreleased 落款成正式版本并派生四个包的 CHANGELOG；
 7. 聚合、删除碎片、版本落款和包内派生必须进入同一个发布提交。
 
-PB-040-20 的自动聚合尚未实现之前，由 maintainer 在发布 MR 中按上述规则手工完成；实现后，
-`release_prep --check` 必须负责校验，`--apply` 必须负责稳定聚合和删除碎片。自动化实现 MR 应同步移除
-这段过渡说明。
-
 已经推送的 release tag 不回写。遗漏的变更用下一个补丁版本的新碎片补记，不移动 tag，也不修改旧版本段。

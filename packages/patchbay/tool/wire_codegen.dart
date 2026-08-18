@@ -20,21 +20,117 @@ void _run(List<String> arguments) {
   final _Contract contract = _Contract.parse(decoded);
   final String generated = _formatDart(_render(contract, contractFile.path));
   final File output = File(options.output);
+  final Directory? packageRoot = contract.library == 'patchbay_core_wire'
+      ? contractFile.absolute.parent.parent
+      : null;
+  final File? surfaceGolden = packageRoot == null
+      ? null
+      : File('${packageRoot.path}/test/golden/wire_surface.json');
+  final String? surface = packageRoot == null
+      ? null
+      : _renderSurfaceGolden(contract, packageRoot);
 
   if (options.check) {
-    if (!output.existsSync() || output.readAsStringSync() != generated) {
-      stderr.writeln('Patchbay wire generated output drifted: ${output.path}');
+    final List<String> drifted = <String>[
+      if (!output.existsSync() || output.readAsStringSync() != generated)
+        output.path,
+      if (surfaceGolden != null &&
+          (!surfaceGolden.existsSync() ||
+              surfaceGolden.readAsStringSync() != surface))
+        surfaceGolden.path,
+    ];
+    if (drifted.isNotEmpty) {
+      for (final String path in drifted) {
+        stderr.writeln('Patchbay wire generated output drifted: $path');
+      }
       stderr.writeln('Run the same command with --write.');
       exitCode = 1;
       return;
     }
-    stdout.writeln('Patchbay wire generated output is current: ${output.path}');
+    stdout.writeln(
+      surfaceGolden == null
+          ? 'Patchbay wire generated output is current: ${output.path}'
+          : 'Patchbay wire generated outputs are current: '
+                '${output.path}, ${surfaceGolden.path}',
+    );
     return;
   }
 
   output.parent.createSync(recursive: true);
   output.writeAsStringSync(generated);
-  stdout.writeln('Generated ${output.path} from ${contractFile.path}');
+  if (surfaceGolden != null) {
+    surfaceGolden.parent.createSync(recursive: true);
+    surfaceGolden.writeAsStringSync(surface!);
+  }
+  stdout.writeln(
+    surfaceGolden == null
+        ? 'Generated ${output.path} from ${contractFile.path}'
+        : 'Generated ${output.path} and ${surfaceGolden.path} '
+              'from ${contractFile.path}',
+  );
+}
+
+String _renderSurfaceGolden(_Contract contract, Directory packageRoot) {
+  final File serviceHost = File(
+    '${packageRoot.path}/lib/src/service_host.dart',
+  );
+  final Iterable<RegExpMatch> schemaMatches = RegExp(
+    r'static const int schemaVersion\s*=\s*(\d+)\s*;',
+  ).allMatches(serviceHost.readAsStringSync());
+  if (schemaMatches.length != 1) {
+    throw const FormatException(
+      'PatchbayServiceHost.schemaVersion must have one integer declaration',
+    );
+  }
+  final int schemaVersion = int.parse(schemaMatches.single.group(1)!);
+  final Set<String> declared = contract.types
+      .map((_TypeDefinition type) => type.name)
+      .toSet();
+  final RegExp strictDecode = RegExp(r'\b(Patchbay[A-Za-z0-9]*Wire)\.fromJson');
+  final Set<String> decoded = <String>{};
+  for (final String package in <String>['patchbay_cli', 'patchbay_transport']) {
+    final Directory lib = Directory('${packageRoot.parent.path}/$package/lib');
+    for (final File file
+        in lib
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((File file) => file.path.endsWith('.dart'))) {
+      for (final RegExpMatch match in strictDecode.allMatches(
+        file.readAsStringSync(),
+      )) {
+        final String name = match.group(1)!;
+        if (declared.contains(name)) decoded.add(name);
+      }
+    }
+  }
+  if (decoded.isEmpty) {
+    throw const FormatException(
+      'no strict wire decoders found in shipped client sources',
+    );
+  }
+
+  final Map<String, Object?> types = <String, Object?>{};
+  for (final _TypeDefinition type in contract.types) {
+    types[type.name] = switch (type.kind) {
+      _TypeKind.enumeration => <String, Object?>{
+        'kind': 'enum',
+        'values': type.values,
+      },
+      _TypeKind.object => <String, Object?>{
+        'kind': 'object',
+        'fields': <String>[
+          for (final _Field field in type.fields) field.wireName,
+        ],
+      },
+    };
+  }
+  final String rendered = const JsonEncoder.withIndent('  ')
+      .convert(<String, Object?>{
+        'schemaVersion': schemaVersion,
+        'strictlyDecodedByShippedClients': decoded.toList()..sort(),
+        'types': types,
+      });
+  return '$rendered\n';
 }
 
 String _formatDart(String source) {

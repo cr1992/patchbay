@@ -1,0 +1,455 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchbay.dev/schemas/harmonyos-permission-capability-v1.schema.json",
+  "title": "Patchbay HarmonyOS permission capability fixture v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "platform",
+    "supportStatus",
+    "report",
+    "baseline",
+    "matrix",
+    "permissions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "platform": {
+      "const": "harmonyos"
+    },
+    "supportStatus": {
+      "enum": [
+        "unsupported",
+        "verified"
+      ]
+    },
+    "report": {
+      "type": "string",
+      "const": "docs/verification/harmonyos-compatibility.md"
+    },
+    "baseline": {
+      "$ref": "#/$defs/baseline"
+    },
+    "matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coreFlutterBuild",
+        "vmServiceAttach",
+        "semanticsLifecycleArtifact",
+        "appPermissionApi",
+        "uiTestHypium",
+        "hdcRecovery"
+      ],
+      "properties": {
+        "coreFlutterBuild": {
+          "$ref": "#/$defs/check"
+        },
+        "vmServiceAttach": {
+          "$ref": "#/$defs/check"
+        },
+        "semanticsLifecycleArtifact": {
+          "$ref": "#/$defs/check"
+        },
+        "appPermissionApi": {
+          "$ref": "#/$defs/check"
+        },
+        "uiTestHypium": {
+          "$ref": "#/$defs/check"
+        },
+        "hdcRecovery": {
+          "$ref": "#/$defs/check"
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "camera",
+        "microphone",
+        "locationWhenInUse",
+        "notifications",
+        "bluetooth"
+      ],
+      "properties": {
+        "camera": {
+          "$ref": "#/$defs/permission"
+        },
+        "microphone": {
+          "$ref": "#/$defs/permission"
+        },
+        "locationWhenInUse": {
+          "$ref": "#/$defs/permission"
+        },
+        "notifications": {
+          "$ref": "#/$defs/permission"
+        },
+        "bluetooth": {
+          "$ref": "#/$defs/permission"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordedAt",
+        "host",
+        "patchbayRevision",
+        "flutterSdk",
+        "platformSdk",
+        "tools",
+        "device",
+        "application"
+      ],
+      "properties": {
+        "recordedAt": {
+          "type": "string",
+          "format": "date"
+        },
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "os",
+            "osVersion",
+            "architecture"
+          ],
+          "properties": {
+            "os": {
+              "const": "macos"
+            },
+            "osVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "architecture": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "patchbayRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "flutterSdk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "selectionStatus",
+            "distribution",
+            "repository",
+            "frameworkVersion",
+            "frameworkRevision",
+            "dartVersion"
+          ],
+          "properties": {
+            "selectionStatus": {
+              "enum": [
+                "candidate",
+                "selected"
+              ]
+            },
+            "distribution": {
+              "type": "string",
+              "minLength": 1
+            },
+            "repository": {
+              "type": "string",
+              "format": "uri"
+            },
+            "frameworkVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "frameworkRevision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "dartVersion": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "platformSdk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiLevel",
+            "platformVersion",
+            "buildVersion"
+          ],
+          "properties": {
+            "apiLevel": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "platformVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "buildVersion": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "hdcVersion",
+            "hvigorVersion",
+            "ohpmVersion"
+          ],
+          "properties": {
+            "hdcVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hvigorVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ohpmVersion": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "device": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "unavailable",
+                "available"
+              ]
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "osVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "apiLevel": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "application": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status"
+          ],
+          "properties": {
+            "kind": {
+              "const": "moiiApp"
+            },
+            "status": {
+              "enum": [
+                "unavailable",
+                "available"
+              ]
+            },
+            "applicationId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "buildMode": {
+              "enum": [
+                "debug",
+                "profile"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "status",
+        "blockers",
+        "evidence"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "examplePreflight",
+            "moiiDeviceAcceptance"
+          ]
+        },
+        "status": {
+          "enum": [
+            "verified",
+            "failed",
+            "blockedBySdk",
+            "blockedByDevice",
+            "notRun"
+          ]
+        },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "sdk",
+              "device",
+              "moiiApp",
+              "runner",
+              "signing"
+            ]
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "notice": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "verified"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "blockers": {
+                "maxItems": 0
+              },
+              "evidence": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "blockedBySdk",
+                  "blockedByDevice"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "blockers": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "permission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tier",
+        "platformPermission",
+        "actions",
+        "decisions"
+      ],
+      "properties": {
+        "tier": {
+          "enum": [
+            "P0",
+            "P1"
+          ]
+        },
+        "platformPermission": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "normalize",
+            "reset",
+            "exercise"
+          ],
+          "properties": {
+            "status": {
+              "$ref": "#/$defs/capabilityState"
+            },
+            "normalize": {
+              "$ref": "#/$defs/capabilityState"
+            },
+            "reset": {
+              "$ref": "#/$defs/capabilityState"
+            },
+            "exercise": {
+              "$ref": "#/$defs/capabilityState"
+            }
+          }
+        },
+        "decisions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allow",
+            "deny",
+            "allowOnce"
+          ],
+          "properties": {
+            "allow": {
+              "$ref": "#/$defs/capabilityState"
+            },
+            "deny": {
+              "$ref": "#/$defs/capabilityState"
+            },
+            "allowOnce": {
+              "$ref": "#/$defs/capabilityState"
+            }
+          }
+        }
+      }
+    },
+    "capabilityState": {
+      "enum": [
+        "unsupported",
+        "verified"
+      ]
+    }
+  }
+}

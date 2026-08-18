@@ -44,6 +44,10 @@ void main() {
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
+          PatchbayFriendlyCommand.permissionStatus ||
+          PatchbayFriendlyCommand.permissionNormalize ||
+          PatchbayFriendlyCommand.permissionExercise ||
+          PatchbayFriendlyCommand.permissionFail => <String>['camera'],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
           PatchbayFriendlyCommand.navigationGo ||
           PatchbayFriendlyCommand.navigationPush => <String>['settings'],
@@ -76,6 +80,15 @@ void main() {
         if (spec == PatchbayFriendlyCommand.snapshotWait) ...<String>[
           '--until',
           'exists',
+        ],
+        if (spec == PatchbayFriendlyCommand.permissionNormalize ||
+            spec == PatchbayFriendlyCommand.permissionFail) ...<String>[
+          '--state',
+          'granted',
+        ],
+        if (spec == PatchbayFriendlyCommand.permissionExercise) ...<String>[
+          '--decision',
+          'deny',
         ],
         ...words,
       ];
