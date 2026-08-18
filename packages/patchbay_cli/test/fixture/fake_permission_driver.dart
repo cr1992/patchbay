@@ -25,28 +25,32 @@ Future<void> main() async {
         'protocolVersion': protocolVersion,
         'requestId': requestId,
         'admission': 'accepted',
-        'capabilities': <String, Object?>{
-          'platform': 'fixture',
-          'driver': 'fixture.permission',
-          'driverVersion': '9',
-          'permissions': <String, Object?>{
-            'camera': <String, Object?>{
-              'actions': <String>[
-                'status',
-                'grant',
-                'revoke',
-                'reset',
-                'exercise',
-              ],
-              'decisions': <String>['allow', 'deny', 'allowOnce'],
+        if (mode != 'missing-capabilities')
+          'capabilities': <String, Object?>{
+            'platform': 'fixture',
+            'driver': 'fixture.permission',
+            'driverVersion': '9',
+            'permissions': <String, Object?>{
+              'camera': <String, Object?>{
+                'actions': <String>[
+                  'status',
+                  'grant',
+                  'revoke',
+                  'reset',
+                  'exercise',
+                ],
+                'decisions': <String>['allow', 'deny', 'allowOnce'],
+              },
             },
           },
-        },
         'evidence': const <Object?>[],
       }),
     );
     return;
   }
+  // `fail` is a CLI policy. A runner that sends it to the companion has
+  // violated the contract; make that regression unmistakable.
+  if (operation == 'fail') exit(23);
   final String permission = request['permission']! as String;
   final String? statePath = Platform.environment['FAKE_PERMISSION_STATE_FILE'];
   final File? stateFile = statePath == null ? null : File(statePath);
@@ -67,30 +71,25 @@ Future<void> main() async {
   if (operation == 'normalize' || operation == 'exercise') {
     stateFile?.writeAsStringSync(state);
   }
-  final bool failed = operation == 'fail' && request['state'] != state;
   stdout.writeln(
     jsonEncode(<String, Object?>{
       'protocolVersion': protocolVersion,
       'requestId': requestId,
-      'admission': failed ? 'rejected' : 'accepted',
-      if (failed)
-        'rejection': <String, Object?>{
-          'code': 'permissionStateMismatch',
-          'details': const <String, Object?>{},
+      'admission': 'accepted',
+      if (mode != 'missing-status')
+        'after': <String, Object?>{
+          'permission': permission,
+          'platformPermission': 'fixture.$permission',
+          'state': state,
+          'platformState': state,
+          'factSource': 'deviceReported',
+          'driver': 'fixture.permission',
+          'driverVersion': '9',
+          'supportedActions': <String>['status'],
+          'requiresRestart': false,
+          'requiresSettings': false,
+          'systemUiExpected': operation == 'exercise',
         },
-      'after': <String, Object?>{
-        'permission': permission,
-        'platformPermission': 'fixture.$permission',
-        'state': state,
-        'platformState': state,
-        'factSource': 'deviceReported',
-        'driver': 'fixture.permission',
-        'driverVersion': '9',
-        'supportedActions': <String>['status'],
-        'requiresRestart': false,
-        'requiresSettings': false,
-        'systemUiExpected': operation == 'exercise',
-      },
       'evidence': <Object?>[
         <String, Object?>{
           'factSource': 'deviceReported',

@@ -29,10 +29,14 @@ String _driver(String mode) {
 PatchbayPermissionDriverRequest _request(
   PatchbayPermissionOperation operation, {
   String permission = 'camera',
+  PatchbayPermissionState? state,
+  PatchbayPermissionDecision? decision,
 }) => PatchbayPermissionDriverRequest(
   requestId: 'fixture-request',
   operation: operation,
   permission: permission,
+  state: state,
+  decision: decision,
   timeoutMs: 1000,
 );
 
@@ -162,6 +166,82 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('accepted capability and status frames require their payload', () async {
+    for (final (String, PatchbayPermissionOperation, String) fixture
+        in <(String, PatchbayPermissionOperation, String)>[
+          (
+            'missing-capabilities',
+            PatchbayPermissionOperation.capabilities,
+            'permissionCapabilityInvalid',
+          ),
+          (
+            'missing-status',
+            PatchbayPermissionOperation.status,
+            'permissionStatusInvalid',
+          ),
+        ]) {
+      final PatchbayPermissionDriverRunner runner =
+          PatchbayPermissionDriverRunner(
+            PatchbayPermissionDriverClient(executable: _driver(fixture.$1)),
+          );
+      await expectLater(
+        runner.run(_request(fixture.$2), timeout: const Duration(seconds: 3)),
+        throwsA(
+          isA<PatchbayPermissionDriverException>().having(
+            (PatchbayPermissionDriverException error) => error.code,
+            'code',
+            fixture.$3,
+          ),
+        ),
+      );
+    }
+  });
+
+  test('direct runner rejects missing policy operands before driver', () async {
+    final PatchbayPermissionDriverRunner runner =
+        PatchbayPermissionDriverRunner(
+          PatchbayPermissionDriverClient(executable: _driver('normal')),
+        );
+    for (final (PatchbayPermissionOperation, String) fixture
+        in <(PatchbayPermissionOperation, String)>[
+          (PatchbayPermissionOperation.normalize, 'permissionStateRequired'),
+          (PatchbayPermissionOperation.fail, 'permissionStateRequired'),
+          (PatchbayPermissionOperation.exercise, 'permissionDecisionRequired'),
+        ]) {
+      await expectLater(
+        runner.run(_request(fixture.$1)),
+        throwsA(
+          isA<PatchbayPermissionDriverException>().having(
+            (PatchbayPermissionDriverException error) => error.code,
+            'code',
+            fixture.$2,
+          ),
+        ),
+      );
+    }
+  });
+
+  test('fail sends status and CLI computes permissionStateMismatch', () async {
+    final PatchbayPermissionDriverRunner runner =
+        PatchbayPermissionDriverRunner(
+          PatchbayPermissionDriverClient(executable: _driver('normal')),
+        );
+    final PatchbayPermissionDriverResponse response = await runner.run(
+      _request(
+        PatchbayPermissionOperation.fail,
+        state: PatchbayPermissionState.denied,
+      ),
+      timeout: const Duration(seconds: 3),
+    );
+    expect(response.admission, 'rejected');
+    expect(response.code, 'permissionStateMismatch');
+    expect(response.details, <String, Object?>{
+      'expected': 'denied',
+      'actual': 'granted',
+    });
+    expect(response.evidence.single.details['operation'], 'status');
   });
 
   test(

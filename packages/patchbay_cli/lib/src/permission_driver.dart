@@ -277,6 +277,23 @@ final class PatchbayPermissionDriverClient {
         diagnostic: stderrText.isEmpty ? null : stderrText,
       );
     }
+    if (response.accepted &&
+        request.operation == PatchbayPermissionOperation.capabilities &&
+        response.capabilities == null) {
+      throw PatchbayPermissionDriverException(
+        'permissionCapabilityInvalid',
+        diagnostic: stderrText.isEmpty ? null : stderrText,
+      );
+    }
+    if (response.accepted &&
+        request.operation == PatchbayPermissionOperation.status &&
+        response.before == null &&
+        response.after == null) {
+      throw PatchbayPermissionDriverException(
+        'permissionStatusInvalid',
+        diagnostic: stderrText.isEmpty ? null : stderrText,
+      );
+    }
     return response;
   }
 
@@ -315,15 +332,18 @@ final class PatchbayPermissionDriverRunner {
     PatchbayPermissionDriverRequest request, {
     Duration? timeout,
   }) async {
+    _validateRequestShape(request);
     final Duration budget = PatchbayPermissionBudget.forOperation(
       request.operation,
     ).validate(timeout);
     final Stopwatch elapsed = Stopwatch()..start();
     if (request.operation == PatchbayPermissionOperation.capabilities) {
-      return client.call(
+      final PatchbayPermissionDriverResponse response = await client.call(
         _withTimeout(request, budget.inMilliseconds),
         timeout: budget,
       );
+      _requireCapabilities(response);
+      return response;
     }
 
     final PatchbayPermissionDriverResponse preflight = await client.call(
@@ -370,13 +390,47 @@ final class PatchbayPermissionDriverRunner {
     if (remaining <= Duration.zero) {
       throw const PatchbayPermissionDriverException('budgetExceeded');
     }
+    final PatchbayPermissionDriverRequest driverRequest =
+        request.operation == PatchbayPermissionOperation.fail
+        ? PatchbayPermissionDriverRequest(
+            protocolVersion: request.protocolVersion,
+            requestId: request.requestId,
+            operation: PatchbayPermissionOperation.status,
+            deviceId: request.deviceId,
+            applicationId: request.applicationId,
+            sessionRef: request.sessionRef,
+            permission: request.permission,
+            policy: PatchbayPermissionOperation.fail.name,
+            timeoutMs: max(1, remaining.inMilliseconds),
+          )
+        : _withTimeout(request, remaining.inMilliseconds);
     final PatchbayPermissionDriverResponse operation = await client.call(
-      _withTimeout(request, remaining.inMilliseconds),
+      driverRequest,
       timeout: remaining,
     );
-    if (!operation.accepted ||
-        (request.operation != PatchbayPermissionOperation.normalize &&
-            request.operation != PatchbayPermissionOperation.exercise)) {
+    if (!operation.accepted) {
+      return operation;
+    }
+    if (request.operation == PatchbayPermissionOperation.status ||
+        request.operation == PatchbayPermissionOperation.fail) {
+      final PatchbayPermissionStatus observed = _requireStatus(operation);
+      if (request.operation == PatchbayPermissionOperation.fail &&
+          observed.state != request.state) {
+        return PatchbayPermissionDriverResponse(
+          protocolVersion: operation.protocolVersion,
+          requestId: request.requestId,
+          admission: 'rejected',
+          code: 'permissionStateMismatch',
+          details: <String, Object?>{
+            'expected': request.state!.name,
+            'actual': observed.state.name,
+          },
+          before: operation.before,
+          after: operation.after,
+          evidence: operation.evidence,
+          notice: operation.notice,
+        );
+      }
       return operation;
     }
 
@@ -400,11 +454,7 @@ final class PatchbayPermissionDriverRunner {
       timeout: verificationRemaining,
     );
     if (!verification.accepted) return verification;
-    final PatchbayPermissionStatus? verified =
-        verification.after ?? verification.before;
-    if (verified == null) {
-      throw const PatchbayPermissionDriverException('permissionStatusInvalid');
-    }
+    final PatchbayPermissionStatus verified = _requireStatus(verification);
     if (request.operation == PatchbayPermissionOperation.normalize &&
         verified.state != request.state) {
       return PatchbayPermissionDriverResponse(
@@ -438,6 +488,38 @@ final class PatchbayPermissionDriverRunner {
       interruption: operation.interruption,
       notice: operation.notice ?? verification.notice,
     );
+  }
+
+  static void _validateRequestShape(PatchbayPermissionDriverRequest request) {
+    if ((request.operation == PatchbayPermissionOperation.normalize ||
+            request.operation == PatchbayPermissionOperation.fail) &&
+        request.state == null) {
+      throw const PatchbayPermissionDriverException('permissionStateRequired');
+    }
+    if (request.operation == PatchbayPermissionOperation.exercise &&
+        request.decision == null) {
+      throw const PatchbayPermissionDriverException(
+        'permissionDecisionRequired',
+      );
+    }
+  }
+
+  static void _requireCapabilities(PatchbayPermissionDriverResponse response) {
+    if (response.accepted && response.capabilities == null) {
+      throw const PatchbayPermissionDriverException(
+        'permissionCapabilityInvalid',
+      );
+    }
+  }
+
+  static PatchbayPermissionStatus _requireStatus(
+    PatchbayPermissionDriverResponse response,
+  ) {
+    final PatchbayPermissionStatus? status = response.after ?? response.before;
+    if (response.accepted && status == null) {
+      throw const PatchbayPermissionDriverException('permissionStatusInvalid');
+    }
+    return status!;
   }
 
   static PatchbayPermissionAction _requiredAction(
