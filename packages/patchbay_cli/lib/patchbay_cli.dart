@@ -2,13 +2,17 @@ library;
 
 export 'src/client.dart';
 export 'src/artifact_download.dart';
+export 'src/android_permission_adapter.dart';
 export 'src/cli.dart';
 export 'src/command_help.dart';
 export 'src/command_registry.dart';
 export 'src/direct_connection.dart';
 export 'src/doctor.dart';
 export 'src/permission_driver.dart';
+export 'src/permission_platform_adapter.dart';
 export 'src/permission_command.dart';
+export 'src/permission_recovery.dart';
+export 'src/ios_permission_adapter.dart';
 export 'src/repl.dart';
 export 'src/result.dart';
 export 'src/rpc_timeout.dart';

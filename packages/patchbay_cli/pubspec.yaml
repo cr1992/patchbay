@@ -20,3 +20,5 @@ dev_dependencies:
 
 executables:
   patchbay: patchbay
+  patchbay-permission-android: patchbay_permission_android
+  patchbay-permission-ios: patchbay_permission_ios
