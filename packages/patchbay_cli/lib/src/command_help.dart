@@ -266,6 +266,9 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientCatalog ||
         PatchbayCommandTarget.clientSnapshot =>
           'Available on any connected Patchbay transport.',
+        PatchbayCommandTarget.localCatalogDescription =>
+          'Available on any connected Patchbay transport; reads the live '
+              'catalog and invokes no App command.',
         PatchbayCommandTarget.clientWidgetTree ||
         PatchbayCommandTarget.clientRenderTree ||
         PatchbayCommandTarget.clientFocusTree =>
@@ -276,6 +279,9 @@ abstract final class PatchbayCommandHelp {
               'whose token would have to share stdin with the commands.',
         PatchbayCommandTarget.localSessionStore =>
           'Always available: it needs no App, no connection and no catalog.',
+        PatchbayCommandTarget.localTraceStore =>
+          'Always available: it reads and writes the local trace store and '
+              'never dials the App.',
         PatchbayCommandTarget.localManifestVerification =>
           'Available on any connected Patchbay transport; a manifest that '
               'scopes entries to a destination also needs navigation.current.',
@@ -306,6 +312,8 @@ abstract final class PatchbayCommandHelp {
     PatchbayCommandTarget.clientCatalog ||
     PatchbayCommandTarget.clientSnapshot =>
       'Served by the transport handshake, not by an App catalog command.',
+    PatchbayCommandTarget.localCatalogDescription =>
+      'Reads one row from the live catalog and invokes no service command.',
     PatchbayCommandTarget.clientWidgetTree ||
     PatchbayCommandTarget.clientRenderTree ||
     PatchbayCommandTarget.clientFocusTree =>
@@ -316,6 +324,9 @@ abstract final class PatchbayCommandHelp {
     PatchbayCommandTarget.localSessionStore =>
       'Reads and writes the local launcher session directory '
           '(--session-dir); it never dials the App.',
+    PatchbayCommandTarget.localTraceStore =>
+      'Reads and writes append-only local trace files (--trace-dir); it '
+          'never invokes an App command.',
     PatchbayCommandTarget.localManifestVerification =>
       'Compares the manifest against the UI targets the catalog publishes; '
           'the verdict is computed locally and exits '

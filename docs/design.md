@@ -208,6 +208,11 @@ sequenceDiagram
 目录、日志、可复用脚本或调试轨迹。一旦它被持久化，任何"照着记录再跑一遍"的能力就天然有了一个
 绝对坐标入口，上面那条红线就只剩字面。
 
+调试轨迹的事实边界同样以观察者为准：CLI 只持久化自己实际看到的 session、request/response、job、
+执行证据和 artifact，不把 App host 内部 audit sink 的事实自动升级为 CLI 已观察事实。M0 原先关于
+“共用 emit 点”的结论因 host/CLI 进程边界无法成立，已于 2026-08-18 明示重新接受为：四包不为此新增
+跨进程 audit event-stream；host audit 与 CLI trace 共享纯脱敏/分类投影，是否传输仍由显式协议决定。
+
 ### 6. 慢事实用 job 表达
 
 配网、连接这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实

@@ -80,6 +80,45 @@ void main() {
     );
   });
 
+  test('typed execution supersedes legacy dispatched for immediate exits', () {
+    expect(
+      patchbayExitCodeFor(<String, Object?>{
+        'admission': 'accepted',
+        'payload': <String, Object?>{
+          'dispatched': false,
+          'execution': <String, Object?>{'classification': 'deviceConfirmed'},
+        },
+      }),
+      PatchbayExitCode.accepted,
+    );
+    expect(
+      patchbayExitCodeFor(<String, Object?>{
+        'admission': 'accepted',
+        'payload': <String, Object?>{
+          'dispatched': true,
+          'execution': <String, Object?>{'classification': 'notSent'},
+        },
+      }),
+      PatchbayExitCode.typedFailure,
+    );
+  });
+
+  test('legacy dispatched false still fails a completed terminal job', () {
+    expect(
+      patchbayExitCodeFor(<String, Object?>{
+        'admission': 'accepted',
+        'payload': <String, Object?>{
+          'terminal': true,
+          'dispatched': false,
+          'events': <Object?>[
+            <String, Object?>{'phase': 'completed'},
+          ],
+        },
+      }),
+      PatchbayExitCode.typedFailure,
+    );
+  });
+
   test('wait timeout is a typed job failure, not a transport exception', () {
     expect(
       waitForPatchbayJob(

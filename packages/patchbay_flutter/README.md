@@ -22,7 +22,7 @@ boundaries, see [`../patchbay/README.md`](https://github.com/cr1992/patchbay/blo
 | **Capture** | Optional root / target capture, next-frame re-check, pixel and byte limits, and chunked blob output |
 | **Keep awake** | Consumer-injected `keepAwakeDelegate`, off by default, auto-released on lease expiry and host disposal |
 | **Inspector switch** | `PatchbayInspectPolicy` opt-in on-device select mode: self-restoring lease, refused on non-debug builds |
-| **Host composition** | `PatchbayFlutterServiceHost` merges the UI and domain catalogs/operators into one service extension |
+| **Host composition** | `PatchbayFlutterServiceHost` merges the UI and domain catalogs/operators into one service extension and forwards core redacted audit configuration |
 
 The logging surface lives in core `patchbay` and only enters this host's catalog when the consumer
 explicitly injects a `PatchbayArtifactService`. The Widget/Render/Focus diagnostic trees are

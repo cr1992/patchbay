@@ -175,6 +175,23 @@ PatchbayCommandDescriptor(
 - 敏感参数标 `sensitive: true`——值只能走 `--stdin`（不回显），强制由 host 完成，见下一节；
 - handler 复用你既有的 controller / 并发约束，**不要**为 CLI 另建一套状态机。
 
+外部副作用命令只有在 descriptor 显式声明 `retryPolicy` 时才是幂等的：
+
+```dart
+retryPolicy: const PatchbayRetryPolicy(maxAttempts: 3, backoffMs: 250),
+```
+
+它只允许用于 `sideEffect: PatchbaySideEffect.external`，`maxAttempts` 含首次调用且只能是 2～3，
+`backoffMs` 为 0～5000。CLI 仅在 transport unavailable / timeout 时复用同一个 `requestId` 重试；
+App 拒绝、协议错误和 provider 已返回的结果都不重试。host 在调用 `domainInvoke` 前按
+`(command, requestId)` 去重：同参数共享进行中的工作并重放已完成结果，不同参数拒绝为
+`requestIdConflict`；未声明策略的命令遇到重复 ID 则拒绝为 `duplicateRequestId`，不会执行第二次。
+
+用 `patchbay describe <namespace.command>` 可只读检查 catalog 行、response schema 模式与
+`retryEligibility`，不会调用命令。需要把调试调用接入审计时，在 host 注入 `auditSink`；host 会先保留
+最近 256 条脱敏事实，再 best-effort 投递 sink。事件只含参数的递归类型、键结构和长度档位，不含标量值；
+sink 失败默认隔离，也可用 `onAuditSinkError` 上报，不能改写已经发生的命令结果。
+
 #### 敏感参数由 host 强制，adapter 不用配合
 
 `sensitive: true` 写在 descriptor 里就够了。客户端会用 `inputWasStdin` 标记「这个值来自无回显
@@ -213,6 +230,67 @@ final jobs = PatchbayJobRegistry(
   cancellationTimeout: const Duration(seconds: 3),
 );
 ```
+
+声明了 `responseSchema.terminal` 的 job 命令要把**同一份** `PatchbayCommandRegistry` 绑定到账本。
+handler 在 registry 的 dispatch scope 内调用 `start()` 时不用再传命令名：账本会捕获当前正在执行的
+exact registration identity，而不是相信 handler 提供的字符串。这是 0.4 新增的可选接入，旧 job 不改也
+继续走 `legacyUnvalidated`：
+
+```dart
+late final PatchbayJobRegistry jobs;
+final commands = PatchbayCommandRegistry(registrations);
+jobs = PatchbayJobRegistry(
+  commandRegistry: commands,
+  maxRunningJobs: 16,
+  retainedJobs: 100,
+);
+
+final jobId = jobs.start(
+  source: PatchbayFactSource.appRecorded,
+  body: refreshDevice,
+);
+```
+
+dispatch scope 跟随 async handler，嵌套或并发 dispatch 不会串用 descriptor。handler 仍显式传
+`command` 时只能与当前 registration 同名；试图绑定同 registry 的另一条 schema 会同步抛
+`ArgumentError`，且不会创建 job。
+
+确实在 dispatch 外启动 job 的 adapter 必须明确选择 `startBoundToCommand(command: ...)`；普通
+`start(command: ...)` 在 dispatch 外会拒绝，避免一个裸字符串冒充来源。账本在启动时深冻结该 descriptor
+的终态 schema，不在任务完成时重新读取可变 catalog。终态 payload 若漏字段、类型错误、变体或额外字段
+违规，会在写 ledger **之前**被替换成不含原值的 `providerProtocolViolation`。未绑定
+`commandRegistry` 且不声明 command 的旧 job 继续保留 0.3 free-payload 行为。
+
+需要表达设备执行结果的命令还要在 payload 中使用统一的 `execution` 对象。descriptor 按实际能力声明
+`confirmationBudgetMs`（`1..120000`）、`unchangedEvidenceMaxAgeMs`（`1..300000`）以及默认关闭的
+`weakConfirmationCompletes`：
+
+```dart
+final descriptor = PatchbayCommandDescriptor(
+  // 其余字段略
+  confirmationBudgetMs: 5000,
+  unchangedEvidenceMaxAgeMs: 30000,
+  weakConfirmationCompletes: false,
+);
+
+final payload = <String, Object?>{
+  'execution': <String, Object?>{
+    'classification': 'unchanged',
+    'factSource': 'appRecorded',
+    'observedAtMs': null,
+    'reasonCode': null,
+    'priorValueSource': 'deviceReported',
+    'priorObservedAtMs': priorObservedAt.millisecondsSinceEpoch,
+  },
+};
+```
+
+四种 classification 只有 `notSent`、`sentUnconfirmed`、`unchanged`、`deviceConfirmed`。job 终态中前两种
+默认只能落 `failed`，后两种只能落 `completed`；只有显式开启弱确认时 `sentUnconfirmed` 才能 completed。
+0.4 中 `deviceConfirmed` 的 factSource 只能是 `deviceReported`，`uiObserved` 不能升级成设备确认。
+`reasonCode` 若非空，必须在 `responseSchema` 的 string `allowedValues` 中封闭声明。新 `execution` 与旧
+`dispatched` 冲突时以新证据为准，并在响应 `details.legacyDispatchedConflict` 留痕；退出码仍按 job 终态，
+不会把“已发送”当成“已完成”。
 
 达到 `maxRunningJobs` 时，`start()` 会在 body 启动前抛出 `PatchbayJobCapacityExceeded`。adapter 应把它
 转换成稳定 rejection（例如 `jobCapacityExceeded`），不要排入无界队列。取消 callback 超时后任务仍是

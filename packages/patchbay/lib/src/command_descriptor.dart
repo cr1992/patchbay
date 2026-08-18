@@ -1,5 +1,7 @@
 import 'facts.dart';
+import 'execution_evidence.dart';
 import 'generated/core_wire.g.dart';
+import 'response_schema.dart';
 import 'ui_descriptor.dart';
 
 enum PatchbayCommandMode { readOnly, immediate, job }
@@ -11,6 +13,46 @@ enum PatchbayParameterType {
   boolean,
   enumeration,
   json,
+}
+
+/// Bounded retry contract for one consumer-owned external command.
+///
+/// The presence of this object is the command's explicit idempotency opt-in.
+/// [maxAttempts] includes the first attempt; clients must reuse one requestId
+/// across every attempt so the host can return the same execution fact.
+final class PatchbayRetryPolicy {
+  const PatchbayRetryPolicy({
+    required this.maxAttempts,
+    required this.backoffMs,
+  });
+
+  factory PatchbayRetryPolicy.fromJson(Object? value) {
+    if (value is! Map<Object?, Object?> ||
+        value.keys.any(
+          (Object? key) => key != 'maxAttempts' && key != 'backoffMs',
+        )) {
+      throw const FormatException('invalid retryPolicy shape');
+    }
+    final Object? maxAttempts = value['maxAttempts'];
+    final Object? backoffMs = value['backoffMs'];
+    if (maxAttempts is! int ||
+        maxAttempts < 2 ||
+        maxAttempts > 3 ||
+        backoffMs is! int ||
+        backoffMs < 0 ||
+        backoffMs > 5000) {
+      throw const FormatException('invalid retryPolicy bounds');
+    }
+    return PatchbayRetryPolicy(maxAttempts: maxAttempts, backoffMs: backoffMs);
+  }
+
+  final int maxAttempts;
+  final int backoffMs;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'maxAttempts': maxAttempts,
+    'backoffMs': backoffMs,
+  };
 }
 
 /// Machine-readable argument declaration used by both validation and CLI help.
@@ -57,6 +99,11 @@ final class PatchbayCommandDescriptor {
     required this.factSources,
     this.parameters = const <PatchbayParameterDescriptor>[],
     this.gates = const <String>{},
+    this.responseSchema,
+    this.unchangedEvidenceMaxAgeMs,
+    this.confirmationBudgetMs,
+    this.weakConfirmationCompletes = false,
+    this.retryPolicy,
   });
 
   final String name;
@@ -73,13 +120,30 @@ final class PatchbayCommandDescriptor {
   final Set<PatchbayFactSource> factSources;
   final List<PatchbayParameterDescriptor> parameters;
   final Set<String> gates;
+  final PatchbayResponseSchema? responseSchema;
+  final int? unchangedEvidenceMaxAgeMs;
+  final int? confirmationBudgetMs;
+  final bool weakConfirmationCompletes;
+
+  PatchbayExecutionContract get executionContract => PatchbayExecutionContract(
+    factSources: factSources,
+    unchangedEvidenceMaxAgeMs: unchangedEvidenceMaxAgeMs,
+    confirmationBudgetMs: confirmationBudgetMs,
+    weakConfirmationCompletes: weakConfirmationCompletes,
+  );
+
+  /// Idempotent retry opt-in for a consumer-owned external command.
+  ///
+  /// A registry-owned command cannot declare this: the host's external
+  /// fallback is the boundary that owns requestId de-duplication.
+  final PatchbayRetryPolicy? retryPolicy;
 
   Map<String, Object?> toJson() {
     final List<PatchbayFactSourceWire> sortedFactSources =
         factSources.map(_factSourceWire).toList(growable: false)
           ..sort((a, b) => a.name.compareTo(b.name));
     final List<String> sortedGates = gates.toList(growable: false)..sort();
-    return PatchbayCommandDescriptorWire(
+    final Map<String, Object?> json = PatchbayCommandDescriptorWire(
       name: name,
       summary: summary,
       plane: _planeWire(plane),
@@ -91,6 +155,20 @@ final class PatchbayCommandDescriptor {
           .map((value) => value._toWire())
           .toList(growable: false),
     ).toJson();
+    if (responseSchema case final PatchbayResponseSchema schema) {
+      json['responseSchema'] = schema.toJson();
+    }
+    if (unchangedEvidenceMaxAgeMs case final int value) {
+      json['unchangedEvidenceMaxAgeMs'] = value;
+    }
+    if (confirmationBudgetMs case final int value) {
+      json['confirmationBudgetMs'] = value;
+    }
+    json['weakConfirmationCompletes'] = weakConfirmationCompletes;
+    if (retryPolicy case final PatchbayRetryPolicy policy) {
+      json['retryPolicy'] = policy.toJson();
+    }
+    return json;
   }
 }
 

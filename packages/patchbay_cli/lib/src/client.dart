@@ -4,6 +4,8 @@ import 'package:patchbay/patchbay.dart';
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
+import 'request_id.dart';
+
 final class PatchbayProtocolException implements Exception {
   const PatchbayProtocolException(
     this.code, {
@@ -150,7 +152,6 @@ final class PatchbayConnection implements PatchbayClient {
   final String isolateId;
   final Set<String> _extensionRPCs;
   final PatchbayRuntimeIdentity runtimeIdentity;
-  int _nextRequest = 0;
 
   static const String _inspectorTreeExtension =
       'ext.flutter.inspector.getRootWidgetTree';
@@ -309,7 +310,7 @@ final class PatchbayConnection implements PatchbayClient {
     if (requestId != null && requestId.isEmpty) {
       throw const PatchbayProtocolException('requestIdValidationFailed');
     }
-    final String id = requestId ?? 'patchbay-cli-vm-${++_nextRequest}';
+    final String id = requestId ?? patchbayCliRequestId('vm');
     final Map<String, Object?> result = await _call(
       PatchbayServiceHost.invokeMethod,
       arguments: <String, Object?>{

@@ -27,6 +27,9 @@ enum PatchbayCommandTarget {
   /// `PatchbayClient.catalog` — the capability listing itself.
   clientCatalog,
 
+  /// A local projection of one live catalog row; invokes no App command.
+  localCatalogDescription,
+
   /// `PatchbayClient.snapshot` — the transport-level state read.
   clientSnapshot,
 
@@ -76,6 +79,9 @@ enum PatchbayCommandTarget {
 
   /// An explicitly installed external JSON Lines permission driver.
   localPermissionDriver,
+
+  /// The local append-only trace store, read and written without dialling.
+  localTraceStore,
 }
 
 /// Mechanical mapping between CLI-friendly paths and stable protocol names.
@@ -96,6 +102,13 @@ enum PatchbayFriendlyCommand {
     <String>['catalog'],
     summary: 'List the commands and UI targets the App registers.',
     target: PatchbayCommandTarget.clientCatalog,
+  ),
+  describe(
+    null,
+    <String>['describe'],
+    summary: 'Describe one live service command and its retry eligibility.',
+    usageSuffix: '<service-command>',
+    target: PatchbayCommandTarget.localCatalogDescription,
   ),
   snapshot(
     null,
@@ -196,6 +209,55 @@ enum PatchbayFriendlyCommand {
     summary: 'Pin one session for commands that pass no --session.',
     usageSuffix: '<session-id> | --clear',
     target: PatchbayCommandTarget.localSessionStore,
+  ),
+  traceStart(
+    null,
+    <String>['trace', 'start'],
+    summary: 'Create a local append-only debug trace.',
+    usageSuffix: '--name <name> [--activate] [--pin]',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceMark(
+    null,
+    <String>['trace', 'mark'],
+    summary: 'Append an operator note to an active or explicit trace.',
+    usageSuffix: '<note>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceStop(
+    null,
+    <String>['trace', 'stop'],
+    summary: 'Finish an active or explicitly named trace.',
+    usageSuffix: '[trace-id]',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceShow(
+    null,
+    <String>['trace', 'show'],
+    summary: 'Read a trace timeline, including crash recovery facts.',
+    usageSuffix: '<trace-id>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceExport(
+    null,
+    <String>['trace', 'export'],
+    summary: 'Export a re-redacted portable trace directory.',
+    usageSuffix: '<trace-id> --output <directory>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  traceDiff(
+    null,
+    <String>['trace', 'diff'],
+    summary: 'Compare two traces by command identity and occurrence.',
+    usageSuffix: '<before-trace-id> <after-trace-id>',
+    target: PatchbayCommandTarget.localTraceStore,
+  ),
+  tracePrune(
+    null,
+    <String>['trace', 'prune'],
+    summary: 'Remove ended, unpinned traces beyond the retention age.',
+    usageSuffix: '[--dry-run]',
+    target: PatchbayCommandTarget.localTraceStore,
   ),
   jobGet(
     'patchbay.job.get',
@@ -553,13 +615,47 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.doctor ||
       PatchbayFriendlyCommand.sessionsList ||
       PatchbayFriendlyCommand.sessionsPrune ||
-      PatchbayFriendlyCommand.permissionCapabilities => _noTail(
-        tail,
-        const <String, Object?>{},
-      ),
+      PatchbayFriendlyCommand.permissionCapabilities ||
+      PatchbayFriendlyCommand.tracePrune => _noTail(tail, <String, Object?>{
+        if (spec == PatchbayFriendlyCommand.tracePrune)
+          'dryRun': options.flag('dry-run'),
+      }),
       PatchbayFriendlyCommand.permissionDoctor => _noTail(
         tail,
         const <String, Object?>{},
+      ),
+      PatchbayFriendlyCommand.traceStart => _noTail(tail, <String, Object?>{
+        'name': options.option('name'),
+        'activate': options.flag('activate'),
+        'pinned': options.flag('pin'),
+      }),
+      PatchbayFriendlyCommand.traceMark => _atLeastOneTail(
+        tail,
+        (List<String> words) => <String, Object?>{'note': words.join(' ')},
+      ),
+      PatchbayFriendlyCommand.traceStop => _zeroOrOneTail(
+        tail,
+        (String? traceId) => <String, Object?>{'traceId': traceId},
+      ),
+      PatchbayFriendlyCommand.traceShow ||
+      PatchbayFriendlyCommand.traceExport => _oneTail(
+        tail,
+        (String traceId) => <String, Object?>{
+          'traceId': traceId,
+          if (spec == PatchbayFriendlyCommand.traceExport)
+            'includeArtifacts': options.flag('include-artifacts'),
+        },
+      ),
+      PatchbayFriendlyCommand.traceDiff => _twoTail(
+        tail,
+        (String before, String after) => <String, Object?>{
+          'before': before,
+          'after': after,
+        },
+      ),
+      PatchbayFriendlyCommand.describe => _oneTail(
+        tail,
+        (String command) => <String, Object?>{'command': command},
       ),
       // An omitted `--path` produces no arguments at all, which is what makes
       // the whole-snapshot read stay exactly the request it always was.
@@ -746,11 +842,13 @@ abstract final class PatchbayFriendlyCommandRegistry {
     };
     final bool writesArtifact =
         spec.artifact != PatchbayArtifactDisposition.none;
+    final bool writesTraceExport = spec == PatchbayFriendlyCommand.traceExport;
     final String? outputPath = options.option('output');
-    if (writesArtifact && (outputPath == null || outputPath.isEmpty)) {
+    if ((writesArtifact || writesTraceExport) &&
+        (outputPath == null || outputPath.isEmpty)) {
       throw const FormatException('--output is required for this command');
     }
-    if (!writesArtifact && outputPath != null) {
+    if (!writesArtifact && !writesTraceExport && outputPath != null) {
       throw const FormatException('--output is not valid for this command');
     }
     return PatchbayFriendlyInvocation(
@@ -910,6 +1008,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'restore',
       'screen-timeout-ms',
       'total-timeout-ms',
+      'name',
+      'activate',
+      'pin',
+      'dry-run',
+      'include-artifacts',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -948,6 +1051,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
   ) => switch (spec) {
     PatchbayFriendlyCommand.identity ||
     PatchbayFriendlyCommand.catalog ||
+    PatchbayFriendlyCommand.describe ||
     PatchbayFriendlyCommand.jobGet ||
     PatchbayFriendlyCommand.jobCancel ||
     PatchbayFriendlyCommand.uiWidgetTree ||
@@ -1004,6 +1108,20 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'decision',
       'confirm-system-permission',
     },
+    PatchbayFriendlyCommand.traceStart => const <String>{
+      'name',
+      'activate',
+      'pin',
+    },
+    PatchbayFriendlyCommand.traceMark ||
+    PatchbayFriendlyCommand.traceStop ||
+    PatchbayFriendlyCommand.traceShow => const <String>{},
+    PatchbayFriendlyCommand.traceExport => const <String>{
+      'output',
+      'include-artifacts',
+    },
+    PatchbayFriendlyCommand.traceDiff => const <String>{},
+    PatchbayFriendlyCommand.tracePrune => const <String>{'dry-run'},
     PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
     PatchbayFriendlyCommand.snapshot => const <String>{'path'},
     PatchbayFriendlyCommand.snapshotWait => const <String>{
@@ -1337,6 +1455,26 @@ abstract final class PatchbayFriendlyCommandRegistry {
       throw const FormatException('command requires two positional arguments');
     }
     return build(tail[0], tail[1]);
+  }
+
+  static Map<String, Object?> _zeroOrOneTail(
+    List<String> tail,
+    Map<String, Object?> Function(String?) build,
+  ) {
+    if (tail.length > 1) {
+      throw const FormatException('command accepts at most one argument');
+    }
+    return build(tail.isEmpty ? null : tail.single);
+  }
+
+  static Map<String, Object?> _atLeastOneTail(
+    List<String> tail,
+    Map<String, Object?> Function(List<String>) build,
+  ) {
+    if (tail.isEmpty) {
+      throw const FormatException('command requires an argument');
+    }
+    return build(tail);
   }
 
   static int? _optionalInt(ArgResults options, String name) {

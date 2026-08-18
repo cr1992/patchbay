@@ -1,0 +1,126 @@
+[
+  {
+    "type": "trace.started",
+    "observer": "cliObserved",
+    "payload": {"name": "golden-flow", "pinned": false}
+  },
+  {
+    "type": "session.observed",
+    "observer": "cliObserved",
+    "sessionRef": {"mode": "launcher", "sessionId": "session-1"},
+    "payload": {}
+  },
+  {
+    "type": "command.started",
+    "observer": "cliObserved",
+    "payload": {"command": "exec", "transport": "vmService"}
+  },
+  {
+    "type": "command.admission",
+    "observer": "hostReported",
+    "requestId": "request-1",
+    "jobId": "job-1",
+    "payload": {
+      "command": "pairing.start",
+      "descriptorDigest": "descriptor-1",
+      "arguments": {"deviceId": "robot-1"},
+      "response": {
+        "admission": "accepted",
+        "schemaMode": "validated",
+        "jobId": "job-1",
+        "execution": {
+          "classification": "deviceConfirmed",
+          "factSource": "deviceReported"
+        },
+        "payloadShape": {
+          "type": "object",
+          "length": "2-5",
+          "keys": {
+            "events": {
+              "type": "array",
+              "length": "1",
+              "items": [
+                {
+                  "type": "object",
+                  "length": "2-5",
+                  "keys": {
+                    "payload": {
+                      "type": "object",
+                      "length": "1",
+                      "keys": {
+                        "execution": {
+                          "type": "object",
+                          "length": "1",
+                          "keys": {
+                            "classification": {"type": "string", "length": "6-20"}
+                          }
+                        }
+                      }
+                    },
+                    "phase": {"type": "string", "length": "6-20"},
+                    "sequence": {"type": "integer"},
+                    "source": {"type": "string", "length": "6-20"}
+                  }
+                }
+              ]
+            },
+            "execution": {
+              "type": "object",
+              "length": "2-5",
+              "keys": {
+                "classification": {"type": "string", "length": "6-20"},
+                "factSource": {"type": "string", "length": "6-20"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "job.event",
+    "observer": "hostReported",
+    "factSource": "deviceReported",
+    "jobId": "job-1",
+    "payload": {
+      "sequence": 1,
+      "phase": "completed",
+      "operation": null,
+      "reason": null,
+      "payloadShape": {
+        "type": "object",
+        "length": "1",
+        "keys": {
+          "execution": {
+            "type": "object",
+            "length": "1",
+            "keys": {
+              "classification": {"type": "string", "length": "6-20"}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "artifact.attached",
+    "observer": "cliObserved",
+    "payload": {
+      "blobId": "blob-1",
+      "sha256": "27e0f133184c2e34811a91feedd7e714c3302f5d6ff0fb2759db17710c9b7e25",
+      "length": 15,
+      "contentType": "image/png",
+      "relativePath": "artifacts/27e0f133184c2e34811a91feedd7e714c3302f5d6ff0fb2759db17710c9b7e25"
+    }
+  },
+  {
+    "type": "command.finished",
+    "observer": "cliObserved",
+    "payload": {"outcome": "finished", "exitCode": 0}
+  },
+  {
+    "type": "trace.finished",
+    "observer": "cliObserved",
+    "payload": {"reason": "operatorStop"}
+  }
+]

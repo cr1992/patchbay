@@ -171,6 +171,20 @@ side-effect notices. It describes at least:
 - a `none`, `appState`, or `external` side effect;
 - the sensitive-parameter policy and the fact sources that may appear.
 
+Consumer-owned external commands may opt into idempotent transport retry with
+`retryPolicy: PatchbayRetryPolicy(maxAttempts: 2..3, backoffMs: 0..5000)`. The host de-duplicates
+before the external adapter by `(command, requestId)` plus an internal canonical-argument digest:
+matching in-flight work is shared and settled results are replayed, conflicting arguments are
+rejected as `requestIdConflict`, and a duplicate ID on a command without the opt-in is rejected as
+`duplicateRequestId`. Registry-owned commands cannot declare this policy because they do not pass
+through that external de-duplication boundary.
+
+`PatchbayServiceHost` may receive an `auditSink` and `onAuditSinkError`. It first retains the newest
+256 redacted `PatchbayAuditEvent`s in `auditEvents`, then delivers each event to the sink on a
+best-effort basis. Parameter shapes expose only recursive JSON types, object keys, and coarse
+length buckets; scalar values and the internal argument digest never leave the host. Sink failures
+cannot change an invocation result.
+
 Enforcement of `sensitive: true` is done by the host, not by the consumer's handler. The client
 marks a value as coming from no-echo stdin with `inputWasStdin`; the host validates against the
 catalog declaration before dispatch and strips that meta key out of the arguments, so
@@ -244,6 +258,43 @@ terminal state rather than being rewritten as cancelled.
 The theoretical upper bound on observable records in the registry is therefore
 `maxRunningJobs + retainedJobs`. `runningJobs`, `settledJobs`, and `totalJobs` are useful for
 consumer health checks, but are not a substitute for evidence of business completion.
+
+When a job command declares `responseSchema.terminal`, bind the ledger to the same immutable
+command registry. A handler calls `start()` without naming itself: the dispatch scope supplies the
+exact registration identity instead of trusting a handler-owned string.
+
+```dart
+late final PatchbayJobRegistry jobs;
+final commands = PatchbayCommandRegistry(registrations);
+jobs = PatchbayJobRegistry(commandRegistry: commands);
+
+final jobId = jobs.start(
+  source: PatchbayFactSource.appRecorded,
+  body: refreshDevice,
+);
+```
+
+The scope follows asynchronous handlers and remains isolated across nested or concurrent
+dispatches. If a handler still passes `command`, it must match the active registration; selecting
+another schema in the same registry fails synchronously before a job is created. An adapter that
+really starts work outside dispatch must opt into the explicit
+`startBoundToCommand(command: ...)` API. Plain `start(command: ...)` is rejected outside dispatch,
+so a bare string cannot masquerade as provenance.
+
+The terminal schema is deeply frozen when the job starts and checked before its event enters the
+ledger. An invalid provider payload is replaced with a value-free `providerProtocolViolation`; the
+invalid payload itself is never retained. A registry constructed without `commandRegistry` and a
+job started without `command` keep the 0.3 free-payload behavior.
+
+Commands that publish device execution evidence use the closed `execution.classification` values
+`notSent`, `sentUnconfirmed`, `unchanged`, and `deviceConfirmed`. Configure confirmation and stale
+same-value evidence on `PatchbayCommandDescriptor` with `confirmationBudgetMs`,
+`unchangedEvidenceMaxAgeMs`, and the opt-in `weakConfirmationCompletes`. A `deviceConfirmed` result
+must come from `deviceReported`; UI observation remains domain evidence and cannot upgrade device
+confirmation. Nullable `reasonCode` strings are closed with the response schema's `allowedValues`.
+Host, bound job ledger, and CLI run the same semantic validator. Legacy commands with no execution
+object stay readable, and when `execution` conflicts with `dispatched`, execution wins while the
+response records `details.legacyDispatchedConflict`.
 
 If the consumer's async API only means "the request has been sent", you cannot mark `completed`
 when that Future returns; you must keep observing domain state until the app can give a real

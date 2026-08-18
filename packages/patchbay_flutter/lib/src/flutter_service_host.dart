@@ -15,10 +15,14 @@ final class PatchbayFlutterServiceHost {
     PatchbayInvocationSource? domainInvoke,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
   }) : _host = PatchbayServiceHost(
          applicationId: applicationId,
          appInstanceId: appInstanceId,
          registrar: registrar,
+         auditSink: auditSink,
+         onAuditSinkError: onAuditSinkError,
          registry: PatchbayCommandRegistry.combine(<PatchbayCommandRegistry>[
            _uiCommandRegistry(bridge),
            if (bridge.artifacts case final PatchbayArtifactService artifacts)
@@ -62,6 +66,8 @@ final class PatchbayFlutterServiceHost {
   String get appInstanceId => _host.appInstanceId;
 
   int get schemaVersion => PatchbayServiceHost.schemaVersion;
+
+  List<PatchbayAuditEvent> get auditEvents => _host.auditEvents;
 
   Future<Map<String, Object?>> dispatchCatalog() => _host.dispatchCatalog();
 

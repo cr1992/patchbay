@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:developer';
+
 import 'package:patchbay/patchbay.dart';
 import 'package:test/test.dart';
 
@@ -179,6 +182,181 @@ void main() {
         'external': 'device.status',
       });
       expect(externalCalls, <String>['device.status']);
+    },
+  );
+
+  test(
+    'service host validates accepted payload and exposes per-command mode',
+    () async {
+      final PatchbayCommandRegistry registry = PatchbayCommandRegistry(
+        <PatchbayCommandRegistration<Object?>>[
+          PatchbayCommandRegistration<Map<String, Object?>>(
+            descriptor: PatchbayCommandDescriptor(
+              name: 'patchbay.typed',
+              summary: 'Typed command.',
+              plane: PatchbayPlane.domain,
+              mode: PatchbayCommandMode.immediate,
+              sideEffect: PatchbaySideEffect.none,
+              factSources: const <PatchbayFactSource>{
+                PatchbayFactSource.appRecorded,
+              },
+              responseSchema: const PatchbayResponseSchema(
+                accepted: PatchbayResponseValueSchema(
+                  type: PatchbayResponseType.object,
+                  properties: <String, PatchbayResponseValueSchema>{
+                    'session': PatchbayResponseValueSchema(
+                      type: PatchbayResponseType.string,
+                    ),
+                  },
+                  required: <String>{'session'},
+                ),
+              ),
+            ),
+            decode: (arguments) => arguments,
+            handle: (_, requestId) => PatchbayInvocation.accepted(
+              requestId: requestId,
+              payload: const <String, Object?>{'session': null},
+            ).toJson(),
+          ),
+        ],
+      );
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'schema-test',
+        registry: registry,
+        catalog: () async => const <String, Object?>{},
+        snapshot: () async => const <String, Object?>{},
+        invoke: (_, _, requestId) async =>
+            PatchbayInvocation.accepted(requestId: requestId).toJson(),
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'patchbay.typed',
+        const <String, Object?>{},
+        'schema-request',
+      );
+
+      expect(host.features, contains(PatchbayFeature.responseSchemas));
+      expect(response['schemaMode'], 'validated');
+      expect(response['admission'], 'rejected');
+      final Map<Object?, Object?> rejection =
+          response['rejection']! as Map<Object?, Object?>;
+      expect(rejection['code'], 'providerProtocolViolation');
+      final Map<Object?, Object?> details =
+          rejection['details']! as Map<Object?, Object?>;
+      expect(details['reason'], 'unexpectedNull');
+      expect(details['field'], r'$.payload.session');
+    },
+  );
+
+  test(
+    'first direct no-arg invocation discovers an external response schema',
+    () async {
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'external-schema-test',
+        registrar: (_, _) {},
+        catalog: () async => <String, Object?>{
+          'commands': <Object?>[
+            <String, Object?>{
+              'name': 'device.status',
+              'sideEffect': 'external',
+              'retryPolicy': <String, Object?>{
+                'maxAttempts': 2,
+                'backoffMs': 0,
+              },
+              'responseSchema': <String, Object?>{
+                'accepted': <String, Object?>{
+                  'type': 'object',
+                  'properties': <String, Object?>{
+                    'online': <String, Object?>{'type': 'boolean'},
+                  },
+                  'required': <String>['online'],
+                  'additionalProperties': false,
+                },
+              },
+            },
+          ],
+        },
+        snapshot: () async => const <String, Object?>{},
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{'online': 'yes'},
+        ).toJson(),
+      );
+
+      final Map<String, Object?> direct = await host.dispatchInvoke(
+        'device.status',
+        const <String, Object?>{},
+        'same-request',
+      );
+      final ServiceExtensionResponse response = await host.handleInvoke(
+        PatchbayServiceHost.invokeMethod,
+        <String, String>{
+          'command': 'device.status',
+          'args': '{}',
+          'requestId': 'same-request',
+        },
+      );
+      final Map<String, Object?> vm = Map<String, Object?>.from(
+        jsonDecode(response.result!) as Map<String, dynamic>,
+      );
+
+      expect(vm, direct);
+      expect(direct['schemaMode'], 'validated');
+      expect(
+        (direct['rejection']! as Map<Object?, Object?>)['code'],
+        'providerProtocolViolation',
+      );
+    },
+  );
+
+  test(
+    'external schema registration fails closed before catalog publication',
+    () async {
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'invalid-schema-test',
+        catalog: () async => <String, Object?>{
+          'commands': <Object?>[
+            <String, Object?>{
+              'name': 'device.invalid',
+              'responseSchema': <String, Object?>{
+                'accepted': <String, Object?>{
+                  'type': 'object',
+                  'properties': const <String, Object?>{},
+                  'required': const <String>[],
+                  // additionalProperties is deliberately absent.
+                },
+              },
+            },
+          ],
+        },
+        snapshot: () async => const <String, Object?>{},
+        invoke: (_, _, requestId) async =>
+            PatchbayInvocation.accepted(requestId: requestId).toJson(),
+      );
+
+      final Map<String, Object?> catalog = await host.dispatchCatalog();
+      expect(catalog.containsKey('commands'), isFalse);
+      final Map<Object?, Object?> rejection =
+          catalog['rejection']! as Map<Object?, Object?>;
+      final Map<Object?, Object?> details =
+          rejection['details']! as Map<Object?, Object?>;
+      final List<Object?> violations = details['violations']! as List<Object?>;
+      expect(
+        violations.single,
+        containsPair('reason', 'invalidResponseSchema'),
+      );
+      final Map<String, Object?> direct = await host.dispatchInvoke(
+        'device.invalid',
+        const <String, Object?>{},
+        'invalid-direct',
+      );
+      final Map<Object?, Object?> directRejection =
+          direct['rejection']! as Map<Object?, Object?>;
+      expect(directRejection['code'], 'providerProtocolViolation');
+      expect(
+        (directRejection['details']! as Map<Object?, Object?>)['reason'],
+        'catalogUnavailable',
+      );
     },
   );
 }

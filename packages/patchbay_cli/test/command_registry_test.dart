@@ -27,7 +27,8 @@ void main() {
       final List<String> words = <String>[
         ...spec.path,
         ...switch (spec) {
-          PatchbayFriendlyCommand.exec => <String>['fixture.command'],
+          PatchbayFriendlyCommand.exec ||
+          PatchbayFriendlyCommand.describe => <String>['fixture.command'],
           PatchbayFriendlyCommand.jobGet ||
           PatchbayFriendlyCommand.jobCancel => <String>['job-id'],
           PatchbayFriendlyCommand.uiTextSet ||
@@ -49,6 +50,15 @@ void main() {
           PatchbayFriendlyCommand.permissionNormalize ||
           PatchbayFriendlyCommand.permissionExercise ||
           PatchbayFriendlyCommand.permissionFail => <String>['camera'],
+          PatchbayFriendlyCommand.traceMark => <String>['operator-note'],
+          PatchbayFriendlyCommand.traceShow ||
+          PatchbayFriendlyCommand.traceExport => <String>[
+            'tr_fixture_0123456789abcdef0123',
+          ],
+          PatchbayFriendlyCommand.traceDiff => <String>[
+            'tr_before_0123456789abcdef0123',
+            'tr_after_0123456789abcdef0123',
+          ],
           PatchbayFriendlyCommand.uiVerifyManifest => <String>['targets.json'],
           PatchbayFriendlyCommand.navigationGo ||
           PatchbayFriendlyCommand.navigationPush => <String>['settings'],
@@ -92,6 +102,14 @@ void main() {
           'deny',
         ],
         if (spec == PatchbayFriendlyCommand.uiTargets) '--emit-manifest',
+        if (spec == PatchbayFriendlyCommand.traceStart) ...<String>[
+          '--name',
+          'fixture-trace',
+        ],
+        if (spec == PatchbayFriendlyCommand.traceExport) ...<String>[
+          '--output',
+          '/tmp/trace-output',
+        ],
         ...words,
       ];
       final parsed = patchbayCliParser().parse(options);

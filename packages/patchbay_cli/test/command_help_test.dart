@@ -82,6 +82,7 @@ Availability is still decided by the running App catalog.
       expect(groups, <String>{
         'identity',
         'catalog',
+        'describe',
         'snapshot',
         'exec',
         'repl',
@@ -90,6 +91,7 @@ Availability is still decided by the running App catalog.
         'job',
         'session',
         'sessions',
+        'trace',
         'navigation',
         'ui',
         'logs',

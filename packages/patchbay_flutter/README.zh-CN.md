@@ -20,7 +20,7 @@ consumer 指接入 Patchbay 的 App。
 | **截图** | 可选 root / target capture、下一帧复核、像素与字节上限、chunked blob 输出 |
 | **保持亮屏** | consumer 注入的 `keepAwakeDelegate`、默认关、租约到期与 host 销毁自动还原 |
 | **Inspector 开关** | `PatchbayInspectPolicy` opt-in 的设备端选择模式：租约到期自还原、非 debug 构建拒绝 |
-| **Host 组合** | `PatchbayFlutterServiceHost` 把 UI 与领域 catalog/operator 合并到同一 service extension |
+| **Host 组合** | `PatchbayFlutterServiceHost` 把 UI 与领域 catalog/operator 合并到同一 service extension，并透传 core 的脱敏审计配置 |
 
 日志面位于 core `patchbay`，只有 consumer 显式注入 `PatchbayArtifactService` 时才进入本 host 的
 catalog。Widget/Render/Focus 诊断树由

@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'command_dispatch_scope.dart';
 import 'command_descriptor.dart';
+import 'execution_evidence.dart';
 import 'invocation.dart';
+import 'response_schema.dart';
 
 typedef PatchbayCommandDecoder<T> = T Function(Map<String, Object?> arguments);
 typedef PatchbayCommandGate<T> =
@@ -47,9 +50,11 @@ final class PatchbayCommandRegistration<T> {
 
   Future<Map<String, Object?>> dispatch(
     Map<String, Object?> arguments,
-    String requestId,
-  ) async {
+    String requestId, {
+    void Function(String result)? onGateResult,
+  }) async {
     if (!available) {
+      onGateResult?.call('notEvaluated');
       return PatchbayInvocation.rejected(
         requestId: requestId,
         rejection: const PatchbayRejection(code: 'commandNotRegistered'),
@@ -59,6 +64,7 @@ final class PatchbayCommandRegistration<T> {
     try {
       request = _decode(arguments);
     } on Object catch (failure) {
+      onGateResult?.call('notEvaluated');
       final PatchbayCommandFailureHandler? recover = _onDecodeFailure;
       if (recover == null) rethrow;
       return recover(failure, arguments, requestId, descriptor);
@@ -67,7 +73,11 @@ final class PatchbayCommandRegistration<T> {
       request,
       requestId,
     );
-    if (gateRejection != null) return gateRejection;
+    if (gateRejection != null) {
+      onGateResult?.call('rejected');
+      return gateRejection;
+    }
+    onGateResult?.call(_gate == null ? 'notDeclared' : 'passed');
     try {
       return await _handle(request, requestId);
     } on Object catch (failure) {
@@ -99,6 +109,18 @@ final class PatchbayCommandRegistry {
 
   bool get isEmpty => _registrations.isEmpty;
 
+  bool get hasResponseSchemas => _registrations.values.any(
+    (PatchbayCommandRegistration<Object?> registration) =>
+        registration.available &&
+        registration.descriptor.responseSchema != null,
+  );
+
+  PatchbayResponseSchema? responseSchemaFor(String command) =>
+      _registrations[command]?.descriptor.responseSchema;
+
+  PatchbayExecutionContract? executionContractFor(String command) =>
+      _registrations[command]?.descriptor.executionContract;
+
   List<PatchbayCommandDescriptor> get descriptors =>
       List<PatchbayCommandDescriptor>.unmodifiable(
         _registrations.values
@@ -118,12 +140,21 @@ final class PatchbayCommandRegistry {
   Future<Map<String, Object?>?> tryDispatch(
     String command,
     Map<String, Object?> arguments,
-    String requestId,
-  ) async {
+    String requestId, {
+    void Function(String result)? onGateResult,
+  }) async {
     final PatchbayCommandRegistration<Object?>? registration =
         _registrations[command];
     if (registration == null) return null;
-    return registration.dispatch(arguments, requestId);
+    return runInPatchbayCommandDispatchScope<Map<String, Object?>>(
+      registry: this,
+      descriptor: registration.descriptor,
+      body: () => registration.dispatch(
+        arguments,
+        requestId,
+        onGateResult: onGateResult,
+      ),
+    );
   }
 
   /// Dispatches within this registry and types an unknown command as rejected.
@@ -148,6 +179,34 @@ final class PatchbayCommandRegistry {
         <String, PatchbayCommandRegistration<Object?>>{};
     for (final PatchbayCommandRegistration<Object?> registration
         in registrations) {
+      validatePatchbayExecutionContract(
+        registration.descriptor.executionContract,
+      );
+      if (registration.descriptor.weakConfirmationCompletes &&
+          registration.descriptor.mode != PatchbayCommandMode.job) {
+        throw ArgumentError(
+          'weakConfirmationCompletes is only valid for job commands',
+        );
+      }
+      if (registration.descriptor.retryPolicy != null) {
+        throw ArgumentError(
+          'retryPolicy is only valid on consumer external fallback commands',
+        );
+      }
+      if (registration.descriptor.responseSchema
+          case final PatchbayResponseSchema schema) {
+        validatePatchbayResponseSchema(schema);
+        if (registration.descriptor.mode == PatchbayCommandMode.job &&
+            !schema.terminal.keys.toSet().containsAll(const <String>{
+              'completed',
+              'failed',
+              'cancelled',
+            })) {
+          throw ArgumentError(
+            'job response schema must declare every terminal phase',
+          );
+        }
+      }
       final String name = registration.descriptor.name;
       if (indexed.containsKey(name)) {
         throw ArgumentError.value(name, 'registrations', 'duplicate command');

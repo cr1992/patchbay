@@ -5,6 +5,8 @@
 > 关联：PB-040-23
 >
 > 设计闸门：无
+>
+> M0 修订：2026-08-18 重新接受 audit/trace 跨进程边界；本版不新增 host audit event-stream。
 
 ## 问题
 
@@ -65,13 +67,15 @@ artifacts/
 - `schemaVersion`、`traceId`、`sequence`、`eventId`；
 - UTC `recordedAt` 与相对起点的单调 `elapsedMs`；
 - `type`、`requestId?`、`sessionRef?`、`jobId?`；
-- `factSource`、`payload`、`previousEventHash`。
+- `observer`、可选协议事实 `factSource`、`payload`、`previousEventHash`。`observer` 只表达谁把事件写进
+  trace（如 `cliObserved/operatorStated/hostReported`）；`factSource` 只在承载协议事实时使用
+  `appRecorded/deviceReported/uiObserved/...`，两套词表不得再共用一个字段。
 
 事件类型**写入侧封闭、读取侧开放**，与 feature capability 的不对称同构：本版 writer 只能产出下列
 类型，而 reader 遇到没见过的类型必须保留但不解释、导出时不得丢失。这样后续版本（例如
 PB-040-25/26 的权限事件）新增类型时，老 reader 降级成“我不解释它”，而不是解析失败。
 
-首版写入侧封闭表：`trace.started`、`session.observed`、`command.started`、`command.admission`、
+首版写入侧封闭表：`trace.started`、`trace.truncated`、`session.observed`、`command.started`、`command.admission`、
 `job.event`、`artifact.attached`、`note.added`、`command.finished`、`trace.finished`。
 
 `artifacts/` 使用 sha256 内容寻址，事件只保存摘要、长度、contentType、原 blob 元数据和相对路径。
@@ -80,7 +84,8 @@ PB-040-25/26 的权限事件）新增类型时，老 reader 降级成“我不�
 ## 写入与恢复
 
 - sequence 在单个 trace 内单调递增，append、flush 后才把事件视为已记录。
-- manifest 使用临时文件 + 原子 rename 更新；events 尾部半行在读取时标记 `truncatedTail` 并忽略。
+- manifest 使用临时文件 + 原子 rename 更新；普通只读会把 events 尾部半行标记 `truncatedTail` 并忽略；
+  `show/stop` 恢复时先在文件锁内截掉半行、追加 `trace.truncated`，再补写未闭合命令，不能形成只读死角。
 - `previousEventHash` 形成轻量 hash chain，用于发现手工截断或重排，不提供身份认证承诺。
 - CLI 进程异常退出时，下一次 `show/stop` 将未闭合命令标为 `interrupted`，但不伪造 host 终态。
 - launcher 重连后继续使用原 traceId，并新增 `session.observed`，不覆盖旧 session 事实。
@@ -88,7 +93,8 @@ PB-040-25/26 的权限事件）新增类型时，老 reader 降级成“我不�
 ## 记录边界与脱敏
 
 - 请求参数按 descriptor 处理：sensitive 字段只记 `{redacted: true, source: stdin}`，不保存值或摘要。
-- PB-040-22 响应 schema 增加可持久化/敏感元数据；未声明字段默认不落盘。
+- PB-040-22 响应 schema 只提供结构校验，不把字段自动升级为“可持久化”；本版默认只保存 admission、
+  稳定 code、执行证据与字段类型形状。以后若增加逐字段持久化/敏感元数据，再单独扩展值级记录。
 - 老 host 的自由 payload 默认只保存 admission、字段名集合、类型形状和 `legacyUnvalidated: true`；必须
   显式 `--include-legacy-payload` 才能保存值，并在终端二次提示。**非 TTY 环境下该标志直接拒绝**，
   需要额外的显式开关才能生效——自动化和 CI 里没有终端可提示，让它静默降级成允许，等于把一条脱敏
@@ -132,25 +138,34 @@ PB-040-24 继续保留在 backlog，但不进入 0.4.0。具体前置与候选�
 - session 跨断连延续依赖 PB-040-11；执行分类依赖 PB-040-21。
 - 权限状态与系统弹窗只有在 PB-040-25/26 落地后才能形成完整 interruption 事件；此前 trace 必须标记
   `externalInterruptionUnknown`，不能把普通超时当成权限结论。
-- audit sink 与 trace 共用事件投递接口：audit 是脱敏摘要投影，trace 是由操作者显式开启的详细时间线，
-  两者不能各自拦截 CLI 再形成两套事实。“投影”是可测的关系而不是措辞：audit 从同一个 emit 点取脱敏
-  子集，测试断言**任何一条 audit 记录都能在同一 traceId 的事件流里找到对应事件**。否则两者会各自
-  演化，最后谁也不知道哪一份是真的。
+### M0 裁决修订：audit 与 trace 的跨进程边界（重新接受）
+
+M0 原结论要求 audit 与 trace 共用 emit 点，并可逐条对应。实现前核对进程边界后确认该前提不成立：
+audit sink 位于 App host，trace recorder 位于 CLI；若不新增 wire event-stream，二者没有共同 emit 点。
+本次明确重新接受以下替代结论，而不是由实现 MR 静默改写：
+
+- 本版不为 host audit 新增跨进程 event-stream wire。trace 的权威输入限定为 CLI 实际观察到的
+  session、request/response、job、执行证据和 artifact；只存在于 App host 内的 audit sink 不自动回传。
+- 两者共享参数形状脱敏函数、执行分类投影和 contract tests，保证对同一份响应不会得出两种分类；但不能
+  宣称每条 host-only audit 都已出现在本机 trace 中。
 - VM/direct 写入相同事件 schema；transport 只作为事件字段，不改变命令结果。
 
 ## 验证
 
 - 单测覆盖并发 writer、序号、原子 manifest、尾部半行、hash chain、资源上限和 prune dry-run。
-- 断言每条 audit 记录都能在同一 traceId 的事件流中找到对应事件（投影关系，不是两套事实）。
+- 断言 host audit 与 CLI trace 对同一响应使用同一脱敏/执行分类投影；host-only audit 不会被伪装成
+  CLI 已观察事实。
 - 断言非 TTY 下 `--include-legacy-payload` 被拒绝，而不是静默按允许处理。
-- 断言 `ui.gesture.*` 事件里没有全局坐标。
+- 断言 trace 唯一写入点递归拒绝绝对坐标字段；!67 汇合后的集成测试另断言手势请求只含局部坐标且响应
+  不含坐标，避免把纵深防御误写成手势契约证据。
 - 断言 reader 遇到未知事件类型时保留原样且导出不丢失。
 - 同名命令重复出现时 diff 结果可复现（同一对轨迹跑两次得同一结果）。
 - golden 覆盖 start → 多命令 → job → artifact → stop 的完整 NDJSON 与 portable export。
 - 敏感值 mutation 测试证明 stdin、token、wsUri 和 legacy payload 默认不落盘、不进入 export。
 - 0.3.x fixture 验证 legacy 形状；0.4 fixture 验证 response schema 与执行证据完整记录。
 - launcher 断连/重连后 trace 连续，且 session 变化可见。
-- 两个接入方分别完成一次真机轨迹导出与 diff；实际写回放需另做专项真机验收。
+- moii app 作为首个真实接入方完成一次跨 session、job、artifact 的真机轨迹导出与 diff，不以 example
+  代替；第二接入方再验证同一 portable schema。实际写回放需另做专项真机验收。
 
 ## 已裁决预算
 

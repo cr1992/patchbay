@@ -2,6 +2,7 @@ import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_transport/patchbay_transport.dart';
 
 import 'client.dart';
+import 'request_id.dart';
 import 'rpc_timeout.dart';
 
 /// Adapts the explicit direct HTTP transport to the same command client used
@@ -32,7 +33,6 @@ final class PatchbayDirectConnection implements PatchbayClient {
        );
 
   final PatchbayDirectClient _client;
-  int _nextRequest = 0;
 
   @override
   Future<Map<String, Object?>> identity() => _translate(_client.identity);
@@ -59,7 +59,7 @@ final class PatchbayDirectConnection implements PatchbayClient {
     if (requestId != null && requestId.isEmpty) {
       throw const PatchbayProtocolException('requestIdValidationFailed');
     }
-    final String id = requestId ?? 'patchbay-cli-direct-${++_nextRequest}';
+    final String id = requestId ?? patchbayCliRequestId('direct');
     final Map<String, Object?> result = await _translate(
       () => _client.invoke(
         command: command,

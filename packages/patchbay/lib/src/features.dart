@@ -33,6 +33,9 @@ enum PatchbayFeature {
   /// sends that object; absence means it may only use the whole-snapshot RPC.
   snapshotSelectors,
 
+  /// Catalog command descriptors can drive host-side response validation.
+  responseSchemas,
+
   /// `*LifecycleNotResumed` rejections carry `details.lifecycleState`.
   ///
   /// Declared by the Flutter host, which owns the lifecycle gate. A pure Dart
