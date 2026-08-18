@@ -86,6 +86,7 @@ Availability is still decided by the running App catalog.
         'exec',
         'repl',
         'doctor',
+        'permission',
         'job',
         'session',
         'sessions',
