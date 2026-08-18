@@ -1,6 +1,6 @@
 # 发版检查清单
 
-> 只由 maintainer 执行：版本分支验收 → 发布 MR 合回 `main` → 同步同一 SHA 到 GitHub → 打 tag → 发布 → 下游按 pin 升级。
+> 只由 maintainer 执行：版本验收 → 发布 MR 合入 `main` → 同步同一 SHA 到 GitHub → 打 tag → 发布 → 下游按 pin 升级。
 > 本清单是发版动作的核对表，不改变 [CONTRIBUTING.md](../CONTRIBUTING.md) 定义的权责边界。
 
 清单分两半：**脚本项**由 `release_prep` 一次跑完并给红绿，不必人肉逐条比对；**人工项**是脚本
@@ -105,7 +105,7 @@ $ dart run packages/patchbay/bin/release_prep.dart --version X.Y.Z --apply --ena
 
 ## 4. 人工项：打 tag（`patchbay-vX.Y.Z`）
 
-- [ ] 顺序遵循 CONTRIBUTING.md「发版」：发布 MR 合回 `main` → 同步同一 SHA 到 GitHub → 打 tag
+- [ ] 顺序遵循 CONTRIBUTING.md「发版」：发布 MR 合入 `main` → 同步同一 SHA 到 GitHub → 打 tag
 - [ ] tag 名格式 `patchbay-vX.Y.Z`，与第 1 节核过的版本号一致
 
 ```console

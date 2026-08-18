@@ -34,6 +34,7 @@
 - RC 阶段冻结范围，只接发布阻断修复。版本通过 CI、兼容和真机门禁后，由一个发布 MR 把
   `release/<SemVer>` 合回 `main`；随后同步 GitHub、打 tag 并发布。完成后回收版本分支。
 - 紧急修复从 `main` 建 `hotfix/<SemVer>`，验证并合回 `main` 后，再前向合入仍活跃的版本分支。
+- 版本分支模型自 0.5.0 起适用。0.4.0 已在 `main` 上集成，其剩余 MR 仍以 `main` 为目标。
 
 完整规则和范围变更流程见 [`docs/planning.md`](docs/planning.md)。
 
