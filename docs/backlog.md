@@ -45,7 +45,7 @@
 | PB-040-24 | 从调试轨迹生成 scenario 并受控回放 | 跑通的操作链需要沉淀为自动化，但应等待 recorder、权限 driver 和真实轨迹 schema 稳定 | — | 待排期 | [未来回放](proposals/future/trace-replay.md)；DG-040-06 |
 | PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 normalize/exercise/fail 策略建立权限前置条件 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 已排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07 |
 | PB-040-26 | 系统权限弹窗 driver 与恢复协议：Android adb/UiAutomator、iOS simctl/XCUITest，处理后重新握手和解析目标 | Patchbay 只能观察 Flutter UI；系统弹窗会遮挡目标或改变 lifecycle，当前只能超时或等待人工处理 | 0.4.0 | 已排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07 |
-| PB-040-27 | HarmonyOS 兼容验证 spike 与 permission capability 矩阵：OpenHarmony Flutter、VM attach、Semantics/lifecycle、hdc + UiTest/Hypium | 架构可接入，但当前 Flutter 3.44.9 CI 与真机均未覆盖 HarmonyOS，不能直接宣称支持 | 0.4.0 | 已排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；本版不交付可用 driver |
+| PB-040-27 | HarmonyOS 兼容验证 spike 与 permission capability 矩阵：OpenHarmony Flutter、VM attach、Semantics/lifecycle、hdc + UiTest/Hypium | 架构可接入，但当前 Flutter 3.44.9 CI 与真机均未覆盖 HarmonyOS，不能直接宣称支持 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；[当前报告](verification/harmonyos-compatibility.md)；已到 SDK/真机阻塞，capability 保持 `unsupported` |
 
 ## 文档债（快赢，可随任意批次走）
 

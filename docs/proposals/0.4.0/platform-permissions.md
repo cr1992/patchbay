@@ -249,6 +249,12 @@ PB-040-27 的兼容验证必须完成：
 5. 验证 hdc 断连、App 前后台和一次性权限回收后的恢复路径；
 6. 把实际支持动作写入 capability fixture，不通过测试就保持 `unsupported`。
 
+报告与机器真源固定为 [HarmonyOS 兼容性验证报告](../../verification/harmonyos-compatibility.md) 和
+`docs/verification/fixtures/harmonyos-permission-capability-v1.json`。example 只承担 package/HAP 构建
+预检；VM attach 之后的六步真机证据统一来自 moii app，example 结果不得外推成业务接入或平台支持。
+fixture 受 versioned schema 与单测约束：六步未全部在 moii app 上通过时，平台结论及逐权限动作都必须
+保持 `unsupported`。
+
 参考：[Flutter OpenHarmony 适配](https://gitee.com/openharmony-sig/flutter_flutter)、
 [HarmonyOS UiTest](https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V13/js-apis-uitest-V13)、
 [HarmonyOS 单次授权](https://developer.huawei.com/consumer/cn/doc/HarmonyOS-Guides/one-time-authorization)。
