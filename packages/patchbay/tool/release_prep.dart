@@ -1246,9 +1246,17 @@ Map<String, String> renderCompatibilityFixtures(
   };
 }
 
-bool _isHandwrittenHistoricalCorpus(ReleaseInputs inputs, String directory) =>
+/// 语料 README 里声明「这一版已经冻结」的机读标记。
+///
+/// 判据必须是显式标记而不是正文措辞：0.2.0 的语料是手写的，0.3.0 的语料是定版时由 host 生成后
+/// 冻结的，两者来源不同但同样不可再生成——已发布版本的协议面属于历史事实，用今天的 host 覆写它
+/// 等于把「新 CLI 还能不能对付老 host」这道闸改成「新 CLI 能不能对付它自己」。缺标记时按未冻结
+/// 处理（fail-closed 到「报漂移」而不是「静默覆写」的那一侧由调用点保证）。
+const String frozenCorpusMarker = 'patchbay:frozen-corpus';
+
+bool _isFrozenHistoricalCorpus(ReleaseInputs inputs, String directory) =>
     inputs.compatibilityCorpus['$directory/README.md']?.contains(
-      '手写冻结的历史 wire',
+      frozenCorpusMarker,
     ) ??
     false;
 
@@ -1281,10 +1289,10 @@ List<ReleaseCheck> evaluateRelease({
 
 ReleaseCheck _checkCompatibilityFixture(String version, ReleaseInputs inputs) {
   final String targetDirectory = compatibilityCorpusDirectory(version);
-  if (_isHandwrittenHistoricalCorpus(inputs, targetDirectory)) {
+  if (_isFrozenHistoricalCorpus(inputs, targetDirectory)) {
     return ReleaseCheck.skipped(
       'protocol-compat-fixture',
-      '$targetDirectory/ 是不可再生成的手写历史语料；不会用当前 host 覆写',
+      '$targetDirectory/ 已声明冻结（$frozenCorpusMarker）；不会用当前 host 覆写',
       hard: true,
     );
   }
@@ -2271,8 +2279,10 @@ void _applyToDisk(String root, _Options options) {
   final String targetCorpusDirectory = compatibilityCorpusDirectory(
     options.version,
   );
-  if (_isHandwrittenHistoricalCorpus(inputs, targetCorpusDirectory)) {
-    throw FormatException('$targetCorpusDirectory/ 是手写冻结的历史语料，拒绝用当前 host 覆写');
+  if (_isFrozenHistoricalCorpus(inputs, targetCorpusDirectory)) {
+    throw FormatException(
+      '$targetCorpusDirectory/ 已声明冻结（$frozenCorpusMarker），拒绝用当前 host 覆写',
+    );
   }
   for (final MapEntry<String, String> entry in compatibilityFixtures.entries) {
     final String relative = '$compatibilityCorpusPath/${entry.key}';
