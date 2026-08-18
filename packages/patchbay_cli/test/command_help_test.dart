@@ -107,6 +107,8 @@ Availability is still decided by the running App catalog.
         'logs',
         'capture',
         'blob',
+        'perf',
+        'net',
       });
       for (final String group in groups) {
         // Matched against the group listing, not anywhere in the page: prose
@@ -193,6 +195,8 @@ Availability is still decided by the running App catalog.
       'logs',
       'capture',
       'blob',
+      'perf',
+      'net',
     ]) {
       expect(root.stdout, _listsGroup(group), reason: group);
     }

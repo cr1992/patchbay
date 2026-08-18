@@ -14,6 +14,7 @@ import 'direct_connection.dart';
 import 'doctor.dart';
 import 'keep_awake_policy.dart';
 import 'launcher.dart';
+import 'performance_profile.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
 import 'repl.dart';
@@ -875,6 +876,14 @@ ArgParser patchbayCliParser() => ArgParser()
         'own when it runs out. Omit to use the App-declared default.',
   )
   ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
+  ..addOption(
+    'duration-ms',
+    help: 'Performance profile window in milliseconds (1..60000).',
+  )
+  ..addOption(
+    'sample-limit',
+    help: 'Maximum VM timeline events summarized (1..10000).',
+  )
   ..addOption('output', help: 'Local artifact output path.')
   ..addOption('name', help: 'Human-readable local trace name.')
   ..addFlag(
@@ -1351,6 +1360,27 @@ Future<_Execution> _execute(
       return _Execution(await connection.renderTree());
     case PatchbayCommandTarget.clientFocusTree:
       return _Execution(await connection.focusTree());
+    case PatchbayCommandTarget.clientPerformanceProfile:
+      final PatchbayProfilingClient profiling = _profilingClient(
+        connection,
+        capability: 'performanceProfile',
+      );
+      final PatchbayPerformanceProfileRequest request =
+          PatchbayPerformanceProfileRequest(
+            duration: Duration(
+              milliseconds: friendly.arguments['durationMs']! as int,
+            ),
+            eventLimit: friendly.arguments['sampleLimit']! as int,
+          );
+      request.validate();
+      return _Execution(await profiling.performanceProfile(request));
+    case PatchbayCommandTarget.clientNetworkProfile:
+      return _Execution(
+        await _profilingClient(
+          connection,
+          capability: 'networkProfile',
+        ).networkProfile(),
+      );
     case PatchbayCommandTarget.localManifestVerification:
       // A one-shot invocation parsed this before it dialled; a repl line
       // arrives with the connection already open and nothing parsed yet, so
@@ -2252,6 +2282,21 @@ _Execution _walkthroughPreludeRejected(
     catalog: catalog,
     exitCode: patchbayExitCodeFor(rejection),
     summary: 'walkthrough refused: $code',
+  );
+}
+
+PatchbayProfilingClient _profilingClient(
+  PatchbayClient client, {
+  required String capability,
+}) {
+  if (client is PatchbayProfilingClient) {
+    return client as PatchbayProfilingClient;
+  }
+  throw PatchbayProtocolException(
+    capability == 'networkProfile'
+        ? 'networkProfilingUnavailable'
+        : 'profilingVmServiceRequired',
+    details: <String, Object?>{'capability': capability},
   );
 }
 

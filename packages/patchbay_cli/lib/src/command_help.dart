@@ -274,6 +274,12 @@ abstract final class PatchbayCommandHelp {
         PatchbayCommandTarget.clientFocusTree =>
           'Only on the VM Service transport, and only while the Flutter SDK '
               'registers the extension.',
+        PatchbayCommandTarget.clientPerformanceProfile =>
+          'Only on the VM Service transport when the public timeline and '
+              'memory RPCs are available; direct HTTP does not fabricate it.',
+        PatchbayCommandTarget.clientNetworkProfile =>
+          'Unavailable until a public collector can discard body, auth and '
+              'query values before collection.',
         PatchbayCommandTarget.clientReplSession =>
           'Available on any connected Patchbay transport except direct HTTP, '
               'whose token would have to share stdin with the commands.',
@@ -320,6 +326,12 @@ abstract final class PatchbayCommandHelp {
     PatchbayCommandTarget.clientRenderTree ||
     PatchbayCommandTarget.clientFocusTree =>
       'Flutter SDK diagnostic passthrough, not an App catalog command.',
+    PatchbayCommandTarget.clientPerformanceProfile =>
+      'Uses public VM Service timeline and memory RPCs, then emits only a '
+          'bounded Patchbay summary; it is not an App catalog command.',
+    PatchbayCommandTarget.clientNetworkProfile =>
+      'Does not call the current VM Service HTTP profiler because it '
+          'collects sensitive fields before filtering.',
     PatchbayCommandTarget.clientReplSession =>
       'Reads command lines from stdin and runs each over one connection; '
           'every line reports its own exit code.',

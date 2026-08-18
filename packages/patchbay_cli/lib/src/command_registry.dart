@@ -42,6 +42,12 @@ enum PatchbayCommandTarget {
   /// `PatchbayClient.focusTree` — Flutter SDK diagnostic passthrough.
   clientFocusTree,
 
+  /// Public VM Service timeline and memory RPCs reduced to a stable summary.
+  clientPerformanceProfile,
+
+  /// A stable refusal until a collection-before-redaction network RPC exists.
+  clientNetworkProfile,
+
   /// A verdict computed on this side of the wire from a catalog reading.
   ///
   /// The App is asked only for facts it already publishes — the UI target
@@ -453,6 +459,19 @@ enum PatchbayFriendlyCommand {
     summary: 'Read the Flutter focus tree diagnostic (SDK passthrough).',
     target: PatchbayCommandTarget.clientFocusTree,
   ),
+  performanceProfile(
+    null,
+    <String>['perf', 'profile'],
+    summary: 'Collect one bounded VM Service performance summary.',
+    usageSuffix: '[--duration-ms <ms>] [--sample-limit <events>]',
+    target: PatchbayCommandTarget.clientPerformanceProfile,
+  ),
+  networkProfile(
+    null,
+    <String>['net', 'profile'],
+    summary: 'Report whether privacy-safe network profiling is available.',
+    target: PatchbayCommandTarget.clientNetworkProfile,
+  ),
   logsQuery('logs.query', <String>[
     'logs',
     'query',
@@ -621,6 +640,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.uiWidgetTree ||
       PatchbayFriendlyCommand.uiRenderTree ||
       PatchbayFriendlyCommand.uiFocusTree ||
+      PatchbayFriendlyCommand.networkProfile ||
       PatchbayFriendlyCommand.repl ||
       PatchbayFriendlyCommand.doctor ||
       PatchbayFriendlyCommand.sessionsList ||
@@ -670,6 +690,11 @@ abstract final class PatchbayFriendlyCommandRegistry {
       PatchbayFriendlyCommand.launch => <String, Object?>{
         'command': _launchCommand(tail),
       },
+      PatchbayFriendlyCommand.performanceProfile =>
+        _noTail(tail, <String, Object?>{
+          'durationMs': _positiveInt(options, 'duration-ms', fallback: 10000),
+          'sampleLimit': _positiveInt(options, 'sample-limit', fallback: 10000),
+        }),
       // An omitted `--path` produces no arguments at all, which is what makes
       // the whole-snapshot read stay exactly the request it always was.
       PatchbayFriendlyCommand.snapshot => _noTail(tail, <String, Object?>{
@@ -1026,6 +1051,8 @@ abstract final class PatchbayFriendlyCommandRegistry {
       'pin',
       'dry-run',
       'include-artifacts',
+      'duration-ms',
+      'sample-limit',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -1070,6 +1097,7 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.uiWidgetTree ||
     PatchbayFriendlyCommand.uiRenderTree ||
     PatchbayFriendlyCommand.uiFocusTree ||
+    PatchbayFriendlyCommand.networkProfile ||
     PatchbayFriendlyCommand.navigationCatalog ||
     PatchbayFriendlyCommand.navigationCurrent ||
     PatchbayFriendlyCommand.uiInspectOff ||
@@ -1136,6 +1164,10 @@ abstract final class PatchbayFriendlyCommandRegistry {
     PatchbayFriendlyCommand.traceDiff => const <String>{},
     PatchbayFriendlyCommand.tracePrune => const <String>{'dry-run'},
     PatchbayFriendlyCommand.launch => const <String>{'keep-awake'},
+    PatchbayFriendlyCommand.performanceProfile => const <String>{
+      'duration-ms',
+      'sample-limit',
+    },
     PatchbayFriendlyCommand.uiKeepAwakeOn => const <String>{'lease-ms'},
     PatchbayFriendlyCommand.snapshot => const <String>{'path'},
     PatchbayFriendlyCommand.snapshotWait => const <String>{

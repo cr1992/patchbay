@@ -121,6 +121,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui verify-manifest ./ui-targets
 dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
+dart run bin/patchbay.dart --ws-uri <uri> --json perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json --duration-ms 5000 --sample-limit 2000 perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json net profile
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation current
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation go settings
@@ -152,6 +155,25 @@ dart run bin/patchbay.dart --ws-uri <uri> --json --output ./artifact.bin blob ge
 `ui wait <子命令>` 与 payload 里的 `condition` 刻意不同名（`semantics-mounted` ↔ `semanticsMounted`、
 `destination` ↔ `navigationDestination`）。两种拼写都可直接键入，映射表在 `patchbay help ui wait`；
 两边的名字都不会改，它们是 wire 契约。
+
+### 有界 VM 性能画像
+
+`perf profile` 默认对已连接的 VM Service 采样 10 秒，只输出稳定的
+`patchbay.performanceProfile.v1` 摘要：build/raster 帧耗时与 16 ms jank 计数、两次 heap 观测、
+新/老生代 GC 计数。`--duration-ms` 限 1..60000，`--sample-limit` 限 1..10000；单次最多处理
+10000 个事件和 8 MiB 事件数据，任一先到都会明确给 `sampling.truncated=true` 与丢弃数。公开 VM
+stream 每批 timeline event 到达即汇总，触顶马上取消订阅；原始事件不保留，也不进入 Patchbay 输出、
+日志或 artifact。命令临时启用所需公开 VM timeline stream，
+无论成功或失败都会恢复原 stream 集合。
+
+这是 VM 观测（`factSource=uiObserved`），不是 App catalog 命令。direct HTTP 稳定返回
+`profilingVmServiceRequired`，不伪造同口径事实；老 VM 缺少所需公开 RPC/stream 时返回
+`performanceProfilingUnavailable`。
+
+`net profile` 当前不采集任何数据，稳定返回 `networkProfilingUnavailable`。经核对的
+`vm_service 15.2.0` 公开 HTTP profile 在调用方过滤前已经收进 body、header、cookie 和 query 值；
+先取回再脱敏违反 Patchbay 的采集时隐私边界，因此只有公开 RPC 能采集前过滤，或接入方注入仅产生
+已脱敏事件的 collector 后，才会发布 net capability。
 
 `ui tap <identifier>` 是 `ui semantics tree` + `ui semantics action` 的一步替代：解析、代际校验和派发
 都在 App 侧一次完成，CLI 不构造 nodeId，也不给 generation 补默认值。`--generation` 可选，传了就是

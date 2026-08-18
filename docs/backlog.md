@@ -27,7 +27,7 @@
 | PB-040-06 | CLI 注册 / 帮助表改由命令 descriptor 生成 | `packages/patchbay_cli/lib/src/cli.dart` 的手写 switch 臂是 0.3.0 并行开发中最大的一类冲突源 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | PB-040-07 | README / 文档命令参考表由 descriptor / help 输出生成 | 双语 README 与包 README 的命令表靠人肉逐字节核对保持一致 | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | PB-040-08 | 幂等 retryPolicy；审计 sink；CLI `describe` | dogfood（`doctor` 已实现） | 0.4.0 | 已排期 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-09 | DevTools 借用剩余两批：perf VM RPC → net 画像 | 第一批 inspect 开关已合入 main；net 画像仍需冻结脱敏口径 | 0.4.0 | 已排期 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md)；DG-040-03 |
+| PB-040-09 | DevTools 借用剩余两批：perf VM RPC → net 画像 | perf 的公开 VM RPC 有界摘要实现中；net 因 `vm_service 15.2.0` 无采集前过滤 body/header/query 的公开 API 而阻塞，不能先收全量再脱敏 | 0.4.0 | 实现中 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md)；DG-040-03 |
 | PB-040-10 | snapshot revision / diff | dogfood（低优先级） | 0.4.0 | 已排期 | [视觉证据](proposals/0.4.0/visual-evidence.md) |
 | PB-040-11 | launcher 监督循环与显式 pending session | 首个接入方已落项目级重连监督，第二接入方已集成 session store | 0.4.0 | 已排期 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
 | PB-040-12 | `ui verify-manifest` 按 destination 逐屏巡检 | v1 只对账当前挂载态；巡检会驱动导航并改变 App 状态 | 0.4.0 | 已排期 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |

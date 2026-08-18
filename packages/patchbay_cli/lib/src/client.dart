@@ -5,6 +5,7 @@ import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
 import 'request_id.dart';
+import 'performance_profile.dart';
 
 final class PatchbayProtocolException implements Exception {
   const PatchbayProtocolException(
@@ -140,7 +141,8 @@ abstract interface class PatchbayClient {
   Future<void> close();
 }
 
-final class PatchbayConnection implements PatchbayClient {
+final class PatchbayConnection
+    implements PatchbayClient, PatchbayProfilingClient {
   PatchbayConnection._(
     this._service,
     this.isolateId,
@@ -297,6 +299,28 @@ final class PatchbayConnection implements PatchbayClient {
     extension: _focusDumpExtension,
     format: 'flutterFocusDumpText',
   );
+
+  @override
+  Future<Map<String, Object?>> performanceProfile(
+    PatchbayPerformanceProfileRequest request,
+  ) => PatchbayVmPerformanceProfiler(
+    source: PatchbayVmServicePerformanceSource(_service),
+  ).collect(isolateId: isolateId, request: request);
+
+  /// The public `vm_service` HTTP profiler returns bodies, headers, cookies and
+  /// query values before a caller can filter them. Collecting that response and
+  /// redacting afterwards would cross the accepted privacy boundary, so this
+  /// transport publishes no network capability and refuses with one stable
+  /// code instead of touching the RPC.
+  @override
+  Future<Map<String, Object?>> networkProfile() async =>
+      throw const PatchbayProtocolException(
+        'networkProfilingUnavailable',
+        details: <String, Object?>{
+          'reason': 'privacySafeVmRpcUnavailable',
+          'reviewedVmServicePackage': '15.2.0',
+        },
+      );
 
   @override
   Future<Map<String, Object?>> invoke({

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:patchbay/patchbay.dart';
 
 import 'client.dart';
+import 'performance_profile.dart';
 
 /// Budget for one RPC round trip against a running App, when the caller names
 /// none.
@@ -121,7 +122,8 @@ Future<void> closePatchbayQuietly(PatchbayClient? connection) async {
 /// It is a decorator, not a policy: it never retries, never reconnects and
 /// never reinterprets an answer that did arrive. The only thing it adds is an
 /// end to the waiting.
-final class PatchbayTimeoutClient implements PatchbayClient {
+final class PatchbayTimeoutClient
+    implements PatchbayClient, PatchbayProfilingClient {
   const PatchbayTimeoutClient(this._inner, {required this.rpcTimeout});
 
   final PatchbayClient _inner;
@@ -175,6 +177,41 @@ final class PatchbayTimeoutClient implements PatchbayClient {
   @override
   Future<Map<String, Object?>> focusTree() =>
       awaitPatchbayRpc(_inner.focusTree(), rpcTimeout: rpcTimeout);
+
+  @override
+  Future<Map<String, Object?>> performanceProfile(
+    PatchbayPerformanceProfileRequest request,
+  ) async {
+    final PatchbayClient inner = _inner;
+    if (inner is! PatchbayProfilingClient) {
+      throw const PatchbayProtocolException(
+        'profilingVmServiceRequired',
+        details: <String, Object?>{'capability': 'performanceProfile'},
+      );
+    }
+    final PatchbayProfilingClient profiling = inner as PatchbayProfilingClient;
+    return await awaitPatchbayRpc(
+      profiling.performanceProfile(request),
+      rpcTimeout: rpcTimeout,
+      deadline: request.duration,
+    );
+  }
+
+  @override
+  Future<Map<String, Object?>> networkProfile() async {
+    final PatchbayClient inner = _inner;
+    if (inner is! PatchbayProfilingClient) {
+      throw const PatchbayProtocolException(
+        'networkProfilingUnavailable',
+        details: <String, Object?>{'reason': 'collectorUnavailable'},
+      );
+    }
+    final PatchbayProfilingClient profiling = inner as PatchbayProfilingClient;
+    return await awaitPatchbayRpc(
+      profiling.networkProfile(),
+      rpcTimeout: rpcTimeout,
+    );
+  }
 
   /// Closing is local teardown, not a request the App has to answer.
   @override

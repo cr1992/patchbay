@@ -3,11 +3,13 @@ import 'package:patchbay_transport/patchbay_transport.dart';
 
 import 'client.dart';
 import 'request_id.dart';
+import 'performance_profile.dart';
 import 'rpc_timeout.dart';
 
 /// Adapts the explicit direct HTTP transport to the same command client used
 /// by the VM Service path. Flutter SDK diagnostic extensions remain VM-only.
-final class PatchbayDirectConnection implements PatchbayClient {
+final class PatchbayDirectConnection
+    implements PatchbayClient, PatchbayProfilingClient {
   static const String protocolPath = PatchbayDirectHost.protocolPathPrefix;
 
   PatchbayDirectConnection({
@@ -85,6 +87,21 @@ final class PatchbayDirectConnection implements PatchbayClient {
   @override
   Future<Map<String, Object?>> focusTree() =>
       throw const PatchbayProtocolException('flutterDiagnosticUnavailable');
+
+  @override
+  Future<Map<String, Object?>> performanceProfile(
+    PatchbayPerformanceProfileRequest request,
+  ) async => throw const PatchbayProtocolException(
+    'profilingVmServiceRequired',
+    details: <String, Object?>{'capability': 'performanceProfile'},
+  );
+
+  @override
+  Future<Map<String, Object?>> networkProfile() async =>
+      throw const PatchbayProtocolException(
+        'networkProfilingUnavailable',
+        details: <String, Object?>{'reason': 'privacySafeCollectorUnavailable'},
+      );
 
   @override
   Future<void> close() async => _client.close(force: true);

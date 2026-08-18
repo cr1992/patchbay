@@ -135,6 +135,9 @@ dart run bin/patchbay.dart --ws-uri <uri> --json ui verify-manifest ./ui-targets
 dart run bin/patchbay.dart --ws-uri <uri> --json ui widget-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui render-tree
 dart run bin/patchbay.dart --ws-uri <uri> --json ui focus-tree
+dart run bin/patchbay.dart --ws-uri <uri> --json perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json --duration-ms 5000 --sample-limit 2000 perf profile
+dart run bin/patchbay.dart --ws-uri <uri> --json net profile
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation catalog
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation current
 dart run bin/patchbay.dart --ws-uri <uri> --json navigation go settings
@@ -171,6 +174,27 @@ The `ui wait <subcommand>` names deliberately differ from the `condition` in the
 (`semantics-mounted` ↔ `semanticsMounted`, `destination` ↔ `navigationDestination`). Both spellings
 can be typed directly, and the mapping table is in `patchbay help ui wait`; neither set of names
 will change, because they are wire contracts.
+
+### Bounded VM Performance Profile
+
+`perf profile` samples the connected VM Service for 10 seconds by default and emits only the
+stable `patchbay.performanceProfile.v1` summary: build/raster frame durations and 16 ms jank counts,
+two heap observations, and new/old-generation GC counts. `--duration-ms` is limited to 1..60000 and
+`--sample-limit` to 1..10000. At most 10000 events and 8 MiB of processed event data contribute to
+one result; either limit sets `sampling.truncated=true` and reports the dropped count. Timeline
+events are reduced as public VM stream batches arrive, and the subscription is cancelled at the
+first limit; raw events are never retained or copied into Patchbay output, logs, or artifacts. The command temporarily enables
+the public VM timeline streams it needs and restores the previous stream set on success or failure.
+
+This is a VM observation (`factSource=uiObserved`), not an App catalog command. Direct HTTP returns
+the stable `profilingVmServiceRequired` code rather than fabricating equivalent facts. Older VMs
+that do not expose the required public RPCs/streams return `performanceProfilingUnavailable`.
+
+`net profile` currently returns `networkProfilingUnavailable` without collecting anything. In the
+reviewed `vm_service 15.2.0` API, the public HTTP profile response already contains bodies, headers,
+cookies, and query values before the caller can filter it. Collecting that response and redacting
+afterwards would violate Patchbay's collection-time privacy boundary, so no network capability is
+published until a public pre-filtered RPC or an injected privacy-safe collector exists.
 
 `ui tap <identifier>` is a one-step replacement for `ui semantics tree` + `ui semantics action`:
 resolution, generation checking, and dispatch all happen in one pass on the app side, so the CLI

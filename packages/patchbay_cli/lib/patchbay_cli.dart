@@ -15,6 +15,7 @@ export 'src/permission_recovery.dart';
 export 'src/ios_permission_adapter.dart';
 export 'src/launcher.dart';
 export 'src/keep_awake_policy.dart';
+export 'src/performance_profile.dart';
 export 'src/repl.dart';
 export 'src/result.dart';
 export 'src/rpc_timeout.dart';
