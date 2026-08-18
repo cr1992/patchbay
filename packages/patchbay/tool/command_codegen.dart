@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' as crypto;
+
 void main(List<String> arguments) {
   try {
     _run(arguments);
@@ -22,8 +24,18 @@ void _run(List<String> arguments) {
   final String generated = _formatDart(
     _render(contract, _headerPath(contractFile, output)),
   );
+  final String snapshot = _renderSnapshot(
+    _headerPath(contractFile, output),
+    generated,
+  );
   if (options.check) {
-    if (!output.existsSync() || output.readAsStringSync() != generated) {
+    final String? current = output.existsSync()
+        ? output.readAsStringSync()
+        : null;
+    final String expected = current?.startsWith(_snapshotMarker) ?? false
+        ? snapshot
+        : generated;
+    if (current != expected) {
       stderr.writeln(
         'Patchbay command generated output drifted: ${output.path}',
       );
@@ -37,9 +49,24 @@ void _run(List<String> arguments) {
     return;
   }
   output.parent.createSync(recursive: true);
-  output.writeAsStringSync(generated);
+  output.writeAsStringSync(options.snapshot ? snapshot : generated);
   stdout.writeln('Generated ${output.path} from ${contractFile.path}');
 }
+
+const String _snapshotMarker =
+    '// GENERATED COMMAND CONTRACT SNAPSHOT - DO NOT MODIFY BY HAND.';
+
+/// A compact repository gate for a generated command surface.
+///
+/// Consumers still use `--write` to produce the complete Dart implementation.
+/// Repositories that only need to freeze their declaration can commit this
+/// digest instead, avoiding a second, large copy of code that is never imported.
+String _renderSnapshot(String path, String generated) =>
+    '$_snapshotMarker\n'
+    '// Contract: $path\n'
+    '// Generator: packages/patchbay/tool/command_codegen.dart\n'
+    '// Generated Dart sha256: '
+    '${crypto.sha256.convert(utf8.encode(generated))}\n';
 
 /// The contract path the generated header records, anchored to the output file.
 ///
@@ -75,16 +102,18 @@ String _headerPath(File contract, File output) {
 }
 
 final class _Options {
-  const _Options(this.contract, this.output, this.check);
+  const _Options(this.contract, this.output, this.check, this.snapshot);
   final String contract;
   final String output;
   final bool check;
+  final bool snapshot;
 
   static _Options parse(List<String> args) {
     String? contract;
     String? output;
     var check = false;
     var write = false;
+    var snapshot = false;
     for (var i = 0; i < args.length; i += 1) {
       switch (args[i]) {
         case '--contract':
@@ -95,16 +124,20 @@ final class _Options {
           check = true;
         case '--write':
           write = true;
+        case '--write-snapshot':
+          write = true;
+          snapshot = true;
         default:
           throw FormatException('unknown command_codegen argument: ${args[i]}');
       }
     }
     if (contract == null || output == null || check == write) {
       throw const FormatException(
-        'usage: command_codegen --contract <json> --output <dart> (--check|--write)',
+        'usage: command_codegen --contract <json> --output <dart> '
+        '(--check|--write|--write-snapshot)',
       );
     }
-    return _Options(contract, output, check);
+    return _Options(contract, output, check, snapshot);
   }
 }
 

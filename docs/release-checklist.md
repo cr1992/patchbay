@@ -61,8 +61,8 @@ Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
 
 - [ ] `dart_packages` —— 排版与规划一致性门禁 + 三个纯 Dart 包 `dart analyze --fatal-infos` + `dart test`
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` + `flutter test`
-- [ ] `codegen_drift` —— `wire_codegen.dart --check` 同时确认 Dart 与 wire surface golden，且与
-  `command_codegen.dart --check` 均无生成物漂移
+- [ ] `codegen_drift` —— `wire_codegen.dart --check` 同时确认 Dart 与 wire surface golden，
+  `command_codegen.dart --check` 按提交形态确认生成物或紧凑快照无漂移
 - [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，三个 job 与上面一一对应）
 - [ ] README 的项目状态、安装示例与四包版本一致（脚本不判 README 文案）
 
@@ -84,6 +84,10 @@ $ dart run packages/patchbay/bin/command_codegen.dart \
     --contract packages/patchbay/contracts/example_commands.json \
     --output packages/patchbay/contracts/example_commands.g.dart --check
 ```
+
+`example_commands.g.dart` 是完整生成结果的 SHA-256 紧凑快照，不作为源码导入。contract 或
+generator 有意变更后，以同一命令把 `--check` 换成 `--write-snapshot` 更新；接入方仍使用
+`--write` 生成可编译的完整实现。
 
 ## 3. 人工项：开发布开关
 
