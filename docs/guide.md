@@ -705,15 +705,26 @@ generation 提供。同 identifier 挂载多个实例、identifier 不存在、�
 
 ### UI 目标声明对账（ui verify-manifest）
 
-接入方把「这个 App 应该开放哪些 UI 目标」写成一份 manifest，CLI 连上运行中的 App，把它与 catalog
-的 `uiTargets` 对一遍，报三类偏差。**纯 CLI 侧比对**：不新增 wire 命令，App 侧零改动。
+接入方把「这个 App 应该开放哪些 UI 目标」写成一份 manifest，CLI 连上运行中的 App，把
+`catalogTarget` 与 catalog 的 `uiTargets`、`semanticsIdentifier` 与既有 `ui.semantics.tree` 活体快照
+分别对账。**纯 CLI 侧比对**：不新增 wire 命令，App 侧零改动。
 
 ```console
 $ patchbay ui verify-manifest ui-targets.json          # 人读：直接列出偏差条目
 $ patchbay --json ui verify-manifest ui-targets.json   # 结构化报告
+$ patchbay --json ui verify-manifest ui-targets.yaml   # 同一 schema、同一校验路径
+$ patchbay --json ui verify-manifest ui-targets.json --navigate # 明示副作用：按清单顺序逐屏巡检
 ```
 
-manifest 是 JSON（v1 只认 JSON），完整示例见
+逐屏模式只接受 manifest 与 `navigation.catalog` 共同声明的 destination id，不接收任意 route 或
+readiness probe；每屏导航后用既有 `ui.wait navigationDestination` 封闭条件确认稳定，再读取活体 catalog /
+Semantics 对账。单屏预算默认 5 秒（`--screen-timeout-ms`，最大 120 秒），总预算默认 120 秒
+（`--total-timeout-ms`，最大 10 分钟）。默认首个失败即停止，`--continue-on-error` 才继续收集；输出始终
+保留 `visited/passed/failed/skipped` 和每屏 `reasonCode`。`--restore` 会在预算内尽力回到起始屏，恢复失败
+只增加 notice 与 `finalDestination`，不覆盖巡检本身的退出码。完整导航能力未声明时不试探，退回当前
+挂载态校验并标记 `navigationMode: unavailable`。
+
+manifest 可用 JSON 或 YAML 表达同一个 v1/v2 schema，完整 JSON 示例见
 [`docs/examples/ui-targets-manifest.json`](examples/ui-targets-manifest.json)：
 
 ```json
@@ -726,9 +737,23 @@ manifest 是 JSON（v1 只认 JSON），完整示例见
 }
 ```
 
+上例与下表是继续兼容的 v1 平铺形式。v2 使用根级 `coverage: mountedOnly` 与 `destinations`，每个
+destination 再携带自己的 `targets`；target 必须明确使用 `namespace: catalogTarget` 或
+`namespace: semanticsIdentifier`。两种版本的 JSON/YAML 都进入同一个内部模型，例如：
+
+```json
+{"version":2,"coverage":"mountedOnly","destinations":[{"id":"login","targets":[
+  {"namespace":"catalogTarget","id":"login.password","kind":"text","sensitive":true},
+  {"namespace":"semanticsIdentifier","id":"login.submit"}
+]}]}
+```
+
+`kind` / `sensitive` 只属于 `catalogTarget`；`semanticsIdentifier` 只写稳定 identifier，不持久化
+`nodeId` / `generation`。同一 id 不得跨 namespace，未知 namespace 与非法字段组合都 fail-closed。
+
 | 字段 | 必填 | 含义 |
 |---|---|---|
-| `version` | 否 | 只接受 `1`；省略即 `1`，将来的版本号会被拒读，而不是当成 `1` 读 |
+| `version` | 否 | v1 只接受 `1`；省略即 `1`，其它版本不会被当成 v1 读 |
 | `targets[].id` | 是 | 稳定 ID，与 catalog `uiTargets[].id` 是同一个 |
 | `targets[].kind` | 是 | `text` / `capture`——词表就是 catalog `uiTargets[].kind` 的取值，不另立新词 |
 | `targets[].sensitive` | 否 | 默认 `false`，对应 catalog 的 `sensitivePolicy`（`redacted` ⇔ `true`） |
@@ -738,6 +763,12 @@ manifest 是 JSON（v1 只认 JSON），完整示例见
 `--json` 的错误信封给稳定 code（`manifestInvalid` / `manifestUnreadable`）和
 `details.field`，直接指到位置（形如 `$.targets[2].kind`）。文件内容本身不进信封。
 
+格式只按小写 `.json`、`.yaml`、`.yml` 扩展名选择；未知扩展名不猜内容，一种解析失败也不会回退到
+另一种。YAML 关闭错误恢复，拒绝 alias 与显式 tag，只归一成 JSON 的 map/list/scalar 数据域后进入
+同一个 `PatchbayUiManifest` 校验器。两种格式共享 1 MiB、64 层、200000 节点（含 mapping key）预算；YAML/JSON 语法
+错误带一基 `line` / `column`，错误信封不回显输入片段。格式与预算失败分别使用稳定 code
+`manifestFormatUnsupported` / `manifestResourceLimit`，退出码仍为本地输入错误 `64`。
+
 三类偏差：
 
 | 组 | 含义 |
@@ -745,6 +776,14 @@ manifest 是 JSON（v1 只认 JSON），完整示例见
 | `declaredNotMounted` | manifest 有、运行时**此刻**没挂载；`runtime` 区分 `absent`（catalog 里没有这个 ID）与 `unmounted`（注册过但当前没挂载） |
 | `mountedNotDeclared` | 运行时挂载着、manifest 里没有 |
 | `propertyMismatch` | 两边都有但 `kind` / `sensitive` 对不上，逐字段给 `declared` / `runtime` |
+
+Semantics 唯一命中时，报告在 `semantics.observed` 给出本次活体的 `nodeId` / `generation`，并携带
+`treeRevision`、命令来源 `ui.semantics.tree` 与 App 回报的事实来源（通常为 `uiObserved`）；零命中以
+`uiSemanticsIdentifierNotFound` 进入
+`declaredNotMounted`。同 identifier 命中多个
+节点时以 `uiSemanticsIdentifierAmbiguous` 记入 `semantics.identifierAmbiguous`，退出 `7`，不会任选
+一个。App 未声明 tree capability、tree 被截断或 payload 不完整时分别给稳定 protocol code
+`manifestSemanticsUnavailable`、`manifestSemanticsTreeTruncated`、`manifestSemanticsContractViolated`。
 
 **「未挂载」不等于「丢了」。** 对账范围是**当前挂载态**：非常驻控件不在当前屏本来就不该挂载，
 所以输出如实说「当前未挂载」，不替你判成缺失。挂载状态与属性漂移是两个独立的轴，同一个 ID
@@ -755,6 +794,10 @@ manifest 是 JSON（v1 只认 JSON），完整示例见
 计入 `stats.skippedOutOfScope`；出现在别的屏的声明仍然算「已声明」，不会被报成挂载未声明。同一个
 ID 可以在多条上重复，但每条都必须写各自不同的 `destination`——否则同一时刻会有两条声明去对同一个
 运行时目标。逐屏自动巡检要驱动导航，不在 v1 内。
+
+`ui targets --emit-manifest` 仍只为 App 已报告的当前 destination 生成 `coverage: mountedOnly` 草稿。
+App 声明 `ui.semantics.tree` 时，唯一、非空的活体 identifier 会一并写入；重复 identifier 或两类
+namespace 同 id 时拒绝生成，CLI 不伪造 destination，也不把截断 tree 冒充完整清单。
 
 `destination` 与 `destinationSource` 一起读：`destinationSource` 为 `null` 表示 manifest 压根没
 scope、没读过 `navigation.current`；为 `navigation.current` 而 `destination` 是 `null`，表示读了、
