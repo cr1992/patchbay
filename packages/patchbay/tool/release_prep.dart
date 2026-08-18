@@ -64,6 +64,12 @@ const String examplePubspecPath = '$examplePath/pubspec.yaml';
 const String exampleOverridesPath = '$examplePath/pubspec_overrides.yaml';
 const String exampleLockPath = '$examplePath/pubspec.lock';
 const String compatMatrixPath = 'docs/compat-matrix.md';
+const String packageVersionSourcePath =
+    'packages/patchbay/lib/src/version.dart';
+const List<String> releaseReadmePaths = <String>[
+  'README.md',
+  'README.zh-CN.md',
+];
 const String serviceHostPath = 'packages/patchbay/lib/src/service_host.dart';
 const String invocationPath = 'packages/patchbay/lib/src/invocation.dart';
 const String workflowPath = '.github/workflows/ci.yml';
@@ -140,6 +146,8 @@ final class PackageManifest {
 final class ReleaseInputs {
   const ReleaseInputs({
     required this.packages,
+    required this.packageVersionSource,
+    required this.readmes,
     required this.changelog,
     required this.examplePubspec,
     required this.exampleOverrides,
@@ -151,6 +159,8 @@ final class ReleaseInputs {
   });
 
   final Map<String, PackageManifest> packages;
+  final String packageVersionSource;
+  final Map<String, String> readmes;
   final String changelog;
   final String examplePubspec;
   final String? exampleOverrides;
@@ -283,6 +293,78 @@ String applyPubspecVersion(String yaml, String version) {
     throw const FormatException('pubspec 缺 version 字段');
   }
   return yaml.replaceFirst(pattern, 'version: $version');
+}
+
+final RegExp _packageVersionPattern = RegExp(
+  r"(const\s+String\s+patchbayPackageVersion\s*=\s*')([^']+)(';)",
+);
+
+/// 只改写对外作为 `serverVersion` 暴露的随包版本常量。
+///
+/// 缺失或出现多份都拒绝，避免在常量改名后静默写入一个无效位置。
+String applyPackageVersionSource(String source, String version) {
+  final List<RegExpMatch> matches = _packageVersionPattern
+      .allMatches(source)
+      .toList(growable: false);
+  if (matches.length != 1) {
+    throw FormatException(
+      '应恰好找到一个 patchbayPackageVersion，实际 ${matches.length} 个',
+    );
+  }
+  final RegExpMatch match = matches.single;
+  return source.replaceRange(
+    match.start,
+    match.end,
+    '${match.group(1)}$version${match.group(3)}',
+  );
+}
+
+final List<RegExp> _managedReadmeVersionPatterns = <RegExp>[
+  RegExp(
+    r'(^> \*\*(?:Project status:|项目状态：)\*\* `v)([^`]+)(`)',
+    multiLine: true,
+  ),
+  RegExp(r'(^\s*ref:\s*patchbay-v)([^\s]+)(\s*$)', multiLine: true),
+  RegExp(r'(--git-ref\s+patchbay-v)([^\s]+)(\s+--git-path)'),
+];
+
+final RegExp _managedReadmeArtifactPattern = RegExp(
+  r'(/releases/download/patchbay-v)([^/]+)(/patchbay-)([^-\s]+)(-(?:linux|macos|windows)-)',
+);
+
+/// 同步 README 中明确由发版流程管理的状态、Git 安装 ref 与 AOT 下载版本。
+///
+/// 每个锚点必须恰好出现一次；README 结构漂移时 fail-closed，而不是泛化替换文档里的历史版本。
+String applyReadmeVersionReferences(String markdown, String version) {
+  var result = markdown;
+  for (final RegExp pattern in _managedReadmeVersionPatterns) {
+    final List<RegExpMatch> matches = pattern
+        .allMatches(result)
+        .toList(growable: false);
+    if (matches.length != 1) {
+      throw FormatException(
+        'README 版本锚点应恰好出现一次，实际 ${matches.length} 个：$pattern',
+      );
+    }
+    final RegExpMatch match = matches.single;
+    result = result.replaceRange(
+      match.start,
+      match.end,
+      '${match.group(1)}$version${match.group(3)}',
+    );
+  }
+  final List<RegExpMatch> artifacts = _managedReadmeArtifactPattern
+      .allMatches(result)
+      .toList(growable: false);
+  if (artifacts.length != 1) {
+    throw FormatException('README AOT 下载锚点应恰好出现一次，实际 ${artifacts.length} 个');
+  }
+  final RegExpMatch artifact = artifacts.single;
+  return result.replaceRange(
+    artifact.start,
+    artifact.end,
+    '${artifact.group(1)}$version${artifact.group(3)}$version${artifact.group(5)}',
+  );
 }
 
 /// 删掉 `publish_to: none` 这一行——**发布开关**，只在显式 `--enable-publish` 时执行。
@@ -1081,6 +1163,7 @@ List<ReleaseCheck> evaluateRelease({
   requireVersion(version);
   return <ReleaseCheck>[
     _checkVersionParity(version, inputs),
+    _checkVersionReferences(version, inputs),
     _checkSchemaParity(inputs),
     _checkChangelog(version, inputs),
     _checkPackageChangelogs(version, inputs),
@@ -1092,6 +1175,46 @@ List<ReleaseCheck> evaluateRelease({
     _checkPublishSwitch(inputs),
     ..._checkPublishManifest(inputs),
   ];
+}
+
+ReleaseCheck _checkVersionReferences(String version, ReleaseInputs inputs) {
+  final stale = <String>[];
+  try {
+    final String expected = applyPackageVersionSource(
+      inputs.packageVersionSource,
+      version,
+    );
+    if (expected != inputs.packageVersionSource) {
+      stale.add('patchbayPackageVersion');
+    }
+  } on FormatException catch (error) {
+    stale.add('patchbayPackageVersion（${error.message}）');
+  }
+  for (final String path in releaseReadmePaths) {
+    final String? readme = inputs.readmes[path];
+    if (readme == null) {
+      stale.add('$path（缺文件）');
+      continue;
+    }
+    try {
+      if (applyReadmeVersionReferences(readme, version) != readme) {
+        stale.add(path);
+      }
+    } on FormatException catch (error) {
+      stale.add('$path（${error.message}）');
+    }
+  }
+  if (stale.isEmpty) {
+    return ReleaseCheck.ok(
+      'version-references',
+      '`patchbayPackageVersion` 与两份 README 版本引用均为 $version',
+    );
+  }
+  return ReleaseCheck.failed(
+    'version-references',
+    '版本引用未同步到 $version：${stale.join('、')}（`--apply` 可代改）',
+    hard: true,
+  );
 }
 
 ReleaseCheck _checkVersionParity(String version, ReleaseInputs inputs) {
@@ -1746,6 +1869,10 @@ ReleaseInputs _read(String root) {
           changelog: readOptional(packageChangelogPathOf(name)),
         ),
     },
+    packageVersionSource: read(packageVersionSourcePath),
+    readmes: <String, String>{
+      for (final String path in releaseReadmePaths) path: read(path),
+    },
     changelog: read(changelogPath),
     examplePubspec: read(examplePubspecPath),
     exampleOverrides: readOptional(exampleOverridesPath),
@@ -1925,6 +2052,16 @@ void _applyToDisk(String root, _Options options) {
     options.date,
   );
   stage(changelogPath, inputs.changelog, rootChangelog);
+
+  stage(
+    packageVersionSourcePath,
+    inputs.packageVersionSource,
+    applyPackageVersionSource(inputs.packageVersionSource, options.version),
+  );
+  for (final String path in releaseReadmePaths) {
+    final String before = inputs.readmes[path]!;
+    stage(path, before, applyReadmeVersionReferences(before, options.version));
+  }
 
   for (final String name in releasePackages) {
     final PackageManifest manifest = inputs.packages[name]!;

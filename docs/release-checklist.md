@@ -63,7 +63,7 @@ Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` + `flutter test`
 - [ ] `codegen_drift` —— `wire_codegen.dart --check` 与 `command_codegen.dart --check` 均无生成物漂移
 - [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，三个 job 与上面一一对应）
-- [ ] README 的项目状态、安装示例与四包版本一致（脚本不判 README 文案）
+- [ ] README 的项目状态、安装示例与四包版本一致（`release_prep` 机检并可同步受管版本引用）
 
 本地复跑（`wire_codegen.dart --check` 必须从仓根调用——它的生成物 header 记录仓根相对路径，
 进包目录跑会假漂移；`command_codegen.dart --check` 没有这个约束，其 header 记录的是相对生成物

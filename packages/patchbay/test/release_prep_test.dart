@@ -100,6 +100,51 @@ dependencies:
     });
   });
 
+  group('随版版本引用', () {
+    test('常量只改版本值且幂等，缺失或重复时拒绝', () {
+      const String source =
+          "// keep\nconst String patchbayPackageVersion = '0.2.1';\n// tail\n";
+      final String bumped = applyPackageVersionSource(source, '0.3.0');
+      expect(
+        bumped,
+        "// keep\nconst String patchbayPackageVersion = '0.3.0';\n// tail\n",
+      );
+      expect(applyPackageVersionSource(bumped, '0.3.0'), bumped);
+      expect(
+        () => applyPackageVersionSource('// missing\n', '0.3.0'),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => applyPackageVersionSource('$source$source', '0.3.0'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('README 只同步四个受管锚点，其他版本文本原样保留', () {
+      const String readme = '''
+> **Project status:** `v0.2.1`, keep
+historical patchbay-v0.1.0 stays
+      ref: patchbay-v0.2.1
+curl /releases/download/patchbay-v0.2.1/patchbay-0.2.1-macos-arm64
+--git-ref patchbay-v0.2.1 --git-path packages/patchbay_cli
+''';
+      final String bumped = applyReadmeVersionReferences(readme, '0.3.0');
+      expect(bumped, contains('`v0.3.0`'));
+      expect(bumped, contains('ref: patchbay-v0.3.0'));
+      expect(bumped, contains('/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64'));
+      expect(bumped, contains('--git-ref patchbay-v0.3.0'));
+      expect(bumped, contains('historical patchbay-v0.1.0 stays'));
+      expect(applyReadmeVersionReferences(bumped, '0.3.0'), bumped);
+    });
+
+    test('README 受管锚点缺失时拒绝，不静默放过结构漂移', () {
+      expect(
+        () => applyReadmeVersionReferences('# Patchbay\n', '0.3.0'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
   group('caret 约束', () {
     test('0.x 走 minor 边界，1.x 走 major 边界', () {
       final Version zeroThreeOne = Version.tryParse('0.3.1')!;
@@ -1041,9 +1086,11 @@ sdks:
       expect(red.stdout, contains('[未过] example-lock'));
       expect(red.stdout, contains('[未过] compat-matrix-row'));
       expect(red.stdout, contains('[未过] package-changelog'));
+      expect(red.stdout, contains('[未过] version-references'));
 
       final ProcessResult applied = await _run(repo, '--apply');
       expect(applied.stdout, contains('[通过] version-parity'));
+      expect(applied.stdout, contains('[通过] version-references'));
       expect(applied.stdout, contains('[通过] changelog-release'));
       expect(applied.stdout, contains('[通过] example-lock'));
       expect(applied.stdout, contains('[通过] compat-matrix-row'));
@@ -1084,6 +1131,30 @@ sdks:
       final Map<String, List<int>> before = _releaseFileBytes(repo);
       final ProcessResult again = await _run(repo, '--apply');
       expect(again.stdout, contains('apply：无改动'));
+      expect(_releaseFileBytes(repo), before);
+    });
+
+    test('check 会逐项检出 README 或 serverVersion 常量漂移，且保持只读', () async {
+      _materialize(repo, _inputs(released: true));
+      final File readme = File('${repo.path}/README.zh-CN.md');
+      readme.writeAsStringSync(
+        readme.readAsStringSync().replaceFirst(
+          'patchbay-v0.3.0',
+          'patchbay-v0.2.1',
+        ),
+      );
+      final File versionSource = File('${repo.path}/$packageVersionSourcePath');
+      versionSource.writeAsStringSync(
+        versionSource.readAsStringSync().replaceFirst("'0.3.0'", "'0.2.1'"),
+      );
+      final Map<String, List<int>> before = _releaseFileBytes(repo);
+
+      final ProcessResult checked = await _run(repo, '--check');
+
+      expect(checked.exitCode, 1);
+      expect(checked.stdout, contains('[未过] version-references'));
+      expect(checked.stdout, contains('patchbayPackageVersion'));
+      expect(checked.stdout, contains('README.zh-CN.md'));
       expect(_releaseFileBytes(repo), before);
     });
 
@@ -1329,6 +1400,12 @@ ReleaseInputs _inputs({
               : null,
         ),
     },
+    packageVersionSource:
+        "const String patchbayPackageVersion = '$resolved';\n",
+    readmes: <String, String>{
+      'README.md': _releaseReadme(resolved, chinese: false),
+      'README.zh-CN.md': _releaseReadme(resolved, chinese: true),
+    },
     changelog: released
         ? '# Changelog\n\n## $resolved - 2026-08-14\n\n### Added\n\n- 某条。\n'
         : '# Changelog\n\n## Unreleased\n\n### Added\n\n- 某条。\n',
@@ -1372,6 +1449,14 @@ ReleaseInputs _inputs({
   );
 }
 
+String _releaseReadme(String version, {required bool chinese}) =>
+    '''
+> **${chinese ? '项目状态：' : 'Project status:'}** `v$version`, keep
+      ref: patchbay-v$version
+curl /releases/download/patchbay-v$version/patchbay-$version-macos-arm64
+--git-ref patchbay-v$version --git-path packages/patchbay_cli
+''';
+
 /// 从当前目录向上找仓根（CHANGELOG.md + packages/patchbay/pubspec.yaml）。
 ///
 /// `dart test` 在包目录跑、CI 也可能从仓根跑，两种 cwd 都要能定位到真实仓库。
@@ -1408,6 +1493,10 @@ void _materialize(Directory repo, ReleaseInputs inputs) {
     write(packageChangelogPathOf(entry.key), entry.value.changelog);
   }
   write(changelogPath, inputs.changelog);
+  write(packageVersionSourcePath, inputs.packageVersionSource);
+  for (final MapEntry<String, String> entry in inputs.readmes.entries) {
+    write(entry.key, entry.value);
+  }
   write(examplePubspecPath, inputs.examplePubspec);
   write(exampleOverridesPath, inputs.exampleOverrides);
   write(exampleLockPath, inputs.exampleLock);
@@ -1427,6 +1516,8 @@ void _writeFragment(Directory repo, String name, String content) {
 Map<String, List<int>> _releaseFileBytes(Directory repo) {
   final paths = <String>[
     changelogPath,
+    packageVersionSourcePath,
+    ...releaseReadmePaths,
     exampleLockPath,
     compatMatrixPath,
     for (final String package in releasePackages) ...<String>[
