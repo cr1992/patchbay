@@ -204,6 +204,39 @@ curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
         throwsA(isA<FormatException>()),
       );
     });
+
+    // 已发布版本的协议面是历史事实。语料目录漏掉冻结标记时，`release_prep --version <旧版>`
+    // 会拿今天的 host 重新渲染并报漂移，`--apply` 会直接覆写——0.3.0 的语料就这样在 0.4.0
+    // 开发期间进入过可被覆写的状态。这条用例把「已发布 = 必须带标记」钉在仓内事实上，
+    // 让下一版发布后漏补标记直接变成红灯。
+    test('根 CHANGELOG 里每个已发布版本的语料目录都必须带冻结标记', () {
+      final String root = _repoRoot();
+      final List<String> released =
+          RegExp(r'^## (\d+\.\d+\.\d+\S*) - ', multiLine: true)
+              .allMatches(File('$root/$changelogPath').readAsStringSync())
+              .map((match) => match.group(1)!)
+              .toList(growable: false);
+
+      expect(released, isNotEmpty, reason: '根 CHANGELOG 应至少有一个已发布版本');
+
+      for (final String version in released) {
+        final Directory corpus = Directory(
+          '$root/$compatibilityCorpusPath/${compatibilityCorpusDirectory(version)}',
+        );
+        if (!corpus.existsSync()) continue;
+        final File readme = File('${corpus.path}/README.md');
+        expect(
+          readme.existsSync(),
+          isTrue,
+          reason: '${corpus.path} 缺 README.md，无法声明冻结',
+        );
+        expect(
+          readme.readAsStringSync(),
+          contains(frozenCorpusMarker),
+          reason: '$version 已发布，${corpus.path} 必须带 $frozenCorpusMarker 标记',
+        );
+      }
+    });
   });
 
   group('caret 约束', () {
@@ -1380,13 +1413,13 @@ sdks:
       );
     });
 
-    test('apply 拒绝用当前 host 覆写手写冻结的旧版语料', () async {
+    test('apply 拒绝用当前 host 覆写已声明冻结的旧版语料', () async {
       _materialize(
         repo,
         _inputs(
           compatibilityCorpus: const <String, String>{
             'legacy_host_v0_2_0/README.md':
-                '# 冻结语料\n\n这些文件是**手写冻结的历史 wire**。\n',
+                '# 冻结语料\n\n<!-- $frozenCorpusMarker -->\n',
             'legacy_host_v0_2_0/identity.json': '{}\n',
             'legacy_host_v0_2_0/catalog.json': '{}\n',
           },
