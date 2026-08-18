@@ -64,6 +64,7 @@ void main() {
           ],
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
+          PatchbayFriendlyCommand.snapshotDiff => const <String>[],
           PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
           PatchbayFriendlyCommand.permissionStatus ||
           PatchbayFriendlyCommand.permissionReset ||
@@ -129,6 +130,10 @@ void main() {
         if (spec == PatchbayFriendlyCommand.traceExport) ...<String>[
           '--output',
           '/tmp/trace-output',
+        ],
+        if (spec == PatchbayFriendlyCommand.snapshotDiff) ...<String>[
+          '--from',
+          '1',
         ],
         ...words,
       ];

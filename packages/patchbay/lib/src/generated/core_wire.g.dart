@@ -2563,6 +2563,26 @@ final class PatchbaySnapshotRequestWire {
   };
 }
 
+final class PatchbaySnapshotDiffRequestWire {
+  const PatchbaySnapshotDiffRequestWire({required this.fromRevision});
+
+  final int fromRevision;
+
+  factory PatchbaySnapshotDiffRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{'fromRevision'}, path);
+    return PatchbaySnapshotDiffRequestWire(
+      fromRevision: _wireInt(json['fromRevision'], '$path.fromRevision'),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'fromRevision': fromRevision,
+  };
+}
+
 final class PatchbaySnapshotSelectionWire {
   const PatchbaySnapshotSelectionWire({
     required this.path,

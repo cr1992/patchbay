@@ -585,6 +585,12 @@
         "timeoutMs"
       ]
     },
+    "PatchbaySnapshotDiffRequestWire": {
+      "kind": "object",
+      "fields": [
+        "fromRevision"
+      ]
+    },
     "PatchbaySnapshotSelectionWire": {
       "kind": "object",
       "fields": [

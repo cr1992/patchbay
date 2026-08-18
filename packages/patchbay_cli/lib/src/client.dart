@@ -141,8 +141,19 @@ abstract interface class PatchbayClient {
   Future<void> close();
 }
 
+/// Optional client surface for the separately capability-gated diff request.
+///
+/// Kept out of [PatchbayClient] so adding PB-040-10 does not break third-party
+/// test or transport adapters that implemented the published 0.3 interface.
+abstract interface class PatchbaySnapshotDiffClient {
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision});
+}
+
 final class PatchbayConnection
-    implements PatchbayClient, PatchbayProfilingClient {
+    implements
+        PatchbayClient,
+        PatchbayProfilingClient,
+        PatchbaySnapshotDiffClient {
   PatchbayConnection._(
     this._service,
     this.isolateId,
@@ -249,6 +260,19 @@ final class PatchbayConnection
                   request.toWire().toJson(),
                 ),
               },
+      );
+
+  @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) =>
+      _call(
+        PatchbayServiceHost.snapshotMethod,
+        arguments: <String, Object?>{
+          PatchbayServiceHost.snapshotRequestKey: jsonEncode(
+            PatchbaySnapshotDiffRequest(
+              fromRevision: fromRevision,
+            ).toWire().toJson(),
+          ),
+        },
       );
 
   /// Reads Flutter's own diagnostic extensions without translating their

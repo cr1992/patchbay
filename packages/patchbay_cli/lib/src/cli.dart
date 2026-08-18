@@ -820,6 +820,10 @@ ArgParser patchbayCliParser() => ArgParser()
         'Dot path into the snapshot (a.b.c); answers that field or subtree '
         'instead of the whole snapshot.',
   )
+  ..addOption(
+    'from',
+    help: 'Retained snapshot revision used as the diff baseline.',
+  )
   ..addOption('args', help: 'JSON object passed to a domain command.')
   ..addFlag(
     'stdin',
@@ -1348,6 +1352,14 @@ Future<_Execution> _execute(
         ),
       );
     case PatchbayCommandTarget.clientSnapshot:
+      if (friendly.spec == PatchbayFriendlyCommand.snapshotDiff) {
+        return _Execution(
+          await _snapshotDiff(
+            connection,
+            friendly.arguments['fromRevision']! as int,
+          ),
+        );
+      }
       final PatchbaySnapshotRequest? selection = _selection(friendly);
       return _Execution(
         selection == null
@@ -2323,6 +2335,32 @@ Future<Map<String, Object?>> _selectedSnapshot(
     return _snapshotSelectorUnsupported();
   }
   return connection.snapshot(request: request);
+}
+
+Future<Map<String, Object?>> _snapshotDiff(
+  PatchbayClient connection,
+  int fromRevision,
+) async {
+  final Set<String>? features = patchbayDeclaredFeatures(
+    await connection.identity(),
+  );
+  if (!(features?.contains(PatchbayFeature.snapshotRevisionDiff.name) ??
+      false)) {
+    final Map<String, Object?> snapshot = await connection.snapshot();
+    return <String, Object?>{
+      ...snapshot,
+      'snapshotMode': 'legacyFull',
+      'notice':
+          'This App does not declare snapshot revision diff support; returned '
+          'the full snapshot without sending a diff request.',
+    };
+  }
+  if (connection is! PatchbaySnapshotDiffClient) {
+    throw const PatchbayProtocolException('snapshotDiffClientUnavailable');
+  }
+  return (connection as PatchbaySnapshotDiffClient).snapshotDiff(
+    fromRevision: fromRevision,
+  );
 }
 
 /// The refusal above, in the same typed shape the App's own rejections use.

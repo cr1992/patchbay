@@ -36,6 +36,13 @@ enum PatchbayFeature {
   /// Catalog command descriptors can drive host-side response validation.
   responseSchemas,
 
+  /// The snapshot RPC accepts a separate revision-diff request shape.
+  ///
+  /// Revisions advance only when this host observes changed canonical content.
+  /// A client must see this declaration before it sends the new request; old
+  /// hosts strictly decode the selector request and cannot accept it.
+  snapshotRevisionDiff,
+
   /// `*LifecycleNotResumed` rejections carry `details.lifecycleState`.
   ///
   /// Declared by the Flutter host, which owns the lifecycle gate. A pure Dart

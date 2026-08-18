@@ -92,6 +92,8 @@ final class PatchbayServiceHost {
       const <String, PatchbayExecutionContract>{};
   int _catalogReadGeneration = 0;
   bool _registered = false;
+  final List<_SnapshotRevision> _snapshotRevisions = <_SnapshotRevision>[];
+  var _nextSnapshotRevision = 0;
 
   /// The newest 256 redacted command facts, in dispatch completion order.
   List<PatchbayAuditEvent> get auditEvents =>
@@ -114,6 +116,7 @@ final class PatchbayServiceHost {
   static const Set<PatchbayFeature> _coreFeatures = <PatchbayFeature>{
     PatchbayFeature.catalogDigest,
     PatchbayFeature.snapshotSelectors,
+    PatchbayFeature.snapshotRevisionDiff,
   };
 
   /// Transport-neutral dispatch seam used by alternate, explicitly enabled
@@ -143,6 +146,21 @@ final class PatchbayServiceHost {
       final _SnapshotRead read = await _readSnapshot();
       return read.response;
     }
+    if (request.containsKey('fromRevision')) {
+      final PatchbaySnapshotDiffRequest diff;
+      try {
+        diff = PatchbaySnapshotDiffRequest.fromWire(
+          PatchbaySnapshotDiffRequestWire.fromJson(request),
+        );
+      } on FormatException catch (error) {
+        return _rejectionEnvelope(
+          'invalidSnapshotDiffRequest',
+          'The snapshot diff request violates the Patchbay contract.',
+          <String, Object?>{'reason': error.message},
+        );
+      }
+      return _diffSnapshot(diff);
+    }
     final PatchbaySnapshotRequest selection;
     try {
       selection = PatchbaySnapshotRequest.fromWire(
@@ -169,6 +187,7 @@ final class PatchbayServiceHost {
     if (read.violated) return read.response;
     return <String, Object?>{
       'schemaVersion': schemaVersion,
+      ...read.metadata,
       'selection': PatchbaySnapshotSelection.resolve(
         read.body,
         request.path,
@@ -217,6 +236,7 @@ final class PatchbayServiceHost {
       if (last.satisfies(condition, request.value)) {
         return <String, Object?>{
           'schemaVersion': schemaVersion,
+          ...read.metadata,
           'selection': last.toJson(),
           'wait': PatchbaySnapshotWaitWire(
             outcome: 'observed',
@@ -293,11 +313,99 @@ final class PatchbayServiceHost {
         ),
       );
     }
-    return _SnapshotRead.valid(<String, Object?>{
-      ...declared,
-      // Protocol-owned fields always win over consumer callback data.
+    final String canonical = patchbayCanonicalJson(declared);
+    _SnapshotRevision revision;
+    if (_snapshotRevisions.isNotEmpty &&
+        _snapshotRevisions.last.canonical == canonical) {
+      revision = _snapshotRevisions.last;
+    } else {
+      revision = _SnapshotRevision(
+        revision: ++_nextSnapshotRevision,
+        canonical: canonical,
+        body: Map<String, Object?>.from(
+          jsonDecode(canonical) as Map<String, Object?>,
+        ),
+      );
+      _snapshotRevisions.add(revision);
+      if (_snapshotRevisions.length > patchbaySnapshotRevisionRetention) {
+        _snapshotRevisions.removeAt(0);
+      }
+    }
+    final Map<String, Object?> metadata = <String, Object?>{
+      'snapshotRevision': revision.revision,
+      'revisionSource': 'hostObserved',
+      'factSource': PatchbayFactSourceWire.appRecorded.name,
+      'observedAt': DateTime.now().toUtc().toIso8601String(),
+      'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
+    };
+    return _SnapshotRead.valid(
+      <String, Object?>{
+        ...declared,
+        // Protocol-owned fields always win over consumer callback data.
+        'schemaVersion': schemaVersion,
+        ...metadata,
+      },
+      declared,
+      metadata,
+    );
+  }
+
+  Future<Map<String, Object?>> _diffSnapshot(
+    PatchbaySnapshotDiffRequest request,
+  ) async {
+    // Resolve the baseline before observing the current snapshot. A diff is
+    // only meaningful against a revision the caller could already have read;
+    // a fresh host must not create revision 1 from this very request and then
+    // pretend an old appInstance's revision 1 was available here.
+    _SnapshotRevision? baseline;
+    for (final _SnapshotRevision candidate in _snapshotRevisions) {
+      if (candidate.revision == request.fromRevision) baseline = candidate;
+    }
+    final _SnapshotRead read = await _readSnapshot();
+    if (read.violated) return read.response;
+    if (baseline == null) {
+      return _rejectionEnvelope(
+        'snapshotRevisionUnavailable',
+        'The requested snapshot revision is no longer retained in this App instance.',
+        <String, Object?>{
+          'fromRevision': request.fromRevision,
+          'oldestAvailableRevision': _snapshotRevisions.first.revision,
+          'snapshotRevision': _snapshotRevisions.last.revision,
+          'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
+        },
+      );
+    }
+    final _SnapshotDiff diff = _SnapshotDiff.between(
+      baseline.body,
+      _snapshotRevisions.last.body,
+    );
+    final Map<String, Object?> response = <String, Object?>{
       'schemaVersion': schemaVersion,
-    }, declared);
+      ...read.metadata,
+      'fromRevision': request.fromRevision,
+      'added': diff.added,
+      'changed': diff.changed,
+      'removed': diff.removed,
+      'limits': const <String, Object?>{
+        'maxChanges': patchbaySnapshotDiffMaxChanges,
+        'maxEncodedBytes': patchbaySnapshotDiffMaxEncodedBytes,
+      },
+    };
+    final int encodedBytes = utf8.encode(jsonEncode(response)).length;
+    if (diff.count > patchbaySnapshotDiffMaxChanges ||
+        encodedBytes > patchbaySnapshotDiffMaxEncodedBytes) {
+      return _rejectionEnvelope(
+        'snapshotDiffLimitExceeded',
+        'The snapshot diff exceeds the bounded response budget.',
+        <String, Object?>{
+          'changes': diff.count,
+          'encodedBytes': encodedBytes,
+          'maxChanges': patchbaySnapshotDiffMaxChanges,
+          'maxEncodedBytes': patchbaySnapshotDiffMaxEncodedBytes,
+        },
+      );
+    }
+    return response;
   }
 
   Map<String, Object?> _rejectionEnvelope(
@@ -1117,15 +1225,26 @@ final class _CatalogRead {
 /// One snapshot read: either the snapshot to serve, or the envelope that
 /// replaces it when the consumer source could not be read.
 final class _SnapshotRead {
-  const _SnapshotRead._(this.response, this.body, {required this.violated});
+  const _SnapshotRead._(
+    this.response,
+    this.body,
+    this.metadata, {
+    required this.violated,
+  });
 
   const _SnapshotRead.valid(
     Map<String, Object?> response,
     Map<String, Object?> body,
-  ) : this._(response, body, violated: false);
+    Map<String, Object?> metadata,
+  ) : this._(response, body, metadata, violated: false);
 
   const _SnapshotRead.violated(Map<String, Object?> response)
-    : this._(response, const <String, Object?>{}, violated: true);
+    : this._(
+        response,
+        const <String, Object?>{},
+        const <String, Object?>{},
+        violated: true,
+      );
 
   /// The snapshot, or the rejection envelope every caller receives instead.
   final Map<String, Object?> response;
@@ -1141,8 +1260,65 @@ final class _SnapshotRead {
   /// host has no business guessing which of a consumer's keys is "really" the
   /// body — the shipped example publishes its state flat, others wrap it.
   final Map<String, Object?> body;
+  final Map<String, Object?> metadata;
   final bool violated;
 }
+
+final class _SnapshotRevision {
+  const _SnapshotRevision({
+    required this.revision,
+    required this.canonical,
+    required this.body,
+  });
+
+  final int revision;
+  final String canonical;
+  final Map<String, Object?> body;
+}
+
+final class _SnapshotDiff {
+  _SnapshotDiff._(this.added, this.changed, this.removed);
+
+  factory _SnapshotDiff.between(Object? before, Object? after) {
+    final List<Map<String, Object?>> added = <Map<String, Object?>>[];
+    final List<Map<String, Object?>> changed = <Map<String, Object?>>[];
+    final List<Map<String, Object?>> removed = <Map<String, Object?>>[];
+    void walk(String path, Object? left, Object? right) {
+      if (patchbayJsonEquals(left, right)) return;
+      if (left is Map<String, Object?> && right is Map<String, Object?>) {
+        final List<String> keys = <String>{...left.keys, ...right.keys}.toList()
+          ..sort();
+        for (final String key in keys) {
+          final String child = '$path/${_jsonPointerSegment(key)}';
+          if (!left.containsKey(key)) {
+            added.add(<String, Object?>{'path': child, 'after': right[key]});
+          } else if (!right.containsKey(key)) {
+            removed.add(<String, Object?>{'path': child, 'before': left[key]});
+          } else {
+            walk(child, left[key], right[key]);
+          }
+        }
+        return;
+      }
+      changed.add(<String, Object?>{
+        'path': path,
+        'before': left,
+        'after': right,
+      });
+    }
+
+    walk('', before, after);
+    return _SnapshotDiff._(added, changed, removed);
+  }
+
+  final List<Map<String, Object?>> added;
+  final List<Map<String, Object?>> changed;
+  final List<Map<String, Object?>> removed;
+  int get count => added.length + changed.length + removed.length;
+}
+
+String _jsonPointerSegment(String value) =>
+    value.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /// The envelope a provider-side contract failure is answered with.
 ///

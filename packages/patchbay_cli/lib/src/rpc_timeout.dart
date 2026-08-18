@@ -123,7 +123,10 @@ Future<void> closePatchbayQuietly(PatchbayClient? connection) async {
 /// never reinterprets an answer that did arrive. The only thing it adds is an
 /// end to the waiting.
 final class PatchbayTimeoutClient
-    implements PatchbayClient, PatchbayProfilingClient {
+    implements
+        PatchbayClient,
+        PatchbayProfilingClient,
+        PatchbaySnapshotDiffClient {
   const PatchbayTimeoutClient(this._inner, {required this.rpcTimeout});
 
   final PatchbayClient _inner;
@@ -148,6 +151,20 @@ final class PatchbayTimeoutClient
         rpcTimeout: rpcTimeout,
         deadline: request?.timeout,
       );
+
+  @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) {
+    final PatchbayClient inner = _inner;
+    if (inner is! PatchbaySnapshotDiffClient) {
+      throw const PatchbayProtocolException('snapshotDiffClientUnavailable');
+    }
+    final PatchbaySnapshotDiffClient diffClient =
+        inner as PatchbaySnapshotDiffClient;
+    return awaitPatchbayRpc(
+      diffClient.snapshotDiff(fromRevision: fromRevision),
+      rpcTimeout: rpcTimeout,
+    );
+  }
 
   @override
   Future<Map<String, Object?>> invoke({

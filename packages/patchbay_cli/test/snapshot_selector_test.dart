@@ -15,7 +15,8 @@ import 'fixture/fake_client.dart';
 /// tested against the envelopes the host actually produces, and re-typing those
 /// into a fake would be a test that agrees with itself. Everything except the
 /// snapshot is delegated to the ordinary fake.
-final class _HostBackedClient implements PatchbayClient {
+final class _HostBackedClient
+    implements PatchbayClient, PatchbaySnapshotDiffClient {
   _HostBackedClient(this._source, {this.identityData});
 
   /// Answers one probe. A wait test hands over a source that changes its mind,
@@ -54,6 +55,14 @@ final class _HostBackedClient implements PatchbayClient {
     if (snapshotFailure case final Object failure) throw failure;
     return _host.dispatchSnapshot(request?.toWire().toJson());
   }
+
+  @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) =>
+      _host.dispatchSnapshot(
+        PatchbaySnapshotDiffRequest(
+          fromRevision: fromRevision,
+        ).toWire().toJson(),
+      );
 
   @override
   Future<Map<String, Object?>> identity() async =>

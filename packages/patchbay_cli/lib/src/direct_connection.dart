@@ -9,7 +9,10 @@ import 'rpc_timeout.dart';
 /// Adapts the explicit direct HTTP transport to the same command client used
 /// by the VM Service path. Flutter SDK diagnostic extensions remain VM-only.
 final class PatchbayDirectConnection
-    implements PatchbayClient, PatchbayProfilingClient {
+    implements
+        PatchbayClient,
+        PatchbayProfilingClient,
+        PatchbaySnapshotDiffClient {
   static const String protocolPath = PatchbayDirectHost.protocolPathPrefix;
 
   PatchbayDirectConnection({
@@ -48,6 +51,16 @@ final class PatchbayDirectConnection
         () => _client.snapshot(
           request: request?.toWire().toJson(),
           deadline: request?.timeout,
+        ),
+      );
+
+  @override
+  Future<Map<String, Object?>> snapshotDiff({required int fromRevision}) =>
+      _translate(
+        () => _client.snapshot(
+          request: PatchbaySnapshotDiffRequest(
+            fromRevision: fromRevision,
+          ).toWire().toJson(),
         ),
       );
 

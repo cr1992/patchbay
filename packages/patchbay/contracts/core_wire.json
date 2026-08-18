@@ -547,6 +547,13 @@
     },
     {
       "kind": "object",
+      "name": "PatchbaySnapshotDiffRequestWire",
+      "fields": [
+        {"name": "fromRevision", "type": "int"}
+      ]
+    },
+    {
+      "kind": "object",
       "name": "PatchbaySnapshotSelectionWire",
       "fields": [
         {"name": "path", "type": "String"},
