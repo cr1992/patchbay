@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'blob_store.dart';
 import 'command_descriptor.dart';
+import 'command_registry.dart';
 import 'facts.dart';
 import 'gates.dart';
 import 'generated/core_wire.g.dart';
@@ -157,12 +158,14 @@ final class PatchbayArtifactService {
         queryTimeout <= Duration.zero) {
       throw ArgumentError('Artifact service limits are inconsistent.');
     }
+    _registry = _buildRegistry();
   }
 
   final PatchbayMemoryBlobStore blobs;
   final PatchbayGateEvaluator _gates;
   final PatchbayLogSource? _logs;
   final Set<String> _gateIds;
+  late final PatchbayCommandRegistry _registry;
   final int maxQueryRecords;
   final int maxExportRecords;
   final int maxBatchBytes;
@@ -173,69 +176,107 @@ final class PatchbayArtifactService {
 
   bool get logsEnabled => _logs != null;
 
-  List<PatchbayCommandDescriptor> get descriptors =>
-      <PatchbayCommandDescriptor>[
-        ..._blobDescriptors,
-        if (logsEnabled) ..._logDescriptors,
-      ];
+  PatchbayCommandRegistry get registry => _registry;
 
-  bool handles(String command) =>
-      command == 'blob.metadata' ||
-      command == 'blob.read' ||
-      logsEnabled &&
-          (command == 'logs.query' ||
-              command == 'logs.tail' ||
-              command == 'logs.export');
+  List<PatchbayCommandDescriptor> get descriptors => registry.descriptors;
+
+  bool handles(String command) => registry.handles(command);
 
   Future<Map<String, Object?>> invoke(
     String command,
     Map<String, Object?> arguments,
     String requestId,
-  ) async {
-    if (!handles(command)) {
-      return _rejected(
-        requestId,
-        'commandNotRegistered',
-        details: <String, Object?>{'command': command},
-      );
-    }
+  ) => registry.dispatch(command, arguments, requestId);
+
+  PatchbayCommandRegistry _buildRegistry() {
+    final List<PatchbayCommandDescriptor> blobs = _blobDescriptors;
+    final List<PatchbayCommandDescriptor> logs = _logDescriptors;
+    return PatchbayCommandRegistry(<PatchbayCommandRegistration<Object?>>[
+      PatchbayCommandRegistration<PatchbayBlobMetadataRequestWire>(
+        descriptor: blobs[0],
+        decode: PatchbayBlobMetadataRequestWire.fromJson,
+        gate: _gate,
+        handle: _metadata,
+        onDecodeFailure: _failure,
+        onExecutionFailure: _failure,
+      ),
+      PatchbayCommandRegistration<PatchbayBlobReadRequestWire>(
+        descriptor: blobs[1],
+        decode: PatchbayBlobReadRequestWire.fromJson,
+        gate: _gate,
+        handle: _read,
+        onDecodeFailure: _failure,
+        onExecutionFailure: _failure,
+      ),
+      if (logsEnabled) ...<PatchbayCommandRegistration<Object?>>[
+        PatchbayCommandRegistration<PatchbayLogQueryRequestWire>(
+          descriptor: logs[0],
+          decode: PatchbayLogQueryRequestWire.fromJson,
+          gate: _gate,
+          handle: _query,
+          onDecodeFailure: _failure,
+          onExecutionFailure: _failure,
+        ),
+        PatchbayCommandRegistration<PatchbayLogExportRequestWire>(
+          descriptor: logs[1],
+          decode: PatchbayLogExportRequestWire.fromJson,
+          gate: _gate,
+          handle: _export,
+          onDecodeFailure: _failure,
+          onExecutionFailure: _failure,
+        ),
+        PatchbayCommandRegistration<PatchbayLogTailRequestWire>(
+          descriptor: logs[2],
+          decode: PatchbayLogTailRequestWire.fromJson,
+          gate: _gate,
+          handle: _tail,
+          onDecodeFailure: _failure,
+          onExecutionFailure: _failure,
+        ),
+      ],
+    ]);
+  }
+
+  Future<Map<String, Object?>?> _gate(Object? _, String requestId) async {
     final PatchbayGateRejection? gate = await _gates.evaluate(_gateIds);
-    if (gate != null) {
-      return _rejected(
-        requestId,
-        gate.code,
-        details: <String, Object?>{'gateId': gate.gateId},
-        notice: gate.notice,
-      );
-    }
-    try {
-      return switch (command) {
-        'blob.metadata' => _metadata(arguments, requestId),
-        'blob.read' => _read(arguments, requestId),
-        'logs.query' => await _query(arguments, requestId),
-        'logs.tail' => await _tail(arguments, requestId),
-        'logs.export' => await _export(arguments, requestId),
-        _ => throw StateError('unreachable artifact command $command'),
-      };
-    } on FormatException catch (error) {
+    return gate == null
+        ? null
+        : _rejected(
+            requestId,
+            gate.code,
+            details: <String, Object?>{'gateId': gate.gateId},
+            notice: gate.notice,
+          );
+  }
+
+  Map<String, Object?> _failure(
+    Object failure,
+    Map<String, Object?> _,
+    String requestId,
+    PatchbayCommandDescriptor __,
+  ) {
+    if (failure case FormatException error) {
       return _rejected(
         requestId,
         'invalidArguments',
         details: <String, Object?>{'message': error.message},
       );
-    } on PatchbayBlobFailure catch (error) {
+    }
+    if (failure case PatchbayBlobFailure error) {
       return _rejected(
         requestId,
         _blobFailureCode(error.code),
         details: error.details,
       );
-    } on PatchbayLogRedactionFailure catch (error) {
+    }
+    if (failure case PatchbayLogRedactionFailure error) {
       return _rejected(
         requestId,
         'logRedactionContractViolated',
         details: <String, Object?>{'path': error.path},
       );
-    } on PatchbayLogRecordTooLarge catch (error) {
+    }
+    if (failure case PatchbayLogRecordTooLarge error) {
       return _rejected(
         requestId,
         'logRecordTooLarge',
@@ -244,17 +285,18 @@ final class PatchbayArtifactService {
           'maxBatchBytes': maxBatchBytes,
         },
       );
-    } on PatchbayLogSourceContractFailure catch (error) {
+    }
+    if (failure case PatchbayLogSourceContractFailure error) {
       return _rejected(
         requestId,
         'logSourceContractViolated',
         details: <String, Object?>{'reason': error.reason},
       );
-    } on TimeoutException {
-      return _rejected(requestId, 'logQueryTimeout');
-    } on Object {
-      return _rejected(requestId, 'artifactSourceFailed');
     }
+    if (failure is TimeoutException) {
+      return _rejected(requestId, 'logQueryTimeout');
+    }
+    return _rejected(requestId, 'artifactSourceFailed');
   }
 
   void dispose() {
@@ -267,20 +309,19 @@ final class PatchbayArtifactService {
   }
 
   Map<String, Object?> _metadata(
-    Map<String, Object?> arguments,
+    PatchbayBlobMetadataRequestWire request,
     String requestId,
   ) {
-    final PatchbayBlobMetadataRequestWire request =
-        PatchbayBlobMetadataRequestWire.fromJson(arguments);
     return PatchbayInvocation.accepted(
       requestId: requestId,
       payload: blobs.metadata(request.blobId).toJson(),
     ).toJson();
   }
 
-  Map<String, Object?> _read(Map<String, Object?> arguments, String requestId) {
-    final PatchbayBlobReadRequestWire request =
-        PatchbayBlobReadRequestWire.fromJson(arguments);
+  Map<String, Object?> _read(
+    PatchbayBlobReadRequestWire request,
+    String requestId,
+  ) {
     return PatchbayInvocation.accepted(
       requestId: requestId,
       payload: blobs
@@ -297,11 +338,9 @@ final class PatchbayArtifactService {
   }
 
   Future<Map<String, Object?>> _query(
-    Map<String, Object?> arguments,
+    PatchbayLogQueryRequestWire request,
     String requestId,
   ) async {
-    final PatchbayLogQueryRequestWire request =
-        PatchbayLogQueryRequestWire.fromJson(arguments);
     final Stopwatch stopwatch = Stopwatch()..start();
     final PatchbayLogQuery query = _queryFromWire(
       request,
@@ -325,11 +364,9 @@ final class PatchbayArtifactService {
   }
 
   Future<Map<String, Object?>> _tail(
-    Map<String, Object?> arguments,
+    PatchbayLogTailRequestWire request,
     String requestId,
   ) async {
-    final PatchbayLogTailRequestWire request =
-        PatchbayLogTailRequestWire.fromJson(arguments);
     final int limit = _boundedPositive(
       request.limit ?? 100,
       maxQueryRecords,
@@ -411,11 +448,9 @@ final class PatchbayArtifactService {
   }
 
   Future<Map<String, Object?>> _export(
-    Map<String, Object?> arguments,
+    PatchbayLogExportRequestWire request,
     String requestId,
   ) async {
-    final PatchbayLogExportRequestWire request =
-        PatchbayLogExportRequestWire.fromJson(arguments);
     final DateTime? since = _date(request.since, 'since');
     final DateTime? until = _date(request.until, 'until');
     _validateRange(since, until);
@@ -684,56 +719,26 @@ final class PatchbayArtifactService {
 
   List<PatchbayCommandDescriptor>
   get _logDescriptors => <PatchbayCommandDescriptor>[
-    for (final String name in <String>['logs.query', 'logs.export'])
-      PatchbayCommandDescriptor(
-        name: name,
-        summary: name == 'logs.query'
-            ? 'Query bounded consumer-redacted structured App logs.'
-            : 'Export consumer-redacted structured App logs to a blob.',
-        plane: PatchbayPlane.domain,
-        mode: PatchbayCommandMode.readOnly,
-        sideEffect: PatchbaySideEffect.none,
-        factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-        gates: _gateIds,
-        parameters: <PatchbayParameterDescriptor>[
-          const PatchbayParameterDescriptor(
-            name: 'cursor',
-            type: PatchbayParameterType.string,
-          ),
-          const PatchbayParameterDescriptor(
-            name: 'direction',
-            type: PatchbayParameterType.enumeration,
-            defaultValue: 'backward',
-            allowedValues: <String>['forward', 'backward'],
-          ),
-          PatchbayParameterDescriptor(
-            name: 'limit',
-            type: PatchbayParameterType.integer,
-            defaultValue: name == 'logs.export' ? 1000 : 100,
-          ),
-          const PatchbayParameterDescriptor(
-            name: 'levels',
-            type: PatchbayParameterType.json,
-          ),
-          const PatchbayParameterDescriptor(
-            name: 'categories',
-            type: PatchbayParameterType.json,
-          ),
-          const PatchbayParameterDescriptor(
-            name: 'since',
-            type: PatchbayParameterType.string,
-          ),
-          const PatchbayParameterDescriptor(
-            name: 'until',
-            type: PatchbayParameterType.string,
-          ),
-          if (name == 'logs.export')
-            const PatchbayParameterDescriptor(
-              name: 'ttlMs',
-              type: PatchbayParameterType.integer,
-            ),
-        ],
-      ),
+    PatchbayCommandDescriptor(
+      name: 'logs.query',
+      summary: 'Query bounded consumer-redacted structured App logs.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.readOnly,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      gates: _gateIds,
+      parameters: _logQueryParameters(export: false),
+    ),
+    PatchbayCommandDescriptor(
+      name: 'logs.export',
+      summary: 'Export consumer-redacted structured App logs to a blob.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.readOnly,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      gates: _gateIds,
+      parameters: _logQueryParameters(export: true),
+    ),
     PatchbayCommandDescriptor(
       name: 'logs.tail',
       summary: 'Long-poll bounded consumer-redacted logs after a cursor.',
@@ -769,6 +774,47 @@ final class PatchbayArtifactService {
         ),
       ],
     ),
+  ];
+
+  List<PatchbayParameterDescriptor> _logQueryParameters({
+    required bool export,
+  }) => <PatchbayParameterDescriptor>[
+    const PatchbayParameterDescriptor(
+      name: 'cursor',
+      type: PatchbayParameterType.string,
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'direction',
+      type: PatchbayParameterType.enumeration,
+      defaultValue: 'backward',
+      allowedValues: <String>['forward', 'backward'],
+    ),
+    PatchbayParameterDescriptor(
+      name: 'limit',
+      type: PatchbayParameterType.integer,
+      defaultValue: export ? 1000 : 100,
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'levels',
+      type: PatchbayParameterType.json,
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'categories',
+      type: PatchbayParameterType.json,
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'since',
+      type: PatchbayParameterType.string,
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'until',
+      type: PatchbayParameterType.string,
+    ),
+    if (export)
+      const PatchbayParameterDescriptor(
+        name: 'ttlMs',
+        type: PatchbayParameterType.integer,
+      ),
   ];
 }
 

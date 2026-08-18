@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'dart:math';
 
 import 'catalog_digest.dart';
+import 'command_registry.dart';
 import 'features.dart';
 import 'generated/core_wire.g.dart';
 import 'invocation.dart';
@@ -28,6 +29,7 @@ final class PatchbayServiceHost {
     required PatchbayCatalogSource catalog,
     required PatchbaySnapshotSource snapshot,
     required PatchbayInvocationSource invoke,
+    PatchbayCommandRegistry? registry,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
@@ -35,6 +37,7 @@ final class PatchbayServiceHost {
        _catalog = catalog,
        _snapshot = snapshot,
        _invoke = invoke,
+       _registry = registry ?? PatchbayCommandRegistry(const []),
        _registrar = registrar ?? registerExtension,
        _declaredFeatures = features;
 
@@ -68,6 +71,7 @@ final class PatchbayServiceHost {
   final PatchbayCatalogSource _catalog;
   final PatchbaySnapshotSource _snapshot;
   final PatchbayInvocationSource _invoke;
+  final PatchbayCommandRegistry _registry;
   final PatchbayExtensionRegistrar _registrar;
   final Set<PatchbayFeature> _declaredFeatures;
   bool _registered = false;
@@ -339,11 +343,9 @@ final class PatchbayServiceHost {
           ? arguments
           : _withoutStdinProvenance(arguments);
     }
-    final Map<String, Object?> result = await _invoke(
-      command,
-      forwarded,
-      requestId,
-    );
+    final Map<String, Object?> result =
+        await _registry.tryDispatch(command, forwarded, requestId) ??
+        await _invoke(command, forwarded, requestId);
     final PatchbayInvocationWire wire;
     try {
       wire = PatchbayInvocationWire.fromJson(result);
@@ -504,8 +506,20 @@ final class PatchbayServiceHost {
         'error': error.runtimeType.toString(),
       });
     }
+    final Object? declaredCommands = declared['commands'];
+    final Object? commands = switch (declaredCommands) {
+      List<Object?> values => <Object?>[
+        ..._registry.descriptors.map((descriptor) => descriptor.toJson()),
+        ...values,
+      ],
+      null when !_registry.isEmpty => <Object?>[
+        ..._registry.descriptors.map((descriptor) => descriptor.toJson()),
+      ],
+      _ => declaredCommands,
+    };
     final Map<String, Object?> catalog = <String, Object?>{
       ...declared,
+      if (commands != null) 'commands': commands,
       // Protocol-owned fields always win over consumer callback data.
       'schemaVersion': schemaVersion,
     };
