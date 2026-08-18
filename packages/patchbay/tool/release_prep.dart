@@ -1842,7 +1842,7 @@ List<String> manualSteps(String version, ReleaseInputs inputs) {
   final String tag = '$tagPrefix$version';
   return <String>[
     '给 CHANGELOG 的 `## $version` 段补一句批次摘要（体例见 0.2.1 段）。',
-    '门禁全绿后按 CONTRIBUTING.md「发版」顺序走：内网主仓 MR 合并 → 同步同一 SHA 到 GitHub → 再打 tag。',
+    '门禁全绿后按 CONTRIBUTING.md「发版」顺序走：发布 MR 合回 main → 同步同一 SHA 到 GitHub → 再打 tag。',
     '打 tag（origin 已配双推，一条命令同时到 GitLab 与 GitHub）：\n'
         '      git tag -a $tag -m \'patchbay $version\'\n'
         '      git push origin $tag',
@@ -2046,42 +2046,86 @@ ReleaseInputs _read(String root) {
 }
 
 final class _FragmentScan {
-  const _FragmentScan({required this.fragments, required this.errors});
+  const _FragmentScan({
+    required this.version,
+    required this.fragments,
+    required this.fragmentPaths,
+    required this.errors,
+  });
 
+  final String version;
   final List<ChangelogFragment> fragments;
+  final List<String> fragmentPaths;
   final List<String> errors;
 }
 
-_FragmentScan _readChangelogFragments(String root) {
+_FragmentScan _readChangelogFragments(String root, String version) {
   final Directory directory = Directory('$root/$changelogFragmentsPath');
   if (!directory.existsSync()) {
-    return const _FragmentScan(
+    return _FragmentScan(
+      version: version,
       fragments: <ChangelogFragment>[],
+      fragmentPaths: <String>[],
       errors: <String>['changelog.d：目录不存在'],
     );
   }
   final List<FileSystemEntity> entries = directory.listSync()
     ..sort((left, right) => left.path.compareTo(right.path));
   final fragments = <ChangelogFragment>[];
+  final fragmentPaths = <String>[];
   final errors = <String>[];
   for (final FileSystemEntity entry in entries) {
     final String name = entry.uri.pathSegments
         .where((segment) => segment.isNotEmpty)
         .last;
     if (name == 'README.md') continue;
-    if (entry is! File) {
-      errors.add('$name：changelog.d 除 README.md 外只能包含碎片文件');
+    if (entry is File) {
+      errors.add('$name：碎片必须放入 changelog.d/<version>/ 版本目录');
+      continue;
+    }
+    if (entry is! Directory) {
+      errors.add('$name：changelog.d 根目录只允许 README.md 与版本目录');
       continue;
     }
     try {
-      fragments.add(parseChangelogFragment(name, entry.readAsBytesSync()));
-    } on FormatException catch (error) {
-      errors.add(error.message);
-    } on FileSystemException catch (error) {
-      errors.add('$name：读取失败（${error.message}）');
+      requireVersion(name);
+    } on FormatException {
+      errors.add('$name：版本目录名必须是 SemVer');
+      continue;
+    }
+    final List<FileSystemEntity> versionEntries = entry.listSync()
+      ..sort((left, right) => left.path.compareTo(right.path));
+    for (final FileSystemEntity fragmentEntry in versionEntries) {
+      final String fileName = fragmentEntry.uri.pathSegments
+          .where((segment) => segment.isNotEmpty)
+          .last;
+      final String relative = '$changelogFragmentsPath/$name/$fileName';
+      if (fragmentEntry is! File) {
+        errors.add('$relative：版本目录只允许碎片文件');
+        continue;
+      }
+      try {
+        final ChangelogFragment fragment = parseChangelogFragment(
+          fileName,
+          fragmentEntry.readAsBytesSync(),
+        );
+        if (name == version) {
+          fragments.add(fragment);
+          fragmentPaths.add(relative);
+        }
+      } on FormatException catch (error) {
+        errors.add('$name/${error.message}');
+      } on FileSystemException catch (error) {
+        errors.add('$relative：读取失败（${error.message}）');
+      }
     }
   }
-  return _FragmentScan(fragments: fragments, errors: errors);
+  return _FragmentScan(
+    version: version,
+    fragments: fragments,
+    fragmentPaths: fragmentPaths,
+    errors: errors,
+  );
 }
 
 ReleaseCheck _checkChangelogFragments(_FragmentScan scan) {
@@ -2094,7 +2138,7 @@ ReleaseCheck _checkChangelogFragments(_FragmentScan scan) {
   }
   return ReleaseCheck.ok(
     'changelog-fragments',
-    '${scan.fragments.length} 个碎片格式合法',
+    '${scan.version}：${scan.fragments.length} 个目标碎片格式合法；其他版本队列保留',
     hard: true,
   );
 }
@@ -2126,7 +2170,10 @@ void _run(List<String> arguments) {
     _applyToDisk(root, options);
   }
 
-  final _FragmentScan fragmentScan = _readChangelogFragments(root);
+  final _FragmentScan fragmentScan = _readChangelogFragments(
+    root,
+    options.version,
+  );
   final ReleaseInputs inputs = _read(root);
   final List<ReleaseCheck> checks = evaluateRelease(
     version: options.version,
@@ -2191,7 +2238,10 @@ void _run(List<String> arguments) {
 }
 
 void _applyToDisk(String root, _Options options) {
-  final _FragmentScan fragmentScan = _readChangelogFragments(root);
+  final _FragmentScan fragmentScan = _readChangelogFragments(
+    root,
+    options.version,
+  );
   if (fragmentScan.errors.isNotEmpty) {
     throw FormatException('CHANGELOG 碎片校验失败：${fragmentScan.errors.join('；')}');
   }
@@ -2288,9 +2338,7 @@ void _applyToDisk(String root, _Options options) {
     ),
   );
 
-  final List<String> fragmentPaths = fragmentScan.fragments
-      .map((fragment) => '$changelogFragmentsPath/${fragment.fileName}')
-      .toList(growable: false);
+  final List<String> fragmentPaths = fragmentScan.fragmentPaths;
   final Set<String> transactionPaths = <String>{
     ...writes.keys,
     ...fragmentPaths,

@@ -1,10 +1,27 @@
 # CHANGELOG 碎片规范
 
-本目录保存尚未发布、会影响使用者的变更说明。日常行为 MR 各写自己的碎片；定版时统一聚合进仓根
-`CHANGELOG.md`，再由 `release_prep` 从根表派生四个包的 `CHANGELOG.md`。
+本目录按目标版本保存尚未发布、会影响使用者的变更说明。日常行为 MR 各写自己的碎片；定版时
+`release_prep --version <SemVer>` 只聚合对应版本目录，再从仓根 `CHANGELOG.md` 派生四个包的
+`CHANGELOG.md`。
 
 仓根 `CHANGELOG.md` 是已发布历史的唯一真源；本目录只保存待发布输入。四个包当前共享同一份发布
 正文，因此碎片不声明 package scope。
+
+## 目录
+
+```text
+changelog.d/
+├── README.md
+├── 0.4.0/
+│   ├── PB-040-01.added.md
+│   └── PB-040-05.registry.changed.md
+└── 0.5.0/
+    └── PB-050-01.added.md
+```
+
+- 版本目录名必须是完整 SemVer；预发布版本使用自己的精确目录，例如 `0.4.0-rc.1/`。
+- 碎片不得散落在 `changelog.d/` 根目录，也不得再提前聚合成一个共享的版本文件。
+- 多个版本可并行积累；发布某一版本只消费同名目录，其他版本队列原样保留。
 
 ## 何时必须写
 
@@ -25,10 +42,10 @@
 
 ## 文件名
 
-格式：
+完整路径格式：
 
 ```text
-<change-id>[.<part>].<type>.md
+changelog.d/<target-version>/<change-id>[.<part>].<type>.md
 ```
 
 `change-id` 使用两种封闭格式：
@@ -39,10 +56,10 @@
 同一条目拆成多个独立行为时，用可选的 `part` 区分；`part` 只能使用小写 ASCII 字母、数字和连字符。
 
 ```text
-PB-040-01.added.md
-PB-040-01.cli.added.md
-PB-040-05.registry.changed.md
-BUG-20260817-01.fixed.md
+changelog.d/0.4.0/PB-040-01.added.md
+changelog.d/0.4.0/PB-040-01.cli.added.md
+changelog.d/0.4.0/PB-040-05.registry.changed.md
+changelog.d/0.4.1/BUG-20260817-01.fixed.md
 ```
 
 完整文件名必须匹配：
@@ -96,10 +113,10 @@ BUG-20260817-01.fixed.md
 ## MR 流程
 
 1. 从版本计划或 backlog 取得 `change-id`；未排期缺陷先登记，design-gate 先裁决。
-2. 实现 MR 同时新增碎片，日常 MR 不直接编辑根或四个包的 `CHANGELOG.md`。
+2. 实现 MR 在目标版本目录新增碎片，日常 MR 不直接编辑根或四个包的 `CHANGELOG.md`。
 3. 作者在 MR 模板填写计划编号、验证证据和碎片文件；无需碎片时填写理由。
 4. 评审者核对文件名、类型、用户视角、Breaking 标记，以及文档/测试是否描述同一契约。
-5. MR 合入后碎片继续留在本目录，直到对应版本定版；不得在功能合入后提前删除。
+5. MR 合入后碎片继续留在对应版本目录，直到该版本定版；不得在功能合入后提前删除。
 
 一个碎片只由创建它的 MR 修改。后续修正另开碎片，避免多个分支重新争写同一个文件。
 
@@ -107,11 +124,11 @@ BUG-20260817-01.fixed.md
 
 定版时按以下顺序处理：
 
-1. 校验全部文件名、change-id、类型、非空正文和单一顶层列表项；
+1. 校验全部版本目录、文件名、change-id、类型、非空正文和单一顶层列表项；
 2. 按 `Added → Changed → Deprecated → Removed → Fixed → Security` 建立栏目；
 3. 同一栏目内按文件名升序聚合，保证重复执行得到相同结果；
 4. 将内容写入仓根 `CHANGELOG.md` 的 `## Unreleased` 段；
-5. 删除本次已聚合的碎片，保留本 `README.md`；
+5. 只删除目标版本目录中本次已聚合的碎片，保留本 `README.md` 和其他版本目录；
 6. 运行 `release_prep --apply`，把 Unreleased 落款成正式版本并派生四个包的 CHANGELOG；
 7. 聚合、删除碎片、版本落款和包内派生必须进入同一个发布提交。
 

@@ -13,6 +13,8 @@ void main() {
   final backlogFile = File('docs/backlog.md');
   final releaseFile = File('docs/releases/0.4.0.md');
 
+  _validateAgentInstructionEntryPoints(failures);
+
   if (!backlogFile.existsSync() || !releaseFile.existsSync()) {
     stderr.writeln('planning check must run from the repository root');
     exitCode = 1;
@@ -115,6 +117,22 @@ void main() {
     '(${pbRows.length} backlog items, ${dgRows.length} design gates, '
     '${releaseScope.length} release entries)',
   );
+}
+
+void _validateAgentInstructionEntryPoints(List<String> failures) {
+  final agents = File('AGENTS.md');
+  if (!agents.existsSync() || agents.readAsStringSync().trim().isEmpty) {
+    failures.add('AGENTS.md: missing canonical Agent instructions');
+  }
+
+  final claude = File('CLAUDE.md');
+  if (!claude.existsSync()) {
+    failures.add('CLAUDE.md: missing AGENTS.md import');
+    return;
+  }
+  if (claude.readAsStringSync().trim() != '@AGENTS.md') {
+    failures.add('CLAUDE.md: must contain only @AGENTS.md');
+  }
 }
 
 List<List<String>> _markdownRows(File file) {
