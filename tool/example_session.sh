@@ -178,6 +178,9 @@ example_session_ensure_platform() {
       ;;
   esac
   if [ -d "$PATCHBAY_EXAMPLE_DIR/$dir" ]; then
+    # 已生成的工程也要过一遍：注入是幂等的，而权限声明是后加的要求，
+    # 否则老检出会静默停在"当不了权限被试对象"的状态上。
+    example_session_declare_permissions "$platform" || return 1
     return 0
   fi
   echo "[session] 生成 example 的 ${flag} 工程（不入库）"
@@ -189,6 +192,7 @@ example_session_ensure_platform() {
   # flutter create 顺手补的默认 widget 测试引用模板里的 MyApp，与本 example 的 main.dart
   # 不是一回事，留着会让 flutter analyze 变红。它是生成物，不入库也不该留在工作树里。
   rm -f "$PATCHBAY_EXAMPLE_DIR/test/widget_test.dart"
+  example_session_declare_permissions "$platform" || return 1
   # flutter create 会自己跑一次**不受 lockfile 约束**的 pub，实测把被追踪的 example lock 里
   # vm_service 从 15.2.0 顶到 15.3.0。这里只告警不代改：静默 `git checkout --` 会把开发者
   # 有意的 lock 改动一并吃掉，而一次"只是生成工程"的动作不该拥有那种权力。
@@ -197,6 +201,70 @@ example_session_ensure_platform() {
     echo "[session] 注意：flutter create 改动了被追踪的 example pubspec.lock。" >&2
     echo "[session] 这不是预检的意图，提交前请复核并复原该文件。" >&2
   fi
+}
+
+# 让 example 成为一个合格的**权限被试对象**。
+#
+# `flutter create` 生成的工程只声明 INTERNET，`dumpsys package` 的 `runtime permissions:`
+# 段是空的。于是 P0 四权限在设备上根本没有可读事实，Android adapter 的状态查询会因为
+# "正则没匹配"退化成 `permissionUnsupported`——仓内因此从来跑不出一份权限矩阵，不是
+# 因为没验，而是因为唯一的测试 App 当不了被试对象。
+#
+# 声明写在生成物里而不是入库工程里：四包仓不维护平台工程（见 example/.gitignore），
+# 所以按需注入、幂等，重复调用不会写重复条目。声明 ≠ 请求：`pm grant/revoke` 对已声明的
+# 运行时权限即可工作，因此 status / normalize / reset 的矩阵不需要 App 主动发起请求；
+# 真实弹窗 exercise 才需要，那条由 example 的域命令触发。
+example_session_declare_permissions() {
+  local platform="$1"
+  case "$platform" in
+    android)
+      local manifest="$PATCHBAY_EXAMPLE_DIR/android/app/src/main/AndroidManifest.xml"
+      [ -f "$manifest" ] || return 0
+      if grep -q 'android.permission.CAMERA' "$manifest"; then
+        return 0
+      fi
+      echo "[session] 给生成的 Android 工程注入 P0 权限声明（不入库）"
+      python3 - "$manifest" <<'PY' || return 1
+import re, sys
+path = sys.argv[1]
+source = open(path, encoding='utf-8').read()
+declarations = '\n'.join(
+    '    <uses-permission android:name="android.permission.%s"/>' % name
+    for name in (
+        'CAMERA',
+        'RECORD_AUDIO',
+        'ACCESS_FINE_LOCATION',
+        'POST_NOTIFICATIONS',
+    )
+)
+updated = re.sub(
+    r'(<manifest[^>]*>\n)',
+    r'\1' + declarations + '\n',
+    source,
+    count=1,
+)
+if updated == source:
+    raise SystemExit('manifest 结构不认识，未注入')
+open(path, 'w', encoding='utf-8').write(updated)
+PY
+      ;;
+    ios-simulator | ios-device)
+      local plist="$PATCHBAY_EXAMPLE_DIR/ios/Runner/Info.plist"
+      [ -f "$plist" ] || return 0
+      if grep -q 'NSCameraUsageDescription' "$plist"; then
+        return 0
+      fi
+      echo "[session] 给生成的 iOS 工程注入 P0 用途声明（不入库）"
+      # iOS 上缺 usage description 不是"权限被拒"，而是**进程直接崩**。所以这四条是
+      # 能不能跑权限路径的前提，不是可选的礼貌项。
+      local key
+      for key in NSCameraUsageDescription NSMicrophoneUsageDescription \
+        NSLocationWhenInUseUsageDescription; do
+        /usr/libexec/PlistBuddy -c "Add :$key string Patchbay example permission probe" \
+          "$plist" >/dev/null 2>&1 || true
+      done
+      ;;
+  esac
 }
 
 example_session_start() {
