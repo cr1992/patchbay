@@ -254,6 +254,33 @@ if updated == source:
     raise SystemExit('applicationId 未找到，未改动')
 open(path, 'w', encoding='utf-8').write(updated)
 INNER
+    # 改了安装身份就会留下旧 id 的孤儿安装：两个图标、`pm list` 两条，排查时很容易
+    # 对着错的那个看权限。只卸掉**本脚本自己生成过的**那个 id，不碰别的。
+    if [ -n "${PATCHBAY_SESSION_DEVICE:-}" ]; then
+      if adb -s "$PATCHBAY_SESSION_DEVICE" shell pm list packages 2>/dev/null |
+        grep -q 'dev.patchbay.patchbay_flutter_example'; then
+        echo "[session] 卸载改名前的旧安装 dev.patchbay.patchbay_flutter_example"
+        adb -s "$PATCHBAY_SESSION_DEVICE" uninstall \
+          dev.patchbay.patchbay_flutter_example >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+}
+
+# 设备上并存多个 example 安装时明确报出来，但不代为卸载。
+#
+# 历史上生成约定变过（早期用 `flutter create` 的默认 org `com.example.*`），这些安装不是
+# 本脚本造的，删不删是操作者的决定；但闷不作声地留着，会让人对着错的包看权限状态。
+example_session_report_foreign_installs() {
+  local device="$1"
+  local others
+  others="$(adb -s "$device" shell pm list packages 2>/dev/null |
+    sed 's/package://' | tr -d '\r' |
+    grep -E 'patchbay_flutter_example' | grep -v '^dev\.patchbay\.example$' || true)"
+  if [ -n "$others" ]; then
+    echo "[session] 注意：设备上还有其他 example 安装（本脚本不代为卸载）：" >&2
+    printf '  %s\n' $others >&2
+    echo "[session] 本次被试对象固定是 dev.patchbay.example" >&2
   fi
 }
 
@@ -326,7 +353,8 @@ example_session_start() {
     return 1
   fi
   PATCHBAY_SESSION_PLATFORM="$platform"
-  export PATCHBAY_SESSION_PLATFORM
+  PATCHBAY_SESSION_DEVICE="$device"
+  export PATCHBAY_SESSION_PLATFORM PATCHBAY_SESSION_DEVICE
   echo "[session] device=$device platform=$platform"
 
   # UI 面有 lifecycle 闸：App 不在 resumed 时 ui.* / navigation.* 全部按
@@ -349,6 +377,9 @@ example_session_start() {
   esac
 
   example_session_ensure_platform "$platform" || return 1
+  if [ "$platform" = android ]; then
+    example_session_report_foreign_installs "$device"
+  fi
 
   # --enforce-lockfile：预检不得改动被追踪的 pubspec.lock。实测不加这个参数时，一次
   # 预检会把 example 的 lock 里 vm_service 从 15.2.0 顺手升到 15.3.0——一次"只读的验证"
