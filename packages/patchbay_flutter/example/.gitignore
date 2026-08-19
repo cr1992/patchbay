@@ -1,0 +1,18 @@
+# 生成的平台工程不入库、也不进发布包。
+#
+# 四包仓不维护一套 Android / iOS 工程：它们会带来 Gradle、签名和 SDK 版本的长期维护面，
+# 而 example 的职责只是证明接线可用。本地端到端预检（tool/example_session.sh）和 CI 冒烟
+# 都按需 `flutter create --platforms=...` 生成，用完留在本地。
+#
+# 这份 ignore 同时是发布门禁的一部分：pub 会把未被忽略的文件打进包，
+# 生成物一旦进包，接入方拉到的就是一个带别人 applicationId 的 Android 工程。
+android/
+ios/
+macos/
+linux/
+windows/
+web/
+
+.metadata
+.flutter-plugins
+.flutter-plugins-dependencies

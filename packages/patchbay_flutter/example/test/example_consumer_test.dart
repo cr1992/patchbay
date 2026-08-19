@@ -4,6 +4,7 @@ import 'dart:developer';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter_example/example_domain.dart';
 import 'package:patchbay_flutter_example/main.dart';
 
 void main() {
@@ -16,14 +17,16 @@ void main() {
       noteTargetId,
       registry: registry,
     );
+    final ExampleRouter router = ExampleRouter();
     final PatchbayExampleHost host = PatchbayExampleHost(
       model: model,
       registry: registry,
+      router: router,
       isAppResumed: () => true,
     );
     try {
       await tester.pumpWidget(
-        PatchbayExampleApp(model: model, noteKey: noteKey),
+        PatchbayExampleApp(model: model, noteKey: noteKey, router: router),
       );
       expect(find.text('Count: 0'), findsOneWidget);
 
@@ -62,9 +65,11 @@ void main() {
       noteTargetId,
       registry: registry,
     );
+    final ExampleRouter router = ExampleRouter();
     final PatchbayExampleHost host = PatchbayExampleHost(
       model: model,
       registry: registry,
+      router: router,
       appInstanceId: 'example-test-instance',
       isAppResumed: () => true,
       registrar: (String method, ServiceExtensionHandler handler) {
@@ -73,7 +78,7 @@ void main() {
     )..register();
     try {
       await tester.pumpWidget(
-        PatchbayExampleApp(model: model, noteKey: noteKey),
+        PatchbayExampleApp(model: model, noteKey: noteKey, router: router),
       );
 
       final Map<String, Object?> identity = await _call(
@@ -96,6 +101,38 @@ void main() {
           incrementCommand,
           'ui.semantics.tree',
           'ui.text.set',
+        }),
+      );
+      // 0.4.0 的能力全部靠组合根注入。没有这条断言，接线被删掉时 example 仍然编译、
+      // 单测仍然全绿，而本地端到端预检会在设备上才发现命令根本不在 catalog 里。
+      expect(
+        commands.map((Map<String, Object?> row) => row['name']),
+        containsAll(<String>{
+          'ui.semantics.action',
+          'ui.gesture.pressHold',
+          'ui.gesture.drag',
+          'ui.gesture.fling',
+          'ui.inspect.select',
+          'ui.inspect.status',
+          'ui.keepAwake.set',
+          'ui.keepAwake.status',
+          'navigation.catalog',
+          'navigation.current',
+          'navigation.go',
+          'navigation.push',
+          'navigation.back',
+          'ui.capture',
+          'ui.capture.diff',
+          'blob.metadata',
+          'logs.query',
+          'logs.tail',
+          'logs.export',
+          deviceWriteCommand,
+          jobRunCommand,
+          idempotentTouchCommand,
+          jobGetCommand,
+          jobWaitCommand,
+          jobCancelCommand,
         }),
       );
       final List<Map<String, Object?>> targets =
