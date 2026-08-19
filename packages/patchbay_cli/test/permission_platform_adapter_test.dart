@@ -91,6 +91,93 @@ void main() {
     );
   });
 
+  // 撤销一个已授予的运行时权限会让 Android 终止应用进程——确定性的系统行为，因此
+  // 状态答复必须提前把它说出来，而不是让操作者在重连窗口超时后自己反推。
+  test(
+    'granted Android permission reports that a change restarts the app',
+    () async {
+      Future<PatchbayPermissionStatus?> statusFor({
+        required bool granted,
+      }) async {
+        Future<PatchbayPlatformCommandResult> command(
+          String executable,
+          List<String> arguments,
+          Duration timeout,
+        ) async {
+          if (arguments case ['version']) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: 'Android Debug Bridge version 1.0.41',
+              stderr: '',
+            );
+          }
+          if (arguments.contains('devices')) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: 'List of devices attached\ndevice-1\tdevice\n',
+              stderr: '',
+            );
+          }
+          // 适配器不假定应用存在也不假定它在跑：先 `pm path` 再 `pidof`。
+          if (arguments.contains('path')) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: 'package:/data/app/consumer/base.apk',
+              stderr: '',
+            );
+          }
+          if (arguments.contains('pidof')) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: '4321',
+              stderr: '',
+            );
+          }
+          if (arguments.contains('dumpsys')) {
+            return PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout:
+                  'android.permission.CAMERA: granted=$granted, '
+                  'flags=[${granted ? ' USER_SET' : ''}]\n',
+              stderr: '',
+            );
+          }
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: '',
+            stderr: '',
+          );
+        }
+
+        final PatchbayPermissionDriverResponse response =
+            await PatchbayAndroidPermissionAdapter(
+              runCommand: command,
+            ).handle(_request(PatchbayPermissionOperation.status));
+        expect(response.accepted, isTrue, reason: response.code ?? '');
+        return response.after;
+      }
+
+      final PatchbayPermissionStatus? grantedStatus = await statusFor(
+        granted: true,
+      );
+      expect(grantedStatus?.state, PatchbayPermissionState.granted);
+      expect(
+        grantedStatus?.requiresRestart,
+        isTrue,
+        reason: '从 granted 出发只能 revoke，而 revoke 必然杀进程',
+      );
+
+      final PatchbayPermissionStatus? pendingStatus = await statusFor(
+        granted: false,
+      );
+      expect(
+        pendingStatus?.requiresRestart,
+        isFalse,
+        reason: 'grant 不会终止进程，不该要求重启',
+      );
+    },
+  );
+
   test('iOS adapter exposes reset without inventing a status fact', () async {
     Future<PatchbayPlatformCommandResult> command(
       String executable,

@@ -244,7 +244,16 @@ final class PatchbayAndroidPermissionAdapter
       driver: 'android.adb-uiautomator',
       driverVersion: '1',
       supportedActions: _capabilities.permissions[permission]!.actions,
-      requiresRestart: false,
+      // Android 会在撤销一个**当前已授予**的运行时权限时终止应用进程。这是确定性的
+      // 系统行为，因此不必等运行时撞上：从 `granted` 出发唯一可用的变更（revoke，
+      // 以及底层同样走 revoke 的 reset）必然杀进程；从 `notDetermined` / `denied`
+      // 出发的 grant 不会。所以这个字段可以由当前状态直接推出。
+      //
+      // 它不是"多一个好看的字段"。它固定为 false 时，监督循环分不清"瞬时断连"
+      // 和"进程已被系统终止、必须重新拉起"——实测后者会让重连窗口空转到超时，
+      // 等一个不可能自己回来的连接。它同时决定 exercise 闭环的步骤顺序：如果
+      // 前置 reset 会杀进程，那么触发权限请求必须排在重新拉起之后。
+      requiresRestart: granted,
       requiresSettings: state == PatchbayPermissionState.permanentlyDenied,
       systemUiExpected: false,
     );
