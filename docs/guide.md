@@ -1074,7 +1074,8 @@ lifecycle `5`），只有 warning 时是 `0`。
 
 ### 输出
 
-`--json` 稳定 JSON（可存档比对）；默认人读摘要；`logs tail` 为 NDJSON 流。
+`--json` 稳定 JSON（可存档比对）；默认人读摘要。`logs tail`（NDJSON）、`repl`（每行一个信封）与
+`launch`（launcher 机器帧）是逐行读的流，不是单个文档。
 
 带 `--json` 时 stdout 只会有一个 JSON 文档：要么是响应信封，要么是错误信封
 
@@ -1085,6 +1086,10 @@ lifecycle `5`），只有 warning 时是 `0`。
 字段与 App 的 rejection 信封同形（稳定 `code` + 自由 `details`），一个解析器读两种。用法错误的
 `code` 是 `usageError`，具体句子在 `details.message`；session、protocol、transport 类错误用它们自己
 的稳定 code。人读的那句话仍然只走 stderr，不会混进 stdout。不带 `--json` 时行为完全不变。
+
+这条只描述 stdout 本身。命令外层的包装器（`just`、`npm`、shell 函数）在命令退非零时也会往 stderr
+打自己的失败提示，用 `2>&1` 合流就会把它接在一个本来完好的文档后面；解析器报的「多余数据」读起来
+像第二个 JSON 文档，其实不是。要留 stderr 就单独重定向到文件。
 
 `--wait` 的终态结果里，**顶层 `jobId` 是稳定取值位置**——它就是这条命令受理的那个 job。
 `payload.jobId` 是 App job snapshot 自带的字段，两处都保留，脚本读顶层那个。

@@ -480,6 +480,16 @@ protocol / transport / sensitive-input / `waitTimeout` errors use their own stab
 fallback error exposes only the exception type name, never echoing a URI or token. Human-readable
 text still goes only to stderr. Without `--json`, behavior is unchanged.
 
+That count is per one-shot command. Three commands stream instead, and a script reads them one line
+at a time rather than as a single document: `repl` emits one envelope per line, `logs tail` emits
+NDJSON, and `launch` emits launcher machine frames.
+
+The count also describes stdout on its own. Human sentences go to stderr, and so does whatever
+wrapper the command runs under — `just`, `npm`, a shell function — when it announces a non-zero
+exit. Merging the two with `2>&1` appends that prose to a document that was already well formed,
+and the parser then reports trailing data, which reads like a second document and is not one.
+Redirect stderr to a file when you want to keep it; never into the stream being parsed.
+
 The chunk size for artifact downloads is taken from the default `limit` of `blob.read` in the
 catalog (capped by the CLI default of 64 KiB) rather than hard-coded: when a consumer lowers
 `maxChunkBytes`, downloads still work instead of being killed by `blobInvalidChunkLimit`.
