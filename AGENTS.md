@@ -86,9 +86,17 @@ AOT 不适用的场景因此只有两个：**要用调试器单步 CLI 自己的
 不在这条规则的管辖范围。改了 CLI 源码不属于例外——那只是重编一次，不是回到 JIT。
 
 **被调 App 默认 debug（JIT），不要默认 profile/AOT。** 这不是性能取舍而是覆盖问题：`ui.inspect` 在
-非 debug 构建按 `notDebugBuild` 类型化拒绝（`kDebugMode` 判定），`ui widget-tree` / `render-tree` /
-`focus-tree` 依赖只在 debug 注册的 inspector 服务扩展。默认 profile 会让这几项静默消失，预检"全过"
-就不再等于"全覆盖"。
+非 debug 构建被类型化拒绝（实测 profile 上退 5 / `inspectorUnavailable`），`ui widget-tree` /
+`render-tree` / `focus-tree` 依赖只在 debug 注册的 inspector 服务扩展。默认 profile 会让这几项失去
+实质内容，预检"全过"就不再等于"全覆盖"。
+
+注意这几棵树在 profile 下**不是拒绝，而是退 0 配空 `data`**（实测：`widget-tree` 只回一行
+`WidgetsFlutterBinding - PROFILE MODE`，`render-tree` / `focus-tree` 为空串，是否为空还随之前的
+交互而变）。也就是说 profile 会话拿到的"成功"并不代表拿到了树——判据要看载荷，不能只看退出码。
+
+**反过来，默认 debug 也有代价：只在非 debug 存在的缺陷，debug 会话在原理上看不见。** 已实证一例
+（`capture` 在 profile 必然退 3，BUG-20260819-02，在 debug 预检里长期全绿）。那一面由
+`tool/example_profile_smoke.sh` 覆盖，它跑 profile 会话、只验答复形态。两者互补，不可互相替代。
 
 **只有测性能时才切 profile。** `perf profile` 在 debug 下的帧耗时与 jank 不代表真实表现（JIT + 断言
 开启），要那组数就必须用 `--profile` 跑；此时同一条会话拿不到 inspect 与诊断树，报告里要写清模式。

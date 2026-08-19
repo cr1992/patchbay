@@ -32,6 +32,25 @@ PATCHBAY_REPO_ROOT="${PATCHBAY_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.
 PATCHBAY_EXAMPLE_DIR="$PATCHBAY_REPO_ROOT/packages/patchbay_flutter/example"
 PATCHBAY_CLI_DIR="$PATCHBAY_REPO_ROOT/packages/patchbay_cli"
 
+# 被调 App 的构建模式。**默认 debug，且应当保持 debug**：`ui.inspect` 与三棵诊断树只在
+# debug 注册，profile 会话跑不出全覆盖（理由见 AGENTS.md 的「联调姿势」，此处不重复）。
+#
+# 之所以还是给出这个开关：有一类缺陷**只在非 debug 存在**，debug 会话在原理上看不见。
+# 已实证一例——绘制就绪判据读 debug-only 的 `debugNeedsPaint`，profile 剥断言后读取即抛，
+# `capture` 在 profile 必然失败，而仓内每一条会话都是 debug，所以它在预检全绿的情况下
+# 活了整整一个版本周期。带模式的会话是这类缺陷唯一的仓内观测手段。
+#
+# 只放开 debug / profile。release 不在此列：host 的注册面在 release 被 const 剪枝，
+# 没有可连的会话，给出这个值只会让调用方误以为存在一种"更真"的验证。
+PATCHBAY_EXAMPLE_MODE="${PATCHBAY_EXAMPLE_MODE:-debug}"
+case "$PATCHBAY_EXAMPLE_MODE" in
+  debug | profile) ;;
+  *)
+    echo "[session] PATCHBAY_EXAMPLE_MODE 只接受 debug 或 profile，收到：${PATCHBAY_EXAMPLE_MODE}" >&2
+    return 1 2>/dev/null || exit 1
+    ;;
+esac
+
 _example_session_run_pid=""
 _example_session_uri_file=""
 _example_session_log=""
@@ -400,23 +419,23 @@ example_session_start() {
   local build_label=""
   local built=0
   case "$platform" in
-    android) build_label="debug APK" ;;
-    ios-simulator) build_label="debug .app（Simulator，不需要签名）" ;;
-    ios-device) build_label="debug .app（真机，需要签名）" ;;
+    android) build_label="${PATCHBAY_EXAMPLE_MODE} APK" ;;
+    ios-simulator) build_label="${PATCHBAY_EXAMPLE_MODE} .app（Simulator，不需要签名）" ;;
+    ios-device) build_label="${PATCHBAY_EXAMPLE_MODE} .app（真机，需要签名）" ;;
   esac
   echo "[session] 预构建 ${build_label}（首次最慢）"
   case "$platform" in
     android)
       (cd "$PATCHBAY_EXAMPLE_DIR" &&
-        flutter build apk --debug --no-pub >/dev/null 2>&1 </dev/null) || built=$?
+        flutter build apk "--$PATCHBAY_EXAMPLE_MODE" --no-pub >/dev/null 2>&1 </dev/null) || built=$?
       ;;
     ios-simulator)
       (cd "$PATCHBAY_EXAMPLE_DIR" &&
-        flutter build ios --debug --simulator --no-pub >/dev/null 2>&1 </dev/null) || built=$?
+        flutter build ios "--$PATCHBAY_EXAMPLE_MODE" --simulator --no-pub >/dev/null 2>&1 </dev/null) || built=$?
       ;;
     ios-device)
       (cd "$PATCHBAY_EXAMPLE_DIR" &&
-        flutter build ios --debug --no-pub >/dev/null 2>&1 </dev/null) || built=$?
+        flutter build ios "--$PATCHBAY_EXAMPLE_MODE" --no-pub >/dev/null 2>&1 </dev/null) || built=$?
       ;;
   esac
   if [ "$built" != 0 ]; then
@@ -449,7 +468,7 @@ example_session_start() {
   (cd "$PATCHBAY_CLI_DIR" && "$PATCHBAY_CLI_BIN" launch -- \
     dart run bin/patchbay_reference_launcher.dart \
     --device "$device" --application-id dev.patchbay.example \
-    --build-mode debug --project "$PATCHBAY_EXAMPLE_DIR" \
+    --build-mode "$PATCHBAY_EXAMPLE_MODE" --project "$PATCHBAY_EXAMPLE_DIR" \
     >"$_example_session_log" 2>&1 </dev/null &
     echo $! >"$_example_session_uri_file.pid")
   sleep 1
