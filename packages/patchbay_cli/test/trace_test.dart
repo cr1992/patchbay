@@ -658,36 +658,78 @@ void main() {
       },
     );
 
-    test(
-      'non-TTY legacy value opt-in fails closed without extra switch',
-      () async {
-        final PatchbayTraceStore store = PatchbayTraceStore(
-          '${sandbox.path}/traces',
-        );
-        final PatchbayTraceManifest trace = store.start(
-          name: 'legacy',
-          cliVersion: 'test',
-          activate: false,
-        );
-        final StringBuffer error = StringBuffer();
+    // Named for what it actually exercises: this process has stdin, so the CLI
+    // prompts and immediately reads end of input. It used to assert the
+    // non-TTY message, which passed only because both refusals shared one
+    // string — the non-TTY branch was never reached here. The pure-function
+    // matrix in legacy_payload_confirmation_test.dart covers the pipe case.
+    test('an unanswerable prompt fails closed and says so', () async {
+      final PatchbayTraceStore store = PatchbayTraceStore(
+        '${sandbox.path}/traces',
+      );
+      final PatchbayTraceManifest trace = store.start(
+        name: 'legacy',
+        cliVersion: 'test',
+        activate: false,
+      );
+      final StringBuffer error = StringBuffer();
 
-        final int result = await runPatchbayCli(
-          <String>[
-            '--trace-dir',
-            store.root.path,
-            '--trace',
-            trace.traceId,
-            '--include-legacy-payload',
-            'identity',
-          ],
-          connect: (_) async => throw StateError('must not dial'),
-          output: StringBuffer(),
-          errorOutput: error,
-        );
+      final int result = await runPatchbayCli(
+        <String>[
+          '--trace-dir',
+          store.root.path,
+          '--trace',
+          trace.traceId,
+          '--include-legacy-payload',
+          'identity',
+        ],
+        connect: (_) async => throw StateError('must not dial'),
+        output: StringBuffer(),
+        errorOutput: error,
+      );
 
-        expect(result, PatchbayExitCode.usage);
-        expect(error.toString(), contains('requires a TTY confirmation'));
-      },
-    );
+      expect(result, PatchbayExitCode.usage);
+      expect(
+        error.toString(),
+        anyOf(
+          contains('reached end of input'),
+          contains('must also pass --allow-non-tty-legacy-payload'),
+        ),
+        reason: '两条路径都必须 fail closed，且各自说清原因',
+      );
+    });
+
+    // `trace start --include-legacy-payload` used to exit 0 with no notice:
+    // the local trace-store branch skipped the confirmation gate entirely, so
+    // the switch was accepted, never confirmed and never applied. An operator
+    // reading that exit code believes later commands will store legacy values.
+    test('the switch is refused where it cannot take effect', () async {
+      final PatchbayTraceStore store = PatchbayTraceStore(
+        '${sandbox.path}/traces',
+      );
+      final StringBuffer error = StringBuffer();
+
+      final int result = await runPatchbayCli(
+        <String>[
+          '--trace-dir',
+          store.root.path,
+          '--include-legacy-payload',
+          'trace',
+          'start',
+          '--name',
+          'gate',
+        ],
+        connect: (_) async => throw StateError('must not dial'),
+        output: StringBuffer(),
+        errorOutput: error,
+      );
+
+      expect(result, PatchbayExitCode.usage);
+      expect(
+        error.toString(),
+        contains('applies to a traced command'),
+        reason: '必须说清它是按命令给的，不是在 trace start 上一次武装',
+      );
+    });
   });
 }

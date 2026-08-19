@@ -14,6 +14,7 @@ import 'direct_connection.dart';
 import 'doctor.dart';
 import 'keep_awake_policy.dart';
 import 'launcher.dart';
+import 'legacy_payload_confirmation.dart';
 import 'performance_profile.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
@@ -436,6 +437,33 @@ Future<int> _runPatchbayCliWithTrace(
       spec == null ||
       spec.target == PatchbayCommandTarget.localTraceStore ||
       _helpTopic(parsed) != null) {
+    // `--include-legacy-payload` only means something for a command whose
+    // answer gets recorded. On a local `trace ...` subcommand there is no
+    // answer to record, and this branch used to skip the confirmation gate
+    // entirely — so the flag was accepted, never confirmed and never applied.
+    // A silently ignored switch that exists to *loosen* redaction is the worst
+    // of the three options: the operator believes values are being stored, and
+    // nothing in the output says otherwise. It is also per invocation by
+    // design, so it cannot be "armed once" at `trace start`.
+    if (parsed != null &&
+        parsed.flag('include-legacy-payload') &&
+        spec?.target == PatchbayCommandTarget.localTraceStore) {
+      final StringSink usageOut = output ?? stdout;
+      final StringSink usageError = errorOutput ?? stderr;
+      const FormatException failure = FormatException(
+        '--include-legacy-payload applies to a traced command, not to a local '
+        'trace subcommand; pass it on each command whose legacy payload should '
+        'be stored',
+      );
+      return _fail(
+        usageOut,
+        usageError,
+        json: parsed.flag('json'),
+        message: failure.message,
+        envelope: _usageEnvelope(failure),
+        exitCode: PatchbayExitCode.usage,
+      );
+    }
     return runZoned(
       () => runPatchbayCli(
         arguments,
@@ -528,39 +556,13 @@ ArgResults? _tryParseForTrace(List<String> arguments) {
   }
 }
 
-bool _confirmLegacyPayload(ArgResults parsed) {
-  if (!parsed.flag('include-legacy-payload')) return false;
-  if (parsed.flag('stdin') || parsed.flag('direct-token-stdin')) {
-    throw const FormatException(
-      '--include-legacy-payload cannot share stdin with command or direct '
-      'credential input',
+bool _confirmLegacyPayload(ArgResults parsed) =>
+    confirmLegacyPayloadPersistenceFromStdio(
+      includeRequested: parsed.flag('include-legacy-payload'),
+      allowWithoutPrompt: parsed.flag('allow-non-tty-legacy-payload'),
+      stdinTakenByCommand:
+          parsed.flag('stdin') || parsed.flag('direct-token-stdin'),
     );
-  }
-  if (!stdin.hasTerminal) {
-    if (!parsed.flag('allow-non-tty-legacy-payload')) {
-      throw const FormatException(
-        '--include-legacy-payload requires a TTY confirmation; automation '
-        'must also pass --allow-non-tty-legacy-payload',
-      );
-    }
-    return true;
-  }
-  stderr.write(
-    'Legacy host payloads have no persistence metadata. Type INCLUDE to '
-    'store their re-redacted values: ',
-  );
-  final String? confirmation = stdin.readLineSync();
-  if (confirmation == null) {
-    throw const FormatException(
-      '--include-legacy-payload requires a TTY confirmation; automation '
-      'must also pass --allow-non-tty-legacy-payload',
-    );
-  }
-  if (confirmation != 'INCLUDE') {
-    throw const FormatException('legacy payload confirmation refused');
-  }
-  return true;
-}
 
 String _traceTransport(ArgResults parsed) {
   if (parsed.option('direct-endpoint') != null) return 'direct';
