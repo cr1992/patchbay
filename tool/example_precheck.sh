@@ -6,6 +6,13 @@
 # 真实控制器语义、设备 SDK 确认、真实 UI 的滚动与遮挡、签名真机上的系统弹窗，都只有
 # 接入方能出证据。规则见 AGENTS.md「实现与验证」。
 #
+# 模式：**debug（JIT）**，不是 profile/AOT。这不是随手选的默认值——`ui.inspect` 与三棵诊断树只在
+# debug 构建存在（见 AGENTS.md「联调姿势」），用 profile 跑会让这几步静默消失，"全过"就不再等于
+# "全覆盖"。性能数字要另跑一次 profile 会话，那次拿不到 inspect 与诊断树，属于两种用途。
+#
+# CLI 本身相反：先 AOT 编成原生可执行再复用（由 example_session.sh 负责），否则四十余步会各自
+# 重新编译一遍。
+#
 # 用法：
 #   tool/example_precheck.sh [adb-serial]
 #
@@ -20,7 +27,7 @@ source "$ROOT/tool/example_session.sh"
 PASS=0
 FAIL=0
 FAILED_STEPS=()
-OUT="$(mktemp -t patchbay-precheck-out)"
+OUT="$(mktemp "${TMPDIR:-/tmp}/patchbay-precheck-out.XXXXXX")"
 
 cleanup() {
   example_session_stop
@@ -87,7 +94,15 @@ print($1)
 }
 
 echo "== 启动 example =="
-example_session_start "${1:-}" || exit 1
+if ! example_session_start "${1:-}"; then
+  echo "预检未开始：会话启动失败（原因见上方 [session] 行）" >&2
+  exit 1
+fi
+
+echo
+echo "== 预检环境 =="
+echo "  CLI 源 revision：${PATCHBAY_CLI_STAMP:-unknown}"
+echo "  被调 App 构建模式：debug（JIT）"
 
 echo
 echo "== 身份与目录 =="
@@ -201,7 +216,7 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 
 echo
 echo "== capture / blob =="
-check 'capture root' 0 "" --output "$(mktemp -t patchbay-shot).png" capture root
+check 'capture root' 0 "" --output "$(mktemp "${TMPDIR:-/tmp}/patchbay-shot.XXXXXX").png" capture root
 
 echo
 echo "== logs =="
