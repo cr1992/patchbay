@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
+import 'example_direct_transport.dart';
 import 'example_domain.dart';
 import 'example_log_source.dart';
 
@@ -41,11 +42,28 @@ void main() {
   // remains the same GlobalKey kind in every mode; only debug registrations
   // and service callbacks are removed from release reachability.
   if (!kReleaseMode) {
-    PatchbayExampleHost(
+    final PatchbayExampleHost host = PatchbayExampleHost(
       model: model,
       registry: registry,
       router: router,
-    ).register();
+    )..register();
+
+    // 可选的第二条面。默认不启动；只有 --dart-define=patchbay.direct=1 才绑 loopback，
+    // 而且仍要操作者显式 adb forward 才能从工作站到达。
+    if (ExampleDirectTransport.requested) {
+      unawaited(
+        ExampleDirectTransport(host: host.service).start().then((
+          Object? session,
+        ) {
+          if (session != null) {
+            host.logs.write(
+              category: 'transport',
+              message: 'direct plane listening',
+            );
+          }
+        }),
+      );
+    }
   }
 
   runApp(PatchbayExampleApp(model: model, noteKey: noteKey, router: router));
@@ -158,6 +176,9 @@ final class PatchbayExampleHost {
         gateIds: const <String>{exampleWriteGate},
       );
   late final PatchbayFlutterServiceHost _service;
+
+  /// The one host both transports dispatch into.
+  PatchbayFlutterServiceHost get service => _service;
 
   String get appInstanceId => _service.appInstanceId;
 

@@ -12,6 +12,10 @@ dependencies:
     sdk: flutter
   patchbay_flutter:
     path: ..
+  # 可选的 direct HTTP 面：默认不启动，只有 --dart-define=patchbay.direct=1 才绑端口。
+  # 接在这里是为了让本地预检能验证「VM Service 与 direct 对共享能力答复一致」。
+  patchbay_transport:
+    path: ../../patchbay_transport
 
 dev_dependencies:
   flutter_test:
