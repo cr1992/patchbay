@@ -57,6 +57,10 @@ _patchbay_checkout_key() {
 }
 PATCHBAY_CLI_BIN="${PATCHBAY_CLI_BIN:-${TMPDIR:-/tmp}/patchbay-cli/$(_patchbay_checkout_key)/patchbay}"
 
+# The precheck owns an isolated launcher session store. Reusing the developer's
+# default store can select a still-live record left by an earlier run.
+PATCHBAY_SESSION_DIR="${PATCHBAY_SESSION_DIR:-${TMPDIR:-/tmp}/patchbay-precheck-sessions/$(_patchbay_checkout_key)}"
+
 # 一个调试任务里只编一次 CLI，任务期间一律复用同一份 AOT 产物。
 #
 # 判据是**源码指纹**而不是"每次启动都编"：一次任务里常要重启 App 多次，每次重编都是白等；
@@ -232,6 +236,29 @@ example_session_ensure_platform() {
 # `dev.patchbay.patchbay_flutter_example`，而 example 的 host 声明的是
 # `dev.patchbay.example`，于是整条权限写路径在 example 上不可用。改 --project-name 会连带
 # 改 pubspec 名，所以这里只对齐生成物里的包名（不入库），幂等。
+example_session_raise_android_compile_sdk() {
+  local gradle="$PATCHBAY_EXAMPLE_DIR/android/app/build.gradle.kts"
+  [ -f "$gradle" ] || return 0
+  if grep -q 'compileSdk = 37' "$gradle"; then
+    return 0
+  fi
+  echo "[session] 抬高生成工程的 compileSdk 到 37（permission_handler 要求，不入库）"
+  python3 - "$gradle" <<'INNER' || return 1
+import re, sys
+path = sys.argv[1]
+source = open(path, encoding='utf-8').read()
+updated = re.sub(
+    r'compileSdk\s*=\s*[A-Za-z0-9_.]+',
+    'compileSdk = 37',
+    source,
+    count=1,
+)
+if updated == source:
+    raise SystemExit('compileSdk 未找到，未改动')
+open(path, 'w', encoding='utf-8').write(updated)
+INNER
+}
+
 example_session_align_android_application_id() {
   local gradle="$PATCHBAY_EXAMPLE_DIR/android/app/build.gradle.kts"
   [ -f "$gradle" ] || gradle="$PATCHBAY_EXAMPLE_DIR/android/app/build.gradle"
@@ -289,6 +316,7 @@ example_session_declare_permissions() {
   case "$platform" in
     android)
       example_session_align_android_application_id || return 1
+      example_session_raise_android_compile_sdk || return 1
       local manifest="$PATCHBAY_EXAMPLE_DIR/android/app/src/main/AndroidManifest.xml"
       [ -f "$manifest" ] || return 0
       if grep -q 'android.permission.CAMERA' "$manifest"; then
@@ -446,7 +474,10 @@ example_session_start() {
   # 依赖，从 example 目录跑会解析不到 `package:patchbay_cli/...`，子进程立刻死掉，而
   # launcher 只会看到一路 `sessionNotDeclared` 直到窗口结束——症状离病因很远。
   # 被调 App 的工程目录改由 `--project` 显式传入。
-  (cd "$PATCHBAY_CLI_DIR" && "$PATCHBAY_CLI_BIN" launch -- \
+  rm -rf "$PATCHBAY_SESSION_DIR"
+  mkdir -p "$PATCHBAY_SESSION_DIR"
+  (cd "$PATCHBAY_CLI_DIR" && "$PATCHBAY_CLI_BIN" \
+    --session-dir "$PATCHBAY_SESSION_DIR" launch -- \
     dart run bin/patchbay_reference_launcher.dart \
     --device "$device" --application-id dev.patchbay.example \
     --build-mode debug --project "$PATCHBAY_EXAMPLE_DIR" \
@@ -467,18 +498,19 @@ example_session_start() {
       tail -n 40 "$_example_session_log" | example_session_redact >&2
       return 1
     fi
-    PATCHBAY_SESSION_ID="$("$PATCHBAY_CLI_BIN" --json sessions list 2>/dev/null |
-      python3 -c "
-import json, sys
-try:
-    document = json.load(sys.stdin)
-except Exception:
-    raise SystemExit(0)
-for session in document.get('sessions', []):
-    if (session.get('applicationId') == 'dev.patchbay.example'
-            and session.get('status') == 'live'):
-        print(session['sessionId'])
-        break
+    PATCHBAY_SESSION_ID="$(PATCHBAY_RECORDS="$PATCHBAY_SESSION_DIR" python3 -c "
+import json, os, pathlib
+directory = os.environ.get('PATCHBAY_RECORDS') or ''
+if directory:
+    for path in sorted(pathlib.Path(directory).glob('*.json')):
+        try:
+            record = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if (record.get('state') == 'live'
+                and record.get('applicationId') == 'dev.patchbay.example'):
+            print(record['sessionId'])
+            break
 " 2>/dev/null)"
     [ -n "$PATCHBAY_SESSION_ID" ] && break
     sleep 5
@@ -489,7 +521,21 @@ for session in document.get('sessions', []):
     tail -n 40 "$_example_session_log" | example_session_redact >&2
     return 1
   fi
-  export PATCHBAY_SESSION_ID
+  export PATCHBAY_SESSION_ID PATCHBAY_SESSION_DIR
+  # A live launcher record proves identity, not that Flutter is resumed. Wait
+  # on Patchbay's own lifecycle-gated semantics response instead of sleeping.
+  local ui_waited=0
+  while [ "$ui_waited" -lt 60 ]; do
+    if example_session_cli --json ui semantics tree >/dev/null 2>&1; then
+      break
+    fi
+    sleep 3
+    ui_waited=$((ui_waited + 3))
+  done
+  if [ "$ui_waited" -ge 60 ]; then
+    echo "[session] 会话已 live，但 ${ui_waited}s 内 UI 面仍被 lifecycle 闸拒绝" >&2
+    return 1
+  fi
   echo "[session] 会话已就绪：${PATCHBAY_SESSION_ID}（URI 不打印，也不进命令行）"
 }
 
@@ -503,7 +549,7 @@ example_session_stop() {
   fi
   [ -n "$_example_session_uri_file" ] && \
     rm -f "$_example_session_uri_file" "$_example_session_uri_file.pid"
-  unset PATCHBAY_SESSION_ID
+  unset PATCHBAY_SESSION_ID PATCHBAY_SESSION_DIR
 }
 
 # 跑一条 CLI 命令，统一经 `--session`。
@@ -512,5 +558,6 @@ example_session_stop() {
 # CLI 按 sessionId 对账 applicationId / appInstanceId / device 后才发命令。权限写操作
 # 只接受这条路径。
 example_session_cli() {
-  "$PATCHBAY_CLI_BIN" --session "$PATCHBAY_SESSION_ID" "$@"
+  "$PATCHBAY_CLI_BIN" --session-dir "$PATCHBAY_SESSION_DIR" \
+    --session "$PATCHBAY_SESSION_ID" "$@"
 }

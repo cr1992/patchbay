@@ -270,6 +270,44 @@ check_local 'permission capabilities 无 driver 时 fail-closed' 6 "" \
   --json permission capabilities
 
 echo
+echo "== 权限真实路径 =="
+PERMISSION_DRIVER="${TMPDIR:-/tmp}/patchbay-precheck-permission-android"
+if (cd "$PATCHBAY_CLI_DIR" && dart compile exe bin/patchbay_permission_android.dart \
+  -o "$PERMISSION_DRIVER" >/dev/null 2>&1); then
+  check 'permission capabilities（有 driver）' 0 \
+    "len(doc['capabilities']['permissions']) == 4 and all(
+        v['decisions'] == [] for v in doc['capabilities']['permissions'].values())" \
+    --json --permission-driver "$PERMISSION_DRIVER" permission capabilities
+
+  for permission in camera microphone locationWhenInUse notifications; do
+    check "permission status $permission" 0 \
+      "doc['after']['factSource'] == 'deviceReported' and doc['after']['platformState']" \
+      --json --permission-driver "$PERMISSION_DRIVER" permission status "$permission"
+  done
+
+  check 'permission normalize granted' 0 \
+    "doc['after']['state'] == 'granted' and doc['after']['requiresRestart'] is True" \
+    --json --permission-driver "$PERMISSION_DRIVER" \
+    permission normalize camera --state granted
+  check 'permission normalize 幂等重放' 0 \
+    "doc['before']['state'] == 'granted' and doc['after']['state'] == 'granted'" \
+    --json --permission-driver "$PERMISSION_DRIVER" \
+    permission normalize camera --state granted
+  check 'permission normalize denied 不可达即拒绝' 5 \
+    "doc['rejection']['code'] == 'permissionStateUnreachable'" \
+    --json --permission-driver "$PERMISSION_DRIVER" \
+    permission normalize camera --state denied
+  # reset revokes a granted permission and Android terminates the process, so
+  # it remains the final device-mutating precheck step.
+  check 'permission reset' 0 \
+    "doc['before']['state'] == 'granted' and doc['after']['state'] == 'notDetermined'" \
+    --json --permission-driver "$PERMISSION_DRIVER" permission reset camera
+else
+  printf '  ✗ %-42s %s\n' 'permission driver 编译' '无法编出 Android 权限 driver'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('permission driver 编译')
+fi
+
+echo
 printf '预检结果：%s 通过，%s 失败\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then
   printf '失败步骤：%s\n' "${FAILED_STEPS[*]}"

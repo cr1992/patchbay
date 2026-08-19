@@ -16,6 +16,9 @@ dependencies:
   # 接在这里是为了让本地预检能验证「VM Service 与 direct 对共享能力答复一致」。
   patchbay_transport:
     path: ../../patchbay_transport
+  # The example is the consumer-side permission-request reference. Patchbay's
+  # reusable packages stay independent of any particular permission plugin.
+  permission_handler: 13.0.1
 
 dev_dependencies:
   flutter_test:

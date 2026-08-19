@@ -65,6 +65,11 @@ final class PatchbayAndroidPermissionAdapter
         requireRunning: _mutates(request.operation),
       );
 
+      // This flag describes whether the operation is expected to cross the
+      // system-UI boundary. adb-only status/normalize/reset operations do not.
+      final bool systemUiExpected =
+          request.operation == PatchbayPermissionOperation.exercise;
+
       if (request.operation == PatchbayPermissionOperation.status ||
           request.operation == PatchbayPermissionOperation.fail) {
         return acceptedPermissionDriverResponse(
@@ -80,6 +85,7 @@ final class PatchbayAndroidPermissionAdapter
         device,
         applicationId,
         permission,
+        systemUiExpected: systemUiExpected,
       );
       if (request.operation == PatchbayPermissionOperation.reset ||
           request.operation == PatchbayPermissionOperation.normalize &&
@@ -95,7 +101,13 @@ final class PatchbayAndroidPermissionAdapter
       return acceptedPermissionDriverResponse(
         request,
         before: before,
-        after: await _status(request, device, applicationId, permission),
+        after: await _status(
+          request,
+          device,
+          applicationId,
+          permission,
+          systemUiExpected: systemUiExpected,
+        ),
         evidence: <PatchbayPermissionEvidence>[
           _evidence('androidPackageManagerMutation', device),
         ],
@@ -298,8 +310,9 @@ final class PatchbayAndroidPermissionAdapter
     PatchbayPermissionDriverRequest request,
     String device,
     String applicationId,
-    String permission,
-  ) async {
+    String permission, {
+    bool systemUiExpected = false,
+  }) async {
     final String platformPermission = patchbayAndroidP0Permissions[permission]!;
     final PatchbayPlatformCommandResult result = await _adb(
       request,
@@ -380,7 +393,7 @@ final class PatchbayAndroidPermissionAdapter
       // 前置 reset 会杀进程，那么触发权限请求必须排在重新拉起之后。
       requiresRestart: granted,
       requiresSettings: state == PatchbayPermissionState.permanentlyDenied,
-      systemUiExpected: false,
+      systemUiExpected: systemUiExpected,
     );
   }
 
@@ -514,7 +527,13 @@ final class PatchbayAndroidPermissionAdapter
     return acceptedPermissionDriverResponse(
       request,
       before: before,
-      after: await _status(request, device, applicationId, permission),
+      after: await _status(
+        request,
+        device,
+        applicationId,
+        permission,
+        systemUiExpected: true,
+      ),
       evidence: <PatchbayPermissionEvidence>[
         _evidence('androidUiAutomator', device),
       ],
