@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# 本地端到端预检：在一台连着的 Android 设备上把 example 跑起来，逐条打通 patchbay 的
+# 本地端到端预检：在一台连着的设备上把 example 跑起来，逐条打通 patchbay 的
 # 命令面，并给出每一步的退出码与断言结果。
+#
+# 目标可以是 Android 真机/模拟器、iOS Simulator 或 iOS 真机——平台由 example_session.sh
+# 按 `flutter devices` 判定。两个平台跑的是同一份步骤清单：能力差异必须表现为类型化答复，
+# 而不是"这一步在那个平台上就不跑了"。
 #
 # 它证明的是「协议 + CLI + host 三方接线在真设备上确实通」。它**不能**替代业务验收：
 # 真实控制器语义、设备 SDK 确认、真实 UI 的滚动与遮挡、签名真机上的系统弹窗，都只有
@@ -14,7 +18,10 @@
 # 重新编译一遍。
 #
 # 用法：
-#   tool/example_precheck.sh [adb-serial]
+#   tool/example_precheck.sh [device-id]
+#
+# device-id 取自 `flutter devices`（Android 用 adb serial，iOS Simulator 用 simctl UDID）；
+# 省略时取第一台 online 的 adb 设备。
 #
 # 退出码：0 全过；1 有步骤失败（末尾列出失败清单）。
 
@@ -102,6 +109,7 @@ fi
 echo
 echo "== 预检环境 =="
 echo "  CLI 源 revision：${PATCHBAY_CLI_STAMP:-unknown}"
+echo "  目标平台：${PATCHBAY_SESSION_PLATFORM:-unknown}"
 echo "  被调 App 构建模式：debug（JIT）"
 
 echo
