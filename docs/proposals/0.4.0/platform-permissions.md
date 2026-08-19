@@ -18,11 +18,12 @@ debug CLI 若只能要求人手点弹窗，就不能形成可持续的调试闭�
 ### 目标
 
 - AI 能先查询当前平台、权限状态、可执行动作和 driver 证据，再选择确定性策略。
-- 普通调试默认将权限规范化到已声明状态，避免无关弹窗打断。
-- 专门测试权限 UX 时，可显式触发并由外部平台 driver 操作预期系统弹窗。
-- 系统弹窗结束后等待 App 恢复，重新握手 session/catalog，重新解析 identifier/generation 后继续。
+- 普通调试可将已证明可达的权限规范化到声明状态，避免把 shell 成功误报成设备事实。
+- 专门测试权限 UX 时，公共协议可显式触发并调用外部平台 driver；是否可用必须由逐设备 capability 证明。
+- 外部 driver 处理系统弹窗后，目标设计是等待 App 恢复、重新握手 session/catalog，并重新解析
+  identifier/generation 后继续。
 - Android、iOS、HarmonyOS 使用同一上层状态和事件信封，但保留原始平台状态与能力差异。
-- 所有权限动作进入 Debug Trace，且不记录敏感值、设备凭据或签名材料。
+- 权限专用 Debug Trace 事件作为目标设计保留，且不得记录敏感值、设备凭据或签名材料。
 
 ### 非目标
 
@@ -31,6 +32,25 @@ debug CLI 若只能要求人手点弹窗，就不能形成可持续的调试闭�
 - 不用屏幕绝对坐标或本地化按钮文本作为稳定权限操作契约。
 - 不承诺所有特殊权限都可自动 grant；unsupported 必须是正常、类型化结果。
 - 不因抽象统一而抹平 `limited/restricted/permanentlyDenied/allowOnce` 等平台差异。
+
+## 0.4.0 定版边界（SC-040-02）
+
+本 Proposal 保留完整的跨平台目标状态与公共 wire，避免为一次范围调整删除已经形成的兼容表面；但 0.4.0
+的**发布承诺**收窄为 Android adb 的 `capabilities/status/normalize/reset/fail`。camera、microphone、
+locationWhenInUse、notifications 四项必须在 emulator/真机上以设备事实复核；不可达目标先拒绝且不改变
+设备，未声明权限返回可读的 `unsupported/notDeclaredByApp`。
+
+以下能力退出 0.4.0 验收，随 PB-040-26 回到 backlog：
+
+- Android/iOS 可构建的 reference runner 与跨 OEM 系统弹窗自动处理；
+- `exercise`、`allowOnce` decision 的端到端设备承诺，以及弹窗后的 resume/reconnect/re-resolve 闭环；
+- iOS `status/normalize/exercise` 真机能力；现有 Simulator reset adapter 不外推成完整权限支持；
+- `permission.preflight`、`permission.transition`、`systemUi.detected`、`systemUi.handled`、
+  `app.resumeObserved` 五类专用 trace 事件。
+
+这些命令、状态词和 driver protocol 继续存在，但 capability 是唯一可用性真源：只有显式安装并通过设备
+探测的外部 runner 才可发布 `exercise`/decision；缺少证据时必须返回 unavailable/unsupported。后文描述
+上述能力时均是 PB-040-26 的目标设计，不构成 0.4.0 已支持或发布阻断的声明。
 
 ## 与既有红线的关系
 
@@ -188,6 +208,9 @@ AI 未显式选择时默认 `fail`；项目级调试配置可以把特定权限�
 - scenario 免确认的前提是该 scenario 文件在 workspace 内，且其指纹被记入 `permission.preflight`
   事件。否则“已评审”是一句事后无法验证的话。
 
+这套确认模型继续约束 PB-040-26 的目标实现。0.4.0 因未交付 `permission.preflight` 写入契约，不把
+scenario 免确认路径列为受支持能力；显式外部 runner 也不能绕过临时命令的确认 flag。
+
 ### P0 权限集合
 
 P0 覆盖 `camera`、`microphone`、`locationWhenInUse`、`notifications`。
@@ -203,9 +226,10 @@ P0 覆盖 `camera`、`microphone`、`locationWhenInUse`、`notifications`。
 package manager/dumpsys 或 App 权限 API复核。特殊权限如悬浮窗、VPN、无障碍、默认应用、通知监听和
 精确闹钟必须逐项声明能力，不能把 appops 退出成功等同于用户授权。
 
-真实弹窗由 UiAutomator runner 处理。runner 按系统权限 dialog/window 与权限上下文识别，使用平台测试
-API选择 allow/deny/allow-once，不使用坐标。OEM/系统版本不支持的 decision 返回 unsupported。Android
-runtime permissions 的 P0 验收至少覆盖 emulator 与一台 adb 真机；特殊权限建立能力矩阵但不阻塞 P0。
+真实弹窗的目标方案仍是由 UiAutomator runner 处理：runner 按系统权限 dialog/window 与权限上下文识别，
+使用平台测试 API 选择 allow/deny/allow-once，不使用坐标；OEM/系统版本不支持的 decision 返回
+unsupported。0.4.0 不随包提供或验收这样的 reference runner，只验收 adb 状态与规范化；显式配置的外部
+runner 只有通过设备探测后才可发布 `exercise` capability。
 
 参考：[Android runtime permission 测试](https://developer.android.com/training/permissions/requesting)、
 [UiAutomator PermissionDialog](https://developer.android.com/reference/androidx/test/uiautomator/watcher/PermissionDialog)。
@@ -219,7 +243,8 @@ interruption monitor。
 
 iOS 不存在面向普通真机的通用 adb shell grant。真机支持程度取决于 Xcode/XCTest、签名身份、设备授权
 和具体 `XCUIProtectedResource`；driver 必须逐资源报告 capability。无法 reset/grant 的权限允许
-`exercise` 或 `manualRequired`，不能伪报 normalize 成功。
+`exercise` 或 `manualRequired`，不能伪报 normalize 成功。0.4.0 只保留 Simulator reset 的 adapter 与
+类型化拒绝，不把 iOS `status/normalize/exercise` 计入发布承诺。
 
 参考：[Simulator privacy](https://developer.apple.com/videos/play/wwdc2020/10647/)、
 [XCTest protected resource](https://developer.apple.com/documentation/xcuiautomation/xcuiprotectedresource)、
@@ -288,18 +313,23 @@ TTL。
 
 ## Trace 与审计
 
-Debug Trace 增加：`permission.preflight`、`permission.transition`、`systemUi.detected`、
-`systemUi.handled`、`app.resumeObserved`。事件记录 before/after、decision、driver、factSource、耗时和稳定
-code；不保存设备配对凭据、Apple 签名材料、stdin sensitive 值或系统弹窗截图中的个人内容。
+PB-040-26 恢复时，Debug Trace 再增加：`permission.preflight`、`permission.transition`、
+`systemUi.detected`、`systemUi.handled`、`app.resumeObserved`。写入侧事件类型是封闭表，必须先修订并验收
+trace 契约，不能把未知类型直接接入 sink。事件记录 before/after、decision、driver、factSource、耗时和
+稳定 code；不保存设备配对凭据、Apple 签名材料、stdin sensitive 值或系统弹窗截图中的个人内容。
 
-audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 属于高风险动作，必须在 trace 中可追踪。
+0.4.0 不声明上述五类专用事件可用；本版权限命令仍通过 CLI 稳定 JSON、退出码与设备复核结果提供证据。
+
+audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 属于高风险动作，PB-040-26 恢复为受支持
+能力前必须在 trace 中可追踪。
 
 ## 兼容、发布与安装
 
 - 没有 platform driver 时，现有 Patchbay 命令继续工作；permission capability 明确 unavailable。
-- CLI AOT/pub 发布物不内置编译后的 native runner，也不内置 adb/Xcode/hdc；release archive 与仓库提供
-  driver protocol/schema 和 companion 源码模板，runner 由用户在本机 SDK 下显式构建、安装，并通过
-  PATH 或项目配置发现。`patchbay doctor permission` 检查工具、版本、设备和 runner。
+- CLI AOT/pub 发布物不内置编译后的 native runner，也不内置 adb/Xcode/hdc；0.4.0 提供 driver
+  protocol/schema 和平台 adapter 源码，不承诺可构建的 reference runner。用户自有 runner 需在本机 SDK
+  下显式构建、安装，并通过 PATH 或项目配置发现；`patchbay doctor permission` 检查工具、版本、设备和
+  runner。
 - companion 版本独立于 App package 版本，但 driver protocol major 不匹配时拒绝执行。
 - release 构建不注册 App 内 permission adapter；外部 driver 只允许操作显式指定的 debug/test App。
 - GitHub/pub 发布必须说明哪些 driver 随包、哪些需要本机 SDK生成，不能首次运行时静默下载可执行文件。
@@ -310,9 +340,11 @@ audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 
 - driver protocol major 不匹配时拒绝执行的单测。
 - CLI fake-driver golden 覆盖 normalize/exercise/fail、非预期弹窗、App 未恢复和 session 变化。
 - 断言非 TTY 下缺 `--confirm-system-permission` 的 `exercise allow` 被拒绝。
-- 断言 `permission.preflight` 事件带 scenario 指纹，免确认路径可事后核对。
-- Android emulator + 真机覆盖 grant/revoke/reset、allow/deny/allow-once 与永久拒绝（P0 四项权限）。
-- iOS Simulator 覆盖 simctl normalize/reset 和 XCUITest alert；至少一台真机验证支持矩阵。
+- PB-040-26 恢复时再断言 `permission.preflight` 事件带 scenario 指纹，使免确认路径可事后核对。
+- Android emulator + 真机覆盖 P0 四项权限的 status、normalize granted、reset、幂等与不可达状态先拒绝
+  不写设备；capability 必须来自逐权限逐 decision 的设备探测。
+- iOS Simulator reset 继续做 adapter 回归；XCUITest alert、真机支持矩阵与 iOS status/normalize 不作为
+  0.4.0 发布门禁。
 - Bluetooth 只验收 capability matrix 与接入方报告，不要求全环境通过。
 - HarmonyOS 只验收“验证报告与 capability fixture 存在，且未通过项保持 `unsupported`”；在 PB-040-27
   验证完成前不进入“支持平台”列表。
@@ -323,8 +355,8 @@ audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 
 
 ## 已裁决分发与验证输出
 
-- native companion 只随 release archive/仓库提供协议、schema 与源码模板，不分发编译后的 runner；本机
-  SDK 显式构建和 PATH/配置发现是 0.4.0 唯一支持的安装形态，首次运行不得静默下载。
+- 0.4.0 只随 release archive/仓库提供协议、schema 与平台 adapter 源码，不分发、也不承诺可构建的
+  reference runner；外部 runner 必须由用户显式提供并通过设备 capability 探测，首次运行不得静默下载。
 - HarmonyOS 选定的 Flutter OpenHarmony SDK、设备和 API 基线是 PB-040-27 spike 的报告字段，不是本
   Proposal 的遗留裁决；报告缺证据时 capability 保持 `unsupported`。
 
