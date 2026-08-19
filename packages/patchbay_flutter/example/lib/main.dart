@@ -296,11 +296,15 @@ PatchbayGestureDecision _gesturePolicy(
       rejectionNotice: 'The press-hold surface does not accept a fling.',
     );
   }
+  // 预算只能相对协议上限**收紧**：`maxVelocity` 的单位是「目标宽/高每秒」，上限 20，
+  // 不是设备像素每秒。声明一个越界的预算不会被当成"放宽"，而是让这条 decision 整体非法——
+  // 于是该表面上的每一次手势都按 `uiGestureBudgetExceeded` 拒绝，连不带速度的 press-hold
+  // 也一起被拒。这里写 8 就是 20 以内的收紧值。
   return const PatchbayGestureDecision.allow(
     gateIds: <String>{exampleWriteGate},
     maxDurationMs: 4000,
     maxPathPoints: 32,
-    maxVelocity: 8000,
+    maxVelocity: 8,
   );
 }
 
