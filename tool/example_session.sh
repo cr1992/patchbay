@@ -27,27 +27,60 @@ _example_session_log=""
 
 # 预检要发四十多条命令。`dart run` 每次都重新编译，单步就是几秒；编一次原生可执行后
 # 单步降到毫秒级，也与仓库发布的 AOT 形态一致。
-PATCHBAY_CLI_BIN="${PATCHBAY_CLI_BIN:-${TMPDIR:-/tmp}/patchbay-precheck/patchbay}"
+#
+# 产物目录按**检出**隔离：主检出与各 worktree 会并行存在，共用一个路径会互相覆盖——
+# 既让指纹永远不命中（每次切换都白编一次），更糟的是可能拿另一个检出编出来的二进制去跑，
+# 而那正是 AOT 唯一的真风险（不报错的过时答案）。
+_patchbay_checkout_key() {
+  printf '%s' "$PATCHBAY_REPO_ROOT" | shasum | awk '{print substr($1, 1, 12)}'
+}
+PATCHBAY_CLI_BIN="${PATCHBAY_CLI_BIN:-${TMPDIR:-/tmp}/patchbay-cli/$(_patchbay_checkout_key)/patchbay}"
 
-# AOT 产物的唯一风险是过期：改了 CLI 源码而没重编时，二进制会给出一个看起来正常但过时的
-# 答案，且不会报错。所以每次会话都重编（约 2 秒），并把来源 revision 落成标记文件——
-# 一份预检报告因此能回答"这是哪个 CLI 跑出来的"。
-example_session_build_cli() {
-  mkdir -p "$(dirname "$PATCHBAY_CLI_BIN")"
-  (cd "$PATCHBAY_CLI_DIR" && dart pub get >/dev/null 2>&1 &&
-    dart compile exe bin/patchbay.dart -o "$PATCHBAY_CLI_BIN" >/dev/null) || return 1
-  local revision dirty=""
-  revision="$(git -C "$PATCHBAY_REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  if ! git -C "$PATCHBAY_REPO_ROOT" diff --quiet 2>/dev/null; then dirty="+dirty"; fi
-  PATCHBAY_CLI_STAMP="$revision$dirty"
-  export PATCHBAY_CLI_STAMP
-  printf '%s\n' "$PATCHBAY_CLI_STAMP" > "$PATCHBAY_CLI_BIN.stamp"
-  echo "[session] CLI 已编译（源 $PATCHBAY_CLI_STAMP）：$PATCHBAY_CLI_BIN"
+# 一个调试任务里只编一次 CLI，任务期间一律复用同一份 AOT 产物。
+#
+# 判据是**源码指纹**而不是"每次启动都编"：一次任务里常要重启 App 多次，每次重编都是白等；
+# 但产物过期又是 AOT 唯一的真风险——改了 CLI 源码却拿旧二进制，会得到一个看起来正常、不报错
+# 的过时答案。所以按 CLI 与其依赖的 core 包的 .dart 内容取指纹，指纹变了才重编。
+#
+# 指纹连同 git revision 落进 <bin>.stamp 并导出 PATCHBAY_CLI_STAMP，预检报告头部打印它：
+# 一份结论必须能回答"这是哪个 CLI 跑出来的"。
+# 只哈希内容、不含文件路径：同一份源码在不同检出下必须得到同一个指纹，否则换个 worktree
+# 就会被判成"源码有变"。
+# 用 `-exec ... +` 而不是管道进 xargs：macOS 的 xargs 没有 GNU 的 `-r`，输入为空时它仍会执行
+# 一次 `shasum`，那次调用会去读 stdin 并永久阻塞——脚本会挂死而不是报错。
+# 排序放在哈希列上，因此指纹与文件遍历顺序无关。
+example_session_cli_fingerprint() {
+  find "$PATCHBAY_CLI_DIR/bin" "$PATCHBAY_CLI_DIR/lib" \
+    "$PATCHBAY_REPO_ROOT/packages/patchbay/lib" \
+    -type f -name '*.dart' -exec shasum {} + 2>/dev/null |
+    awk '{print $1}' | sort | shasum | awk '{print $1}'
 }
 
-# 脱敏后打印一段文本：VM Service URI 带认证 token，不能原样进日志。
-example_session_redact() {
-  sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g'
+example_session_build_cli() {
+  mkdir -p "$(dirname "$PATCHBAY_CLI_BIN")"
+  local fingerprint revision dirty=""
+  fingerprint="$(example_session_cli_fingerprint)"
+  revision="$(git -C "$PATCHBAY_REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if ! git -C "$PATCHBAY_REPO_ROOT" diff --quiet 2>/dev/null; then dirty="+dirty"; fi
+  PATCHBAY_CLI_STAMP="$revision$dirty ${fingerprint:0:12}"
+  export PATCHBAY_CLI_STAMP
+
+  if [ -x "$PATCHBAY_CLI_BIN" ] &&
+    [ "$(cat "$PATCHBAY_CLI_BIN.fingerprint" 2>/dev/null)" = "$fingerprint" ]; then
+    echo "[session] CLI 复用已编译产物（源 $PATCHBAY_CLI_STAMP）"
+    printf '%s\n' "$PATCHBAY_CLI_STAMP" > "$PATCHBAY_CLI_BIN.stamp"
+    return 0
+  fi
+
+  echo "[session] CLI 源码有变或首次运行，编译 AOT"
+  # 所有被脚本调用的 dart/flutter 命令都显式给 </dev/null：脱离终端运行时它们会去读
+  # stdin 并永久阻塞，表现是脚本卡住而不是报错。
+  (cd "$PATCHBAY_CLI_DIR" && dart pub get >/dev/null 2>&1 </dev/null &&
+    dart compile exe bin/patchbay.dart -o "$PATCHBAY_CLI_BIN" >/dev/null </dev/null) ||
+    return 1
+  printf '%s\n' "$fingerprint" > "$PATCHBAY_CLI_BIN.fingerprint"
+  printf '%s\n' "$PATCHBAY_CLI_STAMP" > "$PATCHBAY_CLI_BIN.stamp"
+  echo "[session] CLI 已编译（源 $PATCHBAY_CLI_STAMP）：$PATCHBAY_CLI_BIN"
 }
 
 example_session_device() {
@@ -86,13 +119,13 @@ example_session_start() {
 
   example_session_ensure_android || return 1
 
-  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter pub get >/dev/null) || return 1
+  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter pub get >/dev/null </dev/null) || return 1
   example_session_build_cli || return 1
 
   # Gradle 冷构建和「App 起不起来」是两件事，分开跑才能一眼看出断在哪一头，
   # 也让后面的启动步骤不再包含几分钟的构建时间。
   echo "[session] 预构建 debug APK（首次最慢）"
-  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter build apk --debug >/dev/null 2>&1) || {
+  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter build apk --debug >/dev/null 2>&1 </dev/null) || {
     echo "[session] APK 构建失败" >&2
     return 1
   }
