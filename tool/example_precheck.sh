@@ -27,7 +27,7 @@ source "$ROOT/tool/example_session.sh"
 PASS=0
 FAIL=0
 FAILED_STEPS=()
-OUT="$(mktemp -t patchbay-precheck-out)"
+OUT="$(mktemp "${TMPDIR:-/tmp}/patchbay-precheck-out.XXXXXX")"
 
 cleanup() {
   example_session_stop
@@ -94,7 +94,10 @@ print($1)
 }
 
 echo "== 启动 example =="
-example_session_start "${1:-}" || exit 1
+if ! example_session_start "${1:-}"; then
+  echo "预检未开始：会话启动失败（原因见上方 [session] 行）" >&2
+  exit 1
+fi
 
 echo
 echo "== 预检环境 =="
@@ -213,7 +216,7 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 
 echo
 echo "== capture / blob =="
-check 'capture root' 0 "" --output "$(mktemp -t patchbay-shot).png" capture root
+check 'capture root' 0 "" --output "$(mktemp "${TMPDIR:-/tmp}/patchbay-shot.XXXXXX").png" capture root
 
 echo
 echo "== logs =="

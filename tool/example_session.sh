@@ -17,6 +17,11 @@
 
 set -o pipefail
 
+# 全角标点紧跟变量展开时**必须**写成 ${VAR} 而不是 $VAR。
+# macOS 自带的 bash 3.2 在 C locale + `set -u` 下会把 `$VAR）` 的高位字节当成变量名的一部分，
+# 于是读到一个未定义变量并以 127 静默退出——没有报错行，表现为"脚本跑到某处就没声了"。
+# 预检脚本开着 `set -u`，所以这条不是风格问题而是可运行性问题。
+
 PATCHBAY_REPO_ROOT="${PATCHBAY_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PATCHBAY_EXAMPLE_DIR="$PATCHBAY_REPO_ROOT/packages/patchbay_flutter/example"
 PATCHBAY_CLI_DIR="$PATCHBAY_REPO_ROOT/packages/patchbay_cli"
@@ -31,8 +36,18 @@ _example_session_log=""
 # 产物目录按**检出**隔离：主检出与各 worktree 会并行存在，共用一个路径会互相覆盖——
 # 既让指纹永远不命中（每次切换都白编一次），更糟的是可能拿另一个检出编出来的二进制去跑，
 # 而那正是 AOT 唯一的真风险（不报错的过时答案）。
+# `shasum` 是 perl 附带的，Linux runner 上不保证存在；`sha1sum` 是 coreutils 的，macOS 上没有。
+# 两边都要跑，所以选一个可用的。
+_patchbay_sha() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum "$@"
+  else
+    sha1sum "$@"
+  fi
+}
+
 _patchbay_checkout_key() {
-  printf '%s' "$PATCHBAY_REPO_ROOT" | shasum | awk '{print substr($1, 1, 12)}'
+  printf '%s' "$PATCHBAY_REPO_ROOT" | _patchbay_sha | awk '{print substr($1, 1, 12)}'
 }
 PATCHBAY_CLI_BIN="${PATCHBAY_CLI_BIN:-${TMPDIR:-/tmp}/patchbay-cli/$(_patchbay_checkout_key)/patchbay}"
 
@@ -52,13 +67,20 @@ PATCHBAY_CLI_BIN="${PATCHBAY_CLI_BIN:-${TMPDIR:-/tmp}/patchbay-cli/$(_patchbay_c
 example_session_cli_fingerprint() {
   find "$PATCHBAY_CLI_DIR/bin" "$PATCHBAY_CLI_DIR/lib" \
     "$PATCHBAY_REPO_ROOT/packages/patchbay/lib" \
-    -type f -name '*.dart' -exec shasum {} + 2>/dev/null |
-    awk '{print $1}' | sort | shasum | awk '{print $1}'
+    -type f -name '*.dart' -exec sh -c 'for f; do
+      if command -v shasum >/dev/null 2>&1; then shasum "$f"; else sha1sum "$f"; fi
+    done' sh {} + 2>/dev/null |
+    awk '{print $1}' | sort | _patchbay_sha | awk '{print $1}'
 }
 
 example_session_build_cli() {
   mkdir -p "$(dirname "$PATCHBAY_CLI_BIN")"
-  local fingerprint revision dirty=""
+  # 逐个声明并显式初始化：macOS 自带的 bash 3.2 在 `set -u` 下对
+  # `local a b c=""` 这种合并声明有坑，会让整个脚本以 127 静默退出（无任何报错行）。
+  # 预检脚本本身开着 `set -u`，所以这里必须用安全写法。
+  local fingerprint=""
+  local revision=""
+  local dirty=""
   fingerprint="$(example_session_cli_fingerprint)"
   revision="$(git -C "$PATCHBAY_REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
   if ! git -C "$PATCHBAY_REPO_ROOT" diff --quiet 2>/dev/null; then dirty="+dirty"; fi
@@ -67,7 +89,7 @@ example_session_build_cli() {
 
   if [ -x "$PATCHBAY_CLI_BIN" ] &&
     [ "$(cat "$PATCHBAY_CLI_BIN.fingerprint" 2>/dev/null)" = "$fingerprint" ]; then
-    echo "[session] CLI 复用已编译产物（源 $PATCHBAY_CLI_STAMP）"
+    echo "[session] CLI 复用已编译产物（源 ${PATCHBAY_CLI_STAMP}）"
     printf '%s\n' "$PATCHBAY_CLI_STAMP" > "$PATCHBAY_CLI_BIN.stamp"
     return 0
   fi
@@ -75,12 +97,19 @@ example_session_build_cli() {
   echo "[session] CLI 源码有变或首次运行，编译 AOT"
   # 所有被脚本调用的 dart/flutter 命令都显式给 </dev/null：脱离终端运行时它们会去读
   # stdin 并永久阻塞，表现是脚本卡住而不是报错。
-  (cd "$PATCHBAY_CLI_DIR" && dart pub get >/dev/null 2>&1 </dev/null &&
-    dart compile exe bin/patchbay.dart -o "$PATCHBAY_CLI_BIN" >/dev/null </dev/null) ||
+  # 失败要自解释：静默退出会让调用方（预检脚本）看起来"什么都没发生就结束了"。
+  if ! (cd "$PATCHBAY_CLI_DIR" && dart pub get </dev/null >/dev/null 2>&1); then
+    echo "[session] dart pub get 失败（${PATCHBAY_CLI_DIR}）" >&2
     return 1
+  fi
+  if ! (cd "$PATCHBAY_CLI_DIR" &&
+    dart compile exe bin/patchbay.dart -o "$PATCHBAY_CLI_BIN" </dev/null >/dev/null); then
+    echo "[session] dart compile exe 失败（${PATCHBAY_CLI_DIR}）" >&2
+    return 1
+  fi
   printf '%s\n' "$fingerprint" > "$PATCHBAY_CLI_BIN.fingerprint"
   printf '%s\n' "$PATCHBAY_CLI_STAMP" > "$PATCHBAY_CLI_BIN.stamp"
-  echo "[session] CLI 已编译（源 $PATCHBAY_CLI_STAMP）：$PATCHBAY_CLI_BIN"
+  echo "[session] CLI 已编译（源 ${PATCHBAY_CLI_STAMP}）：$PATCHBAY_CLI_BIN"
 }
 
 example_session_device() {
@@ -98,8 +127,14 @@ example_session_ensure_android() {
     return 0
   fi
   echo "[session] 生成 example 的 Android 工程（不入库）"
-  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter create --platforms=android \
-    --org dev.patchbay --project-name patchbay_flutter_example . >/dev/null)
+  if ! (cd "$PATCHBAY_EXAMPLE_DIR" && flutter create --platforms=android \
+    --org dev.patchbay --project-name patchbay_flutter_example . >/dev/null </dev/null); then
+    echo "[session] flutter create 失败（${PATCHBAY_EXAMPLE_DIR}）" >&2
+    return 1
+  fi
+  # flutter create 顺手补的默认 widget 测试引用模板里的 MyApp，与本 example 的 main.dart
+  # 不是一回事，留着会让 flutter analyze 变红。它是生成物，不入库也不该留在工作树里。
+  rm -f "$PATCHBAY_EXAMPLE_DIR/test/widget_test.dart"
 }
 
 example_session_start() {
@@ -119,19 +154,31 @@ example_session_start() {
 
   example_session_ensure_android || return 1
 
-  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter pub get >/dev/null </dev/null) || return 1
-  example_session_build_cli || return 1
+  # --enforce-lockfile：预检不得改动被追踪的 pubspec.lock。实测不加这个参数时，一次
+  # 预检会把 example 的 lock 里 vm_service 从 15.2.0 顺手升到 15.3.0——一次"只读的验证"
+  # 悄悄改了随版依赖，而仓内多处以 15.2.0 为评审基准。
+  if ! (cd "$PATCHBAY_EXAMPLE_DIR" && flutter pub get --enforce-lockfile >/dev/null </dev/null); then
+    echo "[session] example flutter pub get 失败（lock 与 pubspec 不一致时也会失败）" >&2
+    return 1
+  fi
+  example_session_build_cli || {
+    echo "[session] CLI 准备失败，终止" >&2
+    return 1
+  }
 
   # Gradle 冷构建和「App 起不起来」是两件事，分开跑才能一眼看出断在哪一头，
   # 也让后面的启动步骤不再包含几分钟的构建时间。
   echo "[session] 预构建 debug APK（首次最慢）"
-  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter build apk --debug >/dev/null 2>&1 </dev/null) || {
+  # --no-pub：依赖已由上一步以 --enforce-lockfile 取好。不加这个参数时 flutter build 会
+  # 自己再跑一次 pub，那次不受 lockfile 约束，实测会把被追踪的 example lock 改掉。
+  (cd "$PATCHBAY_EXAMPLE_DIR" &&
+    flutter build apk --debug --no-pub >/dev/null 2>&1 </dev/null) || {
     echo "[session] APK 构建失败" >&2
     return 1
   }
 
-  _example_session_uri_file="$(mktemp -t patchbay-vmservice)"
-  _example_session_log="$(mktemp -t patchbay-flutter-run)"
+  _example_session_uri_file="$(mktemp "${TMPDIR:-/tmp}/patchbay-vmservice.XXXXXX")"
+  _example_session_log="$(mktemp "${TMPDIR:-/tmp}/patchbay-flutter-run.XXXXXX")"
   rm -f "$_example_session_uri_file"
 
   echo "[session] flutter run（日志：${_example_session_log}）"
