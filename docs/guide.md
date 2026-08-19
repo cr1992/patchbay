@@ -1092,6 +1092,17 @@ lifecycle `5`），只有 warning 时是 `0`。
 ## 边界
 
 - 只支持 debug / profile。接入方必须用编译期分支让 release 不构造 Patchbay；仓库不提供运行时后门。
+- **debug 与 profile 不是同一套可用能力，选错模式会静默少掉命令。** `ui.inspect` 只在 debug 成立
+  （非 debug 按 `notDebugBuild` 拒绝），`ui widget-tree` / `render-tree` / `focus-tree` 依赖只在 debug
+  注册的 inspector 服务扩展。反过来，`perf profile` 在 debug 下的帧耗时与 jank 不代表真实表现
+  （JIT + 断言开启），要可信数字必须用 `--profile` 跑。所以：**日常联调用 debug、测性能时才切 profile**，
+  并在报告里写清模式——否则「这条命令不可用」和「这个数字不可信」会被读成同一类问题。
+- **CLI 建议用原生 AOT 可执行，而不是 `dart run`。** `dart run bin/patchbay.dart` 每次调用都重新编译，
+  脚本化场景里单步几秒；`dart compile exe` 一次即可复用，单步降到毫秒级，且与 GitHub Release 上的产物
+  同形态。注意 `dart pub global activate` 装的是 app snapshot 而非原生 AOT，不要用它测启动耗时。
+- **断点会改变现场。** 断在断点上等于冻住 App：冻结期间 UI 面按 `*LifecycleNotResumed` 拒绝，随后 CLI
+  只看到 `appUnresponsive`。定位问题优先用 `snapshot`（含 `--path` 与条件等待）、`logs`、`trace` 轨迹和
+  执行证据分类——这些面存在的意义就是让你不必断点；真要断点，单独起一次会话，别挂在验收链里。
 - UI 平面要求 App 处于 `resumed`。桌面端（macOS 等）窗口一旦失焦就是 `inactive`，此时
   `ui.semantics.*`、`ui.capture`、`ui.wait` 与 `navigation.go|push|back` 都会以
   `*LifecycleNotResumed` 拒绝。这是 fail-closed 设计——未 resumed 的引擎不出帧，请求只会永远等下去，

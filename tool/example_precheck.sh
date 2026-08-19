@@ -6,6 +6,13 @@
 # 真实控制器语义、设备 SDK 确认、真实 UI 的滚动与遮挡、签名真机上的系统弹窗，都只有
 # 接入方能出证据。规则见 AGENTS.md「实现与验证」。
 #
+# 模式：**debug（JIT）**，不是 profile/AOT。这不是随手选的默认值——`ui.inspect` 与三棵诊断树只在
+# debug 构建存在（见 AGENTS.md「联调姿势」），用 profile 跑会让这几步静默消失，"全过"就不再等于
+# "全覆盖"。性能数字要另跑一次 profile 会话，那次拿不到 inspect 与诊断树，属于两种用途。
+#
+# CLI 本身相反：先 AOT 编成原生可执行再复用（由 example_session.sh 负责），否则四十余步会各自
+# 重新编译一遍。
+#
 # 用法：
 #   tool/example_precheck.sh [adb-serial]
 #

@@ -56,6 +56,29 @@
   真实控制器语义、设备 SDK 确认、真实 UI 的滚动与遮挡、签名真机上的系统弹窗只有接入方能出证据。
 - 交接必须给出分支、提交 SHA、实际运行的检查、剩余风险、真机状态和后续依赖。
 
+## 联调姿势
+
+**CLI 一律先编成原生可执行再复用**，不要在循环里 `dart run bin/patchbay.dart`：后者每次调用都重新编译，
+实测单步几秒，四十余步的预检会多花十几分钟且中途无输出。`dart compile exe` 一次约 2 秒、单步降到
+0.5 秒，且与发布产物同形态。`tool/example_session.sh` 已按此实现。
+
+**被调 App 默认 debug（JIT），不要默认 profile/AOT。** 这不是性能取舍而是覆盖问题：`ui.inspect` 在
+非 debug 构建按 `notDebugBuild` 类型化拒绝（`kDebugMode` 判定），`ui widget-tree` / `render-tree` /
+`focus-tree` 依赖只在 debug 注册的 inspector 服务扩展。默认 profile 会让这几项静默消失，预检"全过"
+就不再等于"全覆盖"。
+
+**只有测性能时才切 profile。** `perf profile` 在 debug 下的帧耗时与 jank 不代表真实表现（JIT + 断言
+开启），要那组数就必须用 `--profile` 跑；此时同一条会话拿不到 inspect 与诊断树，报告里要写清模式。
+
+**排障顺序:先证据，后断点。**
+
+1. 用 patchbay 自己的证据面复现并定位：`snapshot`（含 `--path` 与条件等待）、`logs query/tail`、
+   `trace` 轨迹、执行证据分类、审计事件。这些是为"不必断点"而存在的。
+2. 证据不足时补日志或补一条只读命令，重跑复现。
+3. **断点是最后手段**，而且有代价：断在断点上等于把 App 冻住，冻结期间 lifecycle 闸会让 `ui.*` /
+   `navigation.*` 全部按 `*LifecycleNotResumed` 拒绝，CLI 随后只看到 `appUnresponsive`。也就是说断点
+   会改变现场、掩盖原来的问题。要用就单独起一次会话，不要在预检或验收链里挂断点。
+
 ## 安全与维护
 
 - 使用 `apply_patch` 做人工文件编辑；批量生成和格式化使用仓内工具。禁止未经授权的破坏性 Git 或文件操作。
