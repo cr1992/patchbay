@@ -112,7 +112,8 @@ capability 沿用既有表达：`ui.keepAwake.status` 的 `wired: false` 与 `ke
 - **老 reader 不删新记录**：用复刻的 0.3 读取逻辑读当前 writer 写出的记录，断言解析成功且文件仍在。
 - `--no-keep-awake` 覆盖项目配置默认值的单测；续租只在命令成功后发生、读状态不续租的单测。
 - Android/iOS 真机验证租约申请、续租、静默释放和显式关闭；release 产物验证不可达。
-- 两个接入方使用同一 machine-frame parser，不再各自解析人类日志。
+- 双平台 example 预检使用同一 machine-frame parser 解析 pending/握手/断连，不再依赖人类日志；接入方各自
+  的 parser 验证为补充证据（发布判据见[版本计划 SC-040-01](../../releases/0.4.0.md#范围变更记录)）。
 
 ## 已裁决预算
 

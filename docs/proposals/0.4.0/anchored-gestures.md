@@ -98,7 +98,9 @@ fail-closed**，稳定 code 为 `uiGestureTargetObscured`。这一条与 PB-040-
   误拒检查），再补 `uiGestureTargetObscured` 的正反用例。
 - 断言未提供 gesture policy 的接入方目录里没有 `ui.gesture.*`。
 - 断言转换后的全局坐标不出现在响应 payload、日志与 trace 事件中。
-- Android/iOS 真机各覆盖普通滚动、嵌套滚动、方向盘按压态和可拖小窗中的适用路径。
+- Android/iOS 真机上的 example 预检各覆盖普通滚动与锚定后的 press-hold / drag / fling；嵌套滚动与真实
+  业务控件（按压态、可拖浮层）中的适用路径由接入方补充，发布判据见
+  [版本计划 SC-040-01](../../releases/0.4.0.md#范围变更记录)。
 
 ## 被否决方案
 
