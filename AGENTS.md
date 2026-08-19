@@ -34,7 +34,8 @@
 - RC 阶段冻结范围，只接发布阻断修复。版本通过 CI、兼容和真机门禁后，由一个发布 MR 把
   `release/<SemVer>` 合回 `main`；随后同步 GitHub、打 tag 并发布。完成后回收版本分支。
 - 紧急修复从 `main` 建 `hotfix/<SemVer>`，验证并合回 `main` 后，再前向合入仍活跃的版本分支。
-- 版本分支模型自 0.5.0 起适用。0.4.0 已在 `main` 上集成，其剩余 MR 仍以 `main` 为目标。
+- 版本分支模型的生效范围可能因版本而异；当前活跃版本的 MR 目标分支以该版本的
+  [版本计划](docs/releases/)为准，不在本文件维护。
 
 完整规则和范围变更流程见 [`docs/planning.md`](docs/planning.md)。
 
@@ -59,44 +60,23 @@
 ## 联调姿势
 
 **每个调试任务开始时把 CLI 编一次 AOT，任务期间一律复用那份产物。** 不要在循环里
-`dart run bin/patchbay.dart`：后者每次调用都重新编译，实测单步 2 秒以上，四十余步的预检会多花十几分钟
-且中途无输出。`dart compile exe` 一次约 2 秒、单步降到 0.5 秒，且与发布产物同形态。
+`dart run bin/patchbay.dart`——它每次调用都重新编译。`tool/example_session.sh` 已按内容指纹实现重编
+判定与按检出隔离的产物目录，走它即可，不要另起一套。
 
-`tool/example_session.sh` 已按此实现：按 CLI 与 core 包的 `.dart` **内容指纹**决定是否重编，因此一个任务
-里重启 App 多少次都只编一次，源码真变了才重编。产物目录按检出隔离（主检出与各 worktree 并存时共用一个
-路径会互相覆盖，甚至拿到另一个检出编出来的二进制）。指纹与 git revision 落进 `<bin>.stamp` 并导出
-`PATCHBAY_CLI_STAMP`，预检报告头部打印它——一份结论必须能回答"这是哪个 CLI 跑出来的"。
-
-**AOT 出问题不比 JIT 难查**，这一点实测过，不必凭印象担心：
-
-| 排查手段 | AOT | JIT |
-|---|---|---|
-| 未捕获异常栈 | 有函数名、文件、**行号**（缺列号） | 同上，且带列号 |
-| `assert` 检查 | 关闭（无法在运行时打开） | **默认同样关闭**，要靠 `dart run --enable-asserts` |
-| `--json` 错误信封与稳定 `code` | 完全一致 | 完全一致 |
-| 退出码（3/4/5/6/7/64） | 完全一致 | 完全一致 |
-| 调试器断点、热重载 | 不可用（exe 无 VM Service） | 可用 |
-
-这条 CLI 的诊断面本来就是**类型化答复**而不是栈回溯：`--json` 给 `error.code`，退出码区分传输/协议/拒绝/
-类型化失败/用法。这些在两种模式下逐字节相同，所以日常排查根本用不到 JIT。栈回溯只在 CLI 自身抛未捕获
-异常时才有意义，而那种情况下 AOT 的栈依然带函数名与行号。
-
-AOT 不适用的场景因此只有两个：**要用调试器单步 CLI 自己的代码**，以及**需要 `assert` 生效**（`dart run
---enable-asserts`，注意默认的 `dart run` 也不开断言，这不是 AOT 独有的损失）。`dart test` 本来就是 JIT，
-不在这条规则的管辖范围。改了 CLI 源码不属于例外——那只是重编一次，不是回到 JIT。
+诊断面是**类型化答复**而非栈回溯：`--json` 的 `error.code` 与退出码在 AOT / JIT 下一致，因此排障不需要
+回到 JIT。只有两种情况例外：要用调试器单步 CLI 自己的代码，以及需要 `assert` 生效
+（`dart run --enable-asserts`）。改了 CLI 源码不算例外，重编一次即可。
 
 **被调 App 默认 debug（JIT），不要默认 profile/AOT。** 这不是性能取舍而是覆盖问题：`ui.inspect` 在
-非 debug 构建被类型化拒绝（实测 profile 上退 5 / `inspectorUnavailable`），`ui widget-tree` /
-`render-tree` / `focus-tree` 依赖只在 debug 注册的 inspector 服务扩展。默认 profile 会让这几项失去
-实质内容，预检"全过"就不再等于"全覆盖"。
+非 debug 构建按 `inspectorUnavailable` 拒绝，`ui widget-tree` / `render-tree` / `focus-tree` 依赖只在
+debug 注册的 inspector 服务扩展。默认 profile 会让这几项失去实质内容，预检"全过"就不再等于"全覆盖"。
 
-注意这几棵树在 profile 下**不是拒绝，而是退 0 配空 `data`**（实测：`widget-tree` 只回一行
-`WidgetsFlutterBinding - PROFILE MODE`，`render-tree` / `focus-tree` 为空串，是否为空还随之前的
-交互而变）。也就是说 profile 会话拿到的"成功"并不代表拿到了树——判据要看载荷，不能只看退出码。
+**在 profile 判断诊断树是否可用要看载荷，不能只看退出码**：这三棵树在非 debug 返回的是退 0 配空
+`data`，不是拒绝。
 
-**反过来，默认 debug 也有代价：只在非 debug 存在的缺陷，debug 会话在原理上看不见。** 已实证一例
-（`capture` 在 profile 必然退 3，BUG-20260819-02，在 debug 预检里长期全绿）。那一面由
-`tool/example_profile_smoke.sh` 覆盖，它跑 profile 会话、只验答复形态。两者互补，不可互相替代。
+**两种模式各有盲区，覆盖面不可互相代替。** debug 会话在原理上看不见只在非 debug 存在的缺陷；
+`tool/example_profile_smoke.sh` 跑 profile 会话补这一面，只验答复形态，不求全覆盖。改动涉及构建模式
+相关的分支时，两个脚本都要跑。
 
 **只有测性能时才切 profile。** `perf profile` 在 debug 下的帧耗时与 jank 不代表真实表现（JIT + 断言
 开启），要那组数就必须用 `--profile` 跑；此时同一条会话拿不到 inspect 与诊断树，报告里要写清模式。
