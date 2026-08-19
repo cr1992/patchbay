@@ -1101,6 +1101,9 @@ lifecycle `5`），只有 warning 时是 `0`。
   脚本化场景里单步几秒；`dart compile exe` 一次即可复用，单步降到毫秒级，且与 GitHub Release 上的产物
   同形态。注意 `dart pub global activate` 装的是 app snapshot 而非原生 AOT，不要用它测启动耗时。
   唯一要留意的是产物过期：改了 CLI 源码就要重编，否则会拿到一个不报错但过时的答案。
+  不必担心"AOT 出问题不好查"：未捕获异常的栈在 AOT 下仍带函数名与行号（只少列号），而 `--json` 的
+  `error.code` 与退出码在两种模式下完全一致——本 CLI 的诊断面是类型化答复，不是栈回溯。`assert` 在
+  默认的 `dart run` 下同样是关闭的，要它生效得显式 `dart run --enable-asserts`。
 - **断点会改变现场。** 断在断点上等于冻住 App：冻结期间 UI 面按 `*LifecycleNotResumed` 拒绝，随后 CLI
   只看到 `appUnresponsive`。定位问题优先用 `snapshot`（含 `--path` 与条件等待）、`logs`、`trace` 轨迹和
   执行证据分类——这些面存在的意义就是让你不必断点；真要断点，单独起一次会话，别挂在验收链里。
