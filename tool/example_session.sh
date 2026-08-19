@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 在一台连着的 Android 设备上把仓内 example 跑起来，并交出可用的 VM Service URI。
+# 在一台连着的设备上把仓内 example 跑起来，并交出可用的 VM Service URI。
+#
+# 支持 Android 真机/模拟器、iOS Simulator 和 iOS 真机；平台由 `flutter devices --machine`
+# 判定，adb 专用的唤醒解锁只发给 Android。iOS 真机额外需要签名条件（见预构建失败时的提示）。
 #
 # 单独成文件的理由：本地端到端预检、临时手工排查和未来的 CI 冒烟都需要同一段
 # 「装 App → 起 App → 取 URI」流程。这段流程本身容易出错（lifecycle 闸要求 resumed、
@@ -7,8 +10,11 @@
 #
 # 用法：
 #   source tool/example_session.sh          # 提供函数，不自动执行
-#   example_session_start [adb-serial]      # 起 App，导出 PATCHBAY_WS_URI
+#   example_session_start [device-id]       # 起 App，导出 PATCHBAY_WS_URI
 #   example_session_stop                    # 关 App，清理转发
+#
+# device-id 取自 `flutter devices`：Android 用 adb serial，iOS Simulator 用
+# `xcrun simctl list devices` 的 UDID。省略时沿用旧行为，取第一台 online 的 adb 设备。
 #
 # 约定：
 # - URI 只写进 mktemp 文件并导出到变量，任何日志输出都先脱敏；
@@ -121,13 +127,61 @@ example_session_device() {
   adb devices | awk '$2 == "device" { print $1; exit }'
 }
 
-# example 不带平台目录（四包仓不维护一套 Android 工程）。按需生成，用完留在本地。
-example_session_ensure_android() {
-  if [ -d "$PATCHBAY_EXAMPLE_DIR/android" ]; then
+# 目标平台由 `flutter devices --machine` 判定，不靠 id 形状猜：adb serial、iOS Simulator UDID
+# 和 iOS 真机 UDID 在形状上并不互斥，猜错会把 adb 专用步骤发到一台 iPhone 上。
+#
+# 输出封闭三值：android / ios-simulator / ios-device。判不出来就失败，不默认成 android——
+# 默认成 android 的代价是后面每一步都以看不懂的方式失败。
+example_session_platform() {
+  local device="$1"
+  local machine=""
+  machine="$(cd "$PATCHBAY_EXAMPLE_DIR" && flutter devices --machine </dev/null 2>/dev/null)"
+  printf '%s' "$machine" | python3 -c "
+import json, sys
+want = sys.argv[1]
+try:
+    devices = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+for device in devices:
+    if device.get('id') != want:
+        continue
+    platform = device.get('targetPlatform') or ''
+    if platform.startswith('android'):
+        print('android')
+    elif platform.startswith('ios'):
+        print('ios-simulator' if device.get('emulator') else 'ios-device')
+    else:
+        raise SystemExit(1)
+    raise SystemExit(0)
+raise SystemExit(1)
+" "$device"
+}
+
+# example 不带平台目录（四包仓不维护 Android / iOS 工程）。按需生成，用完留在本地。
+example_session_ensure_platform() {
+  local platform="$1"
+  local dir=""
+  local flag=""
+  case "$platform" in
+    android)
+      dir=android
+      flag=android
+      ;;
+    ios-simulator | ios-device)
+      dir=ios
+      flag=ios
+      ;;
+    *)
+      echo "[session] 不支持的目标平台：${platform}" >&2
+      return 1
+      ;;
+  esac
+  if [ -d "$PATCHBAY_EXAMPLE_DIR/$dir" ]; then
     return 0
   fi
-  echo "[session] 生成 example 的 Android 工程（不入库）"
-  if ! (cd "$PATCHBAY_EXAMPLE_DIR" && flutter create --platforms=android \
+  echo "[session] 生成 example 的 ${flag} 工程（不入库）"
+  if ! (cd "$PATCHBAY_EXAMPLE_DIR" && flutter create --platforms="$flag" \
     --org dev.patchbay --project-name patchbay_flutter_example . >/dev/null </dev/null); then
     echo "[session] flutter create 失败（${PATCHBAY_EXAMPLE_DIR}）" >&2
     return 1
@@ -135,24 +189,54 @@ example_session_ensure_android() {
   # flutter create 顺手补的默认 widget 测试引用模板里的 MyApp，与本 example 的 main.dart
   # 不是一回事，留着会让 flutter analyze 变红。它是生成物，不入库也不该留在工作树里。
   rm -f "$PATCHBAY_EXAMPLE_DIR/test/widget_test.dart"
+  # flutter create 会自己跑一次**不受 lockfile 约束**的 pub，实测把被追踪的 example lock 里
+  # vm_service 从 15.2.0 顶到 15.3.0。这里只告警不代改：静默 `git checkout --` 会把开发者
+  # 有意的 lock 改动一并吃掉，而一次"只是生成工程"的动作不该拥有那种权力。
+  if ! git -C "$PATCHBAY_REPO_ROOT" diff --quiet -- \
+    packages/patchbay_flutter/example/pubspec.lock 2>/dev/null; then
+    echo "[session] 注意：flutter create 改动了被追踪的 example pubspec.lock。" >&2
+    echo "[session] 这不是预检的意图，提交前请复核并复原该文件。" >&2
+  fi
 }
 
 example_session_start() {
   local device
   device="$(example_session_device "${1:-}")"
   if [ -z "$device" ]; then
-    echo "[session] adb 里没有 online 的设备" >&2
+    echo "[session] 没有可用设备：未指定 id，且 adb 里也没有 online 的设备" >&2
     return 1
   fi
-  echo "[session] device=$device"
+  local platform=""
+  platform="$(example_session_platform "$device")"
+  if [ -z "$platform" ]; then
+    echo "[session] flutter devices 里没有 id=${device}，或其平台不受支持" >&2
+    echo "[session] 可用设备见：flutter devices" >&2
+    return 1
+  fi
+  PATCHBAY_SESSION_PLATFORM="$platform"
+  export PATCHBAY_SESSION_PLATFORM
+  echo "[session] device=$device platform=$platform"
 
   # UI 面有 lifecycle 闸：App 不在 resumed 时 ui.* / navigation.* 全部按
-  # *LifecycleNotResumed 拒绝。息屏或锁屏就会踩到，所以先唤醒解锁再启动。
-  adb -s "$device" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
-  adb -s "$device" shell wm dismiss-keyguard >/dev/null 2>&1 || true
-  adb -s "$device" shell svc power stayon true >/dev/null 2>&1 || true
+  # *LifecycleNotResumed 拒绝。息屏或锁屏就会踩到，所以先把设备弄成可交互状态。
+  case "$platform" in
+    android)
+      adb -s "$device" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+      adb -s "$device" shell wm dismiss-keyguard >/dev/null 2>&1 || true
+      adb -s "$device" shell svc power stayon true >/dev/null 2>&1 || true
+      ;;
+    ios-simulator)
+      # 未启动的 Simulator 上 flutter run 会自己拉起，但拉起过程里 App 可能先落到
+      # 非 resumed；显式 boot 并等到 booted 再跑，省掉这一类偶发失败。
+      xcrun simctl bootstatus "$device" -b >/dev/null 2>&1 || true
+      ;;
+    ios-device)
+      # 真机无法从命令行解锁：锁屏时 UI 面会整片按 *LifecycleNotResumed 拒绝。
+      echo "[session] iOS 真机请保持解锁并信任本机，否则 UI 面会按 lifecycle 闸拒绝" >&2
+      ;;
+  esac
 
-  example_session_ensure_android || return 1
+  example_session_ensure_platform "$platform" || return 1
 
   # --enforce-lockfile：预检不得改动被追踪的 pubspec.lock。实测不加这个参数时，一次
   # 预检会把 example 的 lock 里 vm_service 从 15.2.0 顺手升到 15.3.0——一次"只读的验证"
@@ -166,16 +250,42 @@ example_session_start() {
     return 1
   }
 
-  # Gradle 冷构建和「App 起不起来」是两件事，分开跑才能一眼看出断在哪一头，
+  # 冷构建和「App 起不起来」是两件事，分开跑才能一眼看出断在哪一头，
   # 也让后面的启动步骤不再包含几分钟的构建时间。
-  echo "[session] 预构建 debug APK（首次最慢）"
   # --no-pub：依赖已由上一步以 --enforce-lockfile 取好。不加这个参数时 flutter build 会
   # 自己再跑一次 pub，那次不受 lockfile 约束，实测会把被追踪的 example lock 改掉。
-  (cd "$PATCHBAY_EXAMPLE_DIR" &&
-    flutter build apk --debug --no-pub >/dev/null 2>&1 </dev/null) || {
-    echo "[session] APK 构建失败" >&2
+  local build_label=""
+  local built=0
+  case "$platform" in
+    android) build_label="debug APK" ;;
+    ios-simulator) build_label="debug .app（Simulator，不需要签名）" ;;
+    ios-device) build_label="debug .app（真机，需要签名）" ;;
+  esac
+  echo "[session] 预构建 ${build_label}（首次最慢）"
+  case "$platform" in
+    android)
+      (cd "$PATCHBAY_EXAMPLE_DIR" &&
+        flutter build apk --debug --no-pub >/dev/null 2>&1 </dev/null) || built=$?
+      ;;
+    ios-simulator)
+      (cd "$PATCHBAY_EXAMPLE_DIR" &&
+        flutter build ios --debug --simulator --no-pub >/dev/null 2>&1 </dev/null) || built=$?
+      ;;
+    ios-device)
+      (cd "$PATCHBAY_EXAMPLE_DIR" &&
+        flutter build ios --debug --no-pub >/dev/null 2>&1 </dev/null) || built=$?
+      ;;
+  esac
+  if [ "$built" != 0 ]; then
+    echo "[session] 预构建失败（${build_label}）" >&2
+    if [ "$platform" = ios-device ]; then
+      # iOS 真机的头号失败原因是签名，而签名只能人工配一次，脚本代不了。
+      echo "[session] iOS 真机需要有效的开发团队与 provisioning profile：" >&2
+      echo "[session]   Xcode > Settings > Accounts 登录账号，再在 example/ios 里选定 team" >&2
+      echo "[session] 没有签名条件时改用 iOS Simulator 的 UDID（xcrun simctl list devices）" >&2
+    fi
     return 1
-  }
+  fi
 
   _example_session_uri_file="$(mktemp "${TMPDIR:-/tmp}/patchbay-vmservice.XXXXXX")"
   _example_session_log="$(mktemp "${TMPDIR:-/tmp}/patchbay-flutter-run.XXXXXX")"
