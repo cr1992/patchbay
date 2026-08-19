@@ -195,7 +195,7 @@ final class PatchbayCaptureBridge {
     }
 
     final RenderRepaintBoundary boundary = after.boundary!;
-    if (boundary.debugNeedsPaint ||
+    if (needsPaintForMode(boundary, isDebugBuild: kDebugMode) ||
         !boundary.hasSize ||
         boundary.size.isEmpty) {
       return _reject(requestId, 'captureTargetNotPainted');
@@ -499,6 +499,24 @@ final class PatchbayCaptureBridge {
       ),
     );
   }
+
+  /// Whether the boundary still owes a paint, to the extent the build mode can
+  /// answer that at all.
+  ///
+  /// `RenderObject.debugNeedsPaint` is debug-only: it returns a `late` field
+  /// assigned inside an `assert`, so profile and release strip the assignment
+  /// and reading it throws `LateInitializationError`. Capture is supported
+  /// outside debug — [PatchbayRoot] wraps the root boundary whenever
+  /// `!kReleaseMode` — so outside debug this answers "cannot tell" rather than
+  /// letting that error escape the bridge as an untyped host failure. Nothing
+  /// is silently admitted: a boundary that really has not painted still fails
+  /// closed one step later, where `toImage` throws and capture rejects with
+  /// `captureEncodingFailed`.
+  @visibleForTesting
+  static bool needsPaintForMode(
+    RenderRepaintBoundary boundary, {
+    required bool isDebugBuild,
+  }) => isDebugBuild && boundary.debugNeedsPaint;
 
   static Future<PatchbayEncodedCapture> _encode(
     RenderRepaintBoundary boundary,

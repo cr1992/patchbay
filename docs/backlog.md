@@ -13,7 +13,7 @@
 
 | 条目 | 动机 / 证据 | 状态 |
 |---|---|---|
-| （暂无已知未修缺陷） | | |
+| BUG-20260819-02：`ui.capture` 在 profile 构建必然失败 | `capture_bridge.dart` 无条件读 debug-only `debugNeedsPaint`；profile 剥断言后该 getter 抛 `LateInitializationError`，在类型化拒绝之前逃逸成 `transportError`。与 `PatchbayRoot` 在 `!kReleaseMode` 即包裹 root boundary 的意图矛盾；`tool/example_session.sh` 只跑 `--debug`，预检从未覆盖该路径 | 实现中 |
 
 ## 特性
 

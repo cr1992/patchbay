@@ -194,6 +194,86 @@ void main() {
     );
   });
 
+  test(
+    'the needs-paint probe leaves the debug-only getter alone outside debug',
+    () {
+      final RenderRepaintBoundary boundary = _UnreadableNeedsPaintBoundary();
+
+      expect(
+        PatchbayCaptureBridge.needsPaintForMode(boundary, isDebugBuild: false),
+        isFalse,
+      );
+      // Profile and release throw `LateInitializationError` from this getter, so
+      // the fixture above only proves anything as long as reading it really does
+      // blow up. Assert that it does, or the case above passes vacuously.
+      expect(
+        () => PatchbayCaptureBridge.needsPaintForMode(
+          boundary,
+          isDebugBuild: true,
+        ),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
+
+  test(
+    'the needs-paint probe still reports an unpainted boundary in debug',
+    () {
+      expect(
+        PatchbayCaptureBridge.needsPaintForMode(
+          _NeedsPaintBoundary(),
+          isDebugBuild: true,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets('capture rejects a boundary with an empty size', (
+    WidgetTester tester,
+  ) async {
+    final PatchbayRootController root = PatchbayRootController();
+    var encoded = false;
+    final PatchbayCaptureBridge capture = PatchbayCaptureBridge(
+      gates: _gates,
+      registry: PatchbayUiRegistry(),
+      frames: PatchbayFrameObserver(),
+      artifacts: _artifacts(),
+      root: root,
+      isAppResumed: () => true,
+      encoder: (_, _) async {
+        encoded = true;
+        return PatchbayEncodedCapture(bytes: _pngBytes(), width: 1, height: 1);
+      },
+    );
+    await tester.pumpWidget(
+      Center(
+        child: SizedBox.shrink(
+          child: PatchbayRoot(
+            controller: root,
+            child: const ColoredBox(color: Colors.blue),
+          ),
+        ),
+      ),
+    );
+
+    final Future<PatchbayInvocation> pending = capture.capture(
+      PatchbayCaptureRequestWire(
+        targetId: null,
+        generation: null,
+        pixelRatio: 1,
+        timeoutMs: 1000,
+        afterFrames: null,
+      ),
+      requestId: 'capture-empty',
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(_rejectionCode((await pending).toJson()), 'captureTargetNotPainted');
+    expect(encoded, isFalse);
+  });
+
   testWidgets(
     'registered capture targets require an existing repaint boundary',
     (WidgetTester tester) async {
@@ -584,6 +664,20 @@ Future<PatchbayDecodedCapture> _decodeFixture(Uint8List bytes) async {
     pixelFormat: 'rgba8888',
     bytesPerPixel: 4,
   );
+}
+
+/// Stands in for a boundary in a profile or release build, where the backing
+/// `late` field of `debugNeedsPaint` was never assigned because the assert that
+/// writes it is stripped.
+class _UnreadableNeedsPaintBoundary extends RenderRepaintBoundary {
+  @override
+  bool get debugNeedsPaint =>
+      throw StateError('debugNeedsPaint is unavailable outside debug builds.');
+}
+
+class _NeedsPaintBoundary extends RenderRepaintBoundary {
+  @override
+  bool get debugNeedsPaint => true;
 }
 
 Uint8List _pngBytes() =>
