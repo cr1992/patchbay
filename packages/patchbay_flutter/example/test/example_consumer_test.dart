@@ -4,6 +4,7 @@ import 'dart:developer';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter_example/example_domain.dart';
 import 'package:patchbay_flutter_example/main.dart';
 
 void main() {
@@ -120,6 +121,18 @@ void main() {
           'navigation.go',
           'navigation.push',
           'navigation.back',
+          'ui.capture',
+          'ui.capture.diff',
+          'blob.metadata',
+          'logs.query',
+          'logs.tail',
+          'logs.export',
+          deviceWriteCommand,
+          jobRunCommand,
+          idempotentTouchCommand,
+          jobGetCommand,
+          jobWaitCommand,
+          jobCancelCommand,
         }),
       );
       final List<Map<String, Object?>> targets =

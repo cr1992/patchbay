@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
+import 'example_domain.dart';
+import 'example_log_source.dart';
+
 const String exampleApplicationId = 'dev.patchbay.example';
-const String incrementCommand = 'example.counter.increment';
 const String counterSemanticsId = 'example.counter.value';
 const String incrementSemanticsId = 'example.counter.increment';
 const String noteTargetId = 'example.note';
@@ -60,15 +62,38 @@ final class ExampleCounterModel extends ValueNotifier<int> {
 /// It owns the domain descriptor/handler while Patchbay owns transport,
 /// identity envelopes, Flutter catalog composition and UI observation.
 final class PatchbayExampleHost {
-  PatchbayExampleHost({
+  /// Resolves the single log source before construction: the artifact service
+  /// and [logs] must be the same instance, or records written by the app would
+  /// never appear in `logs.*`.
+  factory PatchbayExampleHost({
     required ExampleCounterModel model,
     required PatchbayUiRegistry registry,
     required ExampleRouter router,
+    ExampleLogSource? logs,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    bool Function()? isAppResumed,
+  }) => PatchbayExampleHost._(
+    model: model,
+    registry: registry,
+    router: router,
+    logs: logs ?? ExampleLogSource(),
+    appInstanceId: appInstanceId,
+    registrar: registrar,
+    isAppResumed: isAppResumed,
+  );
+
+  PatchbayExampleHost._({
+    required ExampleCounterModel model,
+    required PatchbayUiRegistry registry,
+    required ExampleRouter router,
+    required this.logs,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     bool Function()? isAppResumed,
   }) : _model = model,
        _router = router,
+       domain = ExampleDomain(counter: model, logs: logs),
        bridge = PatchbayFlutterBridge(
          gates: const PatchbayGateEvaluator(
            baseGate: _allowBaseGate,
@@ -91,6 +116,8 @@ final class PatchbayExampleHost {
            back: router.back,
            backGateIds: const <String>{exampleWriteGate},
          ),
+         captureGates: const <String>{exampleWriteGate},
+         artifacts: _artifacts(logs),
        ) {
     _service = PatchbayFlutterServiceHost(
       applicationId: exampleApplicationId,
@@ -100,22 +127,36 @@ final class PatchbayExampleHost {
       domainCatalog: _catalog,
       snapshot: _snapshot,
       domainInvoke: _invoke,
+      // 审计事件只带参数形状与门结果，不带参数值；把它写进 example 自己的日志源，
+      // 于是 `logs.*` 里能看到「谁在什么门下调了什么」，而值仍然不出 App。
+      auditSink: _audit,
+      onAuditSinkError: _auditFailed,
     );
   }
 
-  static const PatchbayCommandDescriptor _incrementDescriptor =
-      PatchbayCommandDescriptor(
-        name: incrementCommand,
-        summary: 'Increment the example consumer counter.',
-        plane: PatchbayPlane.domain,
-        mode: PatchbayCommandMode.immediate,
-        sideEffect: PatchbaySideEffect.appState,
-        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-      );
-
   final ExampleCounterModel _model;
   final ExampleRouter _router;
+
+  /// Example-authored, already-redacted records served by `logs.*`.
+  final ExampleLogSource logs;
+
+  /// Domain commands, job ledger and the simulated device controller.
+  final ExampleDomain domain;
   final PatchbayFlutterBridge bridge;
+
+  /// Blob store plus log/blob commands. Injecting it is what turns on
+  /// `ui.capture`, `ui.capture.diff`, `blob.metadata` and the `logs.*` family;
+  /// without it those commands stay absent from the catalog.
+  static PatchbayArtifactService _artifacts(ExampleLogSource logs) =>
+      PatchbayArtifactService(
+        blobs: PatchbayMemoryBlobStore(),
+        gates: const PatchbayGateEvaluator(
+          baseGate: _allowBaseGate,
+          consumerGate: _exampleConsumerGate,
+        ),
+        logs: logs,
+        gateIds: const <String>{exampleWriteGate},
+      );
   late final PatchbayFlutterServiceHost _service;
 
   String get appInstanceId => _service.appInstanceId;
@@ -123,7 +164,10 @@ final class PatchbayExampleHost {
   void register() => _service.register();
 
   Future<Map<String, Object?>> _catalog() async => <String, Object?>{
-    'commands': <Object?>[_incrementDescriptor.toJson()],
+    'commands': <Object?>[
+      for (final PatchbayCommandDescriptor descriptor in domain.descriptors)
+        descriptor.toJson(),
+    ],
   };
 
   Future<Map<String, Object?>> _snapshot() async => <String, Object?>{
@@ -133,6 +177,7 @@ final class PatchbayExampleHost {
       'destinationId': _router.current,
       'revision': _router.revision,
     },
+    'device': <String, Object?>{'value': domain.device.value},
     'keepAwake': <String, Object?>{
       'held': exampleKeepAwake.held,
       'applications': exampleKeepAwake.applications,
@@ -143,32 +188,34 @@ final class PatchbayExampleHost {
     String command,
     Map<String, Object?> arguments,
     String requestId,
-  ) async {
-    if (command != incrementCommand) {
-      return PatchbayInvocation.rejected(
-        requestId: requestId,
-        rejection: PatchbayRejection(
-          code: 'commandNotRegistered',
-          details: <String, Object?>{'command': command},
-        ),
-      ).toJson();
-    }
-    if (arguments.isNotEmpty) {
-      return PatchbayInvocation.rejected(
-        requestId: requestId,
-        rejection: const PatchbayRejection(code: 'invalidArguments'),
-      ).toJson();
-    }
-    _model.increment();
-    return PatchbayInvocation.accepted(
-      requestId: requestId,
-      payload: <String, Object?>{
-        'outcome': 'completed',
-        'source': PatchbayFactSource.appRecorded.name,
-        'counter': _model.value,
-      },
-    ).toJson();
-  }
+  ) => domain.invoke(command, arguments, requestId);
+
+  void _audit(PatchbayAuditEvent event) => logs.write(
+    category: 'audit',
+    message: event.command,
+    fields: <String, Object?>{
+      'requestId': event.requestId,
+      'gateResult': event.gateResult,
+      'parameterShape': event.parameterShape,
+      if (event.executionClassification case final String classification)
+        'executionClassification': classification,
+    },
+  );
+
+  // 审计写失败不能把被审计的命令一起拖失败：记一条降级说明，然后继续。
+  void _auditFailed(
+    Object error,
+    StackTrace stackTrace,
+    PatchbayAuditEvent event,
+  ) => logs.write(
+    category: 'audit',
+    message: 'audit sink failed',
+    level: PatchbayLogLevelWire.warning,
+    fields: <String, Object?>{
+      'command': event.command,
+      'error': error.runtimeType.toString(),
+    },
+  );
 
   void dispose() => bridge.dispose();
 }

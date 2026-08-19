@@ -1,0 +1,5 @@
+package dev.patchbay.patchbay_flutter_example
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
