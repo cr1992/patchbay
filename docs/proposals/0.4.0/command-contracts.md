@@ -191,7 +191,8 @@ CLI `describe <service-command>` 只读活体 catalog、不 invoke，输出
 - audit 参数形状对对象键与数组 item type 排序确定、标量值不可见、未知运行时类型稳定为
   `unsupported`；sink 与 error observer 抛错均不能改写命令结果。
 - CLI `describe` 覆盖三种 retryEligibility、逐命令 schemaMode，并断言只读 catalog、零 invoke。
-- 两个接入方各验证 `notSent/unchanged/sentUnconfirmed/deviceConfirmed`，至少一个覆盖 DP 同值写入。
+- 双平台 example 预检各验证 `notSent/unchanged/sentUnconfirmed/deviceConfirmed`，并覆盖同值写入；真实
+  设备 SDK 的确认语义由接入方补充（发布判据见[版本计划 SC-040-01](../../releases/0.4.0.md#范围变更记录)）。
 
 ## 已裁决补充
 
