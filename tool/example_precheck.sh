@@ -97,6 +97,11 @@ echo "== 启动 example =="
 example_session_start "${1:-}" || exit 1
 
 echo
+echo "== 预检环境 =="
+echo "  CLI 源 revision：${PATCHBAY_CLI_STAMP:-unknown}"
+echo "  被调 App 构建模式：debug（JIT）"
+
+echo
 echo "== 身份与目录 =="
 check 'identity' 0 "doc['applicationId'] == 'dev.patchbay.example'" --json identity
 check 'catalog' 0 "len(doc['commands']) >= 26" --json catalog

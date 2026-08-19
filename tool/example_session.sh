@@ -29,11 +29,20 @@ _example_session_log=""
 # 单步降到毫秒级，也与仓库发布的 AOT 形态一致。
 PATCHBAY_CLI_BIN="${PATCHBAY_CLI_BIN:-${TMPDIR:-/tmp}/patchbay-precheck/patchbay}"
 
+# AOT 产物的唯一风险是过期：改了 CLI 源码而没重编时，二进制会给出一个看起来正常但过时的
+# 答案，且不会报错。所以每次会话都重编（约 2 秒），并把来源 revision 落成标记文件——
+# 一份预检报告因此能回答"这是哪个 CLI 跑出来的"。
 example_session_build_cli() {
   mkdir -p "$(dirname "$PATCHBAY_CLI_BIN")"
   (cd "$PATCHBAY_CLI_DIR" && dart pub get >/dev/null 2>&1 &&
     dart compile exe bin/patchbay.dart -o "$PATCHBAY_CLI_BIN" >/dev/null) || return 1
-  echo "[session] CLI 已编译：$PATCHBAY_CLI_BIN"
+  local revision dirty=""
+  revision="$(git -C "$PATCHBAY_REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if ! git -C "$PATCHBAY_REPO_ROOT" diff --quiet 2>/dev/null; then dirty="+dirty"; fi
+  PATCHBAY_CLI_STAMP="$revision$dirty"
+  export PATCHBAY_CLI_STAMP
+  printf '%s\n' "$PATCHBAY_CLI_STAMP" > "$PATCHBAY_CLI_BIN.stamp"
+  echo "[session] CLI 已编译（源 $PATCHBAY_CLI_STAMP）：$PATCHBAY_CLI_BIN"
 }
 
 # 脱敏后打印一段文本：VM Service URI 带认证 token，不能原样进日志。

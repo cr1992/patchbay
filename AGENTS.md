@@ -60,7 +60,14 @@
 
 **CLI 一律先编成原生可执行再复用**，不要在循环里 `dart run bin/patchbay.dart`：后者每次调用都重新编译，
 实测单步几秒，四十余步的预检会多花十几分钟且中途无输出。`dart compile exe` 一次约 2 秒、单步降到
-0.5 秒，且与发布产物同形态。`tool/example_session.sh` 已按此实现。
+0.5 秒，且与发布产物同形态。日常联调、脚本化验证和批量取证都用 AOT，没有例外。
+
+AOT 的唯一风险是**产物过期**：改了 CLI 源码而没重编时，二进制会给出一个看起来正常但过时的答案，且
+不报错。所以每次起会话都重编（`tool/example_session.sh` 已如此），并把来源 revision 落成
+`<bin>.stamp` 与 `PATCHBAY_CLI_STAMP`，预检报告头部打印它——一份结论必须能回答"这是哪个 CLI 跑出来
+的"。手工联调复用旧二进制前先看这个标记。
+
+只有两种情况回到 JIT：要用调试器单步 CLI 自己的代码，以及跑 `dart test`（测试本来就是 JIT）。
 
 **被调 App 默认 debug（JIT），不要默认 profile/AOT。** 这不是性能取舍而是覆盖问题：`ui.inspect` 在
 非 debug 构建按 `notDebugBuild` 类型化拒绝（`kDebugMode` 判定），`ui widget-tree` / `render-tree` /
