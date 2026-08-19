@@ -388,6 +388,14 @@ JSON 输出保留事实来源、rejection code、job event sequence 和 capabili
 句子在 `details.message`；session / protocol / transport / 敏感输入 / `waitTimeout` 用各自的稳定 code，
 兜底错误只暴露异常类型名，不回显 URI 或 token。人读文本仍只走 stderr。不带 `--json` 时行为不变。
 
+「一个」是对一次性命令说的。有三条命令是流式输出，脚本要逐行读、而不是当作单个文档解析：`repl`
+每行一个信封，`logs tail` 是 NDJSON，`launch` 是 launcher 机器帧。
+
+「一个」也只描述 stdout 本身。人读句子走 stderr；命令外层的包装器（`just`、`npm`、shell 函数）
+在命令退非零时打的那行失败提示同样走 stderr。用 `2>&1` 合流，会把这段文本接在一个本来完好的
+文档后面，解析器于是报「多余数据」——它读起来像第二个 JSON 文档，其实不是。要留 stderr 就单独
+重定向到文件，不要并进正在解析的那个流。
+
 artifact 下载的分块大小取自 catalog 中 `blob.read` 的 `limit` 默认值（与 CLI 默认 64 KiB 取小），
 不写死：consumer 调小 `maxChunkBytes` 时下载照常，不会被 `blobInvalidChunkLimit` 拒死。
 
