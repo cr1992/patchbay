@@ -135,6 +135,7 @@ final class PatchbayExampleHost {
            backGateIds: const <String>{exampleWriteGate},
          ),
          captureGates: const <String>{exampleWriteGate},
+         rootController: PatchbayRootController.instance,
          artifacts: _artifacts(logs),
        ) {
     _service = PatchbayFlutterServiceHost(
@@ -362,12 +363,17 @@ final class ExampleRouter {
     _land(homeDestinationId);
   }
 
+  // pushNamed / pushNamedAndRemoveUntil 返回的 Future 要等那条路由被 pop 才完成。
+  // await 它等于把一次导航请求挂到用户按返回为止：宿主不回答，CLI 只看到
+  // appUnresponsive。所以只发起导航并立即记账，不等待路由结果。
   Future<void> _go(String destination) async {
     final NavigatorState? navigator = navigatorKey.currentState;
     if (navigator == null) return;
-    await navigator.pushNamedAndRemoveUntil(
-      destination,
-      (Route<Object?> route) => false,
+    unawaited(
+      navigator.pushNamedAndRemoveUntil(
+        destination,
+        (Route<Object?> route) => false,
+      ),
     );
     _land(destination);
   }
@@ -375,7 +381,7 @@ final class ExampleRouter {
   Future<void> _push(String destination) async {
     final NavigatorState? navigator = navigatorKey.currentState;
     if (navigator == null) return;
-    await navigator.pushNamed(destination);
+    unawaited(navigator.pushNamed(destination));
     _land(destination);
   }
 
@@ -411,18 +417,20 @@ final class _PatchbayExampleAppState extends State<PatchbayExampleApp> {
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    navigatorKey: widget.router.navigatorKey,
-    initialRoute: homeDestinationId,
-    routes: <String, WidgetBuilder>{
-      homeDestinationId: (BuildContext context) => _ExampleHomeScreen(
-        model: widget.model,
-        noteKey: widget.noteKey,
-        noteController: _noteController,
-      ),
-      detailsDestinationId: (BuildContext context) =>
-          const _ExampleDetailsScreen(),
-    },
+  Widget build(BuildContext context) => PatchbayRoot(
+    child: MaterialApp(
+      navigatorKey: widget.router.navigatorKey,
+      initialRoute: homeDestinationId,
+      routes: <String, WidgetBuilder>{
+        homeDestinationId: (BuildContext context) => _ExampleHomeScreen(
+          model: widget.model,
+          noteKey: widget.noteKey,
+          noteController: _noteController,
+        ),
+        detailsDestinationId: (BuildContext context) =>
+            const _ExampleDetailsScreen(),
+      },
+    ),
   );
 }
 
@@ -457,12 +465,22 @@ final class _ExampleHomeScreen extends StatelessWidget {
                 ),
           ),
           const SizedBox(height: 16),
+          // identifier 与 tap 动作必须落在同一个语义节点上，而且该 identifier 只能命中
+          // 一个节点：
+          // - 只包一层 Semantics(identifier:) 时，按钮自己的节点才带 tap 动作，
+          //   identifier 命中的那个节点 actions 为空 → uiSemanticsActionUnavailable；
+          // - 用 MergeSemantics 合并时，identifier 会同时出现在合并节点和子节点上，
+          //   活体清单核对报 manifestSemanticsIdentifierAmbiguous（matchCount 2）。
+          // 所以由外层节点自己声明动作，并排除子树语义。两条路径都是真机预检发现的。
           Semantics(
             identifier: incrementSemanticsId,
             button: true,
-            child: ElevatedButton(
-              onPressed: model.increment,
-              child: const Text('Increment'),
+            onTap: model.increment,
+            child: ExcludeSemantics(
+              child: ElevatedButton(
+                onPressed: model.increment,
+                child: const Text('Increment'),
+              ),
             ),
           ),
           const SizedBox(height: 16),

@@ -2716,6 +2716,30 @@ PatchbayExecutionValidationResult _validateTerminalExecution(
   );
 }
 
+/// The "now" an execution-evidence age is measured against.
+///
+/// `unchanged` evidence carries two App-side timestamps: when the prior value
+/// was observed and when this answer was produced. Both come from the device
+/// clock. Measuring their distance against the **workstation** clock turns any
+/// skew between the two machines into `providerProtocolViolation` — the CLI
+/// would blame the App for a clock difference it does not control, and a device
+/// running even slightly ahead makes valid evidence unreadable.
+///
+/// So the App's own `observedAtMs` is the baseline when it is present. This is
+/// the same rule the job-event path already follows, where the event's `at`
+/// timestamp is the baseline. The local clock remains the fallback for payloads
+/// that report no observation time, where there is nothing else to compare to.
+int _evidenceNowMs(Object? payload) {
+  if (payload is Map<Object?, Object?>) {
+    final Object? execution = payload['execution'];
+    if (execution is Map<Object?, Object?>) {
+      final Object? observedAtMs = execution['observedAtMs'];
+      if (observedAtMs is int) return observedAtMs;
+    }
+  }
+  return DateTime.now().millisecondsSinceEpoch;
+}
+
 /// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
 /// `patchbay.job.wait`) declares that budget in `timeoutMs`. The transport must
 /// be told, or a short default transport deadline would abandon — and on the
@@ -2797,7 +2821,7 @@ Future<Map<String, Object?>> _invokeAgainstCatalog(
       execution = validatePatchbayExecutionEvidence(
         descriptor.executionContract,
         response['payload'],
-        nowMs: DateTime.now().millisecondsSinceEpoch,
+        nowMs: _evidenceNowMs(response['payload']),
       );
       issues.addAll(execution.issues);
     }

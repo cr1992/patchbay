@@ -25,6 +25,17 @@ _example_session_run_pid=""
 _example_session_uri_file=""
 _example_session_log=""
 
+# 预检要发四十多条命令。`dart run` 每次都重新编译，单步就是几秒；编一次原生可执行后
+# 单步降到毫秒级，也与仓库发布的 AOT 形态一致。
+PATCHBAY_CLI_BIN="${PATCHBAY_CLI_BIN:-${TMPDIR:-/tmp}/patchbay-precheck/patchbay}"
+
+example_session_build_cli() {
+  mkdir -p "$(dirname "$PATCHBAY_CLI_BIN")"
+  (cd "$PATCHBAY_CLI_DIR" && dart pub get >/dev/null 2>&1 &&
+    dart compile exe bin/patchbay.dart -o "$PATCHBAY_CLI_BIN" >/dev/null) || return 1
+  echo "[session] CLI 已编译：$PATCHBAY_CLI_BIN"
+}
+
 # 脱敏后打印一段文本：VM Service URI 带认证 token，不能原样进日志。
 example_session_redact() {
   sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g'
@@ -67,7 +78,15 @@ example_session_start() {
   example_session_ensure_android || return 1
 
   (cd "$PATCHBAY_EXAMPLE_DIR" && flutter pub get >/dev/null) || return 1
-  (cd "$PATCHBAY_CLI_DIR" && dart pub get >/dev/null 2>&1) || return 1
+  example_session_build_cli || return 1
+
+  # Gradle 冷构建和「App 起不起来」是两件事，分开跑才能一眼看出断在哪一头，
+  # 也让后面的启动步骤不再包含几分钟的构建时间。
+  echo "[session] 预构建 debug APK（首次最慢）"
+  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter build apk --debug >/dev/null 2>&1) || {
+    echo "[session] APK 构建失败" >&2
+    return 1
+  }
 
   _example_session_uri_file="$(mktemp -t patchbay-vmservice)"
   _example_session_log="$(mktemp -t patchbay-flutter-run)"
@@ -114,6 +133,5 @@ example_session_stop() {
 
 # 跑一条 CLI 命令。URI 从环境取，不进命令行历史。
 example_session_cli() {
-  (cd "$PATCHBAY_CLI_DIR" && dart run bin/patchbay.dart \
-    --ws-uri "$PATCHBAY_WS_URI" "$@")
+  "$PATCHBAY_CLI_BIN" --ws-uri "$PATCHBAY_WS_URI" "$@"
 }

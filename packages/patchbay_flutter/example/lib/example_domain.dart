@@ -348,9 +348,17 @@ final class ExampleDomain {
       return _invalid(requestId, 'steps must be between 1 and 20');
     }
     bool cancelled = false;
+    // 这里用 `operation` 而不是 `command`，是一条设计边界而不是偷懒：
+    //
+    // `PatchbayCommandRegistry` 只装协议自有命令；接入方的域命令按设计走宿主的
+    // external fallback（本例的 domainInvoke）。`start(command:)` 只在注册表 dispatch
+    // 内部合法，`startBoundToCommand` 又要求 PatchbayJobRegistry(commandRegistry:)。
+    // 因此接入方自有的 job 无法获得 responseSchema 校验，其终态 payload 会被标成
+    // `legacyUnvalidated`——这正是协议对"未绑定 job"的既定答复。想要被校验的终态，
+    // 命令必须是注册表自有的，那是框架侧的面，不是接入方能自行声明的。
     final String jobId = jobs.start(
       source: PatchbayFactSource.appRecorded,
-      command: jobRunCommand,
+      operation: jobRunCommand,
       body: () async {
         for (int step = 0; step < steps; step += 1) {
           if (cancelled) {
