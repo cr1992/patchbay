@@ -10,7 +10,7 @@
 #
 # 用法：
 #   source tool/example_session.sh          # 提供函数，不自动执行
-#   example_session_start [device-id]       # 起 App，导出 PATCHBAY_WS_URI
+#   example_session_start [device-id]       # 起 App，导出 PATCHBAY_SESSION_ID
 #   example_session_stop                    # 关 App，清理转发
 #
 # device-id 取自 `flutter devices`：Android 用 adb serial，iOS Simulator 用
@@ -118,6 +118,14 @@ example_session_build_cli() {
   echo "[session] CLI 已编译（源 ${PATCHBAY_CLI_STAMP}）：$PATCHBAY_CLI_BIN"
 }
 
+# 打印日志前抹掉 URI：会话 URI 带认证材料，失败诊断也不该把它写进终端或 CI 记录。
+#
+# 这个函数此前只在两处失败路径被引用、却从未定义，于是 App 起不来时 `command not found`
+# 把日志尾部一起吞掉——恰好是唯一需要它的时刻。
+example_session_redact() {
+  sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g'
+}
+
 example_session_device() {
   local requested="${1:-}"
   if [ -n "$requested" ]; then
@@ -214,10 +222,46 @@ example_session_ensure_platform() {
 # 所以按需注入、幂等，重复调用不会写重复条目。声明 ≠ 请求：`pm grant/revoke` 对已声明的
 # 运行时权限即可工作，因此 status / normalize / reset 的矩阵不需要 App 主动发起请求；
 # 真实弹窗 exercise 才需要，那条由 example 的域命令触发。
+# 让生成工程的平台包名等于 host 声明的 `applicationId`。
+#
+# 权限命令会拿 `--application-id` 与会话记录里的 applicationId 对账，不一致就按
+# `platformApplicationMismatch` 拒绝——这道检查是对的（不许拿一个会话去改另一个 App 的
+# 权限），但它推出一条隐含约束：**host 的 identity.applicationId 必须等于平台包名**。
+#
+# `flutter create --project-name patchbay_flutter_example` 生成的包名是
+# `dev.patchbay.patchbay_flutter_example`，而 example 的 host 声明的是
+# `dev.patchbay.example`，于是整条权限写路径在 example 上不可用。改 --project-name 会连带
+# 改 pubspec 名，所以这里只对齐生成物里的包名（不入库），幂等。
+example_session_align_android_application_id() {
+  local gradle="$PATCHBAY_EXAMPLE_DIR/android/app/build.gradle.kts"
+  [ -f "$gradle" ] || gradle="$PATCHBAY_EXAMPLE_DIR/android/app/build.gradle"
+  [ -f "$gradle" ] || return 0
+  if grep -qE 'applicationId\s*=?\s*"dev\.patchbay\.patchbay_flutter_example"' "$gradle"; then
+    echo "[session] 对齐生成工程的 applicationId 到 dev.patchbay.example（不入库）"
+    # 只改 `applicationId`（安装身份），**不改 `namespace`**：namespace 决定 Android 到哪个
+    # 包里找 `.MainActivity`，而生成的 Kotlin 源码仍在原包下。两个一起改会让 App 以
+    # ClassNotFoundException 起不来——实测过一次。
+    python3 - "$gradle" <<'INNER' || return 1
+import re, sys
+path = sys.argv[1]
+source = open(path, encoding='utf-8').read()
+updated = re.sub(
+    r'(applicationId\s*=?\s*)"dev\.patchbay\.patchbay_flutter_example"',
+    r'\1"dev.patchbay.example"',
+    source,
+)
+if updated == source:
+    raise SystemExit('applicationId 未找到，未改动')
+open(path, 'w', encoding='utf-8').write(updated)
+INNER
+  fi
+}
+
 example_session_declare_permissions() {
   local platform="$1"
   case "$platform" in
     android)
+      example_session_align_android_application_id || return 1
       local manifest="$PATCHBAY_EXAMPLE_DIR/android/app/src/main/AndroidManifest.xml"
       [ -f "$manifest" ] || return 0
       if grep -q 'android.permission.CAMERA' "$manifest"; then
@@ -360,45 +404,82 @@ example_session_start() {
   rm -f "$_example_session_uri_file"
 
   echo "[session] flutter run（日志：${_example_session_log}）"
-  (cd "$PATCHBAY_EXAMPLE_DIR" && flutter run -d "$device" --debug \
-    --vmservice-out-file "$_example_session_uri_file" \
+  # 经 `patchbay launch` + 参考声明器启动，而不是直接 `flutter run`：权限写操作
+  # （normalize / exercise / fail）只接受 `--session`，也就是必须存在 launcher 会话库里
+  # 的一条活动记录，而记录由被监督的子进程自己声明。直接跑 flutter run 拿到的 URI 能支撑
+  # 只读面，但权限写路径在仓内就没有载体——预检里权限一节因此长期只能验证
+  # 「没装 driver 时 fail-closed」。
+  #
+  # PATCHBAY_SESSION_ID 导出给调用方：预检要用它跑 `--session` 那一批命令。
+  # 子进程必须从 **patchbay_cli 包目录**跑：`dart run` 按当前目录的 package config 解析
+  # 依赖，从 example 目录跑会解析不到 `package:patchbay_cli/...`，子进程立刻死掉，而
+  # launcher 只会看到一路 `sessionNotDeclared` 直到窗口结束——症状离病因很远。
+  # 被调 App 的工程目录改由 `--project` 显式传入。
+  (cd "$PATCHBAY_CLI_DIR" && "$PATCHBAY_CLI_BIN" launch -- \
+    dart run bin/patchbay_reference_launcher.dart \
+    --device "$device" --application-id dev.patchbay.example \
+    --build-mode debug --project "$PATCHBAY_EXAMPLE_DIR" \
     >"$_example_session_log" 2>&1 </dev/null &
     echo $! >"$_example_session_uri_file.pid")
   sleep 1
   _example_session_run_pid="$(cat "$_example_session_uri_file.pid" 2>/dev/null || true)"
 
+  # 等的是**会话记录**而不是 URI 文件：记录由声明器写入、由 `patchbay launch` 在
+  # identity 探测通过后转 live。等到 live 才算会话可用——pending 只表示"URI 有了"，
+  # 那时 host 还没被证明是同一个应用。
   local waited=0
+  PATCHBAY_SESSION_ID=""
   while [ "$waited" -lt 300 ]; do
     if [ -n "$_example_session_run_pid" ] && \
        ! kill -0 "$_example_session_run_pid" 2>/dev/null; then
-      echo "[session] flutter run 已退出，App 没起来；日志尾部：" >&2
+      echo "[session] launch 已退出，App 没起来；日志尾部：" >&2
       tail -n 40 "$_example_session_log" | example_session_redact >&2
       return 1
     fi
-    [ -s "$_example_session_uri_file" ] && break
+    PATCHBAY_SESSION_ID="$("$PATCHBAY_CLI_BIN" --json sessions list 2>/dev/null |
+      python3 -c "
+import json, sys
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
+for session in document.get('sessions', []):
+    if (session.get('applicationId') == 'dev.patchbay.example'
+            and session.get('status') == 'live'):
+        print(session['sessionId'])
+        break
+" 2>/dev/null)"
+    [ -n "$PATCHBAY_SESSION_ID" ] && break
     sleep 5
     waited=$((waited + 5))
   done
-  if [ ! -s "$_example_session_uri_file" ]; then
-    echo "[session] ${waited}s 内没等到 VM Service URI" >&2
+  if [ -z "$PATCHBAY_SESSION_ID" ]; then
+    echo "[session] ${waited}s 内没等到 live 会话记录；日志尾部：" >&2
     tail -n 40 "$_example_session_log" | example_session_redact >&2
     return 1
   fi
-  sleep 1
-  export PATCHBAY_WS_URI="$(cat "$_example_session_uri_file")"
-  echo "[session] 已取到 VM Service URI（内容不打印）"
+  export PATCHBAY_SESSION_ID
+  echo "[session] 会话已就绪：${PATCHBAY_SESSION_ID}（URI 不打印，也不进命令行）"
 }
 
 example_session_stop() {
   if [ -n "$_example_session_run_pid" ]; then
+    # 给 launch 一个 SIGINT：声明器捕获它并删掉自己写的会话记录（记录带认证材料，
+    # 不能留给下一次运行）。直接 SIGKILL 会把记录留成孤儿。
+    kill -INT "$_example_session_run_pid" 2>/dev/null || true
+    sleep 2
     kill "$_example_session_run_pid" 2>/dev/null || true
   fi
   [ -n "$_example_session_uri_file" ] && \
     rm -f "$_example_session_uri_file" "$_example_session_uri_file.pid"
-  unset PATCHBAY_WS_URI
+  unset PATCHBAY_SESSION_ID
 }
 
-# 跑一条 CLI 命令。URI 从环境取，不进命令行历史。
+# 跑一条 CLI 命令，统一经 `--session`。
+#
+# 这样 URI 一次都不进命令行历史，而且与真实接入方的用法一致：会话由 launcher 声明，
+# CLI 按 sessionId 对账 applicationId / appInstanceId / device 后才发命令。权限写操作
+# 只接受这条路径。
 example_session_cli() {
-  "$PATCHBAY_CLI_BIN" --ws-uri "$PATCHBAY_WS_URI" "$@"
+  "$PATCHBAY_CLI_BIN" --session "$PATCHBAY_SESSION_ID" "$@"
 }
