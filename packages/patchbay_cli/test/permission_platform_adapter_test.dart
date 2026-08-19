@@ -91,6 +91,255 @@ void main() {
     );
   });
 
+  // 撤销一个已授予的运行时权限会让 Android 终止应用进程——确定性的系统行为，因此
+  // 状态答复必须提前把它说出来，而不是让操作者在重连窗口超时后自己反推。
+  test(
+    'granted Android permission reports that a change restarts the app',
+    () async {
+      Future<PatchbayPermissionStatus?> statusFor({
+        required bool granted,
+      }) async {
+        Future<PatchbayPlatformCommandResult> command(
+          String executable,
+          List<String> arguments,
+          Duration timeout,
+        ) async {
+          if (arguments case ['version']) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: 'Android Debug Bridge version 1.0.41',
+              stderr: '',
+            );
+          }
+          if (arguments.contains('devices')) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: 'List of devices attached\ndevice-1\tdevice\n',
+              stderr: '',
+            );
+          }
+          // 适配器不假定应用存在也不假定它在跑：先 `pm path` 再 `pidof`。
+          if (arguments.contains('path')) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: 'package:/data/app/consumer/base.apk',
+              stderr: '',
+            );
+          }
+          if (arguments.contains('pidof')) {
+            return const PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout: '4321',
+              stderr: '',
+            );
+          }
+          if (arguments.contains('dumpsys')) {
+            return PatchbayPlatformCommandResult(
+              exitCode: 0,
+              stdout:
+                  'android.permission.CAMERA: granted=$granted, '
+                  'flags=[${granted ? ' USER_SET' : ''}]\n',
+              stderr: '',
+            );
+          }
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: '',
+            stderr: '',
+          );
+        }
+
+        final PatchbayPermissionDriverResponse response =
+            await PatchbayAndroidPermissionAdapter(
+              runCommand: command,
+            ).handle(_request(PatchbayPermissionOperation.status));
+        expect(response.accepted, isTrue, reason: response.code ?? '');
+        return response.after;
+      }
+
+      final PatchbayPermissionStatus? grantedStatus = await statusFor(
+        granted: true,
+      );
+      expect(grantedStatus?.state, PatchbayPermissionState.granted);
+      expect(
+        grantedStatus?.requiresRestart,
+        isTrue,
+        reason: '从 granted 出发只能 revoke，而 revoke 必然杀进程',
+      );
+
+      final PatchbayPermissionStatus? pendingStatus = await statusFor(
+        granted: false,
+      );
+      expect(
+        pendingStatus?.requiresRestart,
+        isFalse,
+        reason: 'grant 不会终止进程，不该要求重启',
+      );
+    },
+  );
+
+  // 假 shell：可配置"应用声明了哪些权限"与"设备上有没有注册 runner"。
+  Future<PatchbayPlatformCommandResult> Function(String, List<String>, Duration)
+  _android({
+    Set<String> declared = const <String>{'android.permission.CAMERA'},
+    String? installedRunner,
+  }) => (String executable, List<String> arguments, Duration timeout) async {
+    if (arguments case ['version']) {
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: 'Android Debug Bridge version 1.0.41',
+        stderr: '',
+      );
+    }
+    if (arguments.contains('devices')) {
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: 'List of devices attached\ndevice-1\tdevice\n',
+        stderr: '',
+      );
+    }
+    if (arguments.contains('instrumentation')) {
+      return PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: installedRunner == null
+            ? ''
+            : 'instrumentation:$installedRunner (target=com.example.consumer)\n',
+        stderr: '',
+      );
+    }
+    if (arguments.contains('path')) {
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: 'package:/data/app/consumer/base.apk',
+        stderr: '',
+      );
+    }
+    if (arguments.contains('pidof')) {
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: '4321',
+        stderr: '',
+      );
+    }
+    if (arguments.contains('dumpsys')) {
+      return PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: <String>[
+          for (final String name in declared) '$name: granted=false, flags=[]',
+        ].join('\n'),
+        stderr: '',
+      );
+    }
+    return const PatchbayPlatformCommandResult(
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+    );
+  };
+
+  // 应用没声明的权限是一条可读事实，不是协议失败：把它报成拒绝会让同一个 code 同时
+  // 表示"平台不支持"和"这个应用没声明"，而两者的处置完全不同。
+  test(
+    'a permission the app never declared reads back as unsupported',
+    () async {
+      final PatchbayPermissionDriverResponse response =
+          await PatchbayAndroidPermissionAdapter(
+            runCommand: _android(declared: const <String>{}),
+          ).handle(_request(PatchbayPermissionOperation.status));
+      expect(response.accepted, isTrue, reason: response.code ?? '');
+      expect(response.after?.state, PatchbayPermissionState.unsupported);
+      expect(response.after?.platformState, 'notDeclaredByApp');
+      expect(response.after?.supportedActions, isEmpty);
+    },
+  );
+
+  // capability 不能凭"配了 runner 路径"就宣布能处理弹窗：路径存在与 runner 真的装在这台
+  // 设备上是两件事，声明比事实宽会让调用方按声明编排、到执行时才失败。
+  test(
+    'capabilities only claim exercise when the runner is installed',
+    () async {
+      Future<Set<String>> decisionsFor({required bool installed}) async {
+        const String runner =
+            'com.example.consumer.test/androidx.test.runner'
+            '.AndroidJUnitRunner';
+        final PatchbayPermissionDriverResponse response =
+            await PatchbayAndroidPermissionAdapter(
+              instrumentationRunner: runner,
+              runCommand: _android(installedRunner: installed ? runner : null),
+            ).handle(_request(PatchbayPermissionOperation.capabilities));
+        final PatchbayPermissionCapability capability =
+            response.capabilities!.permissions['camera']!;
+        return <String>{
+          for (final PatchbayPermissionDecision decision
+              in capability.decisions)
+            decision.name,
+          if (capability.actions.contains(PatchbayPermissionAction.exercise))
+            'exercise',
+        };
+      }
+
+      expect(await decisionsFor(installed: false), isEmpty);
+      final Set<String> claimed = await decisionsFor(installed: true);
+      expect(claimed, contains('exercise'));
+      expect(claimed, contains('allow'));
+      // 通知没有"仅这一次"这一档，不能跟着相机一起宣布。
+      final PatchbayPermissionDriverResponse response =
+          await PatchbayAndroidPermissionAdapter(
+            instrumentationRunner: 'r/r',
+            runCommand: _android(
+              declared: const <String>{
+                'android.permission.CAMERA',
+                'android.permission.POST_NOTIFICATIONS',
+              },
+              installedRunner: 'r/r',
+            ),
+          ).handle(_request(PatchbayPermissionOperation.capabilities));
+      expect(
+        response.capabilities!.permissions['notifications']!.decisions,
+        isNot(contains(PatchbayPermissionDecision.allowOnce)),
+      );
+    },
+  );
+
+  // adb 撤销只能到 notDetermined；把 denied 当成可达会先改掉权限、再报状态不符，
+  // 副作用已经发生却什么都没达成。
+  test('normalize to denied is refused before touching the device', () async {
+    final List<List<String>> calls = <List<String>>[];
+    Future<PatchbayPlatformCommandResult> command(
+      String executable,
+      List<String> arguments,
+      Duration timeout,
+    ) {
+      calls.add(arguments);
+      return _android()(executable, arguments, timeout);
+    }
+
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayAndroidPermissionAdapter(runCommand: command).handle(
+          PatchbayPermissionDriverRequest(
+            requestId: 'adapter-test',
+            operation: PatchbayPermissionOperation.normalize,
+            deviceId: 'device-1',
+            applicationId: 'com.example.consumer.debug',
+            sessionRef: const <String, Object?>{
+              'sessionId': 'consumer-session',
+              'appInstanceId': 'consumer-instance',
+              'buildMode': 'debug',
+            },
+            permission: 'camera',
+            state: PatchbayPermissionState.denied,
+            timeoutMs: 1000,
+          ),
+        );
+    expect(response.accepted, isFalse);
+    expect(response.code, 'permissionStateUnreachable');
+    expect(
+      calls.where((List<String> call) => call.contains('revoke')),
+      isEmpty,
+      reason: '拒绝必须发生在改设备之前',
+    );
+  });
+
   test('iOS adapter exposes reset without inventing a status fact', () async {
     Future<PatchbayPlatformCommandResult> command(
       String executable,
