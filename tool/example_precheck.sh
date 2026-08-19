@@ -172,28 +172,50 @@ check 'ui focus-tree' 0 "" --json ui focus-tree
 
 echo
 echo "== 锚定手势 =="
-GEN="$(example_session_cli --json ui semantics tree 2>/dev/null | PATCHBAY_OUT=/dev/stdin python3 -c "
-import json,sys
+# `ui semantics tree` 的 --json 输出是**信封**：树在 `payload.nodes`，而 `payload.nodes` 是一个
+# **扁平**列表——`children` 装的是 nodeId 整数，不是嵌套的子节点对象。按顶层 `doc['nodes']` 取、
+# 或按嵌套 children 递归，都只会得到空结果。
+#
+# 空结果曾被当成"跳过"，于是 P0 的锚定手势在预检里零覆盖，而预检仍然报"全过"。这正是
+# AGENTS.md 警告的那种失效：预检"全过"不再等于"全覆盖"。所以这里既修提取，也把取不到
+# generation 变成失败。python 的错误不再吞掉——吞掉正是当初让这个洞看不见的原因。
+GEN="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
+import json, sys
 doc = json.load(sys.stdin)
-def walk(node):
-    yield node
-    for child in node.get('children', []):
-        yield from walk(child)
-gens = [n.get('generation') for r in doc.get('nodes', []) for n in walk(r)
-        if n.get('identifier') == 'example.gesture.surface' and n.get('generation') is not None]
-print(gens[0] if gens else '')
-" 2>/dev/null || true)"
-if [ -n "$GEN" ]; then
-  check 'gesture press-hold' 0 "" --json ui gesture press-hold \
-    example.gesture.surface "$GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
-  check 'gesture drag' 0 "" --json ui gesture drag \
-    example.gesture.surface "$GEN" --start '{"x":0.5,"y":0.8}' \
-    --gesture-path '[{"x":0.5,"y":0.2}]' --duration-ms 400
-  check 'gesture fling 在按压面被拒' 5 "" --json ui gesture fling \
-    example.gesture.surface "$GEN" --start '{"x":0.5,"y":0.8}' \
-    --velocity '{"x":0,"y":-1200}'
+payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
+gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
+        if n.get('identifier') and n.get('generation') is not None}
+print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''))
+")"
+SURFACE_GEN="${GEN%% *}"
+LIST_GEN="${GEN##* }"
+if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ]; then
+  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN"
+  check 'gesture press-hold' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui gesture press-hold \
+    example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
+  # drag 的 path 必须至少两点：契约要求分段路径，单点会按 uiGestureBudgetExceeded 拒绝。
+  check 'gesture drag 分段路径' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui gesture drag \
+    example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
+    --gesture-path '[{"x":0.5,"y":0.5},{"x":0.5,"y":0.2}]' --duration-ms 400
+  # velocity 的单位是「目标宽/高每秒」，向量长度上限 20（见 anchored-gestures Proposal），
+  # 不是设备像素每秒。用 -1200 这类像素速度会先撞全局预算，于是这一步会**因为错误的原因**
+  # 变绿：看着是"按压面拒绝 fling"，实际是速度越界。断言 code 才能区分这两件事。
+  check 'gesture fling 在按压面按策略被拒' 5 \
+    "doc['rejection']['code'] == 'uiGestureDenied'" \
+    --json ui gesture fling \
+    example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
+    --velocity '{"x":0,"y":-6}'
+  check 'gesture fling 在列表面被接受' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui gesture fling \
+    example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
+    --velocity '{"x":0,"y":-6}'
 else
-  echo "  ! 未从 semantics 树取到 gesture surface 的 generation，跳过手势三项"
+  printf '  ✗ %-42s %s\n' 'gesture surface generation' \
+    '未从 semantics 树解析到 example.gesture.surface / example.gesture.list 的 generation'
+  echo '      手势是 P0 能力，取不到目标按失败计——跳过会让"全过"不等于"全覆盖"。'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture surface generation')
 fi
 
 echo
