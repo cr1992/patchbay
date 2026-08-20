@@ -14,6 +14,7 @@
 | 条目 | 动机 / 证据 | 状态 |
 |---|---|---|
 | BUG-20260819-02：`ui.capture` 在 profile 构建必然失败 | `capture_bridge.dart` 无条件读 debug-only `debugNeedsPaint`；profile 剥断言后该 getter 抛 `LateInitializationError`，在类型化拒绝之前逃逸成 `transportError`。与 `PatchbayRoot` 在 `!kReleaseMode` 即包裹 root boundary 的意图矛盾；`tool/example_session.sh` 只跑 `--debug`，预检从未覆盖该路径 | 实现中 |
+| BUG-20260820-01：iOS 权限 capability 把 Simulator `reset` 虚报给物理真机 | `PatchbayIosPermissionAdapter` 只检查本机存在 `simctl` 就静态发布四项 `reset`，未先证明显式 `deviceId` 是 booted Simulator；物理 iPhone 真机实测出现 capability 接受、`status` 却按 `permissionUnsupported` 拒绝的不一致 | 已验证 |
 
 ## 特性
 

@@ -37,6 +37,11 @@ final class PatchbayIosPermissionAdapter
         throw const _IosFailure('platformDriverUnavailable');
       }
       if (request.operation == PatchbayPermissionOperation.capabilities) {
+        // `simctl privacy` can only operate a booted Simulator. Merely finding
+        // `simctl` on a Mac is not evidence that the explicitly selected
+        // device can execute reset: a physical iPhone UDID must not inherit a
+        // Simulator capability just because both are visible to Flutter.
+        await _selectBootedSimulator(request);
         return acceptedPermissionDriverResponse(
           request,
           capabilities: _capabilities,

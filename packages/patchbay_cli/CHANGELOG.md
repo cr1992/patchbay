@@ -138,6 +138,9 @@
   运行时权限会让 Android 终止应用进程，因此 `granted` 状态下任何变更都需要重新拉起 App。此前该字段恒为
   `false`，监督循环无法区分「瞬时断连」与「进程已被系统终止」，只能在重连窗口里等到超时。
 
+- 修复 iOS `permission capabilities` 把 Simulator 专用的 `reset` 能力误报给物理真机；显式设备不是
+  booted Simulator 时现在 fail-closed 返回 `platformDeviceUnavailable`。
+
 ## 0.3.0 - 2026-08-17
 
 发布批次：四包首次发到 pub.dev，随版依赖从 path 改成 hosted 约束——**仍用 git pin 的接入方
