@@ -3,8 +3,9 @@
 # 命令面，并给出每一步的退出码与断言结果。
 #
 # 目标可以是 Android 真机/模拟器、iOS Simulator 或 iOS 真机——平台由 example_session.sh
-# 按 `flutter devices` 判定。两个平台跑的是同一份步骤清单：能力差异必须表现为类型化答复，
-# 而不是"这一步在那个平台上就不跑了"。
+# 按 `flutter devices` 判定。两个平台跑同一份 host/CLI 步骤清单；平台 driver 的设备矩阵只在
+# 该版本承诺的平台上运行。未承诺的平台仍由无 driver 检查证明 fail-closed，不能误接另一平台的
+# driver 来制造一份没有意义的失败。
 #
 # 它证明的是「协议 + CLI + host 三方接线在真设备上确实通」。它**不能**替代业务验收：
 # 真实控制器语义、设备 SDK 确认、真实 UI 的滚动与遮挡、签名真机上的系统弹窗，都只有
@@ -176,8 +177,6 @@ echo
 echo "== UI 观察与操作 =="
 check 'ui semantics tree' 0 "'nodes' in json.dumps(doc)" --json ui semantics tree
 check 'ui tap increment' 0 "" --json ui tap example.counter.increment
-check 'ui text set' 0 "" \
-  --json ui text set example.note "$NOTE_GENERATION" 'precheck note'
 check 'ui wait tree-revision' 0 "" --json ui wait tree-revision 1
 check 'ui widget-tree' 0 "" --json ui widget-tree
 check 'ui render-tree' 0 "" --json ui render-tree
@@ -185,6 +184,13 @@ check 'ui focus-tree' 0 "" --json ui focus-tree
 
 echo
 echo "== 锚定手势 =="
+# 三棵 debug 诊断树会短暂触发 inspector/semantics 刷新；真机上紧接着抓树时，
+# scrollable 的独立 Semantics 节点可能正处在重建窗口。用正式的有界条件等待固定
+# 两个目标已经 mounted，再读取 generation；不能用 sleep 猜时序，也不能缺节点时跳过。
+check 'ui wait gesture surface mounted' 0 "" \
+  --json ui wait semantics-mounted example.gesture.surface --timeout-ms 10000
+check 'ui wait gesture list mounted' 0 "" \
+  --json ui wait semantics-mounted example.gesture.list --timeout-ms 10000
 # `ui semantics tree` 的 --json 输出是**信封**：树在 `payload.nodes`，而 `payload.nodes` 是一个
 # **扁平**列表——`children` 装的是 nodeId 整数，不是嵌套的子节点对象。按顶层 `doc['nodes']` 取、
 # 或按嵌套 children 递归，都只会得到空结果。
@@ -231,6 +237,12 @@ else
   FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture surface generation')
 fi
 
+# setText 可能让系统键盘占据视口；若放在手势前，较矮设备上的两个手势节点存在被裁出
+# Semantics 树的风险。手势证据固定后再测文本输入，后续 navigation 会离开当前页，
+# 不再依赖这两个节点。
+check 'ui text set' 0 "" \
+  --json ui text set example.note "$NOTE_GENERATION" 'precheck note'
+
 echo
 echo "== 导航 =="
 check 'navigation catalog' 0 "'destinations' in json.dumps(doc)" \
@@ -276,40 +288,45 @@ check_local 'permission capabilities 无 driver 时 fail-closed' 6 "" \
 
 echo
 echo "== 权限真实路径 =="
-PERMISSION_DRIVER="${TMPDIR:-/tmp}/patchbay-precheck-permission-android"
-if (cd "$PATCHBAY_CLI_DIR" && dart compile exe bin/patchbay_permission_android.dart \
-  -o "$PERMISSION_DRIVER" >/dev/null 2>&1); then
-  check 'permission capabilities（有 driver）' 0 \
-    "len(doc['capabilities']['permissions']) == 4 and all(
-        v['decisions'] == [] for v in doc['capabilities']['permissions'].values())" \
-    --json --permission-driver "$PERMISSION_DRIVER" permission capabilities
+if [ "${PATCHBAY_SESSION_PLATFORM:-}" = android ]; then
+  PERMISSION_DRIVER="${TMPDIR:-/tmp}/patchbay-precheck-permission-android"
+  if (cd "$PATCHBAY_CLI_DIR" && dart compile exe bin/patchbay_permission_android.dart \
+    -o "$PERMISSION_DRIVER" >/dev/null 2>&1); then
+    check 'permission capabilities（有 driver）' 0 \
+      "len(doc['capabilities']['permissions']) == 4 and all(
+          v['decisions'] == [] for v in doc['capabilities']['permissions'].values())" \
+      --json --permission-driver "$PERMISSION_DRIVER" permission capabilities
 
-  for permission in camera microphone locationWhenInUse notifications; do
-    check "permission status $permission" 0 \
-      "doc['after']['factSource'] == 'deviceReported' and doc['after']['platformState']" \
-      --json --permission-driver "$PERMISSION_DRIVER" permission status "$permission"
-  done
+    for permission in camera microphone locationWhenInUse notifications; do
+      check "permission status $permission" 0 \
+        "doc['after']['factSource'] == 'deviceReported' and doc['after']['platformState']" \
+        --json --permission-driver "$PERMISSION_DRIVER" permission status "$permission"
+    done
 
-  check 'permission normalize granted' 0 \
-    "doc['after']['state'] == 'granted' and doc['after']['requiresRestart'] is True" \
-    --json --permission-driver "$PERMISSION_DRIVER" \
-    permission normalize camera --state granted
-  check 'permission normalize 幂等重放' 0 \
-    "doc['before']['state'] == 'granted' and doc['after']['state'] == 'granted'" \
-    --json --permission-driver "$PERMISSION_DRIVER" \
-    permission normalize camera --state granted
-  check 'permission normalize denied 不可达即拒绝' 5 \
-    "doc['rejection']['code'] == 'permissionStateUnreachable'" \
-    --json --permission-driver "$PERMISSION_DRIVER" \
-    permission normalize camera --state denied
-  # reset revokes a granted permission and Android terminates the process, so
-  # it remains the final device-mutating precheck step.
-  check 'permission reset' 0 \
-    "doc['before']['state'] == 'granted' and doc['after']['state'] == 'notDetermined'" \
-    --json --permission-driver "$PERMISSION_DRIVER" permission reset camera
+    check 'permission normalize granted' 0 \
+      "doc['after']['state'] == 'granted' and doc['after']['requiresRestart'] is True" \
+      --json --permission-driver "$PERMISSION_DRIVER" \
+      permission normalize camera --state granted
+    check 'permission normalize 幂等重放' 0 \
+      "doc['before']['state'] == 'granted' and doc['after']['state'] == 'granted'" \
+      --json --permission-driver "$PERMISSION_DRIVER" \
+      permission normalize camera --state granted
+    check 'permission normalize denied 不可达即拒绝' 5 \
+      "doc['rejection']['code'] == 'permissionStateUnreachable'" \
+      --json --permission-driver "$PERMISSION_DRIVER" \
+      permission normalize camera --state denied
+    # reset revokes a granted permission and Android terminates the process, so
+    # it remains the final device-mutating precheck step.
+    check 'permission reset' 0 \
+      "doc['before']['state'] == 'granted' and doc['after']['state'] == 'notDetermined'" \
+      --json --permission-driver "$PERMISSION_DRIVER" permission reset camera
+  else
+    printf '  ✗ %-42s %s\n' 'permission driver 编译' '无法编出 Android 权限 driver'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=('permission driver 编译')
+  fi
 else
-  printf '  ✗ %-42s %s\n' 'permission driver 编译' '无法编出 Android 权限 driver'
-  FAIL=$((FAIL + 1)); FAILED_STEPS+=('permission driver 编译')
+  printf '  · %-42s %s\n' 'permission platform matrix' \
+    "${PATCHBAY_SESSION_PLATFORM:-unknown} 不在 0.4.0 平台 driver 承诺内；已由 fail-closed 步骤覆盖"
 fi
 
 echo
