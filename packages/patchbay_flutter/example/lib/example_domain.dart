@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'example_log_source.dart';
 
@@ -10,6 +11,53 @@ const String incrementCommand = 'example.counter.increment';
 const String deviceWriteCommand = 'example.device.write';
 const String jobRunCommand = 'example.job.run';
 const String idempotentTouchCommand = 'example.idempotent.touch';
+const String permissionRequestCommand = 'example.permission.request';
+const String permissionStatusCommand = 'example.permission.status';
+
+const Set<String> examplePermissionNames = <String>{
+  'camera',
+  'microphone',
+  'locationWhenInUse',
+  'notifications',
+};
+
+/// Consumer seam for reading and requesting native permissions.
+///
+/// Patchbay only invokes this App-owned seam; the external driver remains
+/// responsible for recognizing and operating the system dialog.
+abstract interface class ExamplePermissionGateway {
+  Future<String> status(String permission);
+
+  /// Dispatches a request without waiting for the dialog decision.
+  void request(String permission);
+}
+
+final class PermissionHandlerExampleGateway
+    implements ExamplePermissionGateway {
+  static const Map<String, Permission> _permissions = <String, Permission>{
+    'camera': Permission.camera,
+    'microphone': Permission.microphone,
+    'locationWhenInUse': Permission.locationWhenInUse,
+    'notifications': Permission.notification,
+  };
+
+  @override
+  Future<String> status(String permission) async =>
+      (await _permissions[permission]!.status).name;
+
+  @override
+  void request(String permission) {
+    // Awaiting request() would deadlock the orchestrator: the Future completes
+    // only after the external driver answers the dialog. A later status read is
+    // the authoritative completion check.
+    unawaited(
+      _permissions[permission]!.request().then<void>(
+        (_) {},
+        onError: (Object _, StackTrace _) {},
+      ),
+    );
+  }
+}
 
 /// Job ledger commands are consumer-served: the protocol defines their names
 /// and payload shapes, the app decides whether it has a ledger at all.
@@ -120,6 +168,51 @@ const PatchbayResponseSchema _jobSchema = PatchbayResponseSchema(
   },
 );
 
+const PatchbayResponseSchema _permissionRequestSchema = PatchbayResponseSchema(
+  accepted: PatchbayResponseValueSchema(
+    type: PatchbayResponseType.object,
+    required: <String>{
+      'outcome',
+      'source',
+      'permission',
+      'beforePlatformState',
+    },
+    properties: <String, PatchbayResponseValueSchema>{
+      'outcome': PatchbayResponseValueSchema(
+        type: PatchbayResponseType.string,
+        allowedValues: <String>{'requested'},
+      ),
+      'source': PatchbayResponseValueSchema(type: PatchbayResponseType.string),
+      'permission': PatchbayResponseValueSchema(
+        type: PatchbayResponseType.string,
+      ),
+      'beforePlatformState': PatchbayResponseValueSchema(
+        type: PatchbayResponseType.string,
+      ),
+    },
+  ),
+);
+
+const PatchbayResponseSchema _permissionStatusSchema = PatchbayResponseSchema(
+  accepted: PatchbayResponseValueSchema(
+    type: PatchbayResponseType.object,
+    required: <String>{'outcome', 'source', 'permission', 'platformState'},
+    properties: <String, PatchbayResponseValueSchema>{
+      'outcome': PatchbayResponseValueSchema(
+        type: PatchbayResponseType.string,
+        allowedValues: <String>{'completed'},
+      ),
+      'source': PatchbayResponseValueSchema(type: PatchbayResponseType.string),
+      'permission': PatchbayResponseValueSchema(
+        type: PatchbayResponseType.string,
+      ),
+      'platformState': PatchbayResponseValueSchema(
+        type: PatchbayResponseType.string,
+      ),
+    },
+  ),
+);
+
 /// Everything the example serves through `domainInvoke`.
 ///
 /// It is deliberately one place: a consumer adapter is where domain vocabulary
@@ -130,13 +223,16 @@ final class ExampleDomain {
     required this.counter,
     required this.logs,
     ExampleDeviceController? device,
-  }) : device = device ?? ExampleDeviceController() {
+    ExamplePermissionGateway? permissions,
+  }) : device = device ?? ExampleDeviceController(),
+       permissions = permissions ?? PermissionHandlerExampleGateway() {
     jobs = PatchbayJobRegistry();
   }
 
   final ValueNotifier<int> counter;
   final ExampleLogSource logs;
   final ExampleDeviceController device;
+  final ExamplePermissionGateway permissions;
   late final PatchbayJobRegistry jobs;
 
   /// requestIds already applied, so a declared-idempotent retry is a no-op
@@ -146,6 +242,38 @@ final class ExampleDomain {
 
   List<PatchbayCommandDescriptor> get descriptors =>
       <PatchbayCommandDescriptor>[
+        const PatchbayCommandDescriptor(
+          name: permissionRequestCommand,
+          summary: 'Request one native permission and return after dispatch.',
+          plane: PatchbayPlane.domain,
+          mode: PatchbayCommandMode.immediate,
+          sideEffect: PatchbaySideEffect.external,
+          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+          responseSchema: _permissionRequestSchema,
+          parameters: <PatchbayParameterDescriptor>[
+            PatchbayParameterDescriptor(
+              name: 'permission',
+              type: PatchbayParameterType.string,
+              required: true,
+            ),
+          ],
+        ),
+        const PatchbayCommandDescriptor(
+          name: permissionStatusCommand,
+          summary: 'Read the App-side native permission state.',
+          plane: PatchbayPlane.domain,
+          mode: PatchbayCommandMode.immediate,
+          sideEffect: PatchbaySideEffect.none,
+          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+          responseSchema: _permissionStatusSchema,
+          parameters: <PatchbayParameterDescriptor>[
+            PatchbayParameterDescriptor(
+              name: 'permission',
+              type: PatchbayParameterType.string,
+              required: true,
+            ),
+          ],
+        ),
         const PatchbayCommandDescriptor(
           name: incrementCommand,
           summary: 'Increment the example consumer counter.',
@@ -252,6 +380,11 @@ final class ExampleDomain {
       deviceWriteCommand => _deviceWrite(arguments, requestId),
       jobRunCommand => _jobRun(arguments, requestId),
       idempotentTouchCommand => _touch(arguments, requestId),
+      permissionRequestCommand => await _permissionRequest(
+        arguments,
+        requestId,
+      ),
+      permissionStatusCommand => await _permissionStatus(arguments, requestId),
       jobGetCommand => _jobGet(arguments, requestId),
       jobWaitCommand => await _jobWait(arguments, requestId),
       jobCancelCommand => await _jobCancel(arguments, requestId),
@@ -263,6 +396,51 @@ final class ExampleDomain {
         ),
       ).toJson(),
     };
+  }
+
+  Future<Map<String, Object?>> _permissionRequest(
+    Map<String, Object?> arguments,
+    String requestId,
+  ) async {
+    final Object? rawPermission = arguments['permission'];
+    if (rawPermission is! String ||
+        !examplePermissionNames.contains(rawPermission)) {
+      return _invalid(requestId, 'permission must name one P0 permission');
+    }
+    final String beforePlatformState = await permissions.status(rawPermission);
+    permissions.request(rawPermission);
+    return PatchbayInvocation.accepted(
+      requestId: requestId,
+      payload: <String, Object?>{
+        'outcome': 'requested',
+        'source': PatchbayFactSource.appRecorded.name,
+        'permission': rawPermission,
+        // permission_handler has no notDetermined enum: a never-requested App
+        // permission reads as `denied`. Keep it as a raw platform view rather
+        // than falsely presenting it as Patchbay's canonical state.
+        'beforePlatformState': beforePlatformState,
+      },
+    ).toJson();
+  }
+
+  Future<Map<String, Object?>> _permissionStatus(
+    Map<String, Object?> arguments,
+    String requestId,
+  ) async {
+    final Object? rawPermission = arguments['permission'];
+    if (rawPermission is! String ||
+        !examplePermissionNames.contains(rawPermission)) {
+      return _invalid(requestId, 'permission must name one P0 permission');
+    }
+    return PatchbayInvocation.accepted(
+      requestId: requestId,
+      payload: <String, Object?>{
+        'outcome': 'completed',
+        'source': PatchbayFactSource.appRecorded.name,
+        'permission': rawPermission,
+        'platformState': await permissions.status(rawPermission),
+      },
+    ).toJson();
   }
 
   Map<String, Object?> _increment(

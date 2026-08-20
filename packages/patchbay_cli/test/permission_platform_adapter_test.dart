@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 PatchbayPermissionDriverRequest _request(
   PatchbayPermissionOperation operation, {
   String permission = 'camera',
+  PatchbayPermissionDecision? decision,
 }) => PatchbayPermissionDriverRequest(
   requestId: 'adapter-test',
   operation: operation,
@@ -19,6 +20,7 @@ PatchbayPermissionDriverRequest _request(
     'buildMode': 'debug',
   },
   permission: permission,
+  decision: decision,
   timeoutMs: 1000,
 );
 
@@ -338,6 +340,91 @@ void main() {
       isEmpty,
       reason: '拒绝必须发生在改设备之前',
     );
+  });
+
+  test('Android exercise marks both snapshots as crossing system UI', () async {
+    var handled = false;
+    const String runner =
+        'com.example.consumer.test/androidx.test.runner.AndroidJUnitRunner';
+    final String marker = base64Encode(
+      utf8.encode(
+        jsonEncode(<String, Object?>{
+          'targetPackage': 'com.example.consumer.debug',
+          'permission': 'camera',
+          'decision': 'allow',
+          'handled': true,
+        }),
+      ),
+    );
+    Future<PatchbayPlatformCommandResult> command(
+      String executable,
+      List<String> arguments,
+      Duration timeout,
+    ) async {
+      if (arguments case ['version']) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'Android Debug Bridge version 1.0.41',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('devices')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'List of devices attached\ndevice-1\tdevice\n',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('path')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'package:/data/app/consumer/base.apk',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('pidof')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '4321',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('dumpsys')) {
+        return PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'android.permission.CAMERA: granted=$handled, flags=[]\n',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('instrument')) {
+        handled = true;
+        return PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'PATCHBAY_RESULT=$marker\nOK (1 test)\n',
+          stderr: '',
+        );
+      }
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      );
+    }
+
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayAndroidPermissionAdapter(
+          instrumentationRunner: runner,
+          runCommand: command,
+        ).handle(
+          _request(
+            PatchbayPermissionOperation.exercise,
+            decision: PatchbayPermissionDecision.allow,
+          ),
+        );
+    expect(response.accepted, isTrue, reason: response.code ?? '');
+    expect(response.before?.systemUiExpected, isTrue);
+    expect(response.after?.systemUiExpected, isTrue);
+    expect(response.interruption?.handled, isTrue);
   });
 
   test('iOS adapter exposes reset without inventing a status fact', () async {

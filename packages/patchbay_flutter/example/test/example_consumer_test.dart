@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 import 'package:patchbay_flutter_example/example_domain.dart';
+import 'package:patchbay_flutter_example/example_log_source.dart';
 import 'package:patchbay_flutter_example/main.dart';
 
 void main() {
@@ -130,6 +132,8 @@ void main() {
           deviceWriteCommand,
           jobRunCommand,
           idempotentTouchCommand,
+          permissionRequestCommand,
+          permissionStatusCommand,
           jobGetCommand,
           jobWaitCommand,
           jobCancelCommand,
@@ -165,6 +169,45 @@ void main() {
       model.dispose();
     }
   });
+
+  test('permission request dispatches without inventing completion', () async {
+    final _FakePermissionGateway permissions = _FakePermissionGateway();
+    final ValueNotifier<int> counter = ValueNotifier<int>(0);
+    final ExampleDomain domain = ExampleDomain(
+      counter: counter,
+      logs: ExampleLogSource(),
+      permissions: permissions,
+    );
+    addTearDown(counter.dispose);
+
+    final Map<String, Object?> response = await domain.invoke(
+      permissionRequestCommand,
+      <String, Object?>{'permission': 'camera'},
+      'permission-request',
+    );
+    expect(response['admission'], 'accepted');
+    expect(response['payload'], containsPair('outcome', 'requested'));
+    expect(response['payload'], containsPair('beforePlatformState', 'denied'));
+    expect(permissions.requests, <String>['camera']);
+
+    final Map<String, Object?> status = await domain.invoke(
+      permissionStatusCommand,
+      <String, Object?>{'permission': 'camera'},
+      'permission-status',
+    );
+    expect(status['admission'], 'accepted');
+    expect(status['payload'], containsPair('platformState', 'denied'));
+  });
+}
+
+final class _FakePermissionGateway implements ExamplePermissionGateway {
+  final List<String> requests = <String>[];
+
+  @override
+  void request(String permission) => requests.add(permission);
+
+  @override
+  Future<String> status(String permission) async => 'denied';
 }
 
 Future<T> _pumpUntilComplete<T>(WidgetTester tester, Future<T> pending) async {
