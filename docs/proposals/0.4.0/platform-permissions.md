@@ -2,7 +2,7 @@
 
 > 状态：已接受
 >
-> 关联：PB-040-25、PB-040-26、PB-040-27
+> 关联：PB-040-25、PB-040-26、PB-040-27、PB-040-33、PB-040-34、PB-040-35、PB-040-36、PB-040-37
 >
 > 设计闸门：DG-040-07
 
@@ -33,24 +33,30 @@ debug CLI 若只能要求人手点弹窗，就不能形成可持续的调试闭�
 - 不承诺所有特殊权限都可自动 grant；unsupported 必须是正常、类型化结果。
 - 不因抽象统一而抹平 `limited/restricted/permanentlyDenied/allowOnce` 等平台差异。
 
-## 0.4.0 定版边界（SC-040-02）
+## 0.4.0 定版边界（SC-040-02、SC-040-05）
 
-本 Proposal 保留完整的跨平台目标状态与公共 wire，避免为一次范围调整删除已经形成的兼容表面；但 0.4.0
-的**发布承诺**收窄为 Android adb 的 `capabilities/status/normalize/reset/fail`。camera、microphone、
+本 Proposal 保留完整的跨平台目标状态与公共 wire，避免为一次范围调整删除已经形成的兼容表面。0.4.0
+的 Android **发布承诺**仍是 adb 的 `capabilities/status/normalize/reset/fail`：camera、microphone、
 locationWhenInUse、notifications 四项必须在 emulator/真机上以设备事实复核；不可达目标先拒绝且不改变
 设备，未声明权限返回可读的 `unsupported/notDeclaredByApp`。
 
-以下能力退出 0.4.0 验收，随 PB-040-26 回到 backlog：
+SC-040-05 在接入方 iPhone 真机证据成立后恢复 iOS 的一部分承诺：仓内提供可构建的 XCUITest reference
+runner；物理真机在显式配置签名 `.xctestrun` 后，可对 camera、microphone、locationWhenInUse 执行
+`reset/exercise`，覆盖 allow/deny，locationWhenInUse 另覆盖 `allowOnce`。App 发起权限请求仍属于接入方
+命令；runner 只验证预期系统弹窗、操作唯一匹配的 decision，并把结果作为 `uiObserved` 返回。弹窗处理后
+沿用既有恢复协议等待 App resumed、重连并刷新 catalog/目标 generation。
 
-- Android/iOS 可构建的 reference runner 与跨 OEM 系统弹窗自动处理；
-- `exercise`、`allowOnce` decision 的端到端设备承诺，以及弹窗后的 resume/reconnect/re-resolve 闭环；
-- iOS `status/normalize/exercise` 真机能力；现有 Simulator reset adapter 不外推成完整权限支持；
+以下能力仍退出 0.4.0 验收，回到 backlog：
+
+- Android 可构建的 reference runner 与跨 OEM 系统弹窗自动处理；
+- iOS 真机 `status/normalize`，以及 notifications 的 reset 与接入方触发端到端矩阵；
 - `permission.preflight`、`permission.transition`、`systemUi.detected`、`systemUi.handled`、
   `app.resumeObserved` 五类专用 trace 事件。
 
-这些命令、状态词和 driver protocol 继续存在，但 capability 是唯一可用性真源：只有显式安装并通过设备
-探测的外部 runner 才可发布 `exercise`/decision；缺少证据时必须返回 unavailable/unsupported。后文描述
-上述能力时均是 PB-040-26 的目标设计，不构成 0.4.0 已支持或发布阻断的声明。
+capability 是唯一可用性真源：只有显式配置并能在所选设备执行的 runner 才可发布 `exercise`/decision；
+缺少签名产物、App 未运行、设备语言没有已验证 matcher 或资源不受支持时，必须返回
+unavailable/unsupported。notifications 可发布“处理已出现弹窗”的 `exercise`，但不代表 Patchbay 能替 App
+发起请求；没有接入方触发路径时不得把它写成端到端已验证。
 
 ## 与既有红线的关系
 
@@ -243,8 +249,11 @@ interruption monitor。
 
 iOS 不存在面向普通真机的通用 adb shell grant。真机支持程度取决于 Xcode/XCTest、签名身份、设备授权
 和具体 `XCUIProtectedResource`；driver 必须逐资源报告 capability。无法 reset/grant 的权限允许
-`exercise` 或 `manualRequired`，不能伪报 normalize 成功。0.4.0 只保留 Simulator reset 的 adapter 与
-类型化拒绝，不把 iOS `status/normalize/exercise` 计入发布承诺。
+`exercise` 或 `manualRequired`，不能伪报 normalize 成功。0.4.0 的 reference runner 使用 XCTest 公共 API
+重置 camera、microphone、locationWhenInUse，并通过 SpringBoard accessibility tree 对英语、简体中文和
+繁体中文的预期弹窗做 permission 身份校验与唯一 decision 匹配；不使用坐标、截图识别或私有 API。
+物理真机 `status/normalize` 保持类型化 unsupported；notifications 没有 XCTest reset resource，只在 App
+已触发弹窗时提供 exercise。
 
 参考：[Simulator privacy](https://developer.apple.com/videos/play/wwdc2020/10647/)、
 [XCTest protected resource](https://developer.apple.com/documentation/xcuiautomation/xcuiprotectedresource)、
@@ -327,9 +336,9 @@ audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 
 
 - 没有 platform driver 时，现有 Patchbay 命令继续工作；permission capability 明确 unavailable。
 - CLI AOT/pub 发布物不内置编译后的 native runner，也不内置 adb/Xcode/hdc；0.4.0 提供 driver
-  protocol/schema 和平台 adapter 源码，不承诺可构建的 reference runner。用户自有 runner 需在本机 SDK
-  下显式构建、安装，并通过 PATH 或项目配置发现；`patchbay doctor permission` 检查工具、版本、设备和
-  runner。
+  protocol/schema、平台 adapter 源码与可构建的 iOS XCUITest reference runner。runner 必须由用户在本机
+  Xcode 和签名身份下显式 build-for-testing，并通过 `PATCHBAY_IOS_XCTESTRUN` 指向生成的签名产物；首次
+  运行不静默下载、签名或修改接入方工程。
 - companion 版本独立于 App package 版本，但 driver protocol major 不匹配时拒绝执行。
 - release 构建不注册 App 内 permission adapter；外部 driver 只允许操作显式指定的 debug/test App。
 - GitHub/pub 发布必须说明哪些 driver 随包、哪些需要本机 SDK生成，不能首次运行时静默下载可执行文件。
@@ -343,8 +352,9 @@ audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 
 - PB-040-26 恢复时再断言 `permission.preflight` 事件带 scenario 指纹，使免确认路径可事后核对。
 - Android emulator + 真机覆盖 P0 四项权限的 status、normalize granted、reset、幂等与不可达状态先拒绝
   不写设备；capability 必须来自逐权限逐 decision 的设备探测。
-- iOS Simulator reset 继续做 adapter 回归；XCUITest alert、真机支持矩阵与 iOS status/normalize 不作为
-  0.4.0 发布门禁。
+- iOS Simulator reset 继续做 adapter 回归；真机以接入方 App 验证 camera/microphone 的 allow/deny、
+  locationWhenInUse 的 allow/allowOnce，以及 reset 后 `notDetermined` 与弹窗后恢复。iOS
+  `status/normalize` 和 notifications 完整矩阵不作为 0.4.0 发布门禁。
 - Bluetooth 只验收 capability matrix 与接入方报告，不要求全环境通过。
 - HarmonyOS 只验收“验证报告与 capability fixture 存在，且未通过项保持 `unsupported`”；在 PB-040-27
   验证完成前不进入“支持平台”列表。
@@ -355,8 +365,9 @@ audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 
 
 ## 已裁决分发与验证输出
 
-- 0.4.0 只随 release archive/仓库提供协议、schema 与平台 adapter 源码，不分发、也不承诺可构建的
-  reference runner；外部 runner 必须由用户显式提供并通过设备 capability 探测，首次运行不得静默下载。
+- 0.4.0 随 release archive/仓库提供协议、schema、平台 adapter 源码与 iOS XCUITest reference runner
+  工程，但不分发签名后的 `.xctestrun`；外部 runner 必须由用户显式构建并通过设备 capability 探测，首次
+  运行不得静默下载或申请签名权限。
 - HarmonyOS 选定的 Flutter OpenHarmony SDK、设备和 API 基线是 PB-040-27 spike 的报告字段，不是本
   Proposal 的遗留裁决；报告缺证据时 capability 保持 `unsupported`。
 

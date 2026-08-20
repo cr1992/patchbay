@@ -28,7 +28,7 @@ widgets by stable ID, and pull redacted logs and screenshots.
 adb looks at a device from outside the system; Patchbay looks at the runtime from inside the app.
 On iOS in particular, it fills in the in-app debugging surface that system tooling cannot provide.
 
-> **Project status:** `v0.3.0`, consumed from source; requires Dart `>=3.11.0`, and Flutter
+> **Project status:** `v0.4.0`, consumed from source; requires Dart `>=3.11.0`, and Flutter
 > `>=3.38.0` for the Flutter UI capabilities. The control plane is enabled only in debug /
 > profile; the packages can take part in a release compile, but the consumer must keep the host
 > and adapters unreachable through compile-time branching at the composition root.
@@ -39,7 +39,8 @@ On iOS in particular, it fills in the in-app debugging surface that system tooli
 |---|---|
 | Reading typed state from inside the app | Installing, uninstalling, and launching apps |
 | Invoking domain commands the app deliberately exposes | Running a system shell |
-| Driving Flutter Semantics or stable UI IDs | Handling system permission dialogs and other apps |
+| Driving Flutter Semantics or stable UI IDs | Installing, launching, and inspecting other apps |
+| Orchestrating expected system permission dialogs through an explicit external driver | General system UI automation or coordinate-driven dialog handling |
 | Fetching redacted app-side logs and Flutter screenshots | Capturing the full physical screen or the internals of a native `PlatformView` |
 
 Patchbay is not an adb replacement, nor a coordinate-driven black-box test framework; the complete
@@ -60,7 +61,7 @@ dependencies:
   patchbay_flutter:
     git:
       url: https://github.com/cr1992/patchbay.git
-      ref: patchbay-v0.3.0
+      ref: patchbay-v0.4.0
       path: packages/patchbay_flutter
 ```
 
@@ -74,7 +75,7 @@ The following installs the native AOT GitHub Release artifact on macOS arm64. Se
 
 ```console
 $ mkdir -p ~/.local/bin
-$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64 \
+$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.0/patchbay-0.4.0-macos-arm64 \
     -o ~/.local/bin/patchbay
 $ chmod +x ~/.local/bin/patchbay
 $ patchbay --help
@@ -88,7 +89,7 @@ When that compatibility form is required, keep it pinned to the same tag:
 
 ```console
 $ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+    --git-ref patchbay-v0.4.0 --git-path packages/patchbay_cli
 ```
 
 ### 3. Register at the composition root

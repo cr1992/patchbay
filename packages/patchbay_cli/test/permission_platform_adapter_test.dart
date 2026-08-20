@@ -9,10 +9,11 @@ PatchbayPermissionDriverRequest _request(
   PatchbayPermissionOperation operation, {
   String permission = 'camera',
   PatchbayPermissionDecision? decision,
+  String deviceId = 'device-1',
 }) => PatchbayPermissionDriverRequest(
   requestId: 'adapter-test',
   operation: operation,
-  deviceId: 'device-1',
+  deviceId: deviceId,
   applicationId: 'com.example.consumer.debug',
   sessionRef: const <String, Object?>{
     'sessionId': 'consumer-session',
@@ -481,6 +482,15 @@ void main() {
     final PatchbayIosPermissionAdapter adapter = PatchbayIosPermissionAdapter(
       runCommand: command,
     );
+    final PatchbayPermissionDriverResponse capabilities = await adapter.handle(
+      _request(PatchbayPermissionOperation.capabilities),
+    );
+    expect(capabilities.accepted, isTrue);
+    expect(
+      capabilities.capabilities?.permissions['camera']?.actions,
+      contains(PatchbayPermissionAction.reset),
+    );
+
     final PatchbayPermissionDriverResponse reset = await adapter.handle(
       _request(PatchbayPermissionOperation.reset),
     );
@@ -496,6 +506,267 @@ void main() {
     );
     expect(status.accepted, isFalse);
     expect(status.code, 'permissionUnsupported');
+  });
+
+  test(
+    'iOS capabilities do not expose Simulator reset for a physical device',
+    () async {
+      Future<PatchbayPlatformCommandResult> command(
+        String executable,
+        List<String> arguments,
+        Duration timeout,
+      ) async {
+        if (arguments case ['simctl', 'help']) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'simctl',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('--json')) {
+          return PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: jsonEncode(<String, Object?>{
+              'devices': <String, Object?>{
+                'runtime': <Object?>[
+                  <String, Object?>{
+                    'udid': 'simulator-1',
+                    'state': 'Booted',
+                    'isAvailable': true,
+                  },
+                ],
+              },
+            }),
+            stderr: '',
+          );
+        }
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        );
+      }
+
+      final PatchbayPermissionDriverResponse response =
+          await PatchbayIosPermissionAdapter(runCommand: command).handle(
+            _request(
+              PatchbayPermissionOperation.capabilities,
+              deviceId: 'physical-device',
+            ),
+          );
+
+      expect(response.accepted, isFalse);
+      expect(response.code, 'platformDeviceUnavailable');
+    },
+  );
+
+  test(
+    'iOS physical-device capabilities come from the configured XCUITest runner',
+    () async {
+      Future<PatchbayPlatformCommandResult> command(
+        String executable,
+        List<String> arguments,
+        Duration timeout,
+      ) async {
+        if (executable == 'xcui-runner') {
+          expect(
+            arguments,
+            containsAll(<String>['--operation', 'capabilities']),
+          );
+          return PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: jsonEncode(<String, Object?>{
+              'deviceId': 'physical-device',
+              'applicationId': 'com.example.consumer.debug',
+              'capabilities': <String, Object?>{
+                'camera': <String, Object?>{
+                  'actions': <String>['reset', 'exercise'],
+                  'decisions': <String>['allow', 'deny'],
+                },
+                'microphone': <String, Object?>{
+                  'actions': <String>['reset', 'exercise'],
+                  'decisions': <String>['allow', 'deny'],
+                },
+                'locationWhenInUse': <String, Object?>{
+                  'actions': <String>['reset', 'exercise'],
+                  'decisions': <String>['allow', 'deny', 'allowOnce'],
+                },
+                'notifications': <String, Object?>{
+                  'actions': <String>['exercise'],
+                  'decisions': <String>['allow', 'deny'],
+                },
+              },
+            }),
+            stderr: '',
+          );
+        }
+        if (arguments case ['simctl', 'help']) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'simctl',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('--json')) {
+          return PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: jsonEncode(<String, Object?>{
+              'devices': <String, Object?>{
+                'runtime': <Object?>[
+                  <String, Object?>{
+                    'udid': 'simulator-1',
+                    'state': 'Booted',
+                    'isAvailable': true,
+                  },
+                ],
+              },
+            }),
+            stderr: '',
+          );
+        }
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        );
+      }
+
+      final PatchbayPermissionDriverResponse response =
+          await PatchbayIosPermissionAdapter(
+            xcuiTestRunner: 'xcui-runner',
+            runCommand: command,
+          ).handle(
+            _request(
+              PatchbayPermissionOperation.capabilities,
+              deviceId: 'physical-device',
+            ),
+          );
+
+      expect(response.accepted, isTrue);
+      final Map<String, PatchbayPermissionCapability> permissions =
+          response.capabilities!.permissions;
+      expect(
+        permissions['camera']!.actions,
+        containsAll(<PatchbayPermissionAction>{
+          PatchbayPermissionAction.reset,
+          PatchbayPermissionAction.exercise,
+        }),
+      );
+      expect(
+        permissions['locationWhenInUse']!.decisions,
+        contains(PatchbayPermissionDecision.allowOnce),
+      );
+      expect(
+        permissions['notifications']!.actions,
+        isNot(contains(PatchbayPermissionAction.reset)),
+      );
+      expect(
+        permissions['notifications']!.decisions,
+        isNot(contains(PatchbayPermissionDecision.allowOnce)),
+      );
+    },
+  );
+
+  test('iOS physical-device reset and exercise use XCUITest facts', () async {
+    Future<PatchbayPlatformCommandResult> command(
+      String executable,
+      List<String> arguments,
+      Duration timeout,
+    ) async {
+      if (executable == 'xcui-runner') {
+        final String operation =
+            arguments[arguments.indexOf('--operation') + 1];
+        if (operation == 'capabilities') {
+          return PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: jsonEncode(<String, Object?>{
+              'deviceId': 'physical-device',
+              'applicationId': 'com.example.consumer.debug',
+              'capabilities': <String, Object?>{
+                'camera': <String, Object?>{
+                  'actions': <String>['reset', 'exercise'],
+                  'decisions': <String>['allow', 'deny'],
+                },
+              },
+            }),
+            stderr: '',
+          );
+        }
+        return PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: jsonEncode(<String, Object?>{
+            'deviceId': 'physical-device',
+            'applicationId': 'com.example.consumer.debug',
+            'permission': 'camera',
+            if (operation == 'exercise') 'decision': 'allow',
+            'handled': true,
+            'state': operation == 'reset' ? 'notDetermined' : 'granted',
+            'platformState': operation == 'reset'
+                ? 'xctestReset'
+                : 'allowedButtonObserved',
+            'factSource': operation == 'reset'
+                ? 'deviceReported'
+                : 'uiObserved',
+          }),
+          stderr: '',
+        );
+      }
+      if (arguments case ['simctl', 'help']) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'simctl',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('--json')) {
+        return PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: jsonEncode(<String, Object?>{
+            'devices': <String, Object?>{
+              'runtime': <Object?>[
+                <String, Object?>{
+                  'udid': 'simulator-1',
+                  'state': 'Booted',
+                  'isAvailable': true,
+                },
+              ],
+            },
+          }),
+          stderr: '',
+        );
+      }
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      );
+    }
+
+    final PatchbayIosPermissionAdapter adapter = PatchbayIosPermissionAdapter(
+      xcuiTestRunner: 'xcui-runner',
+      runCommand: command,
+    );
+    final PatchbayPermissionDriverResponse reset = await adapter.handle(
+      _request(PatchbayPermissionOperation.reset, deviceId: 'physical-device'),
+    );
+    expect(reset.accepted, isTrue);
+    expect(reset.after?.state, PatchbayPermissionState.notDetermined);
+    expect(
+      reset.after?.factSource,
+      PatchbayPermissionFactSource.deviceReported,
+    );
+
+    final PatchbayPermissionDriverResponse exercise = await adapter.handle(
+      _request(
+        PatchbayPermissionOperation.exercise,
+        decision: PatchbayPermissionDecision.allow,
+        deviceId: 'physical-device',
+      ),
+    );
+    expect(exercise.accepted, isTrue);
+    expect(exercise.after?.state, PatchbayPermissionState.granted);
+    expect(exercise.after?.factSource, PatchbayPermissionFactSource.uiObserved);
+    expect(exercise.interruption?.handled, isTrue);
   });
 
   test(

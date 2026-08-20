@@ -522,6 +522,12 @@ coordinate taps, or guessing from widget text, and it will not start a direct li
 distribute a bearer on the app's behalf. Logs are app records the consumer has already redacted;
 capture proves only the composited result of Flutter repaint boundaries, excludes system permission
 dialogs, and may be missing PlatformViews.
+
+System permission orchestration uses an explicit external driver. Android 0.4.0 release-gates adb
+status/normalize/reset. The source repository also includes a buildable iOS XCUITest runner for
+physical-device camera, microphone, and location reset/exercise; the App must initiate its own
+permission request, and unsupported status/normalize, notification reset, signing or language
+conditions fail closed. See [platform permission drivers](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md).
 For the stable commands, passthrough boundaries, and exit conditions of the three trees and
 actions, see
 [`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)
