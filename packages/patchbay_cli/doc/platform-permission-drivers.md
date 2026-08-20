@@ -17,7 +17,9 @@ Android status/normalize/reset use adb package-manager facts. Exercise is only a
 
 iOS Simulator reset uses `simctl privacy`. simctl has no public authoritative status read, so status/normalize remain `permissionUnsupported` instead of turning a successful shell exit into a permission fact. Exercise is advertised only when an explicit XCUITest runner is configured; its one JSON result must bind device, application, permission, decision, handled state, and the observed platform state.
 
-For 0.4.0, the supported device surface is deliberately narrower than the driver protocol: Android adb `capabilities/status/normalize/reset/fail` is release-gated, while generic system-dialog exercise, `allowOnce` decisions, iOS status/normalize/exercise, and permission-specific trace events are not. Patchbay does not ship or qualify a reference UiAutomator/XCUITest runner in this release. An explicitly supplied runner is an external extension and must not be inferred as portable OEM/platform support.
+For 0.4.0, the supported device surface is deliberately narrower than the driver protocol: Android adb `capabilities/status/normalize/reset/fail` is release-gated. The repository and source archive also ship a buildable [iOS XCUITest reference runner](https://github.com/cr1992/patchbay/tree/main/companions/ios-xcuitest): on a physical iPhone it can reset camera, microphone, and locationWhenInUse, then handle allow/deny plus location allowOnce after the target App has initiated its own permission request. Physical-device iOS status/normalize, notification reset and permission-specific trace events remain unsupported/deferred.
+
+The iOS project is not inside the pub package and no signed artifact is distributed. Build it with the local Xcode account/team, compile `bin/patchbay_permission_ios_xcuitest.dart`, point `PATCHBAY_IOS_XCTESTRUN` at the absolute signed `.xctestrun`, and set `PATCHBAY_IOS_PERMISSION_RUNNER` to that wrapper. The runner uses public XCTest APIs and SpringBoard accessibility identity matching for English, simplified Chinese and traditional Chinese; other languages fail closed. It never edits a consumer Xcode project or clicks coordinates.
 
 ## 0.4.0 device checklist
 
@@ -26,6 +28,6 @@ The 0.4.0 permission gate uses the repository example before any optional consum
 1. Start a debug/profile App session and record its session, application and device identity.
 2. Run `patchbay --session <id> --permission-driver <path> --json doctor permission`.
 3. On an Android emulator and one adb device, cover camera/microphone/location/notifications status, normalize granted, reset and idempotent replay. Verify unreachable states fail before mutation and a wrong application/device is rejected.
-4. Verify that missing or unproven runners do not advertise exercise/decisions. iOS status/normalize/exercise and system-dialog handling are typed unsupported/unavailable and do not block 0.4.0.
+4. Verify that missing or unproven runners do not advertise exercise/decisions. On a signed iPhone consumer, cover camera/microphone/location reset and at least microphone allow/deny plus location allowOnce. iOS status/normalize and notification reset remain typed unsupported and do not block 0.4.0.
 
-Building/signing reference runners and collecting Android OEM plus iOS Simulator/device dialog matrices are deferred work; unit fixtures must not be presented as that device evidence.
+Android OEM dialog handling and the complete iOS notification matrix are deferred work; unit fixtures must not be presented as device evidence. `resetAuthorizationStatus(for:)` may terminate the debug App, so the setup phase can require rerunning the consumer's official run/attach tool before triggering the alert; 0.4.0 does not claim that reset is an invisible in-process transition.

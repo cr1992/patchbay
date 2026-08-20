@@ -47,11 +47,16 @@
 | PB-040-29 | example 覆盖全部可注入面 + 本地端到端预检 `tool/example_precheck.sh` | CI 三个 job 全在无设备容器里跑，证明不了「CLI 真的连上了设备上的 host」；example 此前只接 0.3.0 时代的面，0.4.0 能力在设备上一条都打不到 | 0.4.0 | 实现中 | 预检门禁见 [发版清单](release-checklist.md) 第 2 节；SC-040-04；待接进每周 emulator 冒烟 |
 | PB-040-28 | DevTools 借用：net 脱敏画像 | 阻塞在上游——`vm_service 15.2.0` 的 `getHttpProfile` 在调用方介入前已带 body/headers/cookies 与含 query 值的 URI，RPC 无采集前过滤参数，先收全量再脱敏已被 DG-040-03 否决。0.4.0 交付形态是不发布 capability、稳定返回 `networkProfilingUnavailable` | — | 待排期 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md) 的「net 的实现阻断」；DG-040-03；解除条件是上游开放采集前字段过滤，或接入方提供只产生已脱敏事件的 host collector |
 | PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 Android adb 的 normalize/reset/fail 建立可复核的权限前置状态 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-02；SC-040-03 |
-| PB-040-26 | 系统权限弹窗 driver、恢复协议与专用 trace 事件：Android UiAutomator、iOS simctl/XCUITest，处理后重新握手和解析目标 | Patchbay 只能观察 Flutter UI；0.4.0 真机实践证明“App 触发 + 官方平台工具辅助 + 状态复核”的降级链可用，但当前没有跨 OEM / 双平台均验证过的 reference runner，后续实现不得以逐 OEM 文案 matcher 作为发布前提 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；由 SC-040-02 延期 |
+| PB-040-26 | iOS XCUITest 系统权限弹窗 runner 与恢复协议 | Patchbay 只能观察 Flutter UI；真机实践证明“App 触发 + XCTest reset/alert accessibility + 重连复核”可形成不使用坐标或私有 API 的闭环 | 0.4.0 | 已验证 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-05；[真机矩阵](verification/ios-permission-xcuitest.md) |
 | PB-040-27 | HarmonyOS 兼容验证 spike 与 permission capability 矩阵：OpenHarmony Flutter、VM attach、Semantics/lifecycle、hdc + UiTest/Hypium | 架构可接入，但当前 Flutter 3.44.9 CI 与真机均未覆盖 HarmonyOS，不能直接宣称支持 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；[当前报告](verification/harmonyos-compatibility.md)；已到 SDK/真机阻塞，capability 保持 `unsupported` |
 | PB-040-30 | 失效会话的引导式恢复：列出同一应用的可用候选，并在显式确认后完成 prune / reselect / rebind | 真机长流程伴随进程替换时，既有 `sessionStaleProcess` fail-closed 能防止误连另一设备，但操作员仍需手工拼接恢复步骤；需要在不静默回退固定会话的前提下降低恢复成本 | — | 待排期 | 落地前补 Proposal；保持“固定会话不自动改选”的既有安全边界 |
 | PB-040-31 | CLI 长流程状态可视化：持续呈现当前命令、job phase、外部 driver 等待、终态与恢复提示 | CLI 目前适合机器读取最终信封，但操作者在长流程中难以判断是在执行、等待外部系统 UI 还是已经结束；需要一个仍保持结构化输出与脱敏边界的 Patchbay 自有进度面 | — | 待排期 | 与 job 事件和 PB-040-26 恢复阶段共用事实源，不要求接入方 App 提供调试 UI，也不新增第二套状态机 |
 | PB-040-32 | 敏感参数的字段级无回显注入：由 descriptor 声明 sensitive 字段，CLI 通过 prompt/provider 合并且不进入 argv、history 或 trace | 现有 `--stdin` 能安全注入整行 JSON，但真实长流程仍需人工组装 payload；字段级输入可降低误回显和结构错误，同时保持自动化入口 | — | 待排期 | 与 PB-040-24 的回放凭据重新注入共用安全边界；落地前补 Proposal |
+| PB-040-33 | Android 官方 UiAutomator reference runner 与通用系统弹窗识别 | Android OEM 对权限弹窗结构存在差异；应以 Android 官方 accessibility/resource 能力为基线、逐设备探测并 fail-closed，不把逐 OEM 文案与坐标 matcher 变成核心契约 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；由 SC-040-02 延期 |
+| PB-040-34 | 权限专用 trace 事件与损坏轨迹下的恢复语义 | 权限状态机需要可复盘，但 trace 写入侧事件类型是封闭表；必须先裁决损坏轨迹是否阻断被观测命令，不能直接把五类权限事件接入 sink | — | 待裁决 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-08 待建立 |
+| PB-040-35 | iOS 真机权限 `status/normalize` 的权威事实源 | XCTest 能 reset 与操作系统弹窗，但没有面向任意真机 App 的通用公开授权查询/grant API；不能把 XCTest 命令退出 0 当成设备状态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持 capability unsupported，落地前补 Proposal |
+| PB-040-36 | iOS notifications reset 与接入方触发端到端矩阵 | XCTest 没有 notifications 的 protected resource reset，且系统弹窗必须由 App 自己发起；当前 runner 只能处理已出现的弹窗，尚不能形成可重复初始态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；0.4.0 降级边界见 SC-040-05 |
+| PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
 
 ## 文档债（快赢，可随任意批次走）
 
@@ -70,6 +75,7 @@
 | DG-040-05 | 执行证据词表、job 终态和 CLI 退出码的边界 | 0.4.0 | 已裁决 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | DG-040-06 | 轨迹回放的写操作确认、目标重解析、敏感值重新注入和失败停止语义 | — | 待裁决 | [未来回放](proposals/future/trace-replay.md) |
 | DG-040-07 | platform driver 的信任边界、`exercise allow` 确认模型、Android/iOS P0 权限集合与 HarmonyOS 验证基线 | 0.4.0 | 已裁决 | [平台权限](proposals/0.4.0/platform-permissions.md) |
+| DG-040-08 | 损坏轨迹的恢复与阻断语义，以及权限专用事件扩展写入侧封闭表的前置条件 | — | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
 
 ## 维护规则
 

@@ -39,7 +39,8 @@ On iOS in particular, it fills in the in-app debugging surface that system tooli
 |---|---|
 | Reading typed state from inside the app | Installing, uninstalling, and launching apps |
 | Invoking domain commands the app deliberately exposes | Running a system shell |
-| Driving Flutter Semantics or stable UI IDs | Handling system permission dialogs and other apps |
+| Driving Flutter Semantics or stable UI IDs | Installing, launching, and inspecting other apps |
+| Orchestrating expected system permission dialogs through an explicit external driver | General system UI automation or coordinate-driven dialog handling |
 | Fetching redacted app-side logs and Flutter screenshots | Capturing the full physical screen or the internals of a native `PlatformView` |
 
 Patchbay is not an adb replacement, nor a coordinate-driven black-box test framework; the complete

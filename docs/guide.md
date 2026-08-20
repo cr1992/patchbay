@@ -1135,7 +1135,15 @@ lifecycle `5`），只有 warning 时是 `0`。
     `xcrun devicectl device process launch --device <udid> <bundle-id>` 能把 App 拉回前台
     （已实测）。`patchbay doctor` 的 lifecycle 解法里同时给这两条。
 - 截图只证明 Flutter 合成树；系统弹窗、PlatformView 可能缺失，结果附能力警告。
-- 系统权限弹窗、装卸包、shell、进程管理：用 adb / xcrun，Patchbay 不做。
+- 系统权限弹窗不在 Flutter UI 树内。Patchbay 四个 package 不直接操作它；`permission exercise` 通过
+  显式配置的外部 driver 调用平台官方测试工具。Android 0.4.0 只承诺 adb 状态/规范化路径；iOS 随仓提供
+  XCUITest reference runner 源码，真机可处理 camera、microphone、locationWhenInUse 的预期弹窗：
+  App 先用自己的 debug/domain 命令发起权限请求，runner 再按 accessibility identity 与唯一 decision
+  操作，之后 CLI 等待 resumed、重连并刷新 catalog。它不使用坐标或截图识别。
+  iOS runner 需要本机 Xcode、设备授权与签名 `.xctestrun`；物理真机 `status/normalize`、notifications
+  reset 和未验证语言会如实 unsupported。构建和环境变量见
+  [`companions/ios-xcuitest/README`](../companions/ios-xcuitest/README.md)。装卸包、任意 shell 与进程管理
+  仍不属于 Patchbay 公共能力。
 - 直连 HTTP 明文、无 TLS，默认关闭；仅受信网络实验用途，边界见
   [`patchbay_transport/README`](../packages/patchbay_transport/README.md)。
 - CLI 结果是调试证据，不是产品验收证据：证明 App 受理与 App 侧事实，不证明像素
