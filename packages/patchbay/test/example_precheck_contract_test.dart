@@ -30,10 +30,10 @@ void main() {
 
   test('capture target refreshes generation after navigation', () {
     final String source = _examplePrecheck().readAsStringSync();
-    final int navigationHome = source.indexOf("check 'ui wait destination home'");
-    final int catalogCheck = source.indexOf(
-      "check 'catalog capture target available'",
-    );
+    const String homeStep = "check 'ui wait destination home'";
+    const String catalogStep = "check 'catalog capture target available'";
+    final int navigationHome = source.indexOf(homeStep);
+    final int catalogCheck = source.indexOf(catalogStep);
     final int generationRefresh = source.indexOf(
       'CARD_CAPTURE_GEN="\$(read_json',
     );
