@@ -2,6 +2,138 @@
 
 本文件记录尚未发布和已发布版本中会影响接入方、协议行为或安全边界的变化。
 
+## 0.4.0 - 2026-08-20
+
+0.4.0 把调试闭环从“能调用”推进到“可观察、可确认、可复盘”：新增锚定手势、导航与 UI 等待、
+执行证据分层、响应 schema、调试轨迹、截图差异、日志与性能画像，并补齐 launcher、会话恢复和
+双传输兼容边界。平台权限本版按设备证据收窄为 Android adb 的 capability/status/normalize/reset/fail；
+系统弹窗 exercise、iOS 权限自动化、网络画像和 HarmonyOS 可用性保持 fail-closed，不作超出证据的承诺。
+
+### Added
+
+- 新增 identifier 锚定的 press-hold、drag 与 fling：使用必填 Semantics generation、目标内归一坐标、独立 gesture policy，并对遮挡与裁剪 fail-closed。
+
+- 新增 `capture --after-frames` 与 `capture diff`：可在第 N 次 Patchbay 观测到的 Flutter 帧取证，并对同规格截图返回变化像素数和差异比例；结果明确资源上限与 Flutter 渲染层边界，不代替调用方判定 pass/fail。
+
+- CLI 与 launcher 新增默认关闭、可显式覆盖的亮屏租约策略：仅在 live 或命令成功后续租，并在退出、失败和信号取消时尽力归还且明确报告无法确认的结果。
+
+- 新增 `snapshotSelectors` host capability，并让 CLI 在发送 snapshot selector 或 wait 前按声明稳定降级，避免再从传输错误形态猜测旧 host。
+
+- 外部命令可选择有界幂等重试、`requestId` 去重和脱敏 host 审计，并可通过 CLI `describe` 检查声明。
+
+- 新增 `perf profile` 的 VM Service 有界性能摘要，稳定输出帧耗时、jank、heap 与 GC 计数；direct 明确返回 `profilingVmServiceRequired`，网络画像在无法采集前脱敏时返回 `networkProfilingUnavailable`。
+
+- snapshot 新增会话内 `hostObserved` revision 与 `snapshot diff --from <revision>`；保留最近 32 个变化版本，基线淘汰或差异超限时返回稳定拒绝，老 host 明示降级为全量 snapshot。
+
+- 新增 `patchbay launch -- <consumer command>` 有界监督与显式 pending session 声明契约；仅接管匹配 `launchId + ownerPid` 的记录，并在 App restart 后重新校验、重锚运行实例。
+
+- `ui verify-manifest --navigate` 新增按清单顺序的有界逐屏巡检，输出部分完成与稳定失败证据，并支持显式继续和尽力恢复起始屏。
+
+- `ui verify-manifest` 新增有界安全的 YAML 输入，与 JSON 归一到同一 manifest 模型，并按扩展名 fail-closed 选择格式及报告无内容泄漏的语法位置。
+
+- manifest v2 新增独立的 `semanticsIdentifier` 命名空间，按既有活体 Semantics tree 核对挂载、歧义与 generation，并让草稿安全收录唯一 identifier。
+
+- 新增 `ui targets --emit-manifest`，可从当前已稳定 destination 的活体 catalog 生成稳定的 v2 manifest 初稿，并以 `coverage: mountedOnly` 明示只覆盖当前挂载目标。
+
+- 新增统一执行证据契约，稳定区分未发送、已发送未确认、同值无变化与设备已确认；descriptor 会约束确认预算和同值证据时效，host、job ledger 与 CLI 共同拒绝来源、终态或时间证据不一致的 payload，并保留 0.3 遗留降级路径。
+
+- 新增逐命令 `responseSchema` 与 `schemaMode`；host 与 CLI 会复核受理 payload，绑定原始 `CommandRegistry` 的 job ledger 从 async dispatch scope 捕获 exact registration identity，并在落盘前复核、脱敏替换违规终态 payload；dispatch 外 adapter 必须显式使用 `startBoundToCommand`；CLI 等待 job 时再次复核，统一拒绝缺失、空值、错类型、未知变体及未声明字段；老 host 与未绑定 job 的 payload 保持原样并标记为 `legacyUnvalidated`。
+
+- 新增 CLI 调试轨迹持久化：可记录 session、命令、job、执行证据、标记和 artifact，并安全查看、导出、比较与清理。
+
+- 新增平台无关权限协议、显式外部 driver 发现与 fail-closed 的 `permission` CLI 基础闭环，所有 Dart/Flutter package 均不直接操作系统 UI。
+
+- 增加 Android adb/UiAutomator 与 iOS simctl/XCUITest 外部权限 driver 源码适配、`permission reset`、`doctor permission`，并在系统弹窗处理后共享总预算完成 App resume、session 重连、catalog 刷新和目标代际重解析。
+
+- 新增 HarmonyOS 兼容性六步验证报告、versioned capability schema 与 fail-closed fixture；example 仅作构建预检，接入方真机未验证项保持 `unsupported`。
+
+- 仓内 example 现在覆盖 patchbay 的全部可注入面（语义动作、锚定手势、inspect、keep-awake、导航、
+  capture/blob/logs、域命令与 job、执行证据四路径、responseSchema、幂等重试、审计、可选 direct 面），
+  并新增 `tool/example_precheck.sh`：在一台真实 Android 设备上逐条打通 41 步命令面并给出每步退出码，
+  作为业务验收前的必过预检。
+
+- 本地 example 预检新增 Android 权限真实路径：逐权限 capability/status、`normalize granted`、幂等
+  重放、不可达 denied 的无副作用拒绝，以及 `reset` 后状态复核；此前只能验证缺少 driver 时的
+  fail-closed 答复。
+
+- 新增会话声明器参考实现 `patchbay_cli/bin/patchbay_reference_launcher.dart`：在 `patchbay launch` 下
+  先声明 pending 会话记录、取到 VM Service URI 后补传输，交由监督循环判定 live。权限写操作只接受
+  `--session`，此前仓内没有任何可跑的载体；接入方也可照它实现自己的 launcher。
+
+### Changed
+
+- 统一协议自有命令的 descriptor、请求解码、门与 handler 注册源，确保目录和执行分发不再漂移。
+
+- `navigation.*` 的 CLI 注册、参数绑定与帮助信息改由 core command descriptor 的非 wire `cliSyntax` 元数据生成，并新增生成物漂移门禁；既有命令路径、参数和退出码保持不变。
+
+- UI 协议命令的 CLI 注册、参数解析与帮助改由 core descriptor 的非 wire `cliSyntax` 生成；Flutter host 同样直接组合 canonical descriptor，只覆盖运行时 gate 与策略默认值，并保留已公开 enum 常量作为兼容 façade。
+
+- README 中英文命令参考改由协议 descriptor 与 CLI 显式声明统一生成，并在 GitLab / GitHub CI 中 fail-closed 检查漂移。
+
+- `wire_codegen --write` 现在一次同步生成 Dart wire DTO 与协议面 golden；`--check` 对任一生成物
+  缺失或漂移都会失败，协议测试不再提供独立的环境变量改写路径。
+
+- `release_prep --apply` 现在会同步 `patchbayPackageVersion` 与中英文 README 的受管版本引用；`--check` 会阻止这些引用带着旧版本定版。
+
+- `release_prep --apply` 现在会把本版 host 的实际协议面原子冻结为版本化兼容语料，RC 与正式版本均可重复生成，并由 `--check` 检出缺失或漂移。
+
+- `release_prep` 判定「已发布版本的兼容语料」改用语料 README 里的机读标记 `patchbay:frozen-corpus`，
+  并补上 0.3.0 语料缺失的声明：`--check` 不再把已发布协议面报成漂移，`--apply` 不会用当前 host 覆写
+  它；新增仓内门禁，根 CHANGELOG 里已发布的版本若有语料目录而漏标记即失败。
+
+- `command_codegen` 仓库门禁改为由最小真实 contract 生成 SHA-256 紧凑快照，不再长期保存仅供漂移检查的完整样例生成物。
+
+- 发布协作入口改为内网主仓 MR；合入后将同一 `main` SHA 单向同步到 GitHub，避免双端重复合并。
+
+- CHANGELOG 碎片改按目标版本隔离，`release_prep` 只消费指定版本队列并保留其他版本。
+
+- CLI 仅在 payload 含类型化 `execution` 时才让执行证据覆盖遗留 `dispatched` 位；无执行证据的 `dispatched: false` 继续稳定返回失败，弱确认完成策略仅允许 job 命令声明。
+
+- Android 权限能力矩阵改为逐权限逐 decision 的**设备探测**，不再由「配置了 runner 路径」推断：
+  `exercise` 与 allow / deny / allowOnce 只在 runner 确实注册在该设备上时宣布，读写动作只对目标应用
+  **声明过**的权限宣布，`allowOnce` 只给系统提供「仅这一次」的权限（相机 / 麦克风 / 位置，不含通知）。
+  同时：应用未声明的权限现在返回可读状态 `unsupported` 与 `platformState: notDeclaredByApp`，而不是
+  笼统的 `permissionUnsupported` 拒绝；`granted` 且带 `ONE_TIME` 标记的授权读回 `allowOnce`；
+  `normalize --state denied` 在 Android 上按 `permissionStateUnreachable` **先拒绝再不动设备**，并指向
+  `exercise --decision deny`——此前它会先撤销权限（连带被系统终止应用）再报状态不符。
+
+- 设计红线收窄了管辖层级：原「系统权限弹窗不做」改为「四个 package 不直接操作系统 UI」。系统权限
+  编排改由 CLI 通过版本化 driver protocol 调用外部 companion 完成，App 内代码仍不获得任何操作系统
+  UI 的操作能力，release 构建仍不可达。装卸包与进程管理继续不做。本条只放宽设计边界，能力本身随
+  `PB-040-25` / `PB-040-26` 实现后才可用。
+
+- 收窄 0.4.0 权限能力的发布承诺：本版以真机证据验收 Android adb 的
+  `capabilities/status/normalize/reset/fail`；系统权限弹窗 `exercise`、`allowOnce` decision、iOS
+  `status/normalize/exercise`、Android/iOS reference runner 与权限专用 trace 事件延期。公共命令与 wire
+  保留，但没有逐设备证据时 capability 必须保持 unavailable/unsupported，不能把源码 adapter、fake
+  driver 或已配置路径表述成可用能力。
+
+- HarmonyOS capability schema、fixture、文档与测试统一使用接入方中性命名（`consumerApp` /
+  `consumerDeviceAcceptance`），不再出现任何业务接入方标识；识别性真机取证材料改为写入被 gitignore
+  的 `.local/verification/`，仓内只保留中性结论与 capability 状态。
+
+### Fixed
+
+- CLI 校验 `unchanged` 执行证据时，改用 App 自己上报的 `observedAtMs` 作为计龄基准（缺失时才回退本机
+  时钟），与 job 事件路径同口径：此前用工作站时钟比对设备产生的时间戳，设备时钟只要略快就会把一份合法
+  证据报成 `providerProtocolViolation`，把时钟偏移归责成 App 违反协议。
+
+- `ui.capture`（`capture root` 与注册目标）在 profile 构建下不再必然失败：绘制就绪判据此前无条件
+  读取 debug-only 的 `RenderObject.debugNeedsPaint`，而 profile 与 release 会剥掉为它赋值的断言，读取
+  即抛 `LateInitializationError`，并在 capture 给出类型化拒绝之前逃逸成 `transportError`。该判据现在
+  只在 debug 生效；其余构建模式下未绘制的目标仍按 `captureEncodingFailed` 拒绝，不会静默产出空图。
+
+- 修复轨迹里"保存老 host 自由 payload 值"这道确认闸的三处失真：`--allow-non-tty-legacy-payload`
+  现在无论 stdin 被判成哪种形态都生效（此前它只在 `stdin.hasTerminal` 为假的分支里被读取，而 macOS
+  把 `</dev/null` 判成 terminal，于是自动化里这个开关不可达）；把 `--include-legacy-payload` 用在本地
+  `trace` 子命令上会按用法错误拒绝，不再静默接受一个不会生效的开关；交互提示读到输入末尾与
+  "stdin 本来就不可交互"现在报各自的原因，不再共用一句消息。默认行为不变：不给显式开关时仍然只
+  记录字段形状，不保存值。
+
+- Android 权限状态答复的 `requiresRestart` 改为按当前状态推导，不再固定回 `false`：撤销一个**已授予**的
+  运行时权限会让 Android 终止应用进程，因此 `granted` 状态下任何变更都需要重新拉起 App。此前该字段恒为
+  `false`，监督循环无法区分「瞬时断连」与「进程已被系统终止」，只能在重连窗口里等到超时。
+
 ## 0.3.0 - 2026-08-17
 
 发布批次：四包首次发到 pub.dev，随版依赖从 path 改成 hosted 约束——**仍用 git pin 的接入方

@@ -1,7 +1,7 @@
 name: patchbay_flutter
 description: 'Optional low-intrusion Flutter bridge for Patchbay: stable UI targets, Semantics observation and actions, navigation, waits and capture.'
 repository: https://github.com/cr1992/patchbay
-version: 0.3.0
+version: 0.4.0
 
 environment:
   sdk: '>=3.11.0 <4.0.0'
@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  patchbay: ^0.3.0
+  patchbay: ^0.4.0
 
 dev_dependencies:
   flutter_test:

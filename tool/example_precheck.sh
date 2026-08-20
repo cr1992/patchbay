@@ -41,10 +41,12 @@ PASS=0
 FAIL=0
 FAILED_STEPS=()
 OUT="$(mktemp "${TMPDIR:-/tmp}/patchbay-precheck-out.XXXXXX")"
+PRECHECK_TMP="$(mktemp -d "${TMPDIR:-/tmp}/patchbay-precheck.XXXXXX")"
 
 cleanup() {
   example_session_stop
   rm -f "$OUT"
+  rm -rf "$PRECHECK_TMP"
 }
 trap cleanup EXIT
 
@@ -92,6 +94,20 @@ check_local() {
   if [ "$actual" != "$expect_code" ]; then
     printf '  ✗ %-42s 退出码 %s（期望 %s）\n' "$name" "$actual" "$expect_code"
     FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  if [ -n "$assertion" ]; then
+    if ! PATCHBAY_OUT="$OUT" python3 -c "
+import json, os, sys
+raw = open(os.environ['PATCHBAY_OUT'], encoding='utf-8').read()
+try:
+    doc = json.loads(raw)
+except Exception:
+    print('输出不是 JSON'); sys.exit(1)
+sys.exit(0 if bool($assertion) else 1)
+" 2>/dev/null; then
+      printf '  ✗ %-42s 断言不成立：%s\n' "$name" "$assertion"
+      FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+    fi
   fi
   printf '  ✓ %-42s\n' "$name"
   PASS=$((PASS + 1))
@@ -263,7 +279,44 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 
 echo
 echo "== capture / blob =="
-check 'capture root' 0 "" --output "$(mktemp "${TMPDIR:-/tmp}/patchbay-shot.XXXXXX").png" capture root
+check 'capture root' 0 "" --output "$PRECHECK_TMP/capture.png" capture root
+
+echo
+echo "== 调试轨迹 =="
+TRACE_ROOT="$PRECHECK_TMP/traces"
+check_local 'trace start（active）' 0 "doc['active'] is True" \
+  --trace-dir "$TRACE_ROOT" --json trace start --name example-precheck --activate
+TRACE_ID="$(read_json "doc['trace']['traceId']")"
+check 'trace 记录 session / identity' 0 "" \
+  --trace-dir "$TRACE_ROOT" --json identity
+check 'trace 记录 job admission' 0 "'jobId' in json.dumps(doc)" \
+  --trace-dir "$TRACE_ROOT" --json exec example.job.run --args '{"steps":2}'
+TRACE_JOB_ID="$(read_json "doc.get('jobId') or doc['payload']['jobId']")"
+check 'trace 记录 job event' 0 "'events' in json.dumps(doc)" \
+  --trace-dir "$TRACE_ROOT" --json job get "$TRACE_JOB_ID"
+check 'trace 记录 artifact' 0 "" \
+  --trace-dir "$TRACE_ROOT" --output "$PRECHECK_TMP/trace-capture.png" capture root
+check_local 'trace mark' 0 "doc['marked'] is True" \
+  --trace-dir "$TRACE_ROOT" --json trace mark '设备预检完成'
+check_local 'trace stop' 0 "doc['stopped'] is True" \
+  --trace-dir "$TRACE_ROOT" --json trace stop
+check_local 'trace show 含 session/job/artifact' 0 \
+  "'session.observed' in json.dumps(doc) and 'job.event' in json.dumps(doc) and 'artifact.attached' in json.dumps(doc)" \
+  --trace-dir "$TRACE_ROOT" --json trace show "$TRACE_ID"
+check_local 'trace export（重新脱敏）' 0 "doc['traceId'] == '$TRACE_ID'" \
+  --trace-dir "$TRACE_ROOT" --json --include-artifacts \
+  trace export "$TRACE_ID" --output "$PRECHECK_TMP/trace-export"
+
+check_local 'trace comparison baseline start' 0 "doc['active'] is True" \
+  --trace-dir "$TRACE_ROOT" --json trace start --name example-baseline --activate
+BASELINE_TRACE_ID="$(read_json "doc['trace']['traceId']")"
+check 'trace baseline 记录 identity' 0 "" \
+  --trace-dir "$TRACE_ROOT" --json identity
+check_local 'trace comparison baseline stop' 0 "doc['stopped'] is True" \
+  --trace-dir "$TRACE_ROOT" --json trace stop
+check_local 'trace diff 可比较另一条轨迹' 0 \
+  "sum(len(doc[key]) for key in ('added', 'removed', 'changed')) > 0" \
+  --trace-dir "$TRACE_ROOT" --json trace diff "$TRACE_ID" "$BASELINE_TRACE_ID"
 
 echo
 echo "== logs =="

@@ -187,6 +187,12 @@ curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
         renderCompatibilityFixtures('0.4.0-rc.1', _hostSurface('0.3.0')),
         fixtures,
       );
+
+      expect(
+        renderCompatibilityCorpusReadme('0.4.0'),
+        contains(frozenCorpusMarker),
+      );
+      expect(renderCompatibilityCorpusReadme('0.4.0-rc.1'), isNull);
     });
 
     test('source golden 缺面或版本来源漂移时拒绝，不伪造语料', () {
@@ -1227,7 +1233,7 @@ sdks:
       final ProcessResult applied = await _run(repo, '--apply');
       expect(applied.stdout, contains('[通过] version-parity'));
       expect(applied.stdout, contains('[通过] version-references'));
-      expect(applied.stdout, contains('[通过] protocol-compat-fixture'));
+      expect(applied.stdout, contains('[跳过] protocol-compat-fixture'));
       expect(applied.stdout, contains('[通过] changelog-release'));
       expect(applied.stdout, contains('[通过] example-lock'));
       expect(applied.stdout, contains('[通过] compat-matrix-row'));
