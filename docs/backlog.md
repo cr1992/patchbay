@@ -46,8 +46,11 @@
 | PB-040-29 | example 覆盖全部可注入面 + 本地端到端预检 `tool/example_precheck.sh` | CI 三个 job 全在无设备容器里跑，证明不了「CLI 真的连上了设备上的 host」；example 此前只接 0.3.0 时代的面，0.4.0 能力在设备上一条都打不到 | 0.4.0 | 实现中 | 预检门禁见 [发版清单](release-checklist.md) 第 2 节；SC-040-04；待接进每周 emulator 冒烟 |
 | PB-040-28 | DevTools 借用：net 脱敏画像 | 阻塞在上游——`vm_service 15.2.0` 的 `getHttpProfile` 在调用方介入前已带 body/headers/cookies 与含 query 值的 URI，RPC 无采集前过滤参数，先收全量再脱敏已被 DG-040-03 否决。0.4.0 交付形态是不发布 capability、稳定返回 `networkProfilingUnavailable` | — | 待排期 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md) 的「net 的实现阻断」；DG-040-03；解除条件是上游开放采集前字段过滤，或接入方提供只产生已脱敏事件的 host collector |
 | PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 Android adb 的 normalize/reset/fail 建立可复核的权限前置状态 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-02；SC-040-03 |
-| PB-040-26 | 系统权限弹窗 driver、恢复协议与专用 trace 事件：Android UiAutomator、iOS simctl/XCUITest，处理后重新握手和解析目标 | Patchbay 只能观察 Flutter UI；系统弹窗会遮挡目标或改变 lifecycle，当前没有跨 OEM / 双平台均验证过的 reference runner | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；由 SC-040-02 延期 |
+| PB-040-26 | 系统权限弹窗 driver、恢复协议与专用 trace 事件：Android UiAutomator、iOS simctl/XCUITest，处理后重新握手和解析目标 | Patchbay 只能观察 Flutter UI；0.4.0 真机实践证明“App 触发 + 官方平台工具辅助 + 状态复核”的降级链可用，但当前没有跨 OEM / 双平台均验证过的 reference runner，后续实现不得以逐 OEM 文案 matcher 作为发布前提 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；由 SC-040-02 延期 |
 | PB-040-27 | HarmonyOS 兼容验证 spike 与 permission capability 矩阵：OpenHarmony Flutter、VM attach、Semantics/lifecycle、hdc + UiTest/Hypium | 架构可接入，但当前 Flutter 3.44.9 CI 与真机均未覆盖 HarmonyOS，不能直接宣称支持 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；[当前报告](verification/harmonyos-compatibility.md)；已到 SDK/真机阻塞，capability 保持 `unsupported` |
+| PB-040-30 | 失效会话的引导式恢复：列出同一应用的可用候选，并在显式确认后完成 prune / reselect / rebind | 真机长流程伴随进程替换时，既有 `sessionStaleProcess` fail-closed 能防止误连另一设备，但操作员仍需手工拼接恢复步骤；需要在不静默回退固定会话的前提下降低恢复成本 | — | 待排期 | 落地前补 Proposal；保持“固定会话不自动改选”的既有安全边界 |
+| PB-040-31 | 可见的长流程调试态：参考控制台展示当前命令、job phase、外部系统 UI 等待、终态与恢复提示 | headless CLI 适合自动化，但操作者只看真机时无法判断是在执行、等待系统弹窗还是已经结束；先在 example 提供可选参考面，业务 App 不默认承载调试 UI | — | 待排期 | 与 job 事件和 PB-040-26 恢复阶段共用事实源，不新增第二套状态机 |
+| PB-040-32 | 敏感参数的字段级无回显注入：由 descriptor 声明 sensitive 字段，CLI 通过 prompt/provider 合并且不进入 argv、history 或 trace | 现有 `--stdin` 能安全注入整行 JSON，但真实长流程仍需人工组装 payload；字段级输入可降低误回显和结构错误，同时保持自动化入口 | — | 待排期 | 与 PB-040-24 的回放凭据重新注入共用安全边界；落地前补 Proposal |
 
 ## 文档债（快赢，可随任意批次走）
 
