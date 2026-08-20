@@ -1077,7 +1077,7 @@ void main() {
     });
 
     testWidgets(
-      'text set applies formatters without onChanged or onSubmitted',
+      'text set replaces text without formatter or submit callbacks',
       (tester) async {
         final PatchbayUiRegistry registry = PatchbayUiRegistry();
         final PatchbayKey key = PatchbayKey.text(
@@ -1112,16 +1112,16 @@ void main() {
         await tester.pump();
 
         expect(result.admission, PatchbayAdmission.accepted);
-        expect(controller.text, 'ABC');
-        expect(formatterCalls, 1);
+        expect(controller.text, 'abc');
+        expect(formatterCalls, 0);
         expect(changedCalls, 0);
         expect(submittedCalls, 0);
-        expect(result.payload['value'], 'ABC');
+        expect(result.payload['value'], 'abc');
       },
     );
 
     testWidgets(
-      'text enter applies formatters then calls public onChanged and onSubmitted',
+      'text enter applies formatters then calls only public onChanged',
       (tester) async {
         final PatchbayUiRegistry registry = PatchbayUiRegistry();
         final PatchbayKey key = PatchbayKey.text(
@@ -1159,7 +1159,7 @@ void main() {
         expect(controller.text, 'ABC');
         expect(formatterCalls, 1);
         expect(changed, <String>['ABC']);
-        expect(submitted, <String>['ABC']);
+        expect(submitted, isEmpty);
         expect(result.payload['value'], 'ABC');
       },
     );

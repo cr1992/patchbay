@@ -445,7 +445,7 @@ final class PatchbayFlutterBridge {
 
     try {
       final TextEditingValue next = switch (operation) {
-        PatchbayUiOperation.textSet => binding.format(text),
+        PatchbayUiOperation.textSet => _replacement(text),
         PatchbayUiOperation.textEnter => binding.format(text),
         PatchbayUiOperation.capture => throw StateError(
           'capture is not a text operation',
@@ -454,7 +454,6 @@ final class PatchbayFlutterBridge {
       binding.controller.value = next;
       if (operation == PatchbayUiOperation.textEnter) {
         binding.onChanged?.call(next.text);
-        binding.onSubmitted?.call(next.text);
       }
       return PatchbayInvocation.accepted(
         requestId: requestId,
@@ -518,7 +517,6 @@ final class _TextBinding {
     required this.controller,
     required this.inputFormatters,
     required this.onChanged,
-    required this.onSubmitted,
   });
 
   static _TextBinding? fromWidget(Widget? widget) {
@@ -529,7 +527,6 @@ final class _TextBinding {
         controller: controller,
         inputFormatters: widget.inputFormatters ?? const <TextInputFormatter>[],
         onChanged: widget.onChanged,
-        onSubmitted: widget.onSubmitted,
       );
     }
     if (widget is EditableText) {
@@ -537,7 +534,6 @@ final class _TextBinding {
         controller: widget.controller,
         inputFormatters: widget.inputFormatters ?? const <TextInputFormatter>[],
         onChanged: widget.onChanged,
-        onSubmitted: widget.onSubmitted,
       );
     }
     return null;
@@ -546,7 +542,6 @@ final class _TextBinding {
   final TextEditingController controller;
   final List<TextInputFormatter> inputFormatters;
   final ValueChanged<String>? onChanged;
-  final ValueChanged<String>? onSubmitted;
 
   TextEditingValue format(String text) {
     final TextEditingValue oldValue = controller.value;

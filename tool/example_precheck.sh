@@ -206,11 +206,13 @@ echo
 echo "== 锚定手势 =="
 # 三棵 debug 诊断树会短暂触发 inspector/semantics 刷新；真机上紧接着抓树时，
 # scrollable 的独立 Semantics 节点可能正处在重建窗口。用正式的有界条件等待固定
-# 两个目标已经 mounted，再读取 generation；不能用 sleep 猜时序，也不能缺节点时跳过。
+# 三个目标已经 mounted，再读取 generation；不能用 sleep 猜时序，也不能缺节点时跳过。
 check 'ui wait gesture surface mounted' 0 "" \
   --json ui wait semantics-mounted example.gesture.surface --timeout-ms 10000
 check 'ui wait gesture list mounted' 0 "" \
   --json ui wait semantics-mounted example.gesture.list --timeout-ms 10000
+check 'ui wait nested gesture list mounted' 0 "" \
+  --json ui wait semantics-mounted example.gesture.nested --timeout-ms 10000
 # `ui semantics tree` 的 --json 输出是**信封**：树在 `payload.nodes`，而 `payload.nodes` 是一个
 # **扁平**列表——`children` 装的是 nodeId 整数，不是嵌套的子节点对象。按顶层 `doc['nodes']` 取、
 # 或按嵌套 children 递归，都只会得到空结果。
@@ -229,7 +231,7 @@ print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', 
 SURFACE_GEN="$(echo "$GEN" | awk '{print $1}')"
 LIST_GEN="$(echo "$GEN" | awk '{print $2}')"
 NESTED_GEN="$(echo "$GEN" | awk '{print $3}')"
-if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ]; then
+if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ]; then
   echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN"
   check 'gesture press-hold' 0 "doc['payload']['outcome'] == 'dispatched'" \
     --json ui gesture press-hold \
@@ -247,26 +249,37 @@ if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ]; then
     --json ui gesture fling \
     example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
+  # dispatched 只证明指针注入完成，不证明嵌套列表真的滚动。前后各抓一帧并比较，
+  # 把“命令退 0 但 UI 没动”的假绿挡在业务验收之前。
+  example_session_cli --json --output "$PRECHECK_TMP/nested-before.png" \
+    capture root >"$OUT" 2>&1
+  NESTED_BEFORE_BLOB="$(read_json "doc['payload']['blob']['blobId']")"
+  check 'gesture drag 嵌套水平列表' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui gesture drag \
+    example.gesture.nested "$NESTED_GEN" --start '{"x":0.8,"y":0.5}' \
+    --gesture-path '[{"x":0.5,"y":0.5},{"x":0.2,"y":0.5}]' --duration-ms 300
+  example_session_cli --json --output "$PRECHECK_TMP/nested-after.png" \
+    capture root >"$OUT" 2>&1
+  NESTED_AFTER_BLOB="$(read_json "doc['payload']['blob']['blobId']")"
+  check 'gesture drag 嵌套列表产生视觉变化' 0 \
+    "doc['payload']['differenceRatio'] > 0" \
+    --json capture diff "$NESTED_BEFORE_BLOB" "$NESTED_AFTER_BLOB"
+  # 外层 fling 放在嵌套拖动之后；先 fling 可能把 index 2 的嵌套目标滚出视口，
+  # 让后续手势因遮挡被拒而不是验证嵌套归属。
   check 'gesture fling 在列表面被接受' 0 "doc['payload']['outcome'] == 'dispatched'" \
     --json ui gesture fling \
     example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
-  if [ -n "$NESTED_GEN" ]; then
-    check 'gesture drag 嵌套水平列表' 0 "doc['payload']['outcome'] == 'dispatched'" \
-      --json ui gesture drag \
-      example.gesture.nested "$NESTED_GEN" --start '{"x":0.8,"y":0.5}' \
-      --gesture-path '[{"x":0.5,"y":0.5},{"x":0.2,"y":0.5}]' --duration-ms 300
-  fi
 else
-  printf '  ✗ %-42s %s\n' 'gesture surface generation' \
-    '未从 semantics 树解析到 example.gesture.surface / example.gesture.list 的 generation'
+  printf '  ✗ %-42s %s\n' 'gesture target generation' \
+    '未从 semantics 树解析到 surface / list / nested 三个目标的 generation'
   echo '      手势是 P0 能力，取不到目标按失败计——跳过会让"全过"不等于"全覆盖"。'
-  FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture surface generation')
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture target generation')
 fi
 
 # setText 可能让系统键盘占据视口；若放在手势前，较矮设备上的两个手势节点存在被裁出
 # Semantics 树的风险。手势证据固定后再测文本输入，后续 navigation 会离开当前页，
-# 不再依赖这两个节点。
+# 不再依赖这三个节点。
 check 'ui text set' 0 "" \
   --json ui text set example.note "$NOTE_GENERATION" 'precheck note'
 check 'ui text enter' 0 "" \
