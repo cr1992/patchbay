@@ -141,8 +141,7 @@ check 'catalog' 0 "len(doc['commands']) >= 26" --json catalog
 
 example_session_cli --json catalog >"$OUT" 2>&1
 NOTE_GENERATION="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.note'][0]")"
-CARD_CAPTURE_GEN="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.card.capture'][0]")"
-echo "  targets generation：note=$NOTE_GENERATION card=$CARD_CAPTURE_GEN"
+echo "  targets generation：note=$NOTE_GENERATION"
 
 echo
 echo "== 状态读取 =="
@@ -310,10 +309,15 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 echo
 echo "== capture / blob =="
 check 'capture root' 0 "" --output "$PRECHECK_TMP/capture.png" capture root
-if [ -n "$CARD_CAPTURE_GEN" ]; then
-  check 'capture target' 0 "" --output "$PRECHECK_TMP/capture-target.png" \
-    capture target example.card.capture "$CARD_CAPTURE_GEN"
-fi
+# 导航往返会重新挂载页面并递增 target generation。这里不能复用启动时的
+# catalog，否则真机预检会把合法的 stale-generation 拒绝误判成 capture 失败。
+check 'ui wait capture target mounted' 0 "" \
+  --json ui wait semantics-mounted example.card.capture --timeout-ms 10000
+example_session_cli --json catalog >"$OUT" 2>&1
+CARD_CAPTURE_GEN="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.card.capture'][0]")"
+echo "  capture target generation：card=$CARD_CAPTURE_GEN"
+check 'capture target' 0 "" --output "$PRECHECK_TMP/capture-target.png" \
+  capture target example.card.capture "$CARD_CAPTURE_GEN"
 example_session_cli --json --output "$PRECHECK_TMP/cap1.png" capture root >"$OUT" 2>&1
 BLOB1="$(read_json "doc['payload']['blob']['blobId']")"
 example_session_cli --json exec example.counter.increment >/dev/null 2>&1
