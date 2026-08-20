@@ -33,7 +33,8 @@ $ dart run packages/patchbay/bin/release_prep.dart --version <SemVer> --check
 | 判定项 | 硬 | 说的是什么 |
 |---|---|---|
 | `version-parity` | | 四包 `pubspec.yaml` 的 `version` 都等于目标版本 |
-| `version-references` | 硬 | `patchbayPackageVersion` 与两份 README 的受管版本引用等于目标版本 |
+| `version-references` | 硬 | `patchbayPackageVersion` 与当前安装文档的受管版本引用等于目标版本 |
+| `documentation-current` | 硬 | 根、包与 example README / guide 无旧安装口径，双语入口、SVG 能力与中性示例完整 |
 | `protocol-compat-fixture` | 硬 | 本版 host surface 已冻结成版本化 identity / catalog 兼容语料，且无缺失或漂移 |
 | `schema-version-parity` | | `service_host.dart` 与 `invocation.dart` 的 `schemaVersion` 同值 |
 | `changelog-release` | | 根 CHANGELOG 的 `## Unreleased` 已落款成 `## X.Y.Z - 日期` 且在表顶 |
@@ -52,8 +53,8 @@ $ dart run packages/patchbay/bin/release_prep.dart --version <SemVer> --check
 「硬」= 不接受降级成提示。`publish-advisories` 与 `format-gate` 同样按硬对待：pub 只要有一条
 warning，`--dry-run` 就退 65，和 error 一样发不出去；排版则是 CI 门禁，tag 打完再被拦代价更大。
 
-`--apply` 会代改：四包 version 与随版依赖约束、`patchbayPackageVersion`、两份 README 的受管版本
-引用、版本化协议兼容语料、根 CHANGELOG 落款、四包 CHANGELOG（从根表派生）、
+`--apply` 会代改：四包 version 与随版依赖约束、`patchbayPackageVersion`、README / guide / CLI README
+的受管版本引用、版本化协议兼容语料、根 CHANGELOG 落款、四包 CHANGELOG（从根表派生）、
 `example/pubspec.lock` 的版本格子、兼容矩阵新行（tag 后才能定的两格留占位符）、缺失的
 `pubspec_overrides.yaml`。它不碰 `publish_to: none`（第 3 节），也不代写 CHANGELOG 正文；碎片只从
 与 `--version` 精确同名的目录读取。
@@ -70,7 +71,7 @@ Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
 - [ ] 本地 example 端到端预检全绿——CI 三个 job 都跑在无设备的容器里，证明不了「CLI 真的连上了一个跑
   在设备上的 host」。这一项必须在接入方真机验收之前完成，不能用 CI 绿灯代替。
 - [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，三个 job 与上面一一对应）
-- [ ] README 的项目状态、安装示例与四包版本一致（`release_prep` 机检并可同步受管版本引用）
+- [ ] 当前文档、双语入口与 SVG 在打 tag 前定稿；`documentation-current` 已绿，不留“发布后再改”事项
 
 本地复跑（`wire_codegen.dart --check` 必须从仓根调用——它的生成物 header 记录仓根相对路径，
 进包目录跑会假漂移；`command_codegen.dart --check` 没有这个约束，其 header 记录的是相对生成物

@@ -12,17 +12,16 @@ For the protocol, lifecycle, and transport boundaries see
 
 ## Install and Run
 
-These packages are not published to pub.dev yet; you can install from a repository tag:
+Install the CLI from pub.dev and pin the version used by the app:
 
 ```console
-$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
+$ dart pub global activate patchbay_cli 0.4.0
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # it installs here, but that is not on PATH by default
 $ patchbay --help
 ```
 
-For the trade-offs between the three installation forms — including the prebuilt binaries from
-`0.3.0` onward, a startup-time comparison, and the trap that running
+For the trade-offs between the three installation forms — including prebuilt release binaries,
+a startup-time comparison, and the trap that running
 `dart run patchbay_cli:patchbay` inside a consumer's repository directory resolves to the version
 that repo pins — see [the installation section of the usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)
 (currently in Chinese). When changing the CLI itself, `dart run tool/build_cli.dart` compiles the

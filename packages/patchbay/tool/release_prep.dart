@@ -69,9 +69,30 @@ const String hostSurfaceGoldenPath =
 const String compatibilityCorpusPath = 'packages/patchbay_cli/test/golden';
 const String packageVersionSourcePath =
     'packages/patchbay/lib/src/version.dart';
-const List<String> releaseReadmePaths = <String>[
+
+/// 对外文档中的「当前版本」入口。发版时只改这些文件里的受管版本锚点。
+const List<String> releaseVersionDocumentPaths = <String>[
   'README.md',
   'README.zh-CN.md',
+  'docs/guide.md',
+  'packages/patchbay_cli/README.md',
+  'packages/patchbay_cli/README.zh-CN.md',
+];
+
+/// 对外当前事实面。历史版本只允许留在 releases / proposals / changelog / 兼容语料中。
+const List<String> activePublicDocumentPaths = <String>[
+  ...releaseVersionDocumentPaths,
+  'packages/patchbay/README.md',
+  'packages/patchbay/README.zh-CN.md',
+  'packages/patchbay_transport/README.md',
+  'packages/patchbay_transport/README.zh-CN.md',
+  'packages/patchbay_flutter/README.md',
+  'packages/patchbay_flutter/README.zh-CN.md',
+  'packages/patchbay_flutter/example/README.md',
+  'packages/patchbay_flutter/example/README.zh-CN.md',
+  'docs/design.md',
+  'docs/assets/patchbay-hero.svg',
+  'docs/assets/patchbay-architecture.svg',
 ];
 const String serviceHostPath = 'packages/patchbay/lib/src/service_host.dart';
 const String invocationPath = 'packages/patchbay/lib/src/invocation.dart';
@@ -368,31 +389,51 @@ String applyPackageVersionSource(String source, String version) {
   );
 }
 
-final List<RegExp> _managedReadmeVersionPatterns = <RegExp>[
+final List<RegExp> _managedRootReadmeVersionPatterns = <RegExp>[
   RegExp(
     r'(^> \*\*(?:Project status:|项目状态：)\*\* `v)([^`]+)(`)',
     multiLine: true,
   ),
-  RegExp(r'(^\s*ref:\s*patchbay-v)([^\s]+)(\s*$)', multiLine: true),
-  RegExp(r'(--git-ref\s+patchbay-v)([^\s]+)(\s+--git-path)'),
+  RegExp(r'(^\s*patchbay_flutter:\s*\^)([^\s]+)(\s*$)', multiLine: true),
+  RegExp(
+    r'(^\$ dart pub global activate patchbay_cli\s+)([^\s]+)(\s*$)',
+    multiLine: true,
+  ),
+];
+
+final List<RegExp> _managedGuideVersionPatterns = <RegExp>[
+  RegExp(r'(^\s*patchbay_flutter:\s*\^)([^\s]+)(\s*$)', multiLine: true),
+  RegExp(
+    r'(^\$ dart pub global activate patchbay_cli\s+)([^\s]+)(\s*$)',
+    multiLine: true,
+  ),
+];
+
+final List<RegExp> _managedCliReadmeVersionPatterns = <RegExp>[
+  RegExp(
+    r'(^\$ dart pub global activate patchbay_cli\s+)([^\s]+)(\s*$)',
+    multiLine: true,
+  ),
 ];
 
 final RegExp _managedReadmeArtifactPattern = RegExp(
   r'(/releases/download/patchbay-v)([^/]+)(/patchbay-)([^/\s]+?)(-(?:linux|macos|windows)-)',
 );
 
-/// 同步 README 中明确由发版流程管理的状态、Git 安装 ref 与 AOT 下载版本。
-///
-/// 每个锚点必须恰好出现一次；README 结构漂移时 fail-closed，而不是泛化替换文档里的历史版本。
-String applyReadmeVersionReferences(String markdown, String version) {
-  var result = markdown;
-  for (final RegExp pattern in _managedReadmeVersionPatterns) {
+String _applyVersionPatterns(
+  String document,
+  String version,
+  List<RegExp> patterns, {
+  required String label,
+}) {
+  var result = document;
+  for (final RegExp pattern in patterns) {
     final List<RegExpMatch> matches = pattern
         .allMatches(result)
         .toList(growable: false);
     if (matches.length != 1) {
       throw FormatException(
-        'README 版本锚点应恰好出现一次，实际 ${matches.length} 个：$pattern',
+        '$label 版本锚点应恰好出现一次，实际 ${matches.length} 个：$pattern',
       );
     }
     final RegExpMatch match = matches.single;
@@ -402,19 +443,64 @@ String applyReadmeVersionReferences(String markdown, String version) {
       '${match.group(1)}$version${match.group(3)}',
     );
   }
+  return result;
+}
+
+String _applyArtifactVersion(String document, String version, String label) {
   final List<RegExpMatch> artifacts = _managedReadmeArtifactPattern
-      .allMatches(result)
+      .allMatches(document)
       .toList(growable: false);
   if (artifacts.length != 1) {
-    throw FormatException('README AOT 下载锚点应恰好出现一次，实际 ${artifacts.length} 个');
+    throw FormatException('$label AOT 下载锚点应恰好出现一次，实际 ${artifacts.length} 个');
   }
   final RegExpMatch artifact = artifacts.single;
-  return result.replaceRange(
+  return document.replaceRange(
     artifact.start,
     artifact.end,
     '${artifact.group(1)}$version${artifact.group(3)}$version${artifact.group(5)}',
   );
 }
+
+/// 同步根 README 中明确由发版流程管理的状态、hosted 安装与 AOT 下载版本。
+///
+/// 每个锚点必须恰好出现一次；README 结构漂移时 fail-closed，而不是泛化替换文档里的历史版本。
+String applyReadmeVersionReferences(String markdown, String version) {
+  final String result = _applyVersionPatterns(
+    markdown,
+    version,
+    _managedRootReadmeVersionPatterns,
+    label: 'README',
+  );
+  return _applyArtifactVersion(result, version, 'README');
+}
+
+/// 按文件同步当前文档的受管版本锚点；长期设计文档与 SVG 不做版本替换。
+String applyReleaseDocumentVersionReferences(
+  String path,
+  String document,
+  String version,
+) => switch (path) {
+  'README.md' ||
+  'README.zh-CN.md' => applyReadmeVersionReferences(document, version),
+  'docs/guide.md' => _applyArtifactVersion(
+    _applyVersionPatterns(
+      document,
+      version,
+      _managedGuideVersionPatterns,
+      label: path,
+    ),
+    version,
+    path,
+  ),
+  'packages/patchbay_cli/README.md' ||
+  'packages/patchbay_cli/README.zh-CN.md' => _applyVersionPatterns(
+    document,
+    version,
+    _managedCliReadmeVersionPatterns,
+    label: path,
+  ),
+  _ => throw FormatException('不是受管版本文档：$path'),
+};
 
 /// 删掉 `publish_to: none` 这一行——**发布开关**，只在显式 `--enable-publish` 时执行。
 ///
@@ -1288,6 +1374,7 @@ List<ReleaseCheck> evaluateRelease({
   return <ReleaseCheck>[
     _checkVersionParity(version, inputs),
     _checkVersionReferences(version, inputs),
+    _checkDocumentationCurrent(version, inputs),
     _checkCompatibilityFixture(version, inputs),
     _checkSchemaParity(inputs),
     _checkChangelog(version, inputs),
@@ -1362,14 +1449,15 @@ ReleaseCheck _checkVersionReferences(String version, ReleaseInputs inputs) {
   } on FormatException catch (error) {
     stale.add('patchbayPackageVersion（${error.message}）');
   }
-  for (final String path in releaseReadmePaths) {
+  for (final String path in releaseVersionDocumentPaths) {
     final String? readme = inputs.readmes[path];
     if (readme == null) {
       stale.add('$path（缺文件）');
       continue;
     }
     try {
-      if (applyReadmeVersionReferences(readme, version) != readme) {
+      if (applyReleaseDocumentVersionReferences(path, readme, version) !=
+          readme) {
         stale.add(path);
       }
     } on FormatException catch (error) {
@@ -1379,12 +1467,109 @@ ReleaseCheck _checkVersionReferences(String version, ReleaseInputs inputs) {
   if (stale.isEmpty) {
     return ReleaseCheck.ok(
       'version-references',
-      '`patchbayPackageVersion` 与两份 README 版本引用均为 $version',
+      '`patchbayPackageVersion` 与当前安装文档的受管版本引用均为 $version',
     );
   }
   return ReleaseCheck.failed(
     'version-references',
     '版本引用未同步到 $version：${stale.join('、')}（`--apply` 可代改）',
+    hard: true,
+  );
+}
+
+ReleaseCheck _checkDocumentationCurrent(String version, ReleaseInputs inputs) {
+  final problems = <String>[];
+  for (final String path in activePublicDocumentPaths) {
+    if (!inputs.readmes.containsKey(path)) problems.add('$path（缺文件）');
+  }
+  if (problems.isNotEmpty) {
+    return ReleaseCheck.failed(
+      'documentation-current',
+      '对外当前文档不完整：${problems.join('、')}',
+      hard: true,
+    );
+  }
+
+  const List<String> unavailablePhrases = <String>[
+    'not published to pub.dev yet',
+    '尚未发布到 pub.dev',
+    'will be published to pub.dev',
+    '届时发布到 pub.dev',
+  ];
+  for (final MapEntry<String, String> entry in inputs.readmes.entries) {
+    for (final String phrase in unavailablePhrases) {
+      if (entry.value.toLowerCase().contains(phrase.toLowerCase())) {
+        problems.add('${entry.key} 仍声明 `$phrase`');
+      }
+    }
+  }
+
+  const Map<String, String> publicationMarkers = <String, String>{
+    'README.md': 'published on pub.dev',
+    'README.zh-CN.md': '已发布到 pub.dev',
+  };
+  for (final MapEntry<String, String> marker in publicationMarkers.entries) {
+    if (!inputs.readmes[marker.key]!.contains(marker.value)) {
+      problems.add('${marker.key} 缺当前发布状态 `${marker.value}`');
+    }
+  }
+
+  final RegExp tagReference = RegExp(
+    r'patchbay-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)',
+  );
+  for (final String path in activePublicDocumentPaths) {
+    final String document = inputs.readmes[path]!;
+    for (final RegExpMatch match in tagReference.allMatches(document)) {
+      if (match.group(1) != version) {
+        problems.add('$path 含旧版当前引用 `${match.group(0)}`');
+      }
+    }
+  }
+
+  final RegExp concreteCommand = RegExp(
+    r'(?:patchbay(?:\s+--wait)?\s+exec|Host:\s+exec)\s+([a-z0-9][a-z0-9._-]*)',
+    caseSensitive: false,
+  );
+  for (final String path in activePublicDocumentPaths) {
+    for (final RegExpMatch match in concreteCommand.allMatches(
+      inputs.readmes[path]!,
+    )) {
+      final String command = match.group(1)!;
+      if (!command.startsWith('example.')) {
+        problems.add('$path 含非中性命令示例 `$command`');
+      }
+    }
+  }
+
+  final String architecture =
+      inputs.readmes['docs/assets/patchbay-architecture.svg']!;
+  for (final String marker in <String>[
+    'patchbay',
+    'patchbay_transport',
+    'patchbay_cli',
+    'patchbay_flutter',
+    'gesture / inspect / wait',
+  ]) {
+    if (!architecture.contains(marker)) {
+      problems.add('架构 SVG 缺能力/包标记 `$marker`');
+    }
+  }
+  if (!inputs.readmes['docs/assets/patchbay-hero.svg']!.contains(
+    'patchbay exec example.job.run',
+  )) {
+    problems.add('首页 SVG 缺中性命令示例 `patchbay exec example.job.run`');
+  }
+
+  if (problems.isEmpty) {
+    return ReleaseCheck.ok(
+      'documentation-current',
+      '当前文档无旧安装口径，双语入口、架构 SVG 与中性示例已纳入门禁',
+      hard: true,
+    );
+  }
+  return ReleaseCheck.failed(
+    'documentation-current',
+    problems.join('；'),
     hard: true,
   );
 }
@@ -1890,8 +2075,7 @@ List<String> manualSteps(String version, ReleaseInputs inputs) {
         '「patchbay_flutter 从 git、patchbay 也从 git」会被 pub 判成 source 冲突，'
         '接入方要么整体改用 pub.dev 版本，要么在自己仓加 `dependency_overrides` 把四包统一指回 git。'
         '口径见 docs/release-checklist.md。',
-    '发布落地后把安装口径改到 pub.dev（README 的 git ref 安装说明、docs/guide.md 的'
-        '「尚未发布到 pub.dev」一句）。',
+    '在打 tag 前确认 `documentation-current` 已绿；当前安装口径、双语入口与 SVG 不留到发布后补。',
     '真机验收：见 docs/release-checklist.md 对应一节。',
   ];
 }
@@ -2055,7 +2239,7 @@ ReleaseInputs _read(String root) {
     compatibilityCorpus: readCompatibilityCorpus(),
     packageVersionSource: read(packageVersionSourcePath),
     readmes: <String, String>{
-      for (final String path in releaseReadmePaths) path: read(path),
+      for (final String path in activePublicDocumentPaths) path: read(path),
     },
     changelog: read(changelogPath),
     examplePubspec: read(examplePubspecPath),
@@ -2333,9 +2517,13 @@ void _applyToDisk(String root, _Options options) {
     inputs.packageVersionSource,
     applyPackageVersionSource(inputs.packageVersionSource, options.version),
   );
-  for (final String path in releaseReadmePaths) {
+  for (final String path in releaseVersionDocumentPaths) {
     final String before = inputs.readmes[path]!;
-    stage(path, before, applyReadmeVersionReferences(before, options.version));
+    stage(
+      path,
+      before,
+      applyReleaseDocumentVersionReferences(path, before, options.version),
+    );
   }
 
   for (final String name in releasePackages) {

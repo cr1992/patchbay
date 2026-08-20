@@ -1,20 +1,20 @@
 /// Release-version drift guard.
 ///
 /// The four package manifests are the version source of truth. Each root README
-/// repeats that value in one status line and two copy-pasteable Git refs; those
+/// repeats that value in one status line and two copy-pasteable hosted installs; those
 /// repetitions are intentional for usability, so CI must keep them aligned.
 ///
 /// There are two root READMEs — the English `README.md` and the Chinese
 /// `README.zh-CN.md`. Both repeat the version, so both are checked; guarding
 /// only one would let the other drift silently, which is exactly the failure
 /// this guard exists to prevent. The status line is the only language-dependent
-/// anchor, so it is passed in per file; the two Git refs are language-neutral.
+/// anchor, so it is passed in per file; the two install anchors are language-neutral.
 ///
 /// `patchbayPackageVersion` is the repetition with teeth. The others misprint a
 /// document when they drift; this one is served to clients as `serverVersion`,
 /// so a stale constant makes every App in the field report a build it is not —
 /// and a host lying about itself is worse than one that never reported. Like
-/// the Git refs it is language-neutral, so it is checked on every call rather
+/// the install anchors it is language-neutral, so it is checked on every call rather
 /// than per README.
 library;
 
@@ -30,11 +30,14 @@ final RegExp _readmeStatusVersionZh = RegExp(r'\*\*项目状态：\*\*\s*`v([^`]
 final RegExp _readmeStatusVersionEn = RegExp(
   r'\*\*Project status:\*\*\s*`v([^`]+)`',
 );
-final RegExp _readmeFlutterRef = RegExp(
-  r'^\s*ref:\s*patchbay-v([^\s]+)\s*$',
+final RegExp _readmeFlutterVersion = RegExp(
+  r'^\s*patchbay_flutter:\s*\^([^\s]+)\s*$',
   multiLine: true,
 );
-final RegExp _readmeCliRef = RegExp(r'--git-ref\s+patchbay-v([^\s]+)');
+final RegExp _readmeCliVersion = RegExp(
+  r'^\$ dart pub global activate patchbay_cli\s+([^\s]+)\s*$',
+  multiLine: true,
+);
 final RegExp _packageVersionConstant = RegExp(
   r"const\s+String\s+patchbayPackageVersion\s*=\s*'([^']+)'",
 );
@@ -70,8 +73,8 @@ List<String> checkReleaseVersionParity({
 
   final Map<String, String?> readmeVersions = <String, String?>{
     '项目状态': _firstCapture(statusPattern ?? _readmeStatusVersionZh, readme),
-    'Flutter Git ref': _firstCapture(_readmeFlutterRef, readme),
-    'CLI --git-ref': _firstCapture(_readmeCliRef, readme),
+    'Flutter hosted 版本': _firstCapture(_readmeFlutterVersion, readme),
+    'CLI hosted 版本': _firstCapture(_readmeCliVersion, readme),
   };
   for (final MapEntry<String, String?> entry in readmeVersions.entries) {
     if (entry.value == null) {
@@ -121,13 +124,13 @@ void main() {
   };
   const String alignedReadme = '''
 > **项目状态：** `v1.2.3`
-      ref: patchbay-v1.2.3
-    --git-ref patchbay-v1.2.3 --git-path packages/patchbay_cli
+  patchbay_flutter: ^1.2.3
+\$ dart pub global activate patchbay_cli 1.2.3
 ''';
   const String alignedReadmeEn = '''
 > **Project status:** `v1.2.3`
-      ref: patchbay-v1.2.3
-    --git-ref patchbay-v1.2.3 --git-path packages/patchbay_cli
+  patchbay_flutter: ^1.2.3
+\$ dart pub global activate patchbay_cli 1.2.3
 ''';
   const String alignedVersionSource =
       "const String patchbayPackageVersion = '1.2.3';";
@@ -195,23 +198,26 @@ void main() {
       );
     });
 
-    test('README 状态或任一安装 ref 漂移时逐项报出', () {
+    test('README 状态或任一 hosted 安装版本漂移时逐项报出', () {
       final List<String> problems = checkReleaseVersionParity(
         pubspecs: alignedPubspecs,
         versionSource: alignedVersionSource,
         readme: alignedReadme
             .replaceFirst('`v1.2.3`', '`v1.2.2`')
-            .replaceFirst('ref: patchbay-v1.2.3', 'ref: patchbay-v1.2.1')
             .replaceFirst(
-              '--git-ref patchbay-v1.2.3',
-              '--git-ref patchbay-v1.2.0',
+              'patchbay_flutter: ^1.2.3',
+              'patchbay_flutter: ^1.2.1',
+            )
+            .replaceFirst(
+              'activate patchbay_cli 1.2.3',
+              'activate patchbay_cli 1.2.0',
             ),
       );
 
       expect(problems, hasLength(3));
       expect(problems, contains(contains('项目状态')));
-      expect(problems, contains(contains('Flutter Git ref')));
-      expect(problems, contains(contains('CLI --git-ref')));
+      expect(problems, contains(contains('Flutter hosted 版本')));
+      expect(problems, contains(contains('CLI hosted 版本')));
     });
 
     test('抽取式失效明确判红，不会恒绿', () {
@@ -297,7 +303,7 @@ void main() {
           ),
           isEmpty,
           reason:
-              'pubspec.yaml 是版本真源；${entry.key} 的状态与可复制 Git ref、以及 host 报给'
+              'pubspec.yaml 是版本真源；${entry.key} 的状态与可复制 hosted 安装版本、以及 host 报给'
               '客户端的 patchbayPackageVersion 必须随发版同改',
         );
       });

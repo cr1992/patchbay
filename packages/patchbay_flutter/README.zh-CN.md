@@ -166,7 +166,7 @@ class _LoginFormState extends State<LoginForm> {
 | 标注方式 | 查挂载的方式 |
 |---|---|
 | `PatchbayKey.text/capture('id')` | 读 `patchbay catalog`，看 `uiTargets` 里该 ID 的 `mounted` / `generation` |
-| `Semantics(identifier: 'id')` | `patchbay ui wait semantics-mounted <identifier>`（长轮询，自 `patchbay-v0.1.0` 起提供） |
+| `Semantics(identifier: 'id')` | `patchbay ui wait semantics-mounted <identifier>`（长轮询） |
 
 `PatchbayKey` 只替换 Widget 的 `key`，**不会**顺带写 Semantics `identifier`；反过来
 `ui wait semantics-mounted` 走的是 Semantics 树遍历，看不到只标了 `PatchbayKey` 的目标。
