@@ -4,11 +4,18 @@
 // Generator: packages/patchbay/tool/wire_codegen.dart
 // Library: patchbay_core_wire
 
+/// Strict wire representation of `PatchbayCommandModeWire`.
 enum PatchbayCommandModeWire {
+  /// The `readOnly` wire value.
   readOnly,
+
+  /// The `immediate` wire value.
   immediate,
+
+  /// The `job` wire value.
   job;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayCommandModeWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -17,17 +24,31 @@ enum PatchbayCommandModeWire {
     throw FormatException('$path has unknown PatchbayCommandModeWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayParameterTypeWire`.
 enum PatchbayParameterTypeWire {
+  /// The `string` wire value.
   string,
+
+  /// The `integer` wire value.
   integer,
+
+  /// The `number` wire value.
   number,
+
+  /// The `boolean` wire value.
   boolean,
+
+  /// The `enumeration` wire value.
   enumeration,
+
+  /// The `json` wire value.
   json;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayParameterTypeWire fromJson(
     Object? value, {
     String path = r'$',
@@ -39,13 +60,19 @@ enum PatchbayParameterTypeWire {
     throw FormatException('$path has unknown PatchbayParameterTypeWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayPlaneWire`.
 enum PatchbayPlaneWire {
+  /// The `domain` wire value.
   domain,
+
+  /// The `flutterUi` wire value.
   flutterUi;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayPlaneWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -54,14 +81,22 @@ enum PatchbayPlaneWire {
     throw FormatException('$path has unknown PatchbayPlaneWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbaySideEffectWire`.
 enum PatchbaySideEffectWire {
+  /// The `none` wire value.
   none,
+
+  /// The `appState` wire value.
   appState,
+
+  /// The `external` wire value.
   external;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbaySideEffectWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -70,16 +105,28 @@ enum PatchbaySideEffectWire {
     throw FormatException('$path has unknown PatchbaySideEffectWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayFactSourceWire`.
 enum PatchbayFactSourceWire {
+  /// The `appRecorded` wire value.
   appRecorded,
+
+  /// The `commandEcho` wire value.
   commandEcho,
+
+  /// The `deviceReported` wire value.
   deviceReported,
+
+  /// The `uiObserved` wire value.
   uiObserved,
+
+  /// The `unknown` wire value.
   unknown;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayFactSourceWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -88,13 +135,19 @@ enum PatchbayFactSourceWire {
     throw FormatException('$path has unknown PatchbayFactSourceWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayAdmissionWire`.
 enum PatchbayAdmissionWire {
+  /// The `accepted` wire value.
   accepted,
+
+  /// The `rejected` wire value.
   rejected;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayAdmissionWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -103,15 +156,25 @@ enum PatchbayAdmissionWire {
     throw FormatException('$path has unknown PatchbayAdmissionWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayJobPhaseWire`.
 enum PatchbayJobPhaseWire {
+  /// The `running` wire value.
   running,
+
+  /// The `completed` wire value.
   completed,
+
+  /// The `failed` wire value.
   failed,
+
+  /// The `cancelled` wire value.
   cancelled;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayJobPhaseWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -120,13 +183,19 @@ enum PatchbayJobPhaseWire {
     throw FormatException('$path has unknown PatchbayJobPhaseWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayJobWaitOutcomeWire`.
 enum PatchbayJobWaitOutcomeWire {
+  /// The `changed` wire value.
   changed,
+
+  /// The `timedOut` wire value.
   timedOut;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayJobWaitOutcomeWire fromJson(
     Object? value, {
     String path = r'$',
@@ -140,13 +209,19 @@ enum PatchbayJobWaitOutcomeWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayUiTargetKindWire`.
 enum PatchbayUiTargetKindWire {
+  /// The `text` wire value.
   text,
+
+  /// The `capture` wire value.
   capture;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayUiTargetKindWire fromJson(
     Object? value, {
     String path = r'$',
@@ -158,13 +233,19 @@ enum PatchbayUiTargetKindWire {
     throw FormatException('$path has unknown PatchbayUiTargetKindWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbaySensitivePolicyWire`.
 enum PatchbaySensitivePolicyWire {
+  /// The `public` wire value.
   public,
+
+  /// The `redacted` wire value.
   redacted;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbaySensitivePolicyWire fromJson(
     Object? value, {
     String path = r'$',
@@ -178,14 +259,22 @@ enum PatchbaySensitivePolicyWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayNavigationOperationWire`.
 enum PatchbayNavigationOperationWire {
+  /// The `go` wire value.
   go,
+
+  /// The `push` wire value.
   push,
+
+  /// The `back` wire value.
   back;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayNavigationOperationWire fromJson(
     Object? value, {
     String path = r'$',
@@ -199,17 +288,31 @@ enum PatchbayNavigationOperationWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayUiWaitConditionWire`.
 enum PatchbayUiWaitConditionWire {
+  /// The `semanticsMounted` wire value.
   semanticsMounted,
+
+  /// The `semanticsUnmounted` wire value.
   semanticsUnmounted,
+
+  /// The `semanticsValue` wire value.
   semanticsValue,
+
+  /// The `navigationDestination` wire value.
   navigationDestination,
+
+  /// The `treeRevision` wire value.
   treeRevision,
+
+  /// The `frameRevision` wire value.
   frameRevision;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayUiWaitConditionWire fromJson(
     Object? value, {
     String path = r'$',
@@ -223,17 +326,31 @@ enum PatchbayUiWaitConditionWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayLogLevelWire`.
 enum PatchbayLogLevelWire {
+  /// The `trace` wire value.
   trace,
+
+  /// The `debug` wire value.
   debug,
+
+  /// The `info` wire value.
   info,
+
+  /// The `warning` wire value.
   warning,
+
+  /// The `error` wire value.
   error,
+
+  /// The `fatal` wire value.
   fatal;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayLogLevelWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -242,13 +359,19 @@ enum PatchbayLogLevelWire {
     throw FormatException('$path has unknown PatchbayLogLevelWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayLogDirectionWire`.
 enum PatchbayLogDirectionWire {
+  /// The `forward` wire value.
   forward,
+
+  /// The `backward` wire value.
   backward;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayLogDirectionWire fromJson(
     Object? value, {
     String path = r'$',
@@ -260,15 +383,25 @@ enum PatchbayLogDirectionWire {
     throw FormatException('$path has unknown PatchbayLogDirectionWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayLogBatchOutcomeWire`.
 enum PatchbayLogBatchOutcomeWire {
+  /// The `records` wire value.
   records,
+
+  /// The `staleCursor` wire value.
   staleCursor,
+
+  /// The `timedOut` wire value.
   timedOut,
+
+  /// The `cancelled` wire value.
   cancelled;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayLogBatchOutcomeWire fromJson(
     Object? value, {
     String path = r'$',
@@ -282,14 +415,22 @@ enum PatchbayLogBatchOutcomeWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayLogTruncationWire`.
 enum PatchbayLogTruncationWire {
+  /// The `entryLimit` wire value.
   entryLimit,
+
+  /// The `byteLimit` wire value.
   byteLimit,
+
+  /// The `sourceLimit` wire value.
   sourceLimit;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayLogTruncationWire fromJson(
     Object? value, {
     String path = r'$',
@@ -301,12 +442,16 @@ enum PatchbayLogTruncationWire {
     throw FormatException('$path has unknown PatchbayLogTruncationWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayLogRedactionWire`.
 enum PatchbayLogRedactionWire {
+  /// The `consumerRedacted` wire value.
   consumerRedacted;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayLogRedactionWire fromJson(
     Object? value, {
     String path = r'$',
@@ -318,13 +463,19 @@ enum PatchbayLogRedactionWire {
     throw FormatException('$path has unknown PatchbayLogRedactionWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayBlobSourceWire`.
 enum PatchbayBlobSourceWire {
+  /// The `logExport` wire value.
   logExport,
+
+  /// The `flutterCapture` wire value.
   flutterCapture;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayBlobSourceWire fromJson(Object? value, {String path = r'$'}) {
     final wire = _wireString(value, path);
     for (final candidate in values) {
@@ -333,13 +484,19 @@ enum PatchbayBlobSourceWire {
     throw FormatException('$path has unknown PatchbayBlobSourceWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayCaptureTargetWire`.
 enum PatchbayCaptureTargetWire {
+  /// The `root` wire value.
   root,
+
+  /// The `registeredTarget` wire value.
   registeredTarget;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayCaptureTargetWire fromJson(
     Object? value, {
     String path = r'$',
@@ -351,14 +508,22 @@ enum PatchbayCaptureTargetWire {
     throw FormatException('$path has unknown PatchbayCaptureTargetWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayCaptureWarningWire`.
 enum PatchbayCaptureWarningWire {
+  /// The `flutterSubtreeOnly` wire value.
   flutterSubtreeOnly,
+
+  /// The `platformViewsMayBeMissing` wire value.
   platformViewsMayBeMissing,
+
+  /// The `systemUiNotIncluded` wire value.
   systemUiNotIncluded;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayCaptureWarningWire fromJson(
     Object? value, {
     String path = r'$',
@@ -372,14 +537,22 @@ enum PatchbayCaptureWarningWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayKeepAwakeReleaseWire`.
 enum PatchbayKeepAwakeReleaseWire {
+  /// The `operatorRequest` wire value.
   operatorRequest,
+
+  /// The `leaseExpired` wire value.
   leaseExpired,
+
+  /// The `hostDisposed` wire value.
   hostDisposed;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayKeepAwakeReleaseWire fromJson(
     Object? value, {
     String path = r'$',
@@ -393,14 +566,22 @@ enum PatchbayKeepAwakeReleaseWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbaySnapshotConditionWire`.
 enum PatchbaySnapshotConditionWire {
+  /// The `exists` wire value.
   exists,
+
+  /// The `absent` wire value.
   absent,
+
+  /// The `equals` wire value.
   equals;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbaySnapshotConditionWire fromJson(
     Object? value, {
     String path = r'$',
@@ -414,14 +595,22 @@ enum PatchbaySnapshotConditionWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbaySnapshotMissWire`.
 enum PatchbaySnapshotMissWire {
+  /// The `missingKey` wire value.
   missingKey,
+
+  /// The `nullValue` wire value.
   nullValue,
+
+  /// The `notAnObject` wire value.
   notAnObject;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbaySnapshotMissWire fromJson(
     Object? value, {
     String path = r'$',
@@ -433,10 +622,13 @@ enum PatchbaySnapshotMissWire {
     throw FormatException('$path has unknown PatchbaySnapshotMissWire: $wire');
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayParameterDescriptorWire`.
 final class PatchbayParameterDescriptorWire {
+  /// Creates a fully validated wire value.
   const PatchbayParameterDescriptorWire({
     required this.name,
     required this.type,
@@ -447,14 +639,28 @@ final class PatchbayParameterDescriptorWire {
     required this.summary,
   });
 
+  /// Value of the `name` wire field.
   final String name;
+
+  /// Value of the `type` wire field.
   final PatchbayParameterTypeWire type;
+
+  /// Value of the `required` wire field.
   final bool required;
+
+  /// Value of the `sensitive` wire field.
   final bool sensitive;
+
+  /// Value of the `default` wire field.
   final Object? defaultValue;
+
+  /// Value of the `allowedValues` wire field.
   final List<Object?> allowedValues;
+
+  /// Value of the `summary` wire field.
   final String? summary;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayParameterDescriptorWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -490,6 +696,7 @@ final class PatchbayParameterDescriptorWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'name': name,
     'type': type.toJson(),
@@ -504,7 +711,9 @@ final class PatchbayParameterDescriptorWire {
   };
 }
 
+/// Strict wire representation of `PatchbayIdentityWire`.
 final class PatchbayIdentityWire {
+  /// Creates a fully validated wire value.
   const PatchbayIdentityWire({
     required this.schemaVersion,
     required this.serverVersion,
@@ -514,13 +723,25 @@ final class PatchbayIdentityWire {
     required this.isolateId,
   });
 
+  /// Value of the `schemaVersion` wire field.
   final int schemaVersion;
+
+  /// Value of the `serverVersion` wire field.
   final String serverVersion;
+
+  /// Value of the `features` wire field.
   final List<String> features;
+
+  /// Value of the `applicationId` wire field.
   final String applicationId;
+
+  /// Value of the `appInstanceId` wire field.
   final String appInstanceId;
+
+  /// Value of the `isolateId` wire field.
   final String? isolateId;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayIdentityWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -547,6 +768,7 @@ final class PatchbayIdentityWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
     'serverVersion': serverVersion,
@@ -557,17 +779,25 @@ final class PatchbayIdentityWire {
   };
 }
 
+/// Strict wire representation of `PatchbayCatalogDigestWire`.
 final class PatchbayCatalogDigestWire {
+  /// Creates a fully validated wire value.
   const PatchbayCatalogDigestWire({
     required this.algorithm,
     required this.covers,
     required this.value,
   });
 
+  /// Value of the `algorithm` wire field.
   final String algorithm;
+
+  /// Value of the `covers` wire field.
   final List<String> covers;
+
+  /// Value of the `value` wire field.
   final String value;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayCatalogDigestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -582,6 +812,7 @@ final class PatchbayCatalogDigestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'algorithm': algorithm,
     'covers': covers.map((item) => item).toList(growable: false),
@@ -589,7 +820,9 @@ final class PatchbayCatalogDigestWire {
   };
 }
 
+/// Strict wire representation of `PatchbayCommandDescriptorWire`.
 final class PatchbayCommandDescriptorWire {
+  /// Creates a fully validated wire value.
   const PatchbayCommandDescriptorWire({
     required this.name,
     required this.summary,
@@ -601,15 +834,31 @@ final class PatchbayCommandDescriptorWire {
     required this.parameters,
   });
 
+  /// Value of the `name` wire field.
   final String name;
+
+  /// Value of the `summary` wire field.
   final String summary;
+
+  /// Value of the `plane` wire field.
   final PatchbayPlaneWire plane;
+
+  /// Value of the `mode` wire field.
   final PatchbayCommandModeWire mode;
+
+  /// Value of the `sideEffect` wire field.
   final PatchbaySideEffectWire sideEffect;
+
+  /// Value of the `factSources` wire field.
   final List<PatchbayFactSourceWire> factSources;
+
+  /// Value of the `gates` wire field.
   final List<String> gates;
+
+  /// Value of the `parameters` wire field.
   final List<PatchbayParameterDescriptorWire> parameters;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayCommandDescriptorWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -655,6 +904,7 @@ final class PatchbayCommandDescriptorWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'name': name,
     'summary': summary,
@@ -671,17 +921,25 @@ final class PatchbayCommandDescriptorWire {
   };
 }
 
+/// Strict wire representation of `PatchbayRejectionWire`.
 final class PatchbayRejectionWire {
+  /// Creates a fully validated wire value.
   const PatchbayRejectionWire({
     required this.code,
     required this.notice,
     required this.details,
   });
 
+  /// Value of the `code` wire field.
   final String code;
+
+  /// Value of the `notice` wire field.
   final String? notice;
+
+  /// Value of the `details` wire field.
   final Map<String, Object?> details;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayRejectionWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -698,6 +956,7 @@ final class PatchbayRejectionWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'code': code,
     if (notice != null) 'notice': notice!,
@@ -705,7 +964,9 @@ final class PatchbayRejectionWire {
   };
 }
 
+/// Strict wire representation of `PatchbayInvocationWire`.
 final class PatchbayInvocationWire {
+  /// Creates a fully validated wire value.
   const PatchbayInvocationWire({
     required this.schemaVersion,
     required this.requestId,
@@ -716,14 +977,28 @@ final class PatchbayInvocationWire {
     required this.rejection,
   });
 
+  /// Value of the `schemaVersion` wire field.
   final int schemaVersion;
+
+  /// Value of the `requestId` wire field.
   final String requestId;
+
+  /// Value of the `admission` wire field.
   final PatchbayAdmissionWire admission;
+
+  /// Value of the `payload` wire field.
   final Map<String, Object?> payload;
+
+  /// Value of the `notice` wire field.
   final String? notice;
+
+  /// Value of the `jobId` wire field.
   final String? jobId;
+
+  /// Value of the `rejection` wire field.
   final PatchbayRejectionWire? rejection;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayInvocationWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -760,6 +1035,7 @@ final class PatchbayInvocationWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
     'requestId': requestId,
@@ -771,7 +1047,9 @@ final class PatchbayInvocationWire {
   };
 }
 
+/// Strict wire representation of `PatchbayJobEventWire`.
 final class PatchbayJobEventWire {
+  /// Creates a fully validated wire value.
   const PatchbayJobEventWire({
     required this.sequence,
     required this.at,
@@ -782,14 +1060,28 @@ final class PatchbayJobEventWire {
     required this.reason,
   });
 
+  /// Value of the `sequence` wire field.
   final int sequence;
+
+  /// Value of the `at` wire field.
   final String at;
+
+  /// Value of the `phase` wire field.
   final PatchbayJobPhaseWire phase;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `operation` wire field.
   final String? operation;
+
+  /// Value of the `payload` wire field.
   final Map<String, Object?> payload;
+
+  /// Value of the `reason` wire field.
   final String? reason;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayJobEventWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -821,6 +1113,7 @@ final class PatchbayJobEventWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'sequence': sequence,
     'at': at,
@@ -832,17 +1125,25 @@ final class PatchbayJobEventWire {
   };
 }
 
+/// Strict wire representation of `PatchbayJobSnapshotWire`.
 final class PatchbayJobSnapshotWire {
+  /// Creates a fully validated wire value.
   const PatchbayJobSnapshotWire({
     required this.jobId,
     required this.terminal,
     required this.events,
   });
 
+  /// Value of the `jobId` wire field.
   final String jobId;
+
+  /// Value of the `terminal` wire field.
   final bool terminal;
+
+  /// Value of the `events` wire field.
   final List<PatchbayJobEventWire> events;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayJobSnapshotWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -862,6 +1163,7 @@ final class PatchbayJobSnapshotWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'jobId': jobId,
     'terminal': terminal,
@@ -869,15 +1171,21 @@ final class PatchbayJobSnapshotWire {
   };
 }
 
+/// Strict wire representation of `PatchbayJobWaitResultWire`.
 final class PatchbayJobWaitResultWire {
+  /// Creates a fully validated wire value.
   const PatchbayJobWaitResultWire({
     required this.outcome,
     required this.snapshot,
   });
 
+  /// Value of the `outcome` wire field.
   final PatchbayJobWaitOutcomeWire outcome;
+
+  /// Value of the `snapshot` wire field.
   final PatchbayJobSnapshotWire snapshot;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayJobWaitResultWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -895,13 +1203,16 @@ final class PatchbayJobWaitResultWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome.toJson(),
     'snapshot': snapshot.toJson(),
   };
 }
 
+/// Strict wire representation of `PatchbayUiTargetDescriptorWire`.
 final class PatchbayUiTargetDescriptorWire {
+  /// Creates a fully validated wire value.
   const PatchbayUiTargetDescriptorWire({
     required this.id,
     required this.generation,
@@ -915,17 +1226,37 @@ final class PatchbayUiTargetDescriptorWire {
     required this.factSources,
   });
 
+  /// Value of the `id` wire field.
   final String id;
+
+  /// Value of the `generation` wire field.
   final int generation;
+
+  /// Value of the `kind` wire field.
   final PatchbayUiTargetKindWire kind;
+
+  /// Value of the `mounted` wire field.
   final bool mounted;
+
+  /// Value of the `ambiguous` wire field.
   final bool ambiguous;
+
+  /// Value of the `operations` wire field.
   final List<String> operations;
+
+  /// Value of the `operationGates` wire field.
   final Map<String, Object?> operationGates;
+
+  /// Value of the `sensitivePolicy` wire field.
   final PatchbaySensitivePolicyWire sensitivePolicy;
+
+  /// Value of the `sideEffect` wire field.
   final PatchbaySideEffectWire sideEffect;
+
+  /// Value of the `factSources` wire field.
   final List<PatchbayFactSourceWire> factSources;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayUiTargetDescriptorWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -974,6 +1305,7 @@ final class PatchbayUiTargetDescriptorWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
     'generation': generation,
@@ -990,7 +1322,9 @@ final class PatchbayUiTargetDescriptorWire {
   };
 }
 
+/// Strict wire representation of `PatchbaySemanticsRectWire`.
 final class PatchbaySemanticsRectWire {
+  /// Creates a fully validated wire value.
   const PatchbaySemanticsRectWire({
     required this.left,
     required this.top,
@@ -998,11 +1332,19 @@ final class PatchbaySemanticsRectWire {
     required this.height,
   });
 
+  /// Value of the `left` wire field.
   final num left;
+
+  /// Value of the `top` wire field.
   final num top;
+
+  /// Value of the `width` wire field.
   final num width;
+
+  /// Value of the `height` wire field.
   final num height;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbaySemanticsRectWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1016,6 +1358,7 @@ final class PatchbaySemanticsRectWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'left': left,
     'top': top,
@@ -1024,7 +1367,9 @@ final class PatchbaySemanticsRectWire {
   };
 }
 
+/// Strict wire representation of `PatchbaySemanticsNodeWire`.
 final class PatchbaySemanticsNodeWire {
+  /// Creates a fully validated wire value.
   const PatchbaySemanticsNodeWire({
     required this.nodeId,
     required this.generation,
@@ -1050,29 +1395,73 @@ final class PatchbaySemanticsNodeWire {
     required this.children,
   });
 
+  /// Value of the `nodeId` wire field.
   final int nodeId;
+
+  /// Value of the `generation` wire field.
   final int generation;
+
+  /// Value of the `parentNodeId` wire field.
   final int? parentNodeId;
+
+  /// Value of the `depth` wire field.
   final int depth;
+
+  /// Value of the `identifier` wire field.
   final String identifier;
+
+  /// Value of the `label` wire field.
   final String label;
+
+  /// Value of the `value` wire field.
   final String? value;
+
+  /// Value of the `valueRedacted` wire field.
   final bool? valueRedacted;
+
+  /// Value of the `hint` wire field.
   final String? hint;
+
+  /// Value of the `tooltip` wire field.
   final String? tooltip;
+
+  /// Value of the `flags` wire field.
   final List<String> flags;
+
+  /// Value of the `actions` wire field.
   final List<String> actions;
+
+  /// Value of the `invisible` wire field.
   final bool invisible;
+
+  /// Value of the `userActionsBlocked` wire field.
   final bool userActionsBlocked;
+
+  /// Value of the `rect` wire field.
   final PatchbaySemanticsRectWire rect;
+
+  /// Value of the `rectCoordinateSpace` wire field.
   final String rectCoordinateSpace;
+
+  /// Value of the `transformToParent` wire field.
   final List<num>? transformToParent;
+
+  /// Value of the `scrollPosition` wire field.
   final num? scrollPosition;
+
+  /// Value of the `scrollExtentMin` wire field.
   final num? scrollExtentMin;
+
+  /// Value of the `scrollExtentMax` wire field.
   final num? scrollExtentMax;
+
+  /// Value of the `platformViewId` wire field.
   final int? platformViewId;
+
+  /// Value of the `children` wire field.
   final List<int> children;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbaySemanticsNodeWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1164,6 +1553,7 @@ final class PatchbaySemanticsNodeWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'nodeId': nodeId,
     'generation': generation,
@@ -1193,7 +1583,9 @@ final class PatchbaySemanticsNodeWire {
   };
 }
 
+/// Strict wire representation of `PatchbaySemanticsSnapshotWire`.
 final class PatchbaySemanticsSnapshotWire {
+  /// Creates a fully validated wire value.
   const PatchbaySemanticsSnapshotWire({
     required this.outcome,
     required this.source,
@@ -1204,14 +1596,28 @@ final class PatchbaySemanticsSnapshotWire {
     required this.nodes,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `treeRevision` wire field.
   final int treeRevision;
+
+  /// Value of the `rootNodeId` wire field.
   final int rootNodeId;
+
+  /// Value of the `truncated` wire field.
   final bool truncated;
+
+  /// Value of the `nodeCount` wire field.
   final int nodeCount;
+
+  /// Value of the `nodes` wire field.
   final List<PatchbaySemanticsNodeWire> nodes;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbaySemanticsSnapshotWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1246,6 +1652,7 @@ final class PatchbaySemanticsSnapshotWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -1257,7 +1664,9 @@ final class PatchbaySemanticsSnapshotWire {
   };
 }
 
+/// Strict wire representation of `PatchbayDestinationDescriptorWire`.
 final class PatchbayDestinationDescriptorWire {
+  /// Creates a fully validated wire value.
   const PatchbayDestinationDescriptorWire({
     required this.id,
     required this.summary,
@@ -1266,12 +1675,22 @@ final class PatchbayDestinationDescriptorWire {
     required this.ambiguous,
   });
 
+  /// Value of the `id` wire field.
   final String id;
+
+  /// Value of the `summary` wire field.
   final String? summary;
+
+  /// Value of the `operations` wire field.
   final List<PatchbayNavigationOperationWire> operations;
+
+  /// Value of the `gates` wire field.
   final List<String> gates;
+
+  /// Value of the `ambiguous` wire field.
   final bool ambiguous;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayDestinationDescriptorWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1303,6 +1722,7 @@ final class PatchbayDestinationDescriptorWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
     if (summary != null) 'summary': summary!,
@@ -1314,7 +1734,9 @@ final class PatchbayDestinationDescriptorWire {
   };
 }
 
+/// Strict wire representation of `PatchbayNavigationCatalogWire`.
 final class PatchbayNavigationCatalogWire {
+  /// Creates a fully validated wire value.
   const PatchbayNavigationCatalogWire({
     required this.outcome,
     required this.source,
@@ -1322,11 +1744,19 @@ final class PatchbayNavigationCatalogWire {
     required this.destinations,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `navigationRevision` wire field.
   final int navigationRevision;
+
+  /// Value of the `destinations` wire field.
   final List<PatchbayDestinationDescriptorWire> destinations;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayNavigationCatalogWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1358,6 +1788,7 @@ final class PatchbayNavigationCatalogWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -1368,7 +1799,9 @@ final class PatchbayNavigationCatalogWire {
   };
 }
 
+/// Strict wire representation of `PatchbayNavigationCurrentWire`.
 final class PatchbayNavigationCurrentWire {
+  /// Creates a fully validated wire value.
   const PatchbayNavigationCurrentWire({
     required this.outcome,
     required this.source,
@@ -1376,11 +1809,19 @@ final class PatchbayNavigationCurrentWire {
     required this.destinationId,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `navigationRevision` wire field.
   final int navigationRevision;
+
+  /// Value of the `destinationId` wire field.
   final String? destinationId;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayNavigationCurrentWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1407,6 +1848,7 @@ final class PatchbayNavigationCurrentWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -1415,7 +1857,9 @@ final class PatchbayNavigationCurrentWire {
   };
 }
 
+/// Strict wire representation of `PatchbayNavigationResultWire`.
 final class PatchbayNavigationResultWire {
+  /// Creates a fully validated wire value.
   const PatchbayNavigationResultWire({
     required this.outcome,
     required this.source,
@@ -1427,15 +1871,31 @@ final class PatchbayNavigationResultWire {
     required this.frameRevision,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `operation` wire field.
   final PatchbayNavigationOperationWire operation;
+
+  /// Value of the `requestedDestinationId` wire field.
   final String? requestedDestinationId;
+
+  /// Value of the `destinationId` wire field.
   final String destinationId;
+
+  /// Value of the `beforeNavigationRevision` wire field.
   final int beforeNavigationRevision;
+
+  /// Value of the `afterNavigationRevision` wire field.
   final int afterNavigationRevision;
+
+  /// Value of the `frameRevision` wire field.
   final int frameRevision;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayNavigationResultWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1479,6 +1939,7 @@ final class PatchbayNavigationResultWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -1493,7 +1954,9 @@ final class PatchbayNavigationResultWire {
   };
 }
 
+/// Strict wire representation of `PatchbayUiWaitRequestWire`.
 final class PatchbayUiWaitRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayUiWaitRequestWire({
     required this.condition,
     required this.timeoutMs,
@@ -1503,13 +1966,25 @@ final class PatchbayUiWaitRequestWire {
     required this.revision,
   });
 
+  /// Value of the `condition` wire field.
   final PatchbayUiWaitConditionWire condition;
+
+  /// Value of the `timeoutMs` wire field.
   final int timeoutMs;
+
+  /// Value of the `semanticsIdentifier` wire field.
   final String? semanticsIdentifier;
+
+  /// Value of the `value` wire field.
   final String? value;
+
+  /// Value of the `destinationId` wire field.
   final String? destinationId;
+
+  /// Value of the `revision` wire field.
   final int? revision;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayUiWaitRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1546,6 +2021,7 @@ final class PatchbayUiWaitRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'condition': condition.toJson(),
     'timeoutMs': timeoutMs,
@@ -1557,7 +2033,9 @@ final class PatchbayUiWaitRequestWire {
   };
 }
 
+/// Strict wire representation of `PatchbayUiWaitResultWire`.
 final class PatchbayUiWaitResultWire {
+  /// Creates a fully validated wire value.
   const PatchbayUiWaitResultWire({
     required this.outcome,
     required this.source,
@@ -1573,19 +2051,43 @@ final class PatchbayUiWaitResultWire {
     required this.frameRevision,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `condition` wire field.
   final PatchbayUiWaitConditionWire condition;
+
+  /// Value of the `elapsedMs` wire field.
   final int elapsedMs;
+
+  /// Value of the `semanticsIdentifier` wire field.
   final String? semanticsIdentifier;
+
+  /// Value of the `nodeId` wire field.
   final int? nodeId;
+
+  /// Value of the `generation` wire field.
   final int? generation;
+
+  /// Value of the `value` wire field.
   final String? value;
+
+  /// Value of the `destinationId` wire field.
   final String? destinationId;
+
+  /// Value of the `navigationRevision` wire field.
   final int? navigationRevision;
+
+  /// Value of the `treeRevision` wire field.
   final int? treeRevision;
+
+  /// Value of the `frameRevision` wire field.
   final int frameRevision;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayUiWaitResultWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1643,6 +2145,7 @@ final class PatchbayUiWaitResultWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -1660,7 +2163,9 @@ final class PatchbayUiWaitResultWire {
   };
 }
 
+/// Strict wire representation of `PatchbayLogRecordWire`.
 final class PatchbayLogRecordWire {
+  /// Creates a fully validated wire value.
   const PatchbayLogRecordWire({
     required this.cursor,
     required this.at,
@@ -1672,15 +2177,31 @@ final class PatchbayLogRecordWire {
     required this.source,
   });
 
+  /// Value of the `cursor` wire field.
   final String cursor;
+
+  /// Value of the `at` wire field.
   final String at;
+
+  /// Value of the `level` wire field.
   final PatchbayLogLevelWire level;
+
+  /// Value of the `category` wire field.
   final String category;
+
+  /// Value of the `message` wire field.
   final String message;
+
+  /// Value of the `fields` wire field.
   final Map<String, Object?> fields;
+
+  /// Value of the `redaction` wire field.
   final PatchbayLogRedactionWire redaction;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayLogRecordWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1715,6 +2236,7 @@ final class PatchbayLogRecordWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'cursor': cursor,
     'at': at,
@@ -1727,7 +2249,9 @@ final class PatchbayLogRecordWire {
   };
 }
 
+/// Strict wire representation of `PatchbayLogQueryRequestWire`.
 final class PatchbayLogQueryRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayLogQueryRequestWire({
     required this.cursor,
     required this.direction,
@@ -1738,14 +2262,28 @@ final class PatchbayLogQueryRequestWire {
     required this.until,
   });
 
+  /// Value of the `cursor` wire field.
   final String? cursor;
+
+  /// Value of the `direction` wire field.
   final PatchbayLogDirectionWire? direction;
+
+  /// Value of the `limit` wire field.
   final int? limit;
+
+  /// Value of the `levels` wire field.
   final List<PatchbayLogLevelWire> levels;
+
+  /// Value of the `categories` wire field.
   final List<String> categories;
+
+  /// Value of the `since` wire field.
   final String? since;
+
+  /// Value of the `until` wire field.
   final String? until;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayLogQueryRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1796,6 +2334,7 @@ final class PatchbayLogQueryRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     if (cursor != null) 'cursor': cursor!,
     if (direction != null) 'direction': direction!.toJson(),
@@ -1809,7 +2348,9 @@ final class PatchbayLogQueryRequestWire {
   };
 }
 
+/// Strict wire representation of `PatchbayLogTailRequestWire`.
 final class PatchbayLogTailRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayLogTailRequestWire({
     required this.cursor,
     required this.limit,
@@ -1818,12 +2359,22 @@ final class PatchbayLogTailRequestWire {
     required this.categories,
   });
 
+  /// Value of the `cursor` wire field.
   final String? cursor;
+
+  /// Value of the `limit` wire field.
   final int? limit;
+
+  /// Value of the `timeoutMs` wire field.
   final int? timeoutMs;
+
+  /// Value of the `levels` wire field.
   final List<PatchbayLogLevelWire> levels;
+
+  /// Value of the `categories` wire field.
   final List<String> categories;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayLogTailRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1863,6 +2414,7 @@ final class PatchbayLogTailRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     if (cursor != null) 'cursor': cursor!,
     if (limit != null) 'limit': limit!,
@@ -1874,7 +2426,9 @@ final class PatchbayLogTailRequestWire {
   };
 }
 
+/// Strict wire representation of `PatchbayLogExportRequestWire`.
 final class PatchbayLogExportRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayLogExportRequestWire({
     required this.cursor,
     required this.direction,
@@ -1886,15 +2440,31 @@ final class PatchbayLogExportRequestWire {
     required this.ttlMs,
   });
 
+  /// Value of the `cursor` wire field.
   final String? cursor;
+
+  /// Value of the `direction` wire field.
   final PatchbayLogDirectionWire? direction;
+
+  /// Value of the `limit` wire field.
   final int? limit;
+
+  /// Value of the `levels` wire field.
   final List<PatchbayLogLevelWire> levels;
+
+  /// Value of the `categories` wire field.
   final List<String> categories;
+
+  /// Value of the `since` wire field.
   final String? since;
+
+  /// Value of the `until` wire field.
   final String? until;
+
+  /// Value of the `ttlMs` wire field.
   final int? ttlMs;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayLogExportRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -1949,6 +2519,7 @@ final class PatchbayLogExportRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     if (cursor != null) 'cursor': cursor!,
     if (direction != null) 'direction': direction!.toJson(),
@@ -1963,7 +2534,9 @@ final class PatchbayLogExportRequestWire {
   };
 }
 
+/// Strict wire representation of `PatchbayLogBatchWire`.
 final class PatchbayLogBatchWire {
+  /// Creates a fully validated wire value.
   const PatchbayLogBatchWire({
     required this.outcome,
     required this.source,
@@ -1975,15 +2548,31 @@ final class PatchbayLogBatchWire {
     required this.elapsedMs,
   });
 
+  /// Value of the `outcome` wire field.
   final PatchbayLogBatchOutcomeWire outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `records` wire field.
   final List<PatchbayLogRecordWire> records;
+
+  /// Value of the `nextCursor` wire field.
   final String? nextCursor;
+
+  /// Value of the `currentCursor` wire field.
   final String? currentCursor;
+
+  /// Value of the `truncated` wire field.
   final bool truncated;
+
+  /// Value of the `truncation` wire field.
   final PatchbayLogTruncationWire? truncation;
+
+  /// Value of the `elapsedMs` wire field.
   final int elapsedMs;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayLogBatchWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2032,6 +2621,7 @@ final class PatchbayLogBatchWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome.toJson(),
     'source': source.toJson(),
@@ -2044,7 +2634,9 @@ final class PatchbayLogBatchWire {
   };
 }
 
+/// Strict wire representation of `PatchbayBlobMetadataWire`.
 final class PatchbayBlobMetadataWire {
+  /// Creates a fully validated wire value.
   const PatchbayBlobMetadataWire({
     required this.blobId,
     required this.source,
@@ -2058,17 +2650,37 @@ final class PatchbayBlobMetadataWire {
     required this.properties,
   });
 
+  /// Value of the `blobId` wire field.
   final String blobId;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `kind` wire field.
   final PatchbayBlobSourceWire kind;
+
+  /// Value of the `contentType` wire field.
   final String contentType;
+
+  /// Value of the `length` wire field.
   final int length;
+
+  /// Value of the `sha256` wire field.
   final String sha256;
+
+  /// Value of the `createdAt` wire field.
   final String createdAt;
+
+  /// Value of the `expiresAt` wire field.
   final String expiresAt;
+
+  /// Value of the `filename` wire field.
   final String? filename;
+
+  /// Value of the `properties` wire field.
   final Map<String, Object?> properties;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayBlobMetadataWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2106,6 +2718,7 @@ final class PatchbayBlobMetadataWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'blobId': blobId,
     'source': source.toJson(),
@@ -2121,11 +2734,15 @@ final class PatchbayBlobMetadataWire {
   };
 }
 
+/// Strict wire representation of `PatchbayBlobMetadataRequestWire`.
 final class PatchbayBlobMetadataRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayBlobMetadataRequestWire({required this.blobId});
 
+  /// Value of the `blobId` wire field.
   final String blobId;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayBlobMetadataRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2136,20 +2753,29 @@ final class PatchbayBlobMetadataRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{'blobId': blobId};
 }
 
+/// Strict wire representation of `PatchbayBlobReadRequestWire`.
 final class PatchbayBlobReadRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayBlobReadRequestWire({
     required this.blobId,
     required this.offset,
     required this.limit,
   });
 
+  /// Value of the `blobId` wire field.
   final String blobId;
+
+  /// Value of the `offset` wire field.
   final int offset;
+
+  /// Value of the `limit` wire field.
   final int? limit;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayBlobReadRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2164,6 +2790,7 @@ final class PatchbayBlobReadRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'blobId': blobId,
     'offset': offset,
@@ -2171,7 +2798,9 @@ final class PatchbayBlobReadRequestWire {
   };
 }
 
+/// Strict wire representation of `PatchbayBlobChunkWire`.
 final class PatchbayBlobChunkWire {
+  /// Creates a fully validated wire value.
   const PatchbayBlobChunkWire({
     required this.metadata,
     required this.offset,
@@ -2181,13 +2810,25 @@ final class PatchbayBlobChunkWire {
     required this.dataBase64,
   });
 
+  /// Value of the `metadata` wire field.
   final PatchbayBlobMetadataWire metadata;
+
+  /// Value of the `offset` wire field.
   final int offset;
+
+  /// Value of the `length` wire field.
   final int length;
+
+  /// Value of the `nextOffset` wire field.
   final int nextOffset;
+
+  /// Value of the `eof` wire field.
   final bool eof;
+
+  /// Value of the `dataBase64` wire field.
   final String dataBase64;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayBlobChunkWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2213,6 +2854,7 @@ final class PatchbayBlobChunkWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'metadata': metadata.toJson(),
     'offset': offset,
@@ -2223,7 +2865,9 @@ final class PatchbayBlobChunkWire {
   };
 }
 
+/// Strict wire representation of `PatchbayLogExportResultWire`.
 final class PatchbayLogExportResultWire {
+  /// Creates a fully validated wire value.
   const PatchbayLogExportResultWire({
     required this.source,
     required this.blob,
@@ -2232,12 +2876,22 @@ final class PatchbayLogExportResultWire {
     required this.truncation,
   });
 
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `blob` wire field.
   final PatchbayBlobMetadataWire blob;
+
+  /// Value of the `recordCount` wire field.
   final int recordCount;
+
+  /// Value of the `truncated` wire field.
   final bool truncated;
+
+  /// Value of the `truncation` wire field.
   final PatchbayLogTruncationWire? truncation;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayLogExportResultWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2269,6 +2923,7 @@ final class PatchbayLogExportResultWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'source': source.toJson(),
     'blob': blob.toJson(),
@@ -2278,7 +2933,9 @@ final class PatchbayLogExportResultWire {
   };
 }
 
+/// Strict wire representation of `PatchbayCaptureRequestWire`.
 final class PatchbayCaptureRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayCaptureRequestWire({
     required this.targetId,
     required this.generation,
@@ -2287,12 +2944,22 @@ final class PatchbayCaptureRequestWire {
     required this.afterFrames,
   });
 
+  /// Value of the `targetId` wire field.
   final String? targetId;
+
+  /// Value of the `generation` wire field.
   final int? generation;
+
+  /// Value of the `pixelRatio` wire field.
   final num? pixelRatio;
+
+  /// Value of the `timeoutMs` wire field.
   final int? timeoutMs;
+
+  /// Value of the `afterFrames` wire field.
   final int? afterFrames;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayCaptureRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2323,6 +2990,7 @@ final class PatchbayCaptureRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     if (targetId != null) 'targetId': targetId!,
     if (generation != null) 'generation': generation!,
@@ -2332,7 +3000,9 @@ final class PatchbayCaptureRequestWire {
   };
 }
 
+/// Strict wire representation of `PatchbayCaptureResultWire`.
 final class PatchbayCaptureResultWire {
+  /// Creates a fully validated wire value.
   const PatchbayCaptureResultWire({
     required this.outcome,
     required this.source,
@@ -2352,23 +3022,55 @@ final class PatchbayCaptureResultWire {
     required this.blob,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `target` wire field.
   final PatchbayCaptureTargetWire target;
+
+  /// Value of the `targetId` wire field.
   final String? targetId;
+
+  /// Value of the `generation` wire field.
   final int? generation;
+
+  /// Value of the `width` wire field.
   final int width;
+
+  /// Value of the `height` wire field.
   final int height;
+
+  /// Value of the `pixelRatio` wire field.
   final num pixelRatio;
+
+  /// Value of the `pixelFormat` wire field.
   final String pixelFormat;
+
+  /// Value of the `capturedAt` wire field.
   final String capturedAt;
+
+  /// Value of the `requestedFrames` wire field.
   final int requestedFrames;
+
+  /// Value of the `observedFrames` wire field.
   final int observedFrames;
+
+  /// Value of the `maxPixels` wire field.
   final int maxPixels;
+
+  /// Value of the `maxBytes` wire field.
   final int maxBytes;
+
+  /// Value of the `warnings` wire field.
   final List<PatchbayCaptureWarningWire> warnings;
+
+  /// Value of the `blob` wire field.
   final PatchbayBlobMetadataWire blob;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayCaptureResultWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2434,6 +3136,7 @@ final class PatchbayCaptureResultWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -2454,15 +3157,21 @@ final class PatchbayCaptureResultWire {
   };
 }
 
+/// Strict wire representation of `PatchbayCaptureDiffRequestWire`.
 final class PatchbayCaptureDiffRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayCaptureDiffRequestWire({
     required this.beforeBlobId,
     required this.afterBlobId,
   });
 
+  /// Value of the `beforeBlobId` wire field.
   final String beforeBlobId;
+
+  /// Value of the `afterBlobId` wire field.
   final String afterBlobId;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayCaptureDiffRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2474,13 +3183,16 @@ final class PatchbayCaptureDiffRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'beforeBlobId': beforeBlobId,
     'afterBlobId': afterBlobId,
   };
 }
 
+/// Strict wire representation of `PatchbayCaptureDiffResultWire`.
 final class PatchbayCaptureDiffResultWire {
+  /// Creates a fully validated wire value.
   const PatchbayCaptureDiffResultWire({
     required this.outcome,
     required this.source,
@@ -2498,21 +3210,49 @@ final class PatchbayCaptureDiffResultWire {
     required this.warnings,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `beforeBlobId` wire field.
   final String beforeBlobId;
+
+  /// Value of the `afterBlobId` wire field.
   final String afterBlobId;
+
+  /// Value of the `width` wire field.
   final int width;
+
+  /// Value of the `height` wire field.
   final int height;
+
+  /// Value of the `pixelFormat` wire field.
   final String pixelFormat;
+
+  /// Value of the `changedPixels` wire field.
   final int changedPixels;
+
+  /// Value of the `totalPixels` wire field.
   final int totalPixels;
+
+  /// Value of the `differenceRatio` wire field.
   final num differenceRatio;
+
+  /// Value of the `comparedAt` wire field.
   final String comparedAt;
+
+  /// Value of the `maxPixels` wire field.
   final int maxPixels;
+
+  /// Value of the `maxBytes` wire field.
   final int maxBytes;
+
+  /// Value of the `warnings` wire field.
   final List<PatchbayCaptureWarningWire> warnings;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayCaptureDiffResultWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2564,6 +3304,7 @@ final class PatchbayCaptureDiffResultWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -2582,15 +3323,21 @@ final class PatchbayCaptureDiffResultWire {
   };
 }
 
+/// Strict wire representation of `PatchbayKeepAwakeRequestWire`.
 final class PatchbayKeepAwakeRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayKeepAwakeRequestWire({
     required this.enabled,
     required this.leaseMs,
   });
 
+  /// Value of the `enabled` wire field.
   final bool enabled;
+
+  /// Value of the `leaseMs` wire field.
   final int? leaseMs;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayKeepAwakeRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2604,13 +3351,16 @@ final class PatchbayKeepAwakeRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'enabled': enabled,
     if (leaseMs != null) 'leaseMs': leaseMs!,
   };
 }
 
+/// Strict wire representation of `PatchbayKeepAwakeStateWire`.
 final class PatchbayKeepAwakeStateWire {
+  /// Creates a fully validated wire value.
   const PatchbayKeepAwakeStateWire({
     required this.outcome,
     required this.source,
@@ -2622,15 +3372,31 @@ final class PatchbayKeepAwakeStateWire {
     required this.lastReleaseFailure,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `wired` wire field.
   final bool wired;
+
+  /// Value of the `enabled` wire field.
   final bool enabled;
+
+  /// Value of the `leaseMs` wire field.
   final int? leaseMs;
+
+  /// Value of the `leaseRemainingMs` wire field.
   final int? leaseRemainingMs;
+
+  /// Value of the `lastRelease` wire field.
   final PatchbayKeepAwakeReleaseWire? lastRelease;
+
+  /// Value of the `lastReleaseFailure` wire field.
   final String? lastReleaseFailure;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayKeepAwakeStateWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2671,6 +3437,7 @@ final class PatchbayKeepAwakeStateWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
@@ -2683,7 +3450,9 @@ final class PatchbayKeepAwakeStateWire {
   };
 }
 
+/// Strict wire representation of `PatchbaySnapshotRequestWire`.
 final class PatchbaySnapshotRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbaySnapshotRequestWire({
     required this.path,
     required this.until,
@@ -2691,11 +3460,19 @@ final class PatchbaySnapshotRequestWire {
     required this.timeoutMs,
   });
 
+  /// Value of the `path` wire field.
   final String path;
+
+  /// Value of the `until` wire field.
   final PatchbaySnapshotConditionWire? until;
+
+  /// Value of the `value` wire field.
   final Object? value;
+
+  /// Value of the `timeoutMs` wire field.
   final int? timeoutMs;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbaySnapshotRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2723,6 +3500,7 @@ final class PatchbaySnapshotRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'path': path,
     if (until != null) 'until': until!.toJson(),
@@ -2731,11 +3509,15 @@ final class PatchbaySnapshotRequestWire {
   };
 }
 
+/// Strict wire representation of `PatchbaySnapshotDiffRequestWire`.
 final class PatchbaySnapshotDiffRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbaySnapshotDiffRequestWire({required this.fromRevision});
 
+  /// Value of the `fromRevision` wire field.
   final int fromRevision;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbaySnapshotDiffRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2746,12 +3528,15 @@ final class PatchbaySnapshotDiffRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'fromRevision': fromRevision,
   };
 }
 
+/// Strict wire representation of `PatchbaySnapshotSelectionWire`.
 final class PatchbaySnapshotSelectionWire {
+  /// Creates a fully validated wire value.
   const PatchbaySnapshotSelectionWire({
     required this.path,
     required this.found,
@@ -2759,11 +3544,19 @@ final class PatchbaySnapshotSelectionWire {
     required this.miss,
   });
 
+  /// Value of the `path` wire field.
   final String path;
+
+  /// Value of the `found` wire field.
   final bool found;
+
+  /// Value of the `value` wire field.
   final Object? value;
+
+  /// Value of the `miss` wire field.
   final PatchbaySnapshotMissWire? miss;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbaySnapshotSelectionWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2781,6 +3574,7 @@ final class PatchbaySnapshotSelectionWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'path': path,
     'found': found,
@@ -2789,7 +3583,9 @@ final class PatchbaySnapshotSelectionWire {
   };
 }
 
+/// Strict wire representation of `PatchbaySnapshotWaitWire`.
 final class PatchbaySnapshotWaitWire {
+  /// Creates a fully validated wire value.
   const PatchbaySnapshotWaitWire({
     required this.outcome,
     required this.condition,
@@ -2799,13 +3595,25 @@ final class PatchbaySnapshotWaitWire {
     required this.polls,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `condition` wire field.
   final PatchbaySnapshotConditionWire condition;
+
+  /// Value of the `timeoutMs` wire field.
   final int timeoutMs;
+
+  /// Value of the `elapsedMs` wire field.
   final int elapsedMs;
+
+  /// Value of the `pollIntervalMs` wire field.
   final int pollIntervalMs;
+
+  /// Value of the `polls` wire field.
   final int polls;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbaySnapshotWaitWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2831,6 +3639,7 @@ final class PatchbaySnapshotWaitWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'condition': condition.toJson(),
@@ -2841,11 +3650,18 @@ final class PatchbaySnapshotWaitWire {
   };
 }
 
+/// Strict wire representation of `PatchbayInspectUnavailableWire`.
 enum PatchbayInspectUnavailableWire {
+  /// The `notDebugBuild` wire value.
   notDebugBuild,
+
+  /// The `rootInspectorExcluded` wire value.
   rootInspectorExcluded,
+
+  /// The `hostDisposed` wire value.
   hostDisposed;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayInspectUnavailableWire fromJson(
     Object? value, {
     String path = r'$',
@@ -2859,14 +3675,22 @@ enum PatchbayInspectUnavailableWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayInspectReleaseWire`.
 enum PatchbayInspectReleaseWire {
+  /// The `explicitOff` wire value.
   explicitOff,
+
+  /// The `leaseExpired` wire value.
   leaseExpired,
+
+  /// The `disposed` wire value.
   disposed;
 
+  /// Decodes a value at [path], rejecting unknown values.
   static PatchbayInspectReleaseWire fromJson(
     Object? value, {
     String path = r'$',
@@ -2880,18 +3704,25 @@ enum PatchbayInspectReleaseWire {
     );
   }
 
+  /// Encodes this value using its stable wire name.
   String toJson() => name;
 }
 
+/// Strict wire representation of `PatchbayInspectSelectRequestWire`.
 final class PatchbayInspectSelectRequestWire {
+  /// Creates a fully validated wire value.
   const PatchbayInspectSelectRequestWire({
     required this.enabled,
     required this.ttlMs,
   });
 
+  /// Value of the `enabled` wire field.
   final bool enabled;
+
+  /// Value of the `ttlMs` wire field.
   final int? ttlMs;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayInspectSelectRequestWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2905,13 +3736,16 @@ final class PatchbayInspectSelectRequestWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'enabled': enabled,
     if (ttlMs != null) 'ttlMs': ttlMs!,
   };
 }
 
+/// Strict wire representation of `PatchbayInspectStateWire`.
 final class PatchbayInspectStateWire {
+  /// Creates a fully validated wire value.
   const PatchbayInspectStateWire({
     required this.outcome,
     required this.source,
@@ -2925,17 +3759,37 @@ final class PatchbayInspectStateWire {
     required this.lastRelease,
   });
 
+  /// Value of the `outcome` wire field.
   final String outcome;
+
+  /// Value of the `source` wire field.
   final PatchbayFactSourceWire source;
+
+  /// Value of the `selectMode` wire field.
   final bool selectMode;
+
+  /// Value of the `selectionOnTap` wire field.
   final bool selectionOnTap;
+
+  /// Value of the `managed` wire field.
   final bool managed;
+
+  /// Value of the `previousSelectMode` wire field.
   final bool? previousSelectMode;
+
+  /// Value of the `restoresTo` wire field.
   final bool? restoresTo;
+
+  /// Value of the `leaseMs` wire field.
   final int? leaseMs;
+
+  /// Value of the `leaseRemainingMs` wire field.
   final int? leaseRemainingMs;
+
+  /// Value of the `lastRelease` wire field.
   final PatchbayInspectReleaseWire? lastRelease;
 
+  /// Decodes a strict JSON object at [path].
   factory PatchbayInspectStateWire.fromJson(
     Map<String, Object?> json, {
     String path = r'$',
@@ -2982,6 +3836,7 @@ final class PatchbayInspectStateWire {
     );
   }
 
+  /// Encodes this value as a JSON object.
   Map<String, Object?> toJson() => <String, Object?>{
     'outcome': outcome,
     'source': source.toJson(),
