@@ -58,6 +58,9 @@
 | PB-040-35 | iOS 真机权限 `status/normalize` 的权威事实源 | XCTest 能 reset 与操作系统弹窗，但没有面向任意真机 App 的通用公开授权查询/grant API；不能把 XCTest 命令退出 0 当成设备状态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持 capability unsupported，落地前补 Proposal |
 | PB-040-36 | iOS notifications reset 与接入方触发端到端矩阵 | XCTest 没有 notifications 的 protected resource reset，且系统弹窗必须由 App 自己发起；当前 runner 只能处理已出现的弹窗，尚不能形成可重复初始态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；0.4.0 降级边界见 SC-040-05 |
 | PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
+| PB-040-38 | `patchbay_cli` 大文件拆解与执行流解耦：将 `cli.dart` 内联的 Manifest 遍历引擎、Snapshot 差异比对与 Job 轮询提取为独立 Runner | `cli.dart` 达 3,270 行，承担了入口解析、500+ 行的 manifest walkthrough、snapshot diff 与 job 轮询等多重职责，成为高频冲突热点 | — | 待排期 | 保持 CLI 外部 JSON/退出码行为完全一致的前提下进行纯内部重构 |
+| PB-040-39 | 跨平台进程探测与底层系统命令抽象（`PlatformProcessUtils`） | `session.dart`、`doctor.dart`、`android_permission_adapter.dart`、`launcher.dart` 分散手写 `kill -0`、`tasklist`、`chmod`、`stat` 等命令，缺乏统一跨平台封装 | — | 待排期 | 收敛进程存活判断与权限文件保护逻辑 |
+| PB-040-40 | `patchbay_cli` 源码目录分层与命令分派器模块化 | `patchbay_cli/lib/src/` 扁平放置 28 个文件，`command_registry.dart`（1,926 行）过度集中；按 `commands/`、`platform/`、`session/`、`manifest/` 建立子目录分层 | — | 待排期 | 降低单目录复杂度与代码认知负荷 |
 
 ## 文档债（快赢，可随任意批次走）
 
