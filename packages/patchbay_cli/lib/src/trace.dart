@@ -679,14 +679,18 @@ final class PatchbayTraceStore {
     } finally {
       try {
         lock.unlockSync();
-      } on Object {}
+      } on Object catch (error) {
+        Error.safeToString(error);
+      }
       lock.closeSync();
     }
   }
 
   void _recoverInterrupted(String traceId) {
     final PatchbayTraceManifest manifest = readManifest(traceId);
-    if (manifest.ended) return;
+    if (manifest.ended) {
+      return;
+    }
     if (_readEvents(traceId).truncatedTail) {
       _append(
         traceId: traceId,
@@ -751,15 +755,18 @@ final class PatchbayTraceStore {
       if (!_traceIdPattern.hasMatch(id)) continue;
       try {
         result.add(readManifest(id));
-      } on PatchbayTraceException {}
+      } on PatchbayTraceException {
+        continue;
+      }
     }
     return result;
   }
 
   _DecodedEvents _readEvents(String traceId) {
     final File file = File('${_traceDirectory(traceId).path}/events.ndjson');
-    if (!file.existsSync())
+    if (!file.existsSync()) {
       return const _DecodedEvents(<PatchbayTraceEvent>[], false);
+    }
     final String content = file.readAsStringSync();
     final bool truncatedTail = content.isNotEmpty && !content.endsWith('\n');
     final List<String> lines = content.split('\n');
@@ -877,7 +884,9 @@ final class PatchbayTraceStore {
     } finally {
       try {
         file.unlockSync();
-      } on Object {}
+      } on Object catch (error) {
+        Error.safeToString(error);
+      }
       file.closeSync();
     }
   }
@@ -896,7 +905,9 @@ final class PatchbayTraceStore {
       temporary.writeAsStringSync(jsonEncode(value), flush: true);
       temporary.renameSync(target.path);
     } finally {
-      if (temporary.existsSync()) temporary.deleteSync();
+      if (temporary.existsSync()) {
+        temporary.deleteSync();
+      }
     }
   }
 
@@ -1265,8 +1276,9 @@ String _canonicalJson(Object? value) {
         for (final String key in keys) key: canonical(item[key]),
       };
     }
-    if (item is List<Object?>)
+    if (item is List<Object?>) {
       return <Object?>[for (final Object? child in item) canonical(child)];
+    }
     return item;
   }
 

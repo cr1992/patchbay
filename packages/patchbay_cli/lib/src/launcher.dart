@@ -187,8 +187,9 @@ final class PatchbayLauncherSupervisor {
     ),
     Future<void>? cancellation,
   }) async {
-    if (command.isEmpty)
+    if (command.isEmpty) {
       throw const FormatException('launch requires a command');
+    }
     final DateTime started = _clock().toUtc();
     var attempt = 0;
     var retry = patchbayLaunchInitialRetry;

@@ -53,7 +53,7 @@ final class _FakeClient implements PatchbayClient {
   }) async {
     if (failNextWith case final Object failure) {
       failNextWith = null;
-      throw failure;
+      return Future<Map<String, Object?>>.error(failure);
     }
     invoked.add(command);
     final String id = requestId ?? 'fake-request';

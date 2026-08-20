@@ -317,8 +317,9 @@ final class _WalkthroughHost {
   ) async {
     switch (command) {
       case 'navigation.catalog':
-        if (catalogDelay > Duration.zero)
+        if (catalogDelay > Duration.zero) {
           await Future<void>.delayed(catalogDelay);
+        }
         return fakeAccepted(
           PatchbayNavigationCatalogWire(
             outcome: 'cataloged',
