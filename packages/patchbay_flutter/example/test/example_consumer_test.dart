@@ -19,6 +19,10 @@ void main() {
       noteTargetId,
       registry: registry,
     );
+    final PatchbayKey cardCaptureKey = PatchbayKey.capture(
+      cardCaptureTargetId,
+      registry: registry,
+    );
     final ExampleRouter router = ExampleRouter();
     final PatchbayExampleHost host = PatchbayExampleHost(
       model: model,
@@ -28,7 +32,12 @@ void main() {
     );
     try {
       await tester.pumpWidget(
-        PatchbayExampleApp(model: model, noteKey: noteKey, router: router),
+        PatchbayExampleApp(
+          model: model,
+          noteKey: noteKey,
+          cardCaptureKey: cardCaptureKey,
+          router: router,
+        ),
       );
       expect(find.text('Count: 0'), findsOneWidget);
 
@@ -67,6 +76,10 @@ void main() {
       noteTargetId,
       registry: registry,
     );
+    final PatchbayKey cardCaptureKey = PatchbayKey.capture(
+      cardCaptureTargetId,
+      registry: registry,
+    );
     final ExampleRouter router = ExampleRouter();
     final PatchbayExampleHost host = PatchbayExampleHost(
       model: model,
@@ -80,7 +93,12 @@ void main() {
     )..register();
     try {
       await tester.pumpWidget(
-        PatchbayExampleApp(model: model, noteKey: noteKey, router: router),
+        PatchbayExampleApp(
+          model: model,
+          noteKey: noteKey,
+          cardCaptureKey: cardCaptureKey,
+          router: router,
+        ),
       );
 
       final Map<String, Object?> identity = await _call(
@@ -146,6 +164,34 @@ void main() {
           (Map<String, Object?> target) => target['id'] == noteTargetId,
         ),
         containsPair('mounted', true),
+      );
+      expect(
+        targets.singleWhere(
+          (Map<String, Object?> target) => target['id'] == cardCaptureTargetId,
+        ),
+        allOf(containsPair('mounted', true), containsPair('kind', 'capture')),
+      );
+
+      final Map<String, Object?> treeInvocation = await _pumpUntilComplete(
+        tester,
+        _call(handlers, PatchbayServiceHost.invokeMethod, <String, String>{
+          'command': 'ui.semantics.tree',
+          'args': '{}',
+          'requestId': 'tree-request',
+        }),
+      );
+      expect(treeInvocation['admission'], 'accepted');
+      final Map<String, Object?> treePayload =
+          treeInvocation['payload']! as Map<String, Object?>;
+      final List<Map<String, Object?>> nodes =
+          (treePayload['nodes']! as List<Object?>).cast<Map<String, Object?>>();
+      expect(
+        nodes.map((Map<String, Object?> n) => n['identifier']),
+        containsAll(<String>{
+          gestureSurfaceSemanticsId,
+          gestureListSemanticsId,
+          gestureNestedListSemanticsId,
+        }),
       );
 
       final Map<String, Object?> invocation = await _call(
@@ -219,7 +265,7 @@ Future<T> _pumpUntilComplete<T>(WidgetTester tester, Future<T> pending) async {
     ),
   );
   for (var attempt = 0; attempt < 20 && !completed; attempt += 1) {
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
   }
   if (!completed) {
     throw StateError(

@@ -141,7 +141,7 @@ check 'catalog' 0 "len(doc['commands']) >= 26" --json catalog
 
 example_session_cli --json catalog >"$OUT" 2>&1
 NOTE_GENERATION="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.note'][0]")"
-echo "  note target generation=$NOTE_GENERATION"
+echo "  targets generation：note=$NOTE_GENERATION"
 
 echo
 echo "== 状态读取 =="
@@ -188,6 +188,9 @@ check 'exec job.run' 0 "'jobId' in json.dumps(doc)" \
 example_session_cli --json exec example.job.run --args '{"steps":2}' >"$OUT" 2>&1
 JOB_ID="$(read_json "doc.get('jobId') or doc['payload']['jobId']")"
 check 'job get' 0 "'events' in json.dumps(doc)" --json job get "$JOB_ID"
+example_session_cli --json exec example.job.run --args '{"steps":10}' >"$OUT" 2>&1
+LONG_JOB_ID="$(read_json "doc.get('jobId') or doc['payload']['jobId']")"
+check 'job cancel' 0 "" --json job cancel "$LONG_JOB_ID"
 
 echo
 echo "== UI 观察与操作 =="
@@ -202,11 +205,13 @@ echo
 echo "== 锚定手势 =="
 # 三棵 debug 诊断树会短暂触发 inspector/semantics 刷新；真机上紧接着抓树时，
 # scrollable 的独立 Semantics 节点可能正处在重建窗口。用正式的有界条件等待固定
-# 两个目标已经 mounted，再读取 generation；不能用 sleep 猜时序，也不能缺节点时跳过。
+# 三个目标已经 mounted，再读取 generation；不能用 sleep 猜时序，也不能缺节点时跳过。
 check 'ui wait gesture surface mounted' 0 "" \
   --json ui wait semantics-mounted example.gesture.surface --timeout-ms 10000
 check 'ui wait gesture list mounted' 0 "" \
   --json ui wait semantics-mounted example.gesture.list --timeout-ms 10000
+check 'ui wait nested gesture list mounted' 0 "" \
+  --json ui wait semantics-mounted example.gesture.nested --timeout-ms 10000
 # `ui semantics tree` 的 --json 输出是**信封**：树在 `payload.nodes`，而 `payload.nodes` 是一个
 # **扁平**列表——`children` 装的是 nodeId 整数，不是嵌套的子节点对象。按顶层 `doc['nodes']` 取、
 # 或按嵌套 children 递归，都只会得到空结果。
@@ -220,12 +225,13 @@ doc = json.load(sys.stdin)
 payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
 gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
         if n.get('identifier') and n.get('generation') is not None}
-print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''))
+print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''), gens.get('example.gesture.nested', ''))
 ")"
-SURFACE_GEN="${GEN%% *}"
-LIST_GEN="${GEN##* }"
-if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ]; then
-  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN"
+SURFACE_GEN="$(echo "$GEN" | awk '{print $1}')"
+LIST_GEN="$(echo "$GEN" | awk '{print $2}')"
+NESTED_GEN="$(echo "$GEN" | awk '{print $3}')"
+if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ]; then
+  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN"
   check 'gesture press-hold' 0 "doc['payload']['outcome'] == 'dispatched'" \
     --json ui gesture press-hold \
     example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
@@ -242,22 +248,41 @@ if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ]; then
     --json ui gesture fling \
     example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
+  # dispatched 只证明指针注入完成，不证明嵌套列表真的滚动。前后各抓一帧并比较，
+  # 把“命令退 0 但 UI 没动”的假绿挡在业务验收之前。
+  example_session_cli --json --output "$PRECHECK_TMP/nested-before.png" \
+    capture root >"$OUT" 2>&1
+  NESTED_BEFORE_BLOB="$(read_json "doc['payload']['blob']['blobId']")"
+  check 'gesture drag 嵌套水平列表' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui gesture drag \
+    example.gesture.nested "$NESTED_GEN" --start '{"x":0.8,"y":0.5}' \
+    --gesture-path '[{"x":0.5,"y":0.5},{"x":0.2,"y":0.5}]' --duration-ms 300
+  example_session_cli --json --output "$PRECHECK_TMP/nested-after.png" \
+    capture root >"$OUT" 2>&1
+  NESTED_AFTER_BLOB="$(read_json "doc['payload']['blob']['blobId']")"
+  check 'gesture drag 嵌套列表产生视觉变化' 0 \
+    "doc['payload']['differenceRatio'] > 0" \
+    --json capture diff "$NESTED_BEFORE_BLOB" "$NESTED_AFTER_BLOB"
+  # 外层 fling 放在嵌套拖动之后；先 fling 可能把 index 2 的嵌套目标滚出视口，
+  # 让后续手势因遮挡被拒而不是验证嵌套归属。
   check 'gesture fling 在列表面被接受' 0 "doc['payload']['outcome'] == 'dispatched'" \
     --json ui gesture fling \
     example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
 else
-  printf '  ✗ %-42s %s\n' 'gesture surface generation' \
-    '未从 semantics 树解析到 example.gesture.surface / example.gesture.list 的 generation'
+  printf '  ✗ %-42s %s\n' 'gesture target generation' \
+    '未从 semantics 树解析到 surface / list / nested 三个目标的 generation'
   echo '      手势是 P0 能力，取不到目标按失败计——跳过会让"全过"不等于"全覆盖"。'
-  FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture surface generation')
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture target generation')
 fi
 
 # setText 可能让系统键盘占据视口；若放在手势前，较矮设备上的两个手势节点存在被裁出
 # Semantics 树的风险。手势证据固定后再测文本输入，后续 navigation 会离开当前页，
-# 不再依赖这两个节点。
+# 不再依赖这三个节点。
 check 'ui text set' 0 "" \
   --json ui text set example.note "$NOTE_GENERATION" 'precheck note'
+check 'ui text enter' 0 "" \
+  --json ui text enter example.note "$NOTE_GENERATION" ' entered'
 
 echo
 echo "== 导航 =="
@@ -267,6 +292,10 @@ check 'navigation current' 0 "" --json navigation current
 check 'navigation push details' 0 "" --json navigation push example.details
 check 'ui wait destination' 0 "" --json ui wait destination example.details
 check 'navigation back' 0 "" --json navigation back
+check 'navigation go details' 0 "" --json navigation go example.details
+check 'ui wait destination details' 0 "" --json ui wait destination example.details
+check 'navigation go home' 0 "" --json navigation go example.home
+check 'ui wait destination home' 0 "" --json ui wait destination example.home
 
 echo
 echo "== inspect / keep-awake =="
@@ -280,6 +309,24 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 echo
 echo "== capture / blob =="
 check 'capture root' 0 "" --output "$PRECHECK_TMP/capture.png" capture root
+# 导航往返会重新挂载页面并递增 target generation。这里不能复用启动时的
+# catalog，否则真机预检会把合法的 stale-generation 拒绝误判成 capture 失败。
+# capture target 不保证有独立 semantics 节点，因此通过 catalog 强制确认并读取。
+check 'catalog capture target available' 0 \
+  "any(t['id'] == 'example.card.capture' for t in doc['uiTargets'])" \
+  --json catalog
+example_session_cli --json catalog >"$OUT" 2>&1
+CARD_CAPTURE_GEN="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.card.capture'][0]")"
+echo "  capture target generation：card=$CARD_CAPTURE_GEN"
+check 'capture target' 0 "" --output "$PRECHECK_TMP/capture-target.png" \
+  capture target example.card.capture "$CARD_CAPTURE_GEN"
+example_session_cli --json --output "$PRECHECK_TMP/cap1.png" capture root >"$OUT" 2>&1
+BLOB1="$(read_json "doc['payload']['blob']['blobId']")"
+example_session_cli --json exec example.counter.increment >/dev/null 2>&1
+example_session_cli --json --output "$PRECHECK_TMP/cap2.png" capture root >"$OUT" 2>&1
+BLOB2="$(read_json "doc['payload']['blob']['blobId']")"
+check 'capture diff' 0 "'differenceRatio' in json.dumps(doc)" \
+  --json capture diff "$BLOB1" "$BLOB2"
 
 echo
 echo "== 调试轨迹 =="
@@ -321,11 +368,21 @@ check_local 'trace diff 可比较另一条轨迹' 0 \
 echo
 echo "== logs =="
 check 'logs query' 0 "'records' in json.dumps(doc)" --json logs query
+check 'logs export' 0 "" --output "$PRECHECK_TMP/logs.ndjson" logs export
 
 echo
 echo "== manifest =="
 check 'ui targets --emit-manifest' 0 "'coverage' in json.dumps(doc)" \
   --json ui targets --emit-manifest
+example_session_cli --json ui targets --emit-manifest 2>/dev/null | python3 -c "
+import json, sys
+raw = json.load(sys.stdin)
+payload = raw.get('payload') if isinstance(raw.get('payload'), dict) else raw
+with open('$PRECHECK_TMP/manifest.json', 'w', encoding='utf-8') as f:
+    json.dump(payload, f)
+"
+check 'ui verify-manifest' 0 "" \
+  --json ui verify-manifest "$PRECHECK_TMP/manifest.json"
 
 echo
 echo "== 画像 =="
@@ -345,6 +402,9 @@ if [ "${PATCHBAY_SESSION_PLATFORM:-}" = android ]; then
   PERMISSION_DRIVER="${TMPDIR:-/tmp}/patchbay-precheck-permission-android"
   if (cd "$PATCHBAY_CLI_DIR" && dart compile exe bin/patchbay_permission_android.dart \
     -o "$PERMISSION_DRIVER" >/dev/null 2>&1); then
+    check 'doctor permission' 0 "" \
+      --json --permission-driver "$PERMISSION_DRIVER" doctor permission
+
     check 'permission capabilities（有 driver）' 0 \
       "len(doc['capabilities']['permissions']) == 4 and all(
           v['decisions'] == [] for v in doc['capabilities']['permissions'].values())" \
@@ -368,6 +428,10 @@ if [ "${PATCHBAY_SESSION_PLATFORM:-}" = android ]; then
       "doc['rejection']['code'] == 'permissionStateUnreachable'" \
       --json --permission-driver "$PERMISSION_DRIVER" \
       permission normalize camera --state denied
+    check 'permission fail 策略对比' 5 \
+      "doc['rejection']['code'] == 'permissionStateMismatch'" \
+      --json --permission-driver "$PERMISSION_DRIVER" \
+      permission fail camera --state denied
     # reset revokes a granted permission and Android terminates the process, so
     # it remains the final device-mutating precheck step.
     check 'permission reset' 0 \

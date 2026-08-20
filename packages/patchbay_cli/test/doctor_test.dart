@@ -122,6 +122,29 @@ void main() {
       expect(result.check('session')['action'], contains('sessions prune'));
     });
 
+    test(
+      'a pinned session whose file was deleted fails at session check and names clear hint',
+      () async {
+        store
+          ..write(_record('worktree-a'))
+          ..writeSelection('worktree-deleted');
+
+        final _Run result = await run(<String>['--json', 'doctor']);
+
+        expect(result.exitCode, PatchbayExitCode.transport);
+        expect(result.check('session')['verdict'], 'failed');
+        expect(
+          result.check('session')['action'],
+          patchbaySessionSelectionStaleHint,
+        );
+        expect(
+          (result.check('session')['details']! as Map<String, Object?>)['code'],
+          'sessionSelectionStale',
+        );
+        expect(result.check('connection')['verdict'], 'skipped');
+      },
+    );
+
     test('the directory is not consulted when the peer is named', () async {
       store.write(_record('worktree-a'));
 

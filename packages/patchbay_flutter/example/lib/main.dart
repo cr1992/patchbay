@@ -12,12 +12,16 @@ const String exampleApplicationId = 'dev.patchbay.example';
 const String counterSemanticsId = 'example.counter.value';
 const String incrementSemanticsId = 'example.counter.increment';
 const String noteTargetId = 'example.note';
+const String cardCaptureTargetId = 'example.card.capture';
 
 /// Semantics identifier of the anchored-gesture surface (press-hold / drag).
 const String gestureSurfaceSemanticsId = 'example.gesture.surface';
 
 /// Semantics identifier of the scrollable list used for fling / drag paths.
 const String gestureListSemanticsId = 'example.gesture.list';
+
+/// Semantics identifier of the nested horizontal scrollable list.
+const String gestureNestedListSemanticsId = 'example.gesture.nested';
 
 /// Stable destination IDs the example router exposes to `navigation.*`.
 const String homeDestinationId = 'example.home';
@@ -35,6 +39,11 @@ void main() {
   final ExampleRouter router = ExampleRouter();
   final PatchbayKey noteKey = PatchbayKey.text(
     noteTargetId,
+    registry: registry,
+  );
+  final PatchbayKey cardCaptureKey = PatchbayKey.capture(
+    cardCaptureTargetId,
+    gates: const <String>{exampleWriteGate},
     registry: registry,
   );
 
@@ -66,7 +75,14 @@ void main() {
     }
   }
 
-  runApp(PatchbayExampleApp(model: model, noteKey: noteKey, router: router));
+  runApp(
+    PatchbayExampleApp(
+      model: model,
+      noteKey: noteKey,
+      cardCaptureKey: cardCaptureKey,
+      router: router,
+    ),
+  );
 }
 
 final class ExampleCounterModel extends ValueNotifier<int> {
@@ -284,10 +300,11 @@ PatchbayGestureDecision _gesturePolicy(
   const Set<String> surfaces = <String>{
     gestureSurfaceSemanticsId,
     gestureListSemanticsId,
+    gestureNestedListSemanticsId,
   };
   if (!surfaces.contains(target.identifier)) {
     return const PatchbayGestureDecision.reject(
-      rejectionNotice: 'This example only opens its two gesture surfaces.',
+      rejectionNotice: 'This example only opens its gesture surfaces.',
     );
   }
   if (gesture == PatchbayGestureKind.fling &&
@@ -399,12 +416,14 @@ final class PatchbayExampleApp extends StatefulWidget {
   const PatchbayExampleApp({
     required this.model,
     required this.noteKey,
+    required this.cardCaptureKey,
     required this.router,
     super.key,
   });
 
   final ExampleCounterModel model;
   final PatchbayKey noteKey;
+  final PatchbayKey cardCaptureKey;
   final ExampleRouter router;
 
   @override
@@ -429,6 +448,7 @@ final class _PatchbayExampleAppState extends State<PatchbayExampleApp> {
         homeDestinationId: (BuildContext context) => _ExampleHomeScreen(
           model: widget.model,
           noteKey: widget.noteKey,
+          cardCaptureKey: widget.cardCaptureKey,
           noteController: _noteController,
         ),
         detailsDestinationId: (BuildContext context) =>
@@ -442,11 +462,13 @@ final class _ExampleHomeScreen extends StatelessWidget {
   const _ExampleHomeScreen({
     required this.model,
     required this.noteKey,
+    required this.cardCaptureKey,
     required this.noteController,
   });
 
   final ExampleCounterModel model;
   final PatchbayKey noteKey;
+  final PatchbayKey cardCaptureKey;
   final TextEditingController noteController;
 
   @override
@@ -494,7 +516,10 @@ final class _ExampleHomeScreen extends StatelessWidget {
             decoration: const InputDecoration(labelText: 'Debug note'),
           ),
           const SizedBox(height: 16),
-          const _ExampleGestureSurface(),
+          RepaintBoundary(
+            key: cardCaptureKey,
+            child: const _ExampleGestureSurface(),
+          ),
           const SizedBox(height: 16),
           const Expanded(child: _ExampleGestureList()),
         ],
@@ -534,7 +559,8 @@ final class _ExampleGestureSurfaceState extends State<_ExampleGestureSurface> {
   );
 }
 
-/// Scrollable list for fling and multi-segment drag paths.
+/// Scrollable list for fling and multi-segment drag paths, including a nested
+/// horizontal scrollable for nested gesture isolation testing.
 final class _ExampleGestureList extends StatelessWidget {
   const _ExampleGestureList();
 
@@ -544,8 +570,36 @@ final class _ExampleGestureList extends StatelessWidget {
     label: 'Gesture list',
     child: ListView.builder(
       itemCount: 60,
-      itemBuilder: (BuildContext context, int index) =>
-          ListTile(dense: true, title: Text('row $index')),
+      itemBuilder: (BuildContext context, int index) {
+        if (index == 2) {
+          return SizedBox(
+            height: 96,
+            child: Semantics(
+              identifier: gestureNestedListSemanticsId,
+              container: true,
+              label: 'Nested horizontal list',
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: 20,
+                itemBuilder: (BuildContext context, int hIndex) => Container(
+                  width: 96,
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text('item $hIndex'),
+                ),
+              ),
+            ),
+          );
+        }
+        return ListTile(dense: true, title: Text('row $index'));
+      },
     ),
   );
 }
