@@ -527,7 +527,7 @@ System permission orchestration uses an explicit external driver. Android 0.4.0 
 status/normalize/reset. The source repository also includes a buildable iOS XCUITest runner for
 physical-device camera, microphone, and location reset/exercise; the App must initiate its own
 permission request, and unsupported status/normalize, notification reset, signing or language
-conditions fail closed. See [platform permission drivers](doc/platform-permission-drivers.md).
+conditions fail closed. See [platform permission drivers](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md).
 For the stable commands, passthrough boundaries, and exit conditions of the three trees and
 actions, see
 [`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)
