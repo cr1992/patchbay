@@ -120,19 +120,19 @@ dependencies:
       );
     });
 
-    test('README 只同步四个受管锚点，其他版本文本原样保留', () {
+    test('根 README 只同步 hosted 安装与 AOT 受管锚点，其他版本文本原样保留', () {
       const String readme = '''
 > **Project status:** `v0.2.1`, keep
 historical patchbay-v0.1.0 stays
-      ref: patchbay-v0.2.1
+  patchbay_flutter: ^0.2.1
 curl /releases/download/patchbay-v0.2.1/patchbay-0.2.1-macos-arm64
---git-ref patchbay-v0.2.1 --git-path packages/patchbay_cli
+\$ dart pub global activate patchbay_cli 0.2.1
 ''';
       final String bumped = applyReadmeVersionReferences(readme, '0.3.0');
       expect(bumped, contains('`v0.3.0`'));
-      expect(bumped, contains('ref: patchbay-v0.3.0'));
+      expect(bumped, contains('patchbay_flutter: ^0.3.0'));
       expect(bumped, contains('/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64'));
-      expect(bumped, contains('--git-ref patchbay-v0.3.0'));
+      expect(bumped, contains('activate patchbay_cli 0.3.0'));
       expect(bumped, contains('historical patchbay-v0.1.0 stays'));
       expect(applyReadmeVersionReferences(bumped, '0.3.0'), bumped);
     });
@@ -140,21 +140,47 @@ curl /releases/download/patchbay-v0.2.1/patchbay-0.2.1-macos-arm64
     test('README AOT 文件名完整识别 prerelease SemVer，不在连字符处截断', () {
       const String readme = '''
 > **Project status:** `v0.3.0`, keep
-      ref: patchbay-v0.3.0
+  patchbay_flutter: ^0.3.0
 curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
---git-ref patchbay-v0.3.0 --git-path packages/patchbay_cli
+\$ dart pub global activate patchbay_cli 0.3.0
 ''';
 
       final String bumped = applyReadmeVersionReferences(readme, '0.4.0-rc.1');
 
       expect(bumped, contains('`v0.4.0-rc.1`'));
-      expect(bumped, contains('ref: patchbay-v0.4.0-rc.1'));
+      expect(bumped, contains('patchbay_flutter: ^0.4.0-rc.1'));
       expect(
         bumped,
         contains('/patchbay-v0.4.0-rc.1/patchbay-0.4.0-rc.1-macos-arm64'),
       );
-      expect(bumped, contains('--git-ref patchbay-v0.4.0-rc.1'));
+      expect(bumped, contains('activate patchbay_cli 0.4.0-rc.1'));
       expect(applyReadmeVersionReferences(bumped, '0.4.0-rc.1'), bumped);
+    });
+
+    test('guide 与 CLI README 使用各自的 hosted 版本锚点', () {
+      const String guide = '''
+  patchbay_flutter: ^0.3.0
+\$ dart pub global activate patchbay_cli 0.3.0
+curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-linux-x64
+''';
+      final String bumpedGuide = applyReleaseDocumentVersionReferences(
+        'docs/guide.md',
+        guide,
+        '0.4.0',
+      );
+      expect(bumpedGuide, contains('patchbay_flutter: ^0.4.0'));
+      expect(bumpedGuide, contains('activate patchbay_cli 0.4.0'));
+      expect(bumpedGuide, contains('/patchbay-v0.4.0/patchbay-0.4.0-linux'));
+
+      const String cli = '\$ dart pub global activate patchbay_cli 0.3.0\n';
+      expect(
+        applyReleaseDocumentVersionReferences(
+          'packages/patchbay_cli/README.md',
+          cli,
+          '0.4.0',
+        ),
+        '\$ dart pub global activate patchbay_cli 0.4.0\n',
+      );
     });
 
     test('README 受管锚点缺失时拒绝，不静默放过结构漂移', () {
@@ -909,6 +935,68 @@ sdks:
       expect(_check(checks, 'package-changelog').hard, isTrue);
       expect(_check(checks, 'internal-dep-constraints').hard, isTrue);
       expect(_check(checks, 'local-overrides').hard, isTrue);
+      expect(_check(checks, 'documentation-current').hard, isTrue);
+    });
+
+    group('当前文档治理', () {
+      test('hosted 安装、双语入口、SVG 与中性示例齐全时通过', () {
+        final ReleaseCheck check = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(released: true),
+            resolveTag: (_) => null,
+          ),
+          'documentation-current',
+        );
+        expect(check.status, ReleaseCheckStatus.ok);
+        expect(check.hard, isTrue);
+      });
+
+      test('旧版安装口径与未发布措辞会阻断', () {
+        final ReleaseCheck check = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(
+              released: true,
+              documentOverrides: <String, String>{
+                'docs/guide.md': _releaseDocuments('0.2.1')['docs/guide.md']!
+                    .replaceFirst('# Guide', '# Guide\n\n尚未发布到 pub.dev'),
+              },
+            ),
+            resolveTag: (_) => null,
+          ),
+          'documentation-current',
+        );
+        expect(check.status, ReleaseCheckStatus.failed);
+        expect(check.detail, contains('尚未发布到 pub.dev'));
+        expect(check.detail, contains('patchbay-v0.2.1'));
+      });
+
+      test('业务命令泄漏与架构 SVG 能力缺失会阻断', () {
+        final Map<String, String> documents = _releaseDocuments('0.3.0');
+        final ReleaseCheck check = _check(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: _inputs(
+              released: true,
+              documentOverrides: <String, String>{
+                'docs/design.md': documents['docs/design.md']!.replaceFirst(
+                  'example.job.run',
+                  'consumer.device.pair',
+                ),
+                'docs/assets/patchbay-architecture.svg':
+                    documents['docs/assets/patchbay-architecture.svg']!
+                        .replaceFirst('gesture / inspect / wait', 'navigation'),
+              },
+            ),
+            resolveTag: (_) => null,
+          ),
+          'documentation-current',
+        );
+        expect(check.status, ReleaseCheckStatus.failed);
+        expect(check.detail, contains('非中性命令示例'));
+        expect(check.detail, contains('gesture / inspect / wait'));
+      });
     });
 
     test('四件套补齐后转绿', () {
@@ -1668,6 +1756,7 @@ ReleaseInputs _inputs({
   Set<String> dropOverrides = const <String>{},
   String? hostSurfaceGolden,
   Map<String, String>? compatibilityCorpus,
+  Map<String, String> documentOverrides = const <String, String>{},
 }) {
   final String resolved = version ?? (released ? '0.3.0' : '0.2.1');
   final String constraints = constraintVersion ?? resolved;
@@ -1723,8 +1812,8 @@ ReleaseInputs _inputs({
     packageVersionSource:
         "const String patchbayPackageVersion = '$resolved';\n",
     readmes: <String, String>{
-      'README.md': _releaseReadme(resolved, chinese: false),
-      'README.zh-CN.md': _releaseReadme(resolved, chinese: true),
+      ..._releaseDocuments(resolved),
+      ...documentOverrides,
     },
     changelog: released
         ? '# Changelog\n\n## $resolved - 2026-08-14\n\n### Added\n\n- 某条。\n'
@@ -1794,11 +1883,42 @@ String _hostSurface(String version) => jsonEncode(<String, Object?>{
 
 String _releaseReadme(String version, {required bool chinese}) =>
     '''
-> **${chinese ? '项目状态：' : 'Project status:'}** `v$version`, keep
-      ref: patchbay-v$version
+> **${chinese ? '项目状态：' : 'Project status:'}** `v$version`, ${chinese ? '已发布到 pub.dev' : 'published on pub.dev'}
+  patchbay_flutter: ^$version
 curl /releases/download/patchbay-v$version/patchbay-$version-macos-arm64
---git-ref patchbay-v$version --git-path packages/patchbay_cli
+\$ dart pub global activate patchbay_cli $version
 ''';
+
+Map<String, String> _releaseDocuments(String version) => <String, String>{
+  'README.md': _releaseReadme(version, chinese: false),
+  'README.zh-CN.md': _releaseReadme(version, chinese: true),
+  'docs/guide.md':
+      '''
+# Guide
+  patchbay_flutter: ^$version
+\$ dart pub global activate patchbay_cli $version
+curl /releases/download/patchbay-v$version/patchbay-$version-linux-x64
+''',
+  'packages/patchbay_cli/README.md':
+      '# CLI\n\n\$ dart pub global activate patchbay_cli $version\n',
+  'packages/patchbay_cli/README.zh-CN.md':
+      '# CLI\n\n\$ dart pub global activate patchbay_cli $version\n',
+  'packages/patchbay/README.md': '# Core\n',
+  'packages/patchbay/README.zh-CN.md': '# Core\n',
+  'packages/patchbay_transport/README.md': '# Transport\n',
+  'packages/patchbay_transport/README.zh-CN.md': '# Transport\n',
+  'packages/patchbay_flutter/README.md': '# Flutter\n',
+  'packages/patchbay_flutter/README.zh-CN.md': '# Flutter\n',
+  'packages/patchbay_flutter/example/README.md': '# Example\n',
+  'packages/patchbay_flutter/example/README.zh-CN.md': '# Example\n',
+  'docs/design.md': 'CLI->>Host: exec example.job.run\n',
+  'docs/assets/patchbay-hero.svg':
+      '<svg><text>patchbay exec example.job.run</text></svg>\n',
+  'docs/assets/patchbay-architecture.svg':
+      '<svg><text>patchbay</text><text>patchbay_transport</text>'
+      '<text>patchbay_cli</text><text>patchbay_flutter</text>'
+      '<text>gesture / inspect / wait</text></svg>\n',
+};
 
 /// 从当前目录向上找仓根（CHANGELOG.md + packages/patchbay/pubspec.yaml）。
 ///
@@ -1873,7 +1993,7 @@ Map<String, List<int>> _releaseFileBytes(Directory repo) {
     changelogPath,
     hostSurfaceGoldenPath,
     packageVersionSourcePath,
-    ...releaseReadmePaths,
+    ...activePublicDocumentPaths,
     exampleLockPath,
     compatMatrixPath,
     for (final String package in releasePackages) ...<String>[

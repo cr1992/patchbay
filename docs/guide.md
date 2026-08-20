@@ -7,8 +7,7 @@
 
 - Dart `>=3.11.0 <4.0.0`；
 - 使用 UI 能力时需要 Flutter `>=3.38.0`；
-- App 必须以 debug 或 profile 构建运行；
-- 当前 package 尚未发布到 pub.dev，需要从 Git tag 引用。
+- App 必须以 debug 或 profile 构建运行。
 
 ## 安装
 
@@ -16,11 +15,7 @@
 
 ```yaml
 dependencies:
-  patchbay_flutter:
-    git:
-      url: https://github.com/cr1992/patchbay.git
-      ref: patchbay-v0.2.0
-      path: packages/patchbay_flutter
+  patchbay_flutter: ^0.4.0
 ```
 
 ### CLI
@@ -29,7 +24,7 @@ CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什
 
 | 形态 | 任意目录可用 | 启动 + 一次 `catalog` 往返 | 适用 |
 |---|---|---|---|
-| Release 预编译二进制（`0.3.0` 起） | 是 | ~45 ms | 只用 CLI；机器上不必有 Dart SDK |
+| Release 预编译二进制 | 是 | ~45 ms | 只用 CLI；机器上不必有 Dart SDK |
 | `dart pub global activate` app snapshot | 是 | ~160 ms | 需要 Dart SDK 的兼容形态 |
 | 仓内 `dart run bin/patchbay.dart` | 要写全路径 | ~540 ms | 改 CLI 本身 |
 
@@ -45,8 +40,7 @@ CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什
 #### pub global app snapshot（兼容形态）
 
 ```console
-$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
+$ dart pub global activate patchbay_cli 0.4.0
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```
@@ -55,26 +49,23 @@ $ patchbay --help
 （pub 自己会在安装末尾打这条警告）。把 `export` 那行写进 shell 配置，否则 `patchbay` 会
 「装完了却找不到」。
 
-装好的是一个冻结在该 tag 上、由 `dart` runtime 加载的 app snapshot：换 tag 要重新
+装好的是一个冻结在该 package 版本上、由 `dart` runtime 加载的 app snapshot：换版本要重新
 `activate`，跑起来不会再解析依赖。它不是 `dart compile exe` 生成的独立原生 AOT 二进制；
 不要把这条形态的耗时当作原生 AOT 基准。版本升级时同时更新 App 依赖和全局 CLI，避免 schema
 或命令面漂移。
 
-`0.3.0` 起 `patchbay_cli` 会发布到 pub.dev，届时 `dart pub global activate patchbay_cli` 即可，
-不再需要 `--source git`。
+#### 预编译二进制
 
-#### 预编译二进制（`0.3.0` 起）
-
-`patchbay-v0.3.0` 起，每个 tag 的 GitHub Release 附带三平台 AOT 产物
+每个正式 tag 的 GitHub Release 附带三平台 AOT 产物
 （`macos-arm64` / `linux-x64` / `windows-x64`）与一份 `checksums.txt`。产物自带运行时，
 **目标机器上不需要 Dart SDK**，这是给「只用 CLI、不写 Dart」的人和 CI 镜像准备的形态：
 
 ```console
-$ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
-$ shasum -a 256 patchbay-0.3.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
-$ chmod +x patchbay-0.3.0-macos-arm64
+$ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.0/patchbay-0.4.0-macos-arm64
+$ shasum -a 256 patchbay-0.4.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
+$ chmod +x patchbay-0.4.0-macos-arm64
 $ mkdir -p ~/.local/bin
-$ mv patchbay-0.3.0-macos-arm64 ~/.local/bin/patchbay
+$ mv patchbay-0.4.0-macos-arm64 ~/.local/bin/patchbay
 ```
 
 Release 资产不携带可执行位，`chmod +x` 是必需的一步。用**浏览器**下载的 macOS 产物还会被
@@ -604,7 +595,7 @@ doctor 打一条 `capabilityNotHonoured` 警告——这是要归档的 host bug
 （自顶层域起最多五层），命中就把路径原样打出来并劝阻 `force-stop` / `kill` / 卸载——
 真机上强杀正在通话 / 配网中的 App，代价远大于等它。这是**结构化读法，不认领域词表**：
 CLI 不认识任何 consumer 的业务名词，路径打出来由你判是不是误报。想让它认出来，把布尔
-`active` 放在会话对象上即可（如 `snapshot.call.session.active`）。
+`active` 放在会话对象上即可（如 `snapshot.session.active`）。
 
 App **连不上**时这条警示照样出，措辞换成「查不出设备上有没有活跃会话，按不安全对待」：
 恰恰是那一刻最容易顺手强杀进程。
@@ -617,7 +608,7 @@ doctor 只读，不改会话目录、不删记录、不重连、不替你唤醒�
 $ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查
 $ patchbay catalog                          # App 实际注册了什么（唯一真源）
 $ patchbay --json snapshot                  # 状态快照
-$ patchbay snapshot --path call.session      # 只取一个字段 / 子树
+$ patchbay snapshot --path session           # 只取一个字段 / 子树
 $ patchbay snapshot wait <dot.path> --until exists|absent|equals [<json>]
 $ patchbay --args '{...}' exec <ns.command> # 领域命令
 $ patchbay --wait exec <ns.command>         # job 命令等终态
@@ -692,11 +683,11 @@ Android 的 `adb` 解法在 iOS 上不存在。
 `snapshot` 不带选项时仍是整树读，行为一个字没变。要盯一个字段时有两条：
 
 ```console
-$ patchbay --json snapshot --path call.session.active
-{"schemaVersion":1,"selection":{"path":"call.session.active","found":true,"value":true}}
+$ patchbay --json snapshot --path session.active
+{"schemaVersion":1,"selection":{"path":"session.active","found":true,"value":true}}
 
-$ patchbay snapshot wait call.session.active --until equals true
-path=call.session.active found=true value=true wait=observed
+$ patchbay snapshot wait session.active --until equals true
+path=session.active found=true value=true wait=observed
 ```
 
 `--path` 是**点路径**，段字符集与稳定 destination id 同一套（`[A-Za-z0-9_-]`）。取到什么就原样答什么
@@ -714,7 +705,7 @@ path=call.session.active found=true value=true wait=observed
 {"admission": "accepted", "source": "appRecorded", "snapshot": {"call": {…}}}
 ```
 
-这时正确写法是 `--path snapshot.call.session.active`，`--path call.session.active` 取不到——那层
+这时正确写法是 `--path snapshot.session.active`，`--path session.active` 取不到——那层
 `snapshot` 是**该接入方自己的键**，不是协议字段，host 不会替谁拆包（拆了，平铺的接入方就全取不到
 了）。拿不准就先跑一次不带 `--path` 的整树读，照着实际形状写路径；`patchbay doctor` 打印的活跃
 会话路径也是同一套写法。

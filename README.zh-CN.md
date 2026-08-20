@@ -27,7 +27,7 @@ Patchbay 是一条伸进 Flutter runtime 的类型化控制通道：从终端连
 adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iOS 来说，它补上了
 系统工具无法提供的 App 内部调试面。
 
-> **项目状态：** `v0.4.0`，源码方式使用；需要 Dart `>=3.11.0`，Flutter UI 能力需要
+> **项目状态：** `v0.4.0`，已发布到 pub.dev；需要 Dart `>=3.11.0`，Flutter UI 能力需要
 > Flutter `>=3.38.0`。控制面仅在 debug / profile 启用；package 可以参与 release 编译，但接入方
 > 必须在组合根通过编译期分支让 host 与 adapter 保持不可达。
 
@@ -50,15 +50,11 @@ Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架；
 
 ### 1. 添加 Flutter 依赖
 
-当前 package 尚未发布到 pub.dev，请固定 tag 从 Git 引用：
+日常接入直接使用 hosted package：
 
 ```yaml
 dependencies:
-  patchbay_flutter:
-    git:
-      url: https://github.com/cr1992/patchbay.git
-      ref: patchbay-v0.4.0
-      path: packages/patchbay_flutter
+  patchbay_flutter: ^0.4.0
 ```
 
 `patchbay_flutter` 已导出 core API；纯 Dart 接入可改用 `packages/patchbay`。
@@ -78,11 +74,10 @@ $ patchbay --help
 
 确保 `~/.local/bin` 在 `PATH`。`dart pub global activate patchbay_cli` 安装的是由 Dart runtime
 加载的 app snapshot，并非独立原生 AOT；它可以作为兼容形态使用，但不应拿它验证 AOT 启动耗时。
-需要该兼容形态时仍按同一 tag 固定安装：
+需要该兼容形态时按同一 package 版本固定安装：
 
 ```console
-$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.4.0 --git-path packages/patchbay_cli
+$ dart pub global activate patchbay_cli 0.4.0
 ```
 
 ### 3. 在组合根注册
@@ -167,7 +162,7 @@ $ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '138
 ```console
 $ patchbay identity
 $ patchbay --json snapshot
-$ patchbay --wait exec pairing.ble.pair
+$ patchbay --wait exec example.job.run
 $ patchbay ui semantics tree
 $ patchbay ui tap login.submit
 $ patchbay --output screen.png capture root

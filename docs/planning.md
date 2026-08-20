@@ -11,10 +11,18 @@
 | [版本计划](releases/0.4.0.md) | 版本目标、P0/P1/P2、依赖与实施顺序、版本验收和退出条件 | 条目实施状态、重复的条目标题、方案裁决正文 |
 | [Proposal](proposals/README.md) | API / wire、状态机、边界、兼容策略、资源预算、验证方案和设计裁决 | 排期优先级、实施进度、发布结果 |
 | [design.md](design.md) | 已接受且跨版本长期有效的设计立场 | 尚未裁决的方案和单版本排期 |
+| 根 README、[guide](guide.md)、全部包与 example README | 当前稳定版的安装、入口、能力与限制 | 已淘汰安装方式、旧版状态和实施过程 |
+| `docs/assets/*.svg` | 当前架构与首页能力摘要 | 已删除组件、接入方业务词和旧版命令示例 |
 | `changelog.d/<version>/` / `CHANGELOG.md` | 已实现的用户可见变化 | 待办、设计备选和实施过程 |
+| `releases/`、`proposals/`、CHANGELOG、版本化兼容语料 | 对应版本的计划、裁决与发布证据 | 当前版安装入口 |
 
 同一字段不得在两个文档中维护。为了可读性，版本计划可以多次引用 PB 编号，但范围表只写编号和
 验收，不复制 backlog 标题；Proposal 的“状态”只表示设计是否被接受，不代表条目实施进度。
+
+对外当前文档与历史证据严格分区：README、guide、包 README、design 和 SVG 只能描述当前稳定事实；
+旧版本号、旧安装源和当时状态只留在版本计划、Proposal、CHANGELOG 与版本化兼容语料。正式版必须在
+打 tag 前完成当前文档，不能以“发布后再改 README”制造一个文档已过期的 tag。`release_prep` 对受管
+版本锚点执行精确替换，并对旧安装口径、非中性命令示例和架构 SVG 能力执行 fail-closed 检查。
 
 ## 生命周期
 
@@ -106,5 +114,7 @@ CI 会检查：
 - 版本范围表不引用不存在的 PB，也不复制 backlog 的标题列；
 - backlog 中引用的 Proposal 和 design-gate 文件/编号存在；
 - 标记 `待裁决` 的条目必须同时引用 Proposal 和 design-gate。
+- `release_prep` 另行检查当前文档的版本锚点、hosted 安装口径、中性示例与架构 SVG；历史区不参与
+  当前版本漂移判定。
 
 检查脚本只验证结构关系，不替代对方案内容和验收质量的评审。

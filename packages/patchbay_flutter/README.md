@@ -189,7 +189,7 @@ interconnect**:
 | How it is labelled | How to check whether it is mounted |
 |---|---|
 | `PatchbayKey.text/capture('id')` | Read `patchbay catalog` and look at that ID's `mounted` / `generation` in `uiTargets` |
-| `Semantics(identifier: 'id')` | `patchbay ui wait semantics-mounted <identifier>` (long poll, available since `patchbay-v0.1.0`) |
+| `Semantics(identifier: 'id')` | `patchbay ui wait semantics-mounted <identifier>` (long poll) |
 
 `PatchbayKey` only replaces the widget's `key` and **does not** also write a Semantics
 `identifier`; conversely, `ui wait semantics-mounted` walks the Semantics tree and cannot see a

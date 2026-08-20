@@ -215,7 +215,7 @@ sequenceDiagram
 
 ### 6. 慢事实用 job 表达
 
-配网、连接这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实
+批处理、同步这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实
 来源，取消 / 超时 / 代际失效都有类型化终态。等待是服务端长轮询（客户端声明预算，
 服务端夹紧到上限），不是客户端刷屏轮询。
 
@@ -229,7 +229,7 @@ sequenceDiagram
     participant CLI
     participant Host as App host
     participant Ctrl as App controller
-    CLI->>Host: exec pairing.ble.pair
+    CLI->>Host: exec example.job.run
     Host->>Host: 校验参数 → 过双层门
     Host->>Ctrl: 复用既有 controller（自带并发许可）
     Host-->>CLI: admission: accepted, jobId

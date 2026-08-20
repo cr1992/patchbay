@@ -28,7 +28,7 @@ widgets by stable ID, and pull redacted logs and screenshots.
 adb looks at a device from outside the system; Patchbay looks at the runtime from inside the app.
 On iOS in particular, it fills in the in-app debugging surface that system tooling cannot provide.
 
-> **Project status:** `v0.4.0`, consumed from source; requires Dart `>=3.11.0`, and Flutter
+> **Project status:** `v0.4.0`, published on pub.dev; requires Dart `>=3.11.0`, and Flutter
 > `>=3.38.0` for the Flutter UI capabilities. The control plane is enabled only in debug /
 > profile; the packages can take part in a release compile, but the consumer must keep the host
 > and adapters unreachable through compile-time branching at the composition root.
@@ -54,15 +54,11 @@ session discovery, and direct HTTP integration, see the [usage guide](docs/guide
 
 ### 1. Add the Flutter dependency
 
-These packages are not published to pub.dev yet — reference them from Git, pinned to a tag:
+Use the hosted package for normal integration:
 
 ```yaml
 dependencies:
-  patchbay_flutter:
-    git:
-      url: https://github.com/cr1992/patchbay.git
-      ref: patchbay-v0.4.0
-      path: packages/patchbay_flutter
+  patchbay_flutter: ^0.4.0
 ```
 
 `patchbay_flutter` re-exports the core API; for pure Dart integration use `packages/patchbay`
@@ -85,11 +81,10 @@ Make sure `~/.local/bin` is on `PATH`. `dart pub global activate patchbay_cli` r
 alternative, but it installs an app snapshot loaded by the Dart runtime, not a standalone native
 AOT executable; do not use it to measure native AOT startup.
 
-When that compatibility form is required, keep it pinned to the same tag:
+When that compatibility form is required, pin it to the same package version:
 
 ```console
-$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.4.0 --git-path packages/patchbay_cli
+$ dart pub global activate patchbay_cli 0.4.0
 ```
 
 ### 3. Register at the composition root
@@ -181,7 +176,7 @@ $ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '138
 ```console
 $ patchbay identity
 $ patchbay --json snapshot
-$ patchbay --wait exec pairing.ble.pair
+$ patchbay --wait exec example.job.run
 $ patchbay ui semantics tree
 $ patchbay ui tap login.submit
 $ patchbay --output screen.png capture root

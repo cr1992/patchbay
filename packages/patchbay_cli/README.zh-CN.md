@@ -10,16 +10,15 @@
 
 ## 安装与运行
 
-当前 package 尚未发布到 pub.dev，可以从仓库 tag 安装：
+从 pub.dev 安装 CLI，并与 App 侧使用的版本保持一致：
 
 ```console
-$ dart pub global activate --source git https://github.com/cr1992/patchbay.git \
-    --git-ref patchbay-v0.2.0 --git-path packages/patchbay_cli
+$ dart pub global activate patchbay_cli 0.4.0
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```
 
-三种安装形态的取舍（含 `0.3.0` 起的预编译二进制、启动耗时对比，以及「在接入方仓目录里
+三种安装形态的取舍（含 Release 预编译二进制、启动耗时对比，以及「在接入方仓目录里
 `dart run patchbay_cli:patchbay` 会解析到该仓 pin 的版本」这个坑）见
 [使用指南的安装节](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)。改 CLI 本身时，`dart run tool/build_cli.dart`
 把当前工作树编成 AOT 可执行文件，产物落在 `build/`。
