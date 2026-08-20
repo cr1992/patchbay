@@ -789,7 +789,7 @@ final class PatchbayServiceHost {
 
   /// The identity answer, without the VM Service response wrapper.
   ///
-  /// [serverVersion] and [features] are additive fields under the same
+  /// `serverVersion` and [features] are additive fields under the same
   /// `schemaVersion`: an older client reads identity key by key and ignores
   /// what it does not know, so gaining them breaks nobody, while a newer
   /// client that finds them absent learns the host predates them. That is the

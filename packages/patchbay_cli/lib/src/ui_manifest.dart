@@ -1070,7 +1070,7 @@ PatchbayUiManifestSemanticsRuntime decodePatchbayManifestSemantics(
 
 /// One declared target the runtime is not currently carrying.
 ///
-/// [registered] separates the two ways that happens: the catalog knows the ID
+/// `registered` separates the two ways that happens: the catalog knows the ID
 /// but nothing is mounted right now (`true`), or the catalog has never heard of
 /// it (`false`). The first is ordinary for a control that lives on another
 /// screen; the second is the one that usually means a missing annotation.

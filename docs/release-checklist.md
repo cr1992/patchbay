@@ -18,6 +18,7 @@ CHANGELOG。定版先按碎片规范校验并把目标版本目录聚合为根�
 
 - [ ] 所有版本目录和碎片文件名、change-id、类型、正文符合规范，根目录没有散落碎片
 - [ ] 根 CHANGELOG 的 Unreleased 内容与待发布碎片一一对应
+- [ ] 目标版本段有一对 `PUB_CHANGELOG` 标记包围的英文 pub.dev 摘要
 - [ ] 目标版本碎片在同一发布提交中删除，`README.md` 与其他版本队列保留
 - [ ] 没有直接编辑四个包的派生 CHANGELOG
 
@@ -130,6 +131,22 @@ $ git ls-remote --tags origin patchbay-vX.Y.Z
 `0.3.0` 起四包发布到 pub.dev。顺序由脚本按包间依赖推导（当前为
 `patchbay → patchbay_transport → patchbay_cli → patchbay_flutter`），凭据由人提供，脚本只打印命令。
 
+pub points 是发布硬标准。发布前使用 pub.dev 评分页当时显示的 Pana 版本，在包的
+临时副本上运行；不允许以「尚未解析同版内部依赖」当成评分结果。因为 pub.dev 会忽略
+`pubspec_overrides.yaml` 重做依赖检查，四包按依赖顺序发布：每发一个包，等它实际评分满分
+后才继续下一个；未满分立即停止本次发布链。
+
+```console
+$ dart pub global activate pana <pub.dev 当前版本>
+$ pana packages/patchbay --project-root . --exit-code-threshold 0
+$ pana packages/patchbay_transport --project-root . --exit-code-threshold 0
+# 上游同版包在 pub.dev 可解析后，依次对 patchbay_cli / patchbay_flutter 执行同一命令。
+```
+
+每个包发布后还要在它的 Scores 页核对 `grantedPoints == maxPoints`，不以本地旧 Pana 结果代替站点结果。
+
+- [ ] 四包本地 Pana 报告在可解析同版内部依赖时达到当前满分
+- [ ] 四包发布后 Scores API 均满足 `grantedPoints == maxPoints`
 - [ ] 从干净的 git 状态发布（pub 会因「有未提交改动」报 warning）
 - [ ] 显式指定 host：本机 `PUB_HOSTED_URL` 常指向镜像，不指定会把包发到镜像上
 

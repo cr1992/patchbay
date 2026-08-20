@@ -519,9 +519,18 @@ String _render(_Contract contract, String contractPath) {
 
 void _renderEnum(StringBuffer out, _TypeDefinition type) {
   out
+    ..writeln('/// Strict wire representation of `${type.name}`.')
     ..writeln('enum ${type.name} {')
-    ..writeln('  ${type.values.join(',\n  ')};')
+    ..writeln();
+  for (var index = 0; index < type.values.length; index += 1) {
+    final String value = type.values[index];
+    out
+      ..writeln('  /// The `$value` wire value.')
+      ..writeln('  $value${index == type.values.length - 1 ? ';' : ','}');
+  }
+  out
     ..writeln()
+    ..writeln('  /// Decodes a value at [path], rejecting unknown values.')
     ..writeln(
       '  static ${type.name} fromJson(Object? value, {String path = r\'\$\'}) {',
     )
@@ -534,6 +543,7 @@ void _renderEnum(StringBuffer out, _TypeDefinition type) {
     )
     ..writeln('  }')
     ..writeln()
+    ..writeln('  /// Encodes this value using its stable wire name.')
     ..writeln('  String toJson() => name;')
     ..writeln('}');
 }
@@ -544,7 +554,9 @@ void _renderObject(
   Map<String, _TypeDefinition> types,
 ) {
   out
+    ..writeln('/// Strict wire representation of `${type.name}`.')
     ..writeln('final class ${type.name} {')
+    ..writeln('  /// Creates a fully validated wire value.')
     ..writeln('  const ${type.name}({');
   for (final _Field field in type.fields) {
     out.writeln('    required this.${field.name},');
@@ -553,10 +565,13 @@ void _renderObject(
     ..writeln('  });')
     ..writeln();
   for (final _Field field in type.fields) {
-    out.writeln('  final ${_dartType(field)} ${field.name};');
+    out
+      ..writeln('  /// Value of the `${field.wireName}` wire field.')
+      ..writeln('  final ${_dartType(field)} ${field.name};');
   }
   out
     ..writeln()
+    ..writeln('  /// Decodes a strict JSON object at [path].')
     ..writeln(
       '  factory ${type.name}.fromJson(Map<String, Object?> json, {String path = r\'\$\'}) {',
     )
@@ -583,6 +598,7 @@ void _renderObject(
     ..writeln('    );')
     ..writeln('  }')
     ..writeln()
+    ..writeln('  /// Encodes this value as a JSON object.')
     ..writeln('  Map<String, Object?> toJson() => <String, Object?>{');
   for (final _Field field in type.fields) {
     final String fieldPath = "r'\$.${field.wireName}'";

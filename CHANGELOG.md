@@ -9,6 +9,26 @@
 双传输兼容边界。平台权限本版按设备证据收窄为 Android adb 的 capability/status/normalize/reset/fail；
 系统弹窗 exercise、iOS 权限自动化、网络画像和 HarmonyOS 可用性保持 fail-closed，不作超出证据的承诺。
 
+<!-- PUB_CHANGELOG:START -->
+Patchbay 0.4.0 completes the observable automation loop for running Dart and
+Flutter applications while preserving explicit admission, lifecycle, and
+generation boundaries.
+
+### Highlights
+
+- Added identifier-anchored press, drag, and fling gestures; navigation and UI
+  waits; frame-aware capture and image diffs; snapshot revisions; bounded log
+  and performance evidence; and durable, redacted debugging traces.
+- Added generated command registration, strict request and response schemas,
+  execution-evidence classifications, idempotent retries, and compatibility
+  fixtures for 0.3 clients and hosts.
+- Added supervised launcher sessions, Android permission state normalization,
+  and an iOS XCUITest reference runner with fail-closed capability discovery.
+- Expanded the example application and device precheck so protocol, CLI, host,
+  direct transport, and Flutter bridge wiring are validated before consumer
+  acceptance testing.
+<!-- PUB_CHANGELOG:END -->
+
 ### Added
 
 - 新增 identifier 锚定的 press-hold、drag 与 fling：使用必填 Semantics generation、目标内归一坐标、独立 gesture policy，并对遮挡与裁剪 fail-closed。

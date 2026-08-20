@@ -105,7 +105,7 @@ typedef PatchbayJobBody = Future<Map<String, Object?>> Function();
 ///
 /// Returning after merely sending a cancellation request would let the
 /// registry publish a false terminal state. Consumers without confirmation
-/// must omit this callback and report the real terminal state from [body].
+/// must omit this callback and report the real terminal state from `body`.
 typedef PatchbayJobCancellation = FutureOr<void> Function();
 
 /// What a cancellation attempt actually achieved for one job.

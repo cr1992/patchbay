@@ -19,7 +19,7 @@ enum PatchbaySideEffect { none, appState, external }
 
 enum PatchbaySensitivePolicy { public, redacted }
 
-/// Consumer declaration stored by a [PatchbayKey] without Widget callbacks.
+/// Consumer declaration stored by a `PatchbayKey` without Widget callbacks.
 final class PatchbayUiTargetDeclaration {
   PatchbayUiTargetDeclaration.text({
     required this.id,
