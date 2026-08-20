@@ -141,7 +141,8 @@ check 'catalog' 0 "len(doc['commands']) >= 26" --json catalog
 
 example_session_cli --json catalog >"$OUT" 2>&1
 NOTE_GENERATION="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.note'][0]")"
-echo "  note target generation=$NOTE_GENERATION"
+CARD_CAPTURE_GEN="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.card.capture'][0]")"
+echo "  targets generation：note=$NOTE_GENERATION card=$CARD_CAPTURE_GEN"
 
 echo
 echo "== 状态读取 =="
@@ -188,6 +189,9 @@ check 'exec job.run' 0 "'jobId' in json.dumps(doc)" \
 example_session_cli --json exec example.job.run --args '{"steps":2}' >"$OUT" 2>&1
 JOB_ID="$(read_json "doc.get('jobId') or doc['payload']['jobId']")"
 check 'job get' 0 "'events' in json.dumps(doc)" --json job get "$JOB_ID"
+example_session_cli --json exec example.job.run --args '{"steps":10}' >"$OUT" 2>&1
+LONG_JOB_ID="$(read_json "doc.get('jobId') or doc['payload']['jobId']")"
+check 'job cancel' 0 "" --json job cancel "$LONG_JOB_ID"
 
 echo
 echo "== UI 观察与操作 =="
@@ -258,6 +262,8 @@ fi
 # 不再依赖这两个节点。
 check 'ui text set' 0 "" \
   --json ui text set example.note "$NOTE_GENERATION" 'precheck note'
+check 'ui text enter' 0 "" \
+  --json ui text enter example.note "$NOTE_GENERATION" ' entered'
 
 echo
 echo "== 导航 =="
@@ -267,6 +273,10 @@ check 'navigation current' 0 "" --json navigation current
 check 'navigation push details' 0 "" --json navigation push example.details
 check 'ui wait destination' 0 "" --json ui wait destination example.details
 check 'navigation back' 0 "" --json navigation back
+check 'navigation go details' 0 "" --json navigation go example.details
+check 'ui wait destination details' 0 "" --json ui wait destination example.details
+check 'navigation go home' 0 "" --json navigation go example.home
+check 'ui wait destination home' 0 "" --json ui wait destination example.home
 
 echo
 echo "== inspect / keep-awake =="
@@ -280,6 +290,17 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 echo
 echo "== capture / blob =="
 check 'capture root' 0 "" --output "$PRECHECK_TMP/capture.png" capture root
+if [ -n "$CARD_CAPTURE_GEN" ]; then
+  check 'capture target' 0 "" --output "$PRECHECK_TMP/capture-target.png" \
+    capture target example.card.capture "$CARD_CAPTURE_GEN"
+fi
+example_session_cli --output "$PRECHECK_TMP/cap1.png" capture root >"$OUT" 2>&1
+BLOB1="$(read_json "doc['payload']['blob']['blobId']")"
+example_session_cli --json exec example.counter.increment >/dev/null 2>&1
+example_session_cli --output "$PRECHECK_TMP/cap2.png" capture root >"$OUT" 2>&1
+BLOB2="$(read_json "doc['payload']['blob']['blobId']")"
+check 'capture diff' 0 "'differenceRatio' in json.dumps(doc)" \
+  --json capture diff "$BLOB1" "$BLOB2"
 
 echo
 echo "== 调试轨迹 =="
@@ -321,11 +342,21 @@ check_local 'trace diff 可比较另一条轨迹' 0 \
 echo
 echo "== logs =="
 check 'logs query' 0 "'records' in json.dumps(doc)" --json logs query
+check 'logs export' 0 "" --output "$PRECHECK_TMP/logs.ndjson" logs export
 
 echo
 echo "== manifest =="
 check 'ui targets --emit-manifest' 0 "'coverage' in json.dumps(doc)" \
   --json ui targets --emit-manifest
+example_session_cli --json ui targets --emit-manifest 2>/dev/null | python3 -c "
+import json, sys
+raw = json.load(sys.stdin)
+payload = raw.get('payload') if isinstance(raw.get('payload'), dict) else raw
+with open('$PRECHECK_TMP/manifest.json', 'w', encoding='utf-8') as f:
+    json.dump(payload, f)
+"
+check 'ui verify-manifest' 0 "" \
+  --json ui verify-manifest "$PRECHECK_TMP/manifest.json"
 
 echo
 echo "== 画像 =="
@@ -345,6 +376,9 @@ if [ "${PATCHBAY_SESSION_PLATFORM:-}" = android ]; then
   PERMISSION_DRIVER="${TMPDIR:-/tmp}/patchbay-precheck-permission-android"
   if (cd "$PATCHBAY_CLI_DIR" && dart compile exe bin/patchbay_permission_android.dart \
     -o "$PERMISSION_DRIVER" >/dev/null 2>&1); then
+    check 'doctor permission' 0 "" \
+      --json --permission-driver "$PERMISSION_DRIVER" doctor permission
+
     check 'permission capabilities（有 driver）' 0 \
       "len(doc['capabilities']['permissions']) == 4 and all(
           v['decisions'] == [] for v in doc['capabilities']['permissions'].values())" \
@@ -368,6 +402,10 @@ if [ "${PATCHBAY_SESSION_PLATFORM:-}" = android ]; then
       "doc['rejection']['code'] == 'permissionStateUnreachable'" \
       --json --permission-driver "$PERMISSION_DRIVER" \
       permission normalize camera --state denied
+    check 'permission fail 策略对比' 5 \
+      "doc['rejection']['code'] == 'permissionStateMismatch'" \
+      --json --permission-driver "$PERMISSION_DRIVER" \
+      permission fail camera --state denied
     # reset revokes a granted permission and Android terminates the process, so
     # it remains the final device-mutating precheck step.
     check 'permission reset' 0 \

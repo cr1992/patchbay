@@ -12,6 +12,7 @@ const String exampleApplicationId = 'dev.patchbay.example';
 const String counterSemanticsId = 'example.counter.value';
 const String incrementSemanticsId = 'example.counter.increment';
 const String noteTargetId = 'example.note';
+const String cardCaptureTargetId = 'example.card.capture';
 
 /// Semantics identifier of the anchored-gesture surface (press-hold / drag).
 const String gestureSurfaceSemanticsId = 'example.gesture.surface';
@@ -35,6 +36,11 @@ void main() {
   final ExampleRouter router = ExampleRouter();
   final PatchbayKey noteKey = PatchbayKey.text(
     noteTargetId,
+    registry: registry,
+  );
+  final PatchbayKey cardCaptureKey = PatchbayKey.capture(
+    cardCaptureTargetId,
+    gates: const <String>{exampleWriteGate},
     registry: registry,
   );
 
@@ -66,7 +72,14 @@ void main() {
     }
   }
 
-  runApp(PatchbayExampleApp(model: model, noteKey: noteKey, router: router));
+  runApp(
+    PatchbayExampleApp(
+      model: model,
+      noteKey: noteKey,
+      cardCaptureKey: cardCaptureKey,
+      router: router,
+    ),
+  );
 }
 
 final class ExampleCounterModel extends ValueNotifier<int> {
@@ -399,12 +412,14 @@ final class PatchbayExampleApp extends StatefulWidget {
   const PatchbayExampleApp({
     required this.model,
     required this.noteKey,
+    required this.cardCaptureKey,
     required this.router,
     super.key,
   });
 
   final ExampleCounterModel model;
   final PatchbayKey noteKey;
+  final PatchbayKey cardCaptureKey;
   final ExampleRouter router;
 
   @override
@@ -429,6 +444,7 @@ final class _PatchbayExampleAppState extends State<PatchbayExampleApp> {
         homeDestinationId: (BuildContext context) => _ExampleHomeScreen(
           model: widget.model,
           noteKey: widget.noteKey,
+          cardCaptureKey: widget.cardCaptureKey,
           noteController: _noteController,
         ),
         detailsDestinationId: (BuildContext context) =>
@@ -442,11 +458,13 @@ final class _ExampleHomeScreen extends StatelessWidget {
   const _ExampleHomeScreen({
     required this.model,
     required this.noteKey,
+    required this.cardCaptureKey,
     required this.noteController,
   });
 
   final ExampleCounterModel model;
   final PatchbayKey noteKey;
+  final PatchbayKey cardCaptureKey;
   final TextEditingController noteController;
 
   @override
@@ -494,7 +512,10 @@ final class _ExampleHomeScreen extends StatelessWidget {
             decoration: const InputDecoration(labelText: 'Debug note'),
           ),
           const SizedBox(height: 16),
-          const _ExampleGestureSurface(),
+          RepaintBoundary(
+            key: cardCaptureKey,
+            child: const _ExampleGestureSurface(),
+          ),
           const SizedBox(height: 16),
           const Expanded(child: _ExampleGestureList()),
         ],

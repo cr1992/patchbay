@@ -19,6 +19,10 @@ void main() {
       noteTargetId,
       registry: registry,
     );
+    final PatchbayKey cardCaptureKey = PatchbayKey.capture(
+      cardCaptureTargetId,
+      registry: registry,
+    );
     final ExampleRouter router = ExampleRouter();
     final PatchbayExampleHost host = PatchbayExampleHost(
       model: model,
@@ -28,7 +32,12 @@ void main() {
     );
     try {
       await tester.pumpWidget(
-        PatchbayExampleApp(model: model, noteKey: noteKey, router: router),
+        PatchbayExampleApp(
+          model: model,
+          noteKey: noteKey,
+          cardCaptureKey: cardCaptureKey,
+          router: router,
+        ),
       );
       expect(find.text('Count: 0'), findsOneWidget);
 
@@ -67,6 +76,10 @@ void main() {
       noteTargetId,
       registry: registry,
     );
+    final PatchbayKey cardCaptureKey = PatchbayKey.capture(
+      cardCaptureTargetId,
+      registry: registry,
+    );
     final ExampleRouter router = ExampleRouter();
     final PatchbayExampleHost host = PatchbayExampleHost(
       model: model,
@@ -80,7 +93,12 @@ void main() {
     )..register();
     try {
       await tester.pumpWidget(
-        PatchbayExampleApp(model: model, noteKey: noteKey, router: router),
+        PatchbayExampleApp(
+          model: model,
+          noteKey: noteKey,
+          cardCaptureKey: cardCaptureKey,
+          router: router,
+        ),
       );
 
       final Map<String, Object?> identity = await _call(
@@ -146,6 +164,12 @@ void main() {
           (Map<String, Object?> target) => target['id'] == noteTargetId,
         ),
         containsPair('mounted', true),
+      );
+      expect(
+        targets.singleWhere(
+          (Map<String, Object?> target) => target['id'] == cardCaptureTargetId,
+        ),
+        allOf(containsPair('mounted', true), containsPair('kind', 'capture')),
       );
 
       final Map<String, Object?> invocation = await _call(

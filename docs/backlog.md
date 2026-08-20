@@ -13,14 +13,14 @@
 
 | 条目 | 动机 / 证据 | 状态 |
 |---|---|---|
-| BUG-20260819-02：`ui.capture` 在 profile 构建必然失败 | `capture_bridge.dart` 无条件读 debug-only `debugNeedsPaint`；profile 剥断言后该 getter 抛 `LateInitializationError`，在类型化拒绝之前逃逸成 `transportError`。与 `PatchbayRoot` 在 `!kReleaseMode` 即包裹 root boundary 的意图矛盾；`tool/example_session.sh` 只跑 `--debug`，预检从未覆盖该路径 | 实现中 |
+| BUG-20260819-02：`ui.capture` 在 profile 构建必然失败 | `capture_bridge.dart` 无条件读 debug-only `debugNeedsPaint`；profile 剥断言后该 getter 抛 `LateInitializationError`，在类型化拒绝之前逃逸成 `transportError`。与 `PatchbayRoot` 在 `!kReleaseMode` 即包裹 root boundary 的意图矛盾；`tool/example_session.sh` 只跑 `--debug`，预检从未覆盖该路径 | 已验证 |
 | BUG-20260820-01：iOS 权限 capability 把 Simulator `reset` 虚报给物理真机 | `PatchbayIosPermissionAdapter` 只检查本机存在 `simctl` 就静态发布四项 `reset`，未先证明显式 `deviceId` 是 booted Simulator；物理 iPhone 真机实测出现 capability 接受、`status` 却按 `permissionUnsupported` 拒绝的不一致 | 已验证 |
 
 ## 特性
 
 | 编号 | 条目 | 动机 / 出处 | 目标版本 | 状态 | Proposal / 备注 |
 |---|---|---|---|---|---|
-| PB-040-01 | 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 接入方真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | 0.4.0 | 实现中 | [锚定式手势](proposals/0.4.0/anchored-gestures.md)；DG-040-01 |
+| PB-040-01 | 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 接入方真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | 0.4.0 | 已验证 | [锚定式手势](proposals/0.4.0/anchored-gestures.md)；DG-040-01 |
 | PB-040-02 | 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 接入方：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | 0.4.0 | 实现中 | [视觉证据](proposals/0.4.0/visual-evidence.md) |
 | PB-040-03 | 屏幕唤醒：会话活跃期间 app 自动 keep-screen-on（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，会话静默自动释放，debug-only） | 真机调试息屏即 UI 面全拒（实测），iOS 无系统级 stay-awake；自动会使息屏行为本身的测试失真，需留关闭出口 | 0.4.0 | 实现中 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md)；DG-040-02 |
 | PB-040-04 | host 侧声明 `snapshotSelectors` capability，CLI 据此判定而非猜测失败形态 | 现状是 CLI 捕获 `invalidParams` / `protocolError` 反推“老 host”；feature capabilities 前置已合入（849043a） | 0.4.0 | 已验证 | — |
@@ -30,11 +30,11 @@
 | PB-040-08 | 幂等 retryPolicy；审计 sink；CLI `describe` | dogfood（`doctor` 已实现） | 0.4.0 | 已验证 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | PB-040-09 | DevTools 借用：perf VM RPC 有界摘要 | 帧耗时、jank、heap 与 GC 计数此前只能开 DevTools 人眼看，CLI 拿不到可机读摘要 | 0.4.0 | 实现中 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md)；net 已拆出为 PB-040-28；待接入方书面确认 perf 口径 |
 | PB-040-10 | snapshot revision / diff | dogfood（低优先级） | 0.4.0 | 已验证 | [视觉证据](proposals/0.4.0/visual-evidence.md) |
-| PB-040-11 | launcher 监督循环与显式 pending session | 首个接入方已落项目级重连监督，第二接入方已集成 session store | 0.4.0 | 实现中 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
+| PB-040-11 | launcher 监督循环与显式 pending session | 首个接入方已落项目级重连监督，第二接入方已集成 session store | 0.4.0 | 已验证 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
 | PB-040-12 | `ui verify-manifest` 按 destination 逐屏巡检 | v1 只对账当前挂载态；巡检会驱动导航并改变 App 状态 | 0.4.0 | 实现中 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
 | PB-040-13 | `ui verify-manifest` 接受 YAML manifest | v1 只认 JSON；大清单人手维护 YAML 更省事 | 0.4.0 | 已验证 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
 | PB-040-14 | `ui verify-manifest` 覆盖 Semantics identifier | catalog `uiTargets` 与 Semantics identifier 是两个命名空间和两套挂载语义 | 0.4.0 | 实现中 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
-| PB-040-15 | `ui targets --emit-manifest` 生成 expected-targets manifest 初稿 | 真机验收现在要照着 catalog 手抄清单 | 0.4.0 | 实现中 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
+| PB-040-15 | `ui targets --emit-manifest` 生成 expected-targets manifest 初稿 | 真机验收现在要照着 catalog 手抄清单 | 0.4.0 | 已验证 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
 | PB-040-16 | `wire_codegen --write` 顺手刷新协议面 surface golden | golden 重生成与 codegen 分离，0.3.0 聚合时才发现 12 个 wire 类型漂移（7eb6236） | 0.4.0 | 已验证 | — |
 | PB-040-17 | `release_prep --apply` 覆盖 `patchbayPackageVersion` 与两份 README 的版本引用 | 0.3.0 定版实撞 apply 后版本引用漂移；host 会据此报告 `serverVersion` | 0.4.0 | 已验证 | — |
 | PB-040-18 | `release_prep --apply` 自动冻结本版协议面进兼容语料库 | 旧版语料目前手工冻结，版本过去后不可再生成 | 0.4.0 | 已验证 | — |
@@ -44,9 +44,9 @@
 | PB-040-22 | command/job 响应 schema | `--json` 只稳定外层信封，自由 `Map` 仍迫使脚本到处判空 | 0.4.0 | 已验证 | [命令契约](proposals/0.4.0/command-contracts.md) |
 | PB-040-23 | 调试轨迹持久化：以 traceId 记录 CLI 实际观察到的跨命令 session、请求/响应、job、执行证据、人工标记与 artifact，支持查看、导出和 diff；host-only audit 不自动回传 | 一次调试的细节目前散落在终端历史、临时 JSON 和 App 内存中，无法复盘或比较回归 | 0.4.0 | 实现中 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
 | PB-040-24 | 从调试轨迹生成 scenario 并受控回放 | 跑通的操作链需要沉淀为自动化，但应等待 recorder、权限 driver 和真实轨迹 schema 稳定 | — | 待排期 | [未来回放](proposals/future/trace-replay.md)；DG-040-06 |
-| PB-040-29 | example 覆盖全部可注入面 + 本地端到端预检 `tool/example_precheck.sh` | CI 三个 job 全在无设备容器里跑，证明不了「CLI 真的连上了设备上的 host」；example 此前只接 0.3.0 时代的面，0.4.0 能力在设备上一条都打不到 | 0.4.0 | 实现中 | 预检门禁见 [发版清单](release-checklist.md) 第 2 节；SC-040-04；待接进每周 emulator 冒烟 |
+| PB-040-29 | example 覆盖全部可注入面 + 本地端到端预检 `tool/example_precheck.sh` | CI 三个 job 全在无设备容器里跑，证明不了「CLI 真的连上了设备上的 host」；example 此前只接 0.3.0 时代的面，0.4.0 能力在设备上一条都打不到 | 0.4.0 | 已验证 | 预检门禁见 [发版清单](release-checklist.md) 第 2 节；SC-040-04 |
 | PB-040-28 | DevTools 借用：net 脱敏画像 | 阻塞在上游——`vm_service 15.2.0` 的 `getHttpProfile` 在调用方介入前已带 body/headers/cookies 与含 query 值的 URI，RPC 无采集前过滤参数，先收全量再脱敏已被 DG-040-03 否决。0.4.0 交付形态是不发布 capability、稳定返回 `networkProfilingUnavailable` | — | 待排期 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md) 的「net 的实现阻断」；DG-040-03；解除条件是上游开放采集前字段过滤，或接入方提供只产生已脱敏事件的 host collector |
-| PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 Android adb 的 normalize/reset/fail 建立可复核的权限前置状态 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-02；SC-040-03 |
+| PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 Android adb 的 normalize/reset/fail 建立可复核的权限前置状态 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 已验证 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-02；SC-040-03；[Android 矩阵](verification/android-permission-matrix.md)；[example 矩阵](verification/example-permission-matrix.md) |
 | PB-040-26 | iOS XCUITest 系统权限弹窗 runner 与恢复协议 | Patchbay 只能观察 Flutter UI；真机实践证明“App 触发 + XCTest reset/alert accessibility + 重连复核”可形成不使用坐标或私有 API 的闭环 | 0.4.0 | 已验证 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-05；[真机矩阵](verification/ios-permission-xcuitest.md) |
 | PB-040-27 | HarmonyOS 兼容验证 spike 与 permission capability 矩阵：OpenHarmony Flutter、VM attach、Semantics/lifecycle、hdc + UiTest/Hypium | 架构可接入，但当前 Flutter 3.44.9 CI 与真机均未覆盖 HarmonyOS，不能直接宣称支持 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；[当前报告](verification/harmonyos-compatibility.md)；已到 SDK/真机阻塞，capability 保持 `unsupported` |
 | PB-040-30 | 失效会话的引导式恢复：列出同一应用的可用候选，并在显式确认后完成 prune / reselect / rebind | 真机长流程伴随进程替换时，既有 `sessionStaleProcess` fail-closed 能防止误连另一设备，但操作员仍需手工拼接恢复步骤；需要在不静默回退固定会话的前提下降低恢复成本 | — | 待排期 | 落地前补 Proposal；保持“固定会话不自动改选”的既有安全边界 |

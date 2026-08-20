@@ -858,6 +858,27 @@ void main() {
         'manifestSemanticsIdentifierAmbiguous',
       );
     });
+
+    test(
+      'live emission refuses a cross-namespace identifier conflict draft',
+      () async {
+        final CliRun run = await _emit(
+          _client(
+            destination: 'login',
+            uiTargets: <Object?>[_target('login.submit')],
+            semanticsPayload: _semanticsPayload(<Map<String, Object?>>[
+              _semanticsNode(2, generation: 1, identifier: 'login.submit'),
+            ]),
+          ),
+        );
+
+        expect(run.exitCode, PatchbayExitCode.protocol);
+        expect(
+          (_report(run)['error']! as Map<String, Object?>)['code'],
+          'manifestNamespaceConflict',
+        );
+      },
+    );
   });
 
   group('manifest parsing is fail-closed', () {
