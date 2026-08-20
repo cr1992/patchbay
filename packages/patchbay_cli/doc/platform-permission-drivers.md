@@ -13,18 +13,19 @@ patchbay --json doctor permission
 
 `--permission-driver` overrides the environment for one invocation. Android also accepts `PATCHBAY_ADB` and `PATCHBAY_ANDROID_PERMISSION_RUNNER`; iOS accepts `PATCHBAY_XCRUN` and `PATCHBAY_IOS_PERMISSION_RUNNER`. Every value is explicit; the CLI never downloads a runner or chooses a different App/device after an error.
 
-Android status/normalize/reset use adb package-manager facts. Exercise is only advertised when an explicitly built UiAutomator runner is configured. The runner must return a `PATCHBAY_RESULT=<base64-json>` instrumentation status and must identify `targetPackage`, `permission`, and `decision`; mismatches are `systemUiUnexpected`.
+Android status/normalize/reset use adb package-manager facts. Exercise is only advertised when an explicitly built UiAutomator runner is configured and found on the selected device. The runner must return a `PATCHBAY_RESULT=<base64-json>` instrumentation status and must identify `targetPackage`, `permission`, and `decision`; mismatches are `systemUiUnexpected`.
 
 iOS Simulator reset uses `simctl privacy`. simctl has no public authoritative status read, so status/normalize remain `permissionUnsupported` instead of turning a successful shell exit into a permission fact. Exercise is advertised only when an explicit XCUITest runner is configured; its one JSON result must bind device, application, permission, decision, handled state, and the observed platform state.
 
-## Consumer app device checklist (post-code handoff)
+For 0.4.0, the supported device surface is deliberately narrower than the driver protocol: Android adb `capabilities/status/normalize/reset/fail` is release-gated, while generic system-dialog exercise, `allowOnce` decisions, iOS status/normalize/exercise, and permission-specific trace events are not. Patchbay does not ship or qualify a reference UiAutomator/XCUITest runner in this release. An explicitly supplied runner is an external extension and must not be inferred as portable OEM/platform support.
 
-The 0.4.0 device gate uses a real consumer app, not the Patchbay example:
+## 0.4.0 device checklist
 
-1. Start a debug/profile consumer app session and record its real session ID, application ID, device ID and driver path. Never reuse example identifiers.
+The 0.4.0 permission gate uses the repository example before any optional consumer evidence:
+
+1. Start a debug/profile App session and record its session, application and device identity.
 2. Run `patchbay --session <id> --permission-driver <path> --json doctor permission`.
-3. Android emulator and one adb device: camera/microphone/location/notifications status, normalize, reset, allow, deny and allow-once where the OS advertises them. Verify a wrong consumer application/device is rejected before mutation.
-4. iOS Simulator: reset each supported protected resource. Run the configured XCUITest companion against the consumer app and archive unsupported resources as typed capability results. A signed iOS device run owns the final matrix.
-5. After every handled dialog, assert the consumer app resumed, the session reconnected, catalog was refreshed, and identifiers/generations were re-resolved. The original permission-triggering command must not be replayed automatically.
+3. On an Android emulator and one adb device, cover camera/microphone/location/notifications status, normalize granted, reset and idempotent replay. Verify unreachable states fail before mutation and a wrong application/device is rejected.
+4. Verify that missing or unproven runners do not advertise exercise/decisions. iOS status/normalize/exercise and system-dialog handling are typed unsupported/unavailable and do not block 0.4.0.
 
-SDK installation, test-runner build/signing and the device evidence above are the remaining true-device work; they are intentionally not simulated by unit fixtures.
+Building/signing reference runners and collecting Android OEM plus iOS Simulator/device dialog matrices are deferred work; unit fixtures must not be presented as that device evidence.
