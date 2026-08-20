@@ -311,8 +311,10 @@ echo "== capture / blob =="
 check 'capture root' 0 "" --output "$PRECHECK_TMP/capture.png" capture root
 # 导航往返会重新挂载页面并递增 target generation。这里不能复用启动时的
 # catalog，否则真机预检会把合法的 stale-generation 拒绝误判成 capture 失败。
-check 'ui wait capture target mounted' 0 "" \
-  --json ui wait semantics-mounted example.card.capture --timeout-ms 10000
+# capture target 不保证有独立 semantics 节点，因此通过 catalog 强制确认并读取。
+check 'catalog capture target available' 0 \
+  "any(t['id'] == 'example.card.capture' for t in doc['uiTargets'])" \
+  --json catalog
 example_session_cli --json catalog >"$OUT" 2>&1
 CARD_CAPTURE_GEN="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.card.capture'][0]")"
 echo "  capture target generation：card=$CARD_CAPTURE_GEN"

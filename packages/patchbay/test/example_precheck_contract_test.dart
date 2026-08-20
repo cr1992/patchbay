@@ -31,8 +31,8 @@ void main() {
   test('capture target refreshes generation after navigation', () {
     final String source = _examplePrecheck().readAsStringSync();
     final int navigationHome = source.indexOf("check 'ui wait destination home'");
-    final int captureWait = source.indexOf(
-      "check 'ui wait capture target mounted'",
+    final int catalogCheck = source.indexOf(
+      "check 'catalog capture target available'",
     );
     final int generationRefresh = source.indexOf(
       'CARD_CAPTURE_GEN="\$(read_json',
@@ -40,8 +40,8 @@ void main() {
     final int captureTarget = source.indexOf("check 'capture target'");
 
     expect(navigationHome, isNonNegative);
-    expect(captureWait, greaterThan(navigationHome));
-    expect(generationRefresh, greaterThan(captureWait));
+    expect(catalogCheck, greaterThan(navigationHome));
+    expect(generationRefresh, greaterThan(catalogCheck));
     expect(captureTarget, greaterThan(generationRefresh));
     expect(source, isNot(contains(r'if [ -n "$CARD_CAPTURE_GEN" ]; then')));
   });
