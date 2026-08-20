@@ -52,7 +52,9 @@ final class _HostBackedClient
     PatchbaySnapshotRequest? request,
   }) async {
     requests.add(request);
-    if (snapshotFailure case final Object failure) throw failure;
+    if (snapshotFailure case final Object failure) {
+      return Future<Map<String, Object?>>.error(failure);
+    }
     return _host.dispatchSnapshot(request?.toWire().toJson());
   }
 

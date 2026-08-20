@@ -52,8 +52,9 @@ void main() {
   });
 
   tearDown(() {
-    if (store.directory.existsSync())
+    if (store.directory.existsSync()) {
       store.directory.deleteSync(recursive: true);
+    }
   });
 
   PatchbayLauncherSupervisor supervisor({

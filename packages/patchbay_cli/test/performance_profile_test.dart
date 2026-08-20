@@ -40,7 +40,9 @@ final class _FakeVmSource implements PatchbayPerformanceVmSource {
 
   @override
   Future<PatchbayTimelineConfiguration> timelineConfiguration() async {
-    if (configurationFailure case final Object failure) throw failure;
+    if (configurationFailure case final Object failure) {
+      return Future<PatchbayTimelineConfiguration>.error(failure);
+    }
     return PatchbayTimelineConfiguration(
       availableStreams: availableStreams,
       recordedStreams: recordedStreams,
