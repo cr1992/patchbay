@@ -339,17 +339,21 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
       'not consulted',
     );
   }
+  final PatchbaySessionStore store = PatchbaySessionStore(
+    options.option('session-dir'),
+  );
   final List<PatchbaySessionListing> listings;
   try {
-    listings = PatchbaySessionResolver(
-      store: PatchbaySessionStore(options.option('session-dir')),
-    ).inventory();
+    listings = PatchbaySessionResolver(store: store).inventory();
   } on Object catch (failure) {
     return patchbayFailureFinding(PatchbayDoctorCheck.session, failure);
   }
+  final String? explicitSession = options.option('session');
+  final String? pinned = explicitSession == null ? store.readSelection() : null;
   return patchbaySessionFinding(
     listings: listings,
-    explicitSession: options.option('session'),
+    explicitSession: explicitSession,
+    pinnedSessionId: pinned,
   );
 }
 
@@ -358,6 +362,7 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
 PatchbayDoctorFinding patchbaySessionFinding({
   required List<PatchbaySessionListing> listings,
   required String? explicitSession,
+  String? pinnedSessionId,
 }) {
   Map<String, Object?> counts() => <String, Object?>{
     'records': listings.length,
@@ -400,6 +405,34 @@ PatchbayDoctorFinding patchbaySessionFinding({
       );
     }
     return _statusFinding(named, 'the record named by --session', counts());
+  }
+
+  if (pinnedSessionId != null) {
+    final PatchbaySessionListing? pinned = listings
+        .where(
+          (PatchbaySessionListing listing) =>
+              listing.record.sessionId == pinnedSessionId,
+        )
+        .firstOrNull;
+    if (pinned == null) {
+      return PatchbayDoctorFinding(
+        check: PatchbayDoctorCheck.session,
+        verdict: PatchbayCheckVerdict.failed,
+        observed:
+            'the pinned session ($pinnedSessionId) was removed from the '
+            'session directory',
+        cause:
+            'that App exited or was pruned; the CLI never silently falls '
+            'back to another session',
+        action: patchbaySessionSelectionStaleHint,
+        details: <String, Object?>{
+          ...counts(),
+          'code': 'sessionSelectionStale',
+          'pinnedSessionId': pinnedSessionId,
+        },
+      );
+    }
+    return _statusFinding(pinned, 'the pinned record', counts());
   }
 
   final PatchbaySessionListing? pinned = listings

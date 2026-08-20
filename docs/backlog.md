@@ -15,6 +15,10 @@
 |---|---|---|
 | BUG-20260819-02：`ui.capture` 在 profile 构建必然失败 | `capture_bridge.dart` 无条件读 debug-only `debugNeedsPaint`；profile 剥断言后该 getter 抛 `LateInitializationError`，在类型化拒绝之前逃逸成 `transportError`。与 `PatchbayRoot` 在 `!kReleaseMode` 即包裹 root boundary 的意图矛盾；`tool/example_session.sh` 只跑 `--debug`，预检从未覆盖该路径 | 已验证 |
 | BUG-20260820-01：iOS 权限 capability 把 Simulator `reset` 虚报给物理真机 | `PatchbayIosPermissionAdapter` 只检查本机存在 `simctl` 就静态发布四项 `reset`，未先证明显式 `deviceId` 是 booted Simulator；物理 iPhone 真机实测出现 capability 接受、`status` 却按 `permissionUnsupported` 拒绝的不一致 | 已验证 |
+| BUG-20260820-02：`ui text set` 对受控表单回执未标记 `drivesState` | `textSet` 仅更新 controller 不触发 `onChanged`，回执却同为 `applied`，导致受控表单状态未更新被误判为按钮点不动；需在回执 payload 中显式返回 `'drivesState': false`（`textEnter` 为 `true`） | 已验证 |
+| BUG-20260820-03：`ui text set` 绕过 `inputFormatters` 可写入非法/超长状态 | `textSet` 走 `_replacement` 跳过了 `formatEditUpdate`，可写入违反 `LengthLimitingTextInputFormatter` 的不可达值；现改为同样执行 formatters 格式化 | 已验证 |
+| BUG-20260820-04：`ui text enter` 未捕获并调用 `onSubmitted` 提交回调 | 命令文案承诺 submit 但 `_TextBinding` 仅持有 `onChanged`；现补齐 `TextField` / `EditableText` 的 `onSubmitted` 捕获并在 enter 时调用 | 已验证 |
+| BUG-20260820-05：`doctor` 在孤儿 pin 场景下 session 检查误报通过 | 当 pinned session 文件已从磁盘删除时，`doctor` 的 session 阶段漏检判 ok，延迟至 connection 阶段才报 `sessionSelectionStale`；现改为 session 阶段直接 fail-closed 并输出 `patchbay session use --clear` 清理建议 | 已验证 |
 
 ## 特性
 

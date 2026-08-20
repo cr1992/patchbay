@@ -1076,76 +1076,95 @@ void main() {
       });
     });
 
-    testWidgets('text set bypasses formatter and onChanged', (tester) async {
-      final PatchbayUiRegistry registry = PatchbayUiRegistry();
-      final PatchbayKey key = PatchbayKey.text('form.code', registry: registry);
-      final TextEditingController controller = TextEditingController(
-        text: 'old',
-      );
-      addTearDown(controller.dispose);
-      var formatterCalls = 0;
-      var changedCalls = 0;
-      await _pumpTextField(
-        tester,
-        key: key,
-        controller: controller,
-        inputFormatters: <TextInputFormatter>[
-          _CountingUpperFormatter(() => formatterCalls += 1),
-        ],
-        onChanged: (_) => changedCalls += 1,
-      );
-      final PatchbayFlutterBridge bridge = _allowedBridge(registry);
-      final int generation = bridge.catalog().single.generation;
+    testWidgets(
+      'text set applies formatters without onChanged or onSubmitted',
+      (tester) async {
+        final PatchbayUiRegistry registry = PatchbayUiRegistry();
+        final PatchbayKey key = PatchbayKey.text(
+          'form.code',
+          registry: registry,
+        );
+        final TextEditingController controller = TextEditingController(
+          text: 'old',
+        );
+        addTearDown(controller.dispose);
+        var formatterCalls = 0;
+        var changedCalls = 0;
+        var submittedCalls = 0;
+        await _pumpTextField(
+          tester,
+          key: key,
+          controller: controller,
+          inputFormatters: <TextInputFormatter>[
+            _CountingUpperFormatter(() => formatterCalls += 1),
+          ],
+          onChanged: (_) => changedCalls += 1,
+          onSubmitted: (_) => submittedCalls += 1,
+        );
+        final PatchbayFlutterBridge bridge = _allowedBridge(registry);
+        final int generation = bridge.catalog().single.generation;
 
-      final PatchbayInvocation result = await bridge.setText(
-        id: 'form.code',
-        generation: generation,
-        text: 'abc',
-      );
-      await tester.pump();
+        final PatchbayInvocation result = await bridge.setText(
+          id: 'form.code',
+          generation: generation,
+          text: 'abc',
+        );
+        await tester.pump();
 
-      expect(result.admission, PatchbayAdmission.accepted);
-      expect(controller.text, 'abc');
-      expect(formatterCalls, 0);
-      expect(changedCalls, 0);
-    });
+        expect(result.admission, PatchbayAdmission.accepted);
+        expect(controller.text, 'ABC');
+        expect(formatterCalls, 1);
+        expect(changedCalls, 0);
+        expect(submittedCalls, 0);
+        expect(result.payload['drivesState'], isFalse);
+        expect(result.payload['value'], 'ABC');
+      },
+    );
 
-    testWidgets('text enter applies formatters then calls public onChanged', (
-      tester,
-    ) async {
-      final PatchbayUiRegistry registry = PatchbayUiRegistry();
-      final PatchbayKey key = PatchbayKey.text('form.code', registry: registry);
-      final TextEditingController controller = TextEditingController(
-        text: 'old',
-      );
-      addTearDown(controller.dispose);
-      var formatterCalls = 0;
-      final List<String> changed = <String>[];
-      await _pumpTextField(
-        tester,
-        key: key,
-        controller: controller,
-        inputFormatters: <TextInputFormatter>[
-          _CountingUpperFormatter(() => formatterCalls += 1),
-        ],
-        onChanged: changed.add,
-      );
-      final PatchbayFlutterBridge bridge = _allowedBridge(registry);
-      final int generation = bridge.catalog().single.generation;
+    testWidgets(
+      'text enter applies formatters then calls public onChanged and onSubmitted',
+      (tester) async {
+        final PatchbayUiRegistry registry = PatchbayUiRegistry();
+        final PatchbayKey key = PatchbayKey.text(
+          'form.code',
+          registry: registry,
+        );
+        final TextEditingController controller = TextEditingController(
+          text: 'old',
+        );
+        addTearDown(controller.dispose);
+        var formatterCalls = 0;
+        final List<String> changed = <String>[];
+        final List<String> submitted = <String>[];
+        await _pumpTextField(
+          tester,
+          key: key,
+          controller: controller,
+          inputFormatters: <TextInputFormatter>[
+            _CountingUpperFormatter(() => formatterCalls += 1),
+          ],
+          onChanged: changed.add,
+          onSubmitted: submitted.add,
+        );
+        final PatchbayFlutterBridge bridge = _allowedBridge(registry);
+        final int generation = bridge.catalog().single.generation;
 
-      final PatchbayInvocation result = await bridge.enterText(
-        id: 'form.code',
-        generation: generation,
-        text: 'abc',
-      );
-      await tester.pump();
+        final PatchbayInvocation result = await bridge.enterText(
+          id: 'form.code',
+          generation: generation,
+          text: 'abc',
+        );
+        await tester.pump();
 
-      expect(result.admission, PatchbayAdmission.accepted);
-      expect(controller.text, 'ABC');
-      expect(formatterCalls, 1);
-      expect(changed, <String>['ABC']);
-      expect(result.payload['value'], 'ABC');
-    });
+        expect(result.admission, PatchbayAdmission.accepted);
+        expect(controller.text, 'ABC');
+        expect(formatterCalls, 1);
+        expect(changed, <String>['ABC']);
+        expect(submitted, <String>['ABC']);
+        expect(result.payload['drivesState'], isTrue);
+        expect(result.payload['value'], 'ABC');
+      },
+    );
 
     testWidgets('base and descriptor gates both fail closed', (tester) async {
       final PatchbayUiRegistry registry = PatchbayUiRegistry();
@@ -1443,6 +1462,7 @@ Future<void> _pumpTextField(
   required TextEditingController controller,
   List<TextInputFormatter>? inputFormatters,
   ValueChanged<String>? onChanged,
+  ValueChanged<String>? onSubmitted,
 }) => tester.pumpWidget(
   MaterialApp(
     home: Scaffold(
@@ -1451,6 +1471,7 @@ Future<void> _pumpTextField(
         controller: controller,
         inputFormatters: inputFormatters,
         onChanged: onChanged,
+        onSubmitted: onSubmitted,
       ),
     ),
   ),
