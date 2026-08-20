@@ -1116,7 +1116,6 @@ void main() {
         expect(formatterCalls, 1);
         expect(changedCalls, 0);
         expect(submittedCalls, 0);
-        expect(result.payload['drivesState'], isFalse);
         expect(result.payload['value'], 'ABC');
       },
     );
@@ -1161,7 +1160,6 @@ void main() {
         expect(formatterCalls, 1);
         expect(changed, <String>['ABC']);
         expect(submitted, <String>['ABC']);
-        expect(result.payload['drivesState'], isTrue);
         expect(result.payload['value'], 'ABC');
       },
     );

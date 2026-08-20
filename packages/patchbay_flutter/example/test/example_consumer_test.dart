@@ -172,6 +172,28 @@ void main() {
         allOf(containsPair('mounted', true), containsPair('kind', 'capture')),
       );
 
+      final Map<String, Object?> treeInvocation = await _pumpUntilComplete(
+        tester,
+        _call(handlers, PatchbayServiceHost.invokeMethod, <String, String>{
+          'command': 'ui.semantics.tree',
+          'args': '{}',
+          'requestId': 'tree-request',
+        }),
+      );
+      expect(treeInvocation['admission'], 'accepted');
+      final Map<String, Object?> treePayload =
+          treeInvocation['payload']! as Map<String, Object?>;
+      final List<Map<String, Object?>> nodes =
+          (treePayload['nodes']! as List<Object?>).cast<Map<String, Object?>>();
+      expect(
+        nodes.map((Map<String, Object?> n) => n['identifier']),
+        containsAll(<String>{
+          gestureSurfaceSemanticsId,
+          gestureListSemanticsId,
+          gestureNestedListSemanticsId,
+        }),
+      );
+
       final Map<String, Object?> invocation = await _call(
         handlers,
         PatchbayServiceHost.invokeMethod,
@@ -243,7 +265,7 @@ Future<T> _pumpUntilComplete<T>(WidgetTester tester, Future<T> pending) async {
     ),
   );
   for (var attempt = 0; attempt < 20 && !completed; attempt += 1) {
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
   }
   if (!completed) {
     throw StateError(

@@ -20,6 +20,9 @@ const String gestureSurfaceSemanticsId = 'example.gesture.surface';
 /// Semantics identifier of the scrollable list used for fling / drag paths.
 const String gestureListSemanticsId = 'example.gesture.list';
 
+/// Semantics identifier of the nested horizontal scrollable list.
+const String gestureNestedListSemanticsId = 'example.gesture.nested';
+
 /// Stable destination IDs the example router exposes to `navigation.*`.
 const String homeDestinationId = 'example.home';
 const String detailsDestinationId = 'example.details';
@@ -297,10 +300,11 @@ PatchbayGestureDecision _gesturePolicy(
   const Set<String> surfaces = <String>{
     gestureSurfaceSemanticsId,
     gestureListSemanticsId,
+    gestureNestedListSemanticsId,
   };
   if (!surfaces.contains(target.identifier)) {
     return const PatchbayGestureDecision.reject(
-      rejectionNotice: 'This example only opens its two gesture surfaces.',
+      rejectionNotice: 'This example only opens its gesture surfaces.',
     );
   }
   if (gesture == PatchbayGestureKind.fling &&
@@ -555,7 +559,8 @@ final class _ExampleGestureSurfaceState extends State<_ExampleGestureSurface> {
   );
 }
 
-/// Scrollable list for fling and multi-segment drag paths.
+/// Scrollable list for fling and multi-segment drag paths, including a nested
+/// horizontal scrollable for nested gesture isolation testing.
 final class _ExampleGestureList extends StatelessWidget {
   const _ExampleGestureList();
 
@@ -565,8 +570,36 @@ final class _ExampleGestureList extends StatelessWidget {
     label: 'Gesture list',
     child: ListView.builder(
       itemCount: 60,
-      itemBuilder: (BuildContext context, int index) =>
-          ListTile(dense: true, title: Text('row $index')),
+      itemBuilder: (BuildContext context, int index) {
+        if (index == 2) {
+          return SizedBox(
+            height: 96,
+            child: Semantics(
+              identifier: gestureNestedListSemanticsId,
+              container: true,
+              label: 'Nested horizontal list',
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: 20,
+                itemBuilder: (BuildContext context, int hIndex) => Container(
+                  width: 96,
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text('item $hIndex'),
+                ),
+              ),
+            ),
+          );
+        }
+        return ListTile(dense: true, title: Text('row $index'));
+      },
     ),
   );
 }

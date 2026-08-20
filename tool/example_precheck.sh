@@ -224,12 +224,13 @@ doc = json.load(sys.stdin)
 payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
 gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
         if n.get('identifier') and n.get('generation') is not None}
-print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''))
+print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''), gens.get('example.gesture.nested', ''))
 ")"
-SURFACE_GEN="${GEN%% *}"
-LIST_GEN="${GEN##* }"
+SURFACE_GEN="$(echo "$GEN" | awk '{print $1}')"
+LIST_GEN="$(echo "$GEN" | awk '{print $2}')"
+NESTED_GEN="$(echo "$GEN" | awk '{print $3}')"
 if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ]; then
-  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN"
+  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN"
   check 'gesture press-hold' 0 "doc['payload']['outcome'] == 'dispatched'" \
     --json ui gesture press-hold \
     example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
@@ -250,6 +251,12 @@ if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ]; then
     --json ui gesture fling \
     example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
+  if [ -n "$NESTED_GEN" ]; then
+    check 'gesture drag 嵌套水平列表' 0 "doc['payload']['outcome'] == 'dispatched'" \
+      --json ui gesture drag \
+      example.gesture.nested "$NESTED_GEN" --start '{"x":0.8,"y":0.5}' \
+      --gesture-path '[{"x":0.5,"y":0.5},{"x":0.2,"y":0.5}]' --duration-ms 300
+  fi
 else
   printf '  ✗ %-42s %s\n' 'gesture surface generation' \
     '未从 semantics 树解析到 example.gesture.surface / example.gesture.list 的 generation'
@@ -294,10 +301,10 @@ if [ -n "$CARD_CAPTURE_GEN" ]; then
   check 'capture target' 0 "" --output "$PRECHECK_TMP/capture-target.png" \
     capture target example.card.capture "$CARD_CAPTURE_GEN"
 fi
-example_session_cli --output "$PRECHECK_TMP/cap1.png" capture root >"$OUT" 2>&1
+example_session_cli --json --output "$PRECHECK_TMP/cap1.png" capture root >"$OUT" 2>&1
 BLOB1="$(read_json "doc['payload']['blob']['blobId']")"
 example_session_cli --json exec example.counter.increment >/dev/null 2>&1
-example_session_cli --output "$PRECHECK_TMP/cap2.png" capture root >"$OUT" 2>&1
+example_session_cli --json --output "$PRECHECK_TMP/cap2.png" capture root >"$OUT" 2>&1
 BLOB2="$(read_json "doc['payload']['blob']['blobId']")"
 check 'capture diff' 0 "'differenceRatio' in json.dumps(doc)" \
   --json capture diff "$BLOB1" "$BLOB2"

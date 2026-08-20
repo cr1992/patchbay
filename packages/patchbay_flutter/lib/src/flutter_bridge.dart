@@ -464,7 +464,6 @@ final class PatchbayFlutterBridge {
           'targetId': id,
           'generation': generation,
           'operation': operation.wireName,
-          'drivesState': operation == PatchbayUiOperation.textEnter,
           if (declaration.sensitivePolicy == PatchbaySensitivePolicy.redacted)
             'valueRedacted': true
           else
