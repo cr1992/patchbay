@@ -27,7 +27,6 @@ import 'rpc_timeout.dart';
 import 'sensitive_input.dart';
 import 'session.dart';
 import 'trace.dart';
-import 'trace/trace_context.dart';
 import 'ui_manifest.dart';
 
 export 'commands/command_parser.dart';

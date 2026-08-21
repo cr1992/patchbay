@@ -10,7 +10,6 @@ import '../request_id.dart';
 import '../rpc_timeout.dart';
 import '../runners/job_runner.dart';
 import '../trace.dart';
-import '../trace/trace_context.dart';
 import '../ui_manifest.dart';
 
 /// One catalog row, read only for what the CLI itself has to decide.
