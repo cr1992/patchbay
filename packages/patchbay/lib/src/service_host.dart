@@ -69,6 +69,8 @@ final class PatchbayServiceHost {
     r'^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$',
   );
 
+  static RegExp get commandNamePattern => _commandName;
+
   final String applicationId;
   final String appInstanceId;
   final PatchbayCommandRegistry _registry;
