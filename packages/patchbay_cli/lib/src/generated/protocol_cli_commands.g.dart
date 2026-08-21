@@ -3,190 +3,189 @@
 
 part of '../command_registry.dart';
 
-const _GeneratedProtocolCommand _navigationCatalogProtocolCommand =
-    _GeneratedProtocolCommand(
+const GeneratedProtocolCommand _navigationCatalogProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayNavigationCatalogCommandDescriptor,
       serviceName: 'navigation.catalog',
       syntaxIndex: 0,
     );
 
-const _GeneratedProtocolCommand _navigationCurrentProtocolCommand =
-    _GeneratedProtocolCommand(
+const GeneratedProtocolCommand _navigationCurrentProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayNavigationCurrentCommandDescriptor,
       serviceName: 'navigation.current',
       syntaxIndex: 0,
     );
 
-const _GeneratedProtocolCommand _navigationGoProtocolCommand =
-    _GeneratedProtocolCommand(
+const GeneratedProtocolCommand _navigationGoProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayNavigationGoCommandDescriptor,
       serviceName: 'navigation.go',
       syntaxIndex: 0,
     );
 
-const _GeneratedProtocolCommand _navigationPushProtocolCommand =
-    _GeneratedProtocolCommand(
+const GeneratedProtocolCommand _navigationPushProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayNavigationPushCommandDescriptor,
       serviceName: 'navigation.push',
       syntaxIndex: 0,
     );
 
-const _GeneratedProtocolCommand _navigationBackProtocolCommand =
-    _GeneratedProtocolCommand(
+const GeneratedProtocolCommand _navigationBackProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayNavigationBackCommandDescriptor,
       serviceName: 'navigation.back',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiTextSetProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiTextSetProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiTextSetCommandDescriptor,
       serviceName: 'ui.text.set',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiTextEnterProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiTextEnterProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiTextEnterCommandDescriptor,
       serviceName: 'ui.text.enter',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiSemanticsTreeProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiSemanticsTreeProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiSemanticsTreeCommandDescriptor,
       serviceName: 'ui.semantics.tree',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiSemanticsActionProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiSemanticsActionProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiSemanticsActionCommandDescriptor,
       serviceName: 'ui.semantics.action',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiTapProtocolCommand =
-    _GeneratedProtocolCommand(
-      descriptor: patchbayUiSemanticsTapCommandDescriptor,
-      serviceName: 'ui.semantics.tap',
-      syntaxIndex: 0,
-    );
+final GeneratedProtocolCommand _uiTapProtocolCommand = GeneratedProtocolCommand(
+  descriptor: patchbayUiSemanticsTapCommandDescriptor,
+  serviceName: 'ui.semantics.tap',
+  syntaxIndex: 0,
+);
 
-final _GeneratedProtocolCommand _uiGesturePressHoldProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiGesturePressHoldProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiGesturePressHoldCommandDescriptor,
       serviceName: 'ui.gesture.pressHold',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiGestureDragProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiGestureDragProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiGestureDragCommandDescriptor,
       serviceName: 'ui.gesture.drag',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiGestureFlingProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiGestureFlingProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiGestureFlingCommandDescriptor,
       serviceName: 'ui.gesture.fling',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiWaitSemanticsMountedProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiWaitSemanticsMountedProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiWaitCommandDescriptor,
       serviceName: 'ui.wait',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiWaitSemanticsUnmountedProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiWaitSemanticsUnmountedProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiWaitCommandDescriptor,
       serviceName: 'ui.wait',
       syntaxIndex: 1,
     );
 
-final _GeneratedProtocolCommand _uiWaitSemanticsValueProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiWaitSemanticsValueProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiWaitCommandDescriptor,
       serviceName: 'ui.wait',
       syntaxIndex: 2,
     );
 
-final _GeneratedProtocolCommand _uiWaitDestinationProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiWaitDestinationProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiWaitCommandDescriptor,
       serviceName: 'ui.wait',
       syntaxIndex: 3,
     );
 
-final _GeneratedProtocolCommand _uiWaitTreeRevisionProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiWaitTreeRevisionProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiWaitCommandDescriptor,
       serviceName: 'ui.wait',
       syntaxIndex: 4,
     );
 
-final _GeneratedProtocolCommand _uiWaitFrameRevisionProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiWaitFrameRevisionProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiWaitCommandDescriptor,
       serviceName: 'ui.wait',
       syntaxIndex: 5,
     );
 
-final _GeneratedProtocolCommand _uiKeepAwakeOnProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiKeepAwakeOnProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiKeepAwakeSetCommandDescriptor,
       serviceName: 'ui.keepAwake.set',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiKeepAwakeOffProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiKeepAwakeOffProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiKeepAwakeSetCommandDescriptor,
       serviceName: 'ui.keepAwake.set',
       syntaxIndex: 1,
     );
 
-final _GeneratedProtocolCommand _uiKeepAwakeStatusProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiKeepAwakeStatusProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiKeepAwakeStatusCommandDescriptor,
       serviceName: 'ui.keepAwake.status',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiInspectOnProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiInspectOnProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiInspectSelectCommandDescriptor,
       serviceName: 'ui.inspect.select',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _uiInspectOffProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiInspectOffProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiInspectSelectCommandDescriptor,
       serviceName: 'ui.inspect.select',
       syntaxIndex: 1,
     );
 
-final _GeneratedProtocolCommand _uiInspectStatusProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _uiInspectStatusProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiInspectStatusCommandDescriptor,
       serviceName: 'ui.inspect.status',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _captureRootProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _captureRootProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiCaptureCommandDescriptor,
       serviceName: 'ui.capture',
       syntaxIndex: 0,
     );
 
-final _GeneratedProtocolCommand _captureTargetProtocolCommand =
-    _GeneratedProtocolCommand(
+final GeneratedProtocolCommand _captureTargetProtocolCommand =
+    GeneratedProtocolCommand(
       descriptor: patchbayUiCaptureCommandDescriptor,
       serviceName: 'ui.capture',
       syntaxIndex: 1,
