@@ -59,12 +59,12 @@
 | PB-040-38 | `patchbay_cli` 大文件拆解与执行流解耦：将 `cli.dart` 内联的 Manifest 遍历引擎、Snapshot 差异比对与 Job 轮询提取为独立 Runner | `cli.dart` 达 3,270 行，承担了入口解析、500+ 行的 manifest walkthrough、snapshot diff 与 job 轮询等多重职责，成为高频冲突热点 | 0.4.1 | 已验证 | 保持 CLI 外部 JSON/退出码行为完全一致的前提下完成独立 Runner 拆解 |
 | PB-040-39 | 跨平台进程探测与底层系统命令抽象（`PlatformProcessUtils`） | `session.dart`、`doctor.dart`、`android_permission_adapter.dart`、`launcher.dart` 分散手写 `kill -0`、`tasklist`、`chmod`、`stat` 等命令，缺乏统一跨平台封装 | 0.4.1 | 已验证 | 收敛进程存活判断与权限文件保护逻辑 |
 | PB-040-40 | `patchbay_cli` 源码目录分层与命令分派器模块化 | `patchbay_cli/lib/src/` 扁平放置 27 个文件，`command_registry.dart`（1,925 行）过度集中；按 `commands/`、`platform/`、`session/`、`manifest/` 建立子目录分层 | 0.4.1 | 已验证 | 拆解 commands, connection, output, trace 模块并将 cli.dart 降至 639 行 |
-| PB-041-01 | pub.dev 评分可复现门禁：按实际发布 archive 对四包执行当期 Pana，并在发布后核对 score API | 本地 analyze / publish dry-run 全绿仍不能替代 pub.dev 解包后的评分；四包同版依赖链也会让未发布上游造成假扣分 | 0.4.1 | 已排期 | 只改发布验收与包内质量，不扩展公共 API / wire / 命令面 |
-| PB-041-02 | 发布收尾自动化：按范围变更和证据状态分型归档 backlog，消费目标版本碎片并冻结版本计划 | 0.4.0 发布后仍残留目标行和 changelog 碎片，证明“打完 tag 再人肉清账”不可持续；但实现中与已验证不能直接批量删除 | 0.4.1 | 已排期 | finalize 必须显式执行、先生成计划再 apply；不得把未结真机证据静默标成完成 |
+| PB-041-01 | pub.dev 评分可复现门禁：按实际发布 archive 对四包执行当期 Pana，并在发布后核对 score API | 本地 analyze / publish dry-run 全绿仍不能替代 pub.dev 解包后的评分；四包同版依赖链也会让未发布上游造成假扣分 | 0.4.1 | 已验证 | 落地 `tool/check_pana_budget.dart` 与单测，全四包评分预算 140/140 满分且自动校验 README 外链与 metadata |
+| PB-041-02 | 发布收尾自动化：按范围变更和证据状态分型归档 backlog，消费目标版本碎片并冻结版本计划 | 0.4.0 发布后仍残留目标行和 changelog 碎片，证明“打完 tag 再人肉清账”不可持续；但实现中与已验证不能直接批量删除 | 0.4.1 | 已验证 | 落地 `tool/release_finalize.dart` 与单测，支持两阶段 plan/apply 归档与未结验证 fail-closed 阻断 |
 | PB-041-03 | 手写源码结构预算与依赖方向门禁 | 四包生产代码有 10 个手写文件超过 800 行；仅靠评审提醒无法阻止新职责继续堆入热点文件 | 0.4.1 | 已验证 | 落地 `tool/check_structure_ratchet.dart` 门禁与单测，全仓 108 个生产文件全部 ≤ 800 行且零 hand-written part 碎片 |
 | PB-041-04 | `patchbay` core host 与领域服务分层 | `service_host.dart` 1,426 行且影响 115 个符号，混合 VM Service 适配、snapshot、invoke、审计、schema 校验；`artifacts.dart` 889 行 | 0.4.1 | 已验证 | 按 `host/` 与 `artifacts/` 完成拆分，原文件收敛为 Facade，全量单测保持 100% 绿灯 |
 | PB-041-05 | `patchbay_flutter` host 与 UI bridge 领域分层 | `semantics_bridge.dart` 938 行、`gesture_bridge.dart` 835 行，service host 同时承担 descriptor、decoder 与注册编排，桥接职责持续横向增长 | 0.4.1 | 已验证 | 拆分为 `semantics/` 与 `gesture/` 模块并消除 `part` 碎片，保持 151 个单测绿灯 |
-| PB-041-06 | 大型测试套件拆分与共享测试支撑收敛 | 现有 5 个测试文件超过 1,000 行，重复 host/fixture 构造使重构时难以判断行为变化还是测试接线变化 | 0.4.1 | 已排期 | 按行为域拆 suite，共享 helper 只提供接线不隐藏断言；测试数量、断言边界和兼容语料不得缩水 |
+| PB-041-06 | 大型测试套件拆分与共享测试支撑收敛 | 现有 5 个测试文件超过 1,000 行，重复 host/fixture 构造使重构时难以判断行为变化还是测试接线变化 | 0.4.1 | 已验证 | 完成 5 个超千行大型测试套件模块化拆解，提取独立子套件与共享夹具，测试文件全部 ≤ 1000 行且 100% 断言保持绿灯 |
 | PB-041-07 | `patchbay_cli` 领域服务继续拆分 | 除 `cli.dart` 外，`command_registry.dart` 1,925 行、`ui_manifest.dart` 1,654 行、`trace.dart` 1,302 行、`doctor.dart` 1,129 行、`session.dart` 830 行，仍会把目录分层变成“移动大文件” | 0.4.1 | 已验证 | 完成 `registry/`、`manifest/`、`trace/`、`doctor/`、`session/` 模块化，全量单测保持 100% 绿灯 |
 | PB-041-08 | `release_prep` 定版工具模块化拆解与架构解耦 | `release_prep.dart` 单文件 2,727 行，混合模型、pubspec 扫描、CHANGELOG 碎片聚合、矩阵改写与 IO 编排；拆解为子模块并保持全部测试和 bin 入口兼容 | 0.4.1 | 已验证 | 拆解为 `tool/src/release_prep/` 10 个子模块并保持全部测试与 facade 兼容 |
 
