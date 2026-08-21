@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:patchbay/patchbay.dart';
 
 import 'client.dart';
+import 'platform/process_utils.dart';
 
 const int patchbaySessionSchemaVersion = 1;
 const Duration patchbayPendingDefaultTtl = Duration(minutes: 5);
@@ -43,14 +44,8 @@ String defaultPatchbaySessionDirectory({Map<String, String>? environment}) {
 /// `exclusive: true` additionally refuses to write through a file another user
 /// planted at that path; the session directory lives under the world-writable
 /// system temp directory, so that is not hypothetical.
-File createRestrictedFileSync(String path) {
-  final file = File(path);
-  file.createSync(exclusive: true);
-  if (!Platform.isWindows) {
-    Process.runSync('chmod', ['600', file.path]);
-  }
-  return file;
-}
+File createRestrictedFileSync(String path) =>
+    PlatformProcessUtils.createRestrictedFileSync(path);
 
 final class PatchbaySessionException implements Exception {
   const PatchbaySessionException(
@@ -473,12 +468,8 @@ final class PatchbaySessionStore {
     return '${directory.path}${Platform.pathSeparator}$sessionId.json';
   }
 
-  void _ensureDirectory() {
-    directory.createSync(recursive: true);
-    if (!Platform.isWindows) {
-      Process.runSync('chmod', ['700', directory.path]);
-    }
-  }
+  void _ensureDirectory() =>
+      PlatformProcessUtils.ensureRestrictedDirectorySync(directory);
 
   void _removeFile(File file) {
     try {
@@ -803,25 +794,8 @@ final class PatchbaySessionResolver {
     }
   }
 
-  static bool _isProcessAlive(int processId) {
-    try {
-      if (Platform.isWindows) {
-        final result = Process.runSync('tasklist', [
-          '/FI',
-          'PID eq $processId',
-          '/NH',
-        ]);
-        return result.exitCode == 0 &&
-            RegExp(
-              '(?:^|\\s)$processId(?:\\s|\$)',
-              multiLine: true,
-            ).hasMatch(result.stdout.toString());
-      }
-      return Process.runSync('kill', ['-0', '$processId']).exitCode == 0;
-    } on ProcessException {
-      return false;
-    }
-  }
+  static bool _isProcessAlive(int processId) =>
+      PlatformProcessUtils.isProcessAlive(processId);
 }
 
 extension<T> on Iterable<T> {
