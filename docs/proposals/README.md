@@ -15,7 +15,7 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 版本内 Proposal 放在 `<version>/<topic>.md`。一个 Proposal 可以承接多个强耦合的 PB 条目，但必须解释
 为什么不能独立裁决；一个 PB 若引用多个 Proposal，也要在 backlog 中给出主方案入口。
 
-0.4.0 当前提案：
+0.4.0 已接受提案：
 
 - [命令契约与执行证据](0.4.0/command-contracts.md)
 - [Launcher、Session 与唤醒租约](0.4.0/launcher-session.md)

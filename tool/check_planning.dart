@@ -1,5 +1,7 @@
 import 'dart:io';
 
+const _activeVersion = '0.4.1';
+
 const _allowedBacklogStatuses = <String>{'待排期', '待裁决', '已排期', '实现中', '已验证'};
 
 const _allowedProposalStatuses = <String>{'提案中', '已接受', '已否决', '已替代'};
@@ -11,7 +13,7 @@ final _proposalLinkPattern = RegExp(r'\]\((proposals/[^)]+\.md)\)');
 void main() {
   final failures = <String>[];
   final backlogFile = File('docs/backlog.md');
-  final releaseFile = File('docs/releases/0.4.0.md');
+  final releaseFile = File('docs/releases/$_activeVersion.md');
 
   _validateAgentInstructionEntryPoints(failures);
 
@@ -82,18 +84,22 @@ void main() {
 
   final releaseScope = _releaseScope(releaseFile, failures);
   final targeted = pbRows.entries
-      .where((entry) => entry.value[3] == '0.4.0')
+      .where((entry) => entry.value[3] == _activeVersion)
       .map((entry) => entry.key)
       .toSet();
 
   for (final id in targeted.difference(releaseScope)) {
-    failures.add('$id: target is 0.4.0 but item is missing from P0/P1/P2');
+    failures.add(
+      '$id: target is $_activeVersion but item is missing from P0/P1/P2',
+    );
   }
   for (final id in releaseScope.difference(targeted)) {
     if (!pbRows.containsKey(id)) {
       failures.add('$id: release scope references a missing backlog item');
     } else {
-      failures.add('$id: release scope includes item not targeted at 0.4.0');
+      failures.add(
+        '$id: release scope includes item not targeted at $_activeVersion',
+      );
     }
   }
 
