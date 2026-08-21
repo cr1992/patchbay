@@ -1,0 +1,9 @@
+# 与 pub.dev 评分口径对齐：pana 的 "Pass static analysis" 按 package:lints/core.yaml 计分，
+# 本地不 include 就会出现「dart analyze 全绿但 pana 扣分」的假阴性。
+include: package:lints/core.yaml
+
+analyzer:
+  errors:
+    dead_code: error
+    unused_element: error
+    unused_import: error

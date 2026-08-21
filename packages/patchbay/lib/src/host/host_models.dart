@@ -180,8 +180,9 @@ final class PatchbayCommandPolicy {
     String command,
   ) {
     final Object? commands = catalog['commands'];
-    if (commands is! List<Object?>)
+    if (commands is! List<Object?>) {
       return const PatchbayCommandPolicy.undeclared();
+    }
     for (final Object? entry in commands) {
       if (entry is! Map<Object?, Object?> || entry['name'] != command) continue;
       final Object? parameters = entry['parameters'];

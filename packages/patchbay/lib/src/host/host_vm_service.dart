@@ -59,8 +59,9 @@ final class HostVmServiceRegistrar {
       return invalidParams('snapshot received unknown parameters');
     }
     final String? encoded = parameters[snapshotRequestKey];
-    if (encoded == null)
+    if (encoded == null) {
       return result(await _snapshotHandler.dispatchSnapshot());
+    }
     final Object? decoded;
     try {
       decoded = jsonDecode(encoded);
