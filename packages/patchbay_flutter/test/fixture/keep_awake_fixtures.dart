@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 import 'dart:ui';
@@ -71,7 +70,10 @@ Future<void> releaseScreen(
   await tester.pump();
 }
 
-Future<void> drainBridge(WidgetTester tester, PatchbayKeepAwakeBridge bridge) async {
+Future<void> drainBridge(
+  WidgetTester tester,
+  PatchbayKeepAwakeBridge bridge,
+) async {
   await tester.pump();
   await bridge.status();
   await tester.pump();
@@ -87,7 +89,9 @@ PatchbayFlutterServiceHost createHost(PatchbayFlutterBridge bridge) =>
 Future<List<Map<String, Object?>>> catalogCommandsOf(
   PatchbayFlutterBridge bridge,
 ) async {
-  final Map<String, Object?> catalog = await createHost(bridge).dispatchCatalog();
+  final Map<String, Object?> catalog = await createHost(
+    bridge,
+  ).dispatchCatalog();
   return (catalog['commands']! as List<Object?>).cast<Map<String, Object?>>();
 }
 

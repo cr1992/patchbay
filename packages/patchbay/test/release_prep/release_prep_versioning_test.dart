@@ -350,17 +350,20 @@ dependencies:
     });
 
     test('改成 hosted 约束后，三处都要 override（含 example 的传递依赖）', () {
-      expect(expectedOverrides(releaseInputsFixture(publishable: true)), <String, Object>{
-        'packages/patchbay_cli/pubspec_overrides.yaml': <String, String>{
-          'patchbay': '../patchbay',
-          'patchbay_transport': '../patchbay_transport',
+      expect(
+        expectedOverrides(releaseInputsFixture(publishable: true)),
+        <String, Object>{
+          'packages/patchbay_cli/pubspec_overrides.yaml': <String, String>{
+            'patchbay': '../patchbay',
+            'patchbay_transport': '../patchbay_transport',
+          },
+          'packages/patchbay_flutter/pubspec_overrides.yaml': <String, String>{
+            'patchbay': '../patchbay',
+          },
+          'packages/patchbay_flutter/example/pubspec_overrides.yaml':
+              <String, String>{'patchbay': '../../patchbay'},
         },
-        'packages/patchbay_flutter/pubspec_overrides.yaml': <String, String>{
-          'patchbay': '../patchbay',
-        },
-        'packages/patchbay_flutter/example/pubspec_overrides.yaml':
-            <String, String>{'patchbay': '../../patchbay'},
-      });
+      );
     });
   });
 

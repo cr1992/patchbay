@@ -11,7 +11,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       final Map<String, Object?> payload = payloadOf(
         await bridge.status(requestId: 'status-1'),
@@ -44,7 +46,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       final Map<String, Object?> payload = payloadOf(
         await bridge.set(
@@ -88,7 +92,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
@@ -113,7 +119,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: null),
@@ -136,7 +144,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       final Map<String, Object?> payload = payloadOf(
         await bridge.set(
@@ -179,7 +189,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 1000),
@@ -201,7 +213,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 1000),
@@ -219,7 +233,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 1000),
@@ -231,14 +247,19 @@ void main() {
       await drainBridge(tester, bridge);
 
       expect(delegate.calls, <bool>[true, false]);
-      expect(payloadOf(await bridge.status())['lastRelease'], 'operatorRequest');
+      expect(
+        payloadOf(await bridge.status())['lastRelease'],
+        'operatorRequest',
+      );
     });
 
     testWidgets('host disposal releases a live hold', (
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
@@ -255,7 +276,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       bridge.dispose();
       await tester.pump();
@@ -332,7 +355,9 @@ void main() {
           await engaging.future;
         },
       );
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       final Future<PatchbayInvocation> pending = bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
@@ -364,7 +389,9 @@ void main() {
           }
         },
       );
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
@@ -389,7 +416,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate();
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       bridge.dispose();
 

@@ -29,10 +29,7 @@ void main() {
       );
       addTearDown(bridge.semantics.dispose);
 
-      final PatchbayInvocation result = await semanticsSnapshot(
-        tester,
-        bridge,
-      );
+      final PatchbayInvocation result = await semanticsSnapshot(tester, bridge);
       final List<Map<String, Object?>> nodes = semanticsNodes(result);
       final Map<String, Object?> settings = nodes.singleWhere(
         (Map<String, Object?> node) => node['label'] == 'Settings',

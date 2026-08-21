@@ -111,7 +111,11 @@ final class CountingUpperFormatter extends TextInputFormatter {
 }
 
 final class ReparentHarness extends StatelessWidget {
-  const ReparentHarness({super.key, required this.probeKey, required this.left});
+  const ReparentHarness({
+    super.key,
+    required this.probeKey,
+    required this.left,
+  });
 
   final PatchbayKey probeKey;
   final bool left;

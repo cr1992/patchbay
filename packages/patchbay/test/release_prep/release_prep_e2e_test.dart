@@ -26,7 +26,10 @@ void main() {
       expect(red.stdout, contains('[未过] version-references'));
       expect(red.stdout, contains('[未过] protocol-compat-fixture'));
 
-      final ProcessResult applied = await execReleasePrepProcess(repo, '--apply');
+      final ProcessResult applied = await execReleasePrepProcess(
+        repo,
+        '--apply',
+      );
       expect(applied.stdout, contains('[通过] version-parity'));
       expect(applied.stdout, contains('[通过] version-references'));
       expect(applied.stdout, contains('[跳过] protocol-compat-fixture'));
@@ -53,7 +56,10 @@ void main() {
       writeFragment(repo, 'PB-040-20.a.added.md', '- A 新增。\n');
       writeFragment(repo, 'PB-040-20.fixed.md', '- 修复问题。\n');
 
-      final ProcessResult applied = await execReleasePrepProcess(repo, '--apply');
+      final ProcessResult applied = await execReleasePrepProcess(
+        repo,
+        '--apply',
+      );
       expect(applied.exitCode, isNot(64));
       final String root = File(
         '${repo.path}/$changelogPath',
@@ -188,7 +194,10 @@ void main() {
         '${repo.path}/$compatibilityCorpusPath/$directory/unmanaged.json',
       ).writeAsStringSync('{}\n');
 
-      final ProcessResult checked = await execReleasePrepProcess(repo, '--check');
+      final ProcessResult checked = await execReleasePrepProcess(
+        repo,
+        '--check',
+      );
 
       expect(checked.exitCode, 1);
       expect(checked.stdout, contains('[未过] protocol-compat-fixture'));
@@ -202,7 +211,10 @@ void main() {
       writeFragment(repo, 'PB-040-18.changed.md', '- 不应被消费。\n');
       final Map<String, List<int>> before = releaseFileBytes(repo);
 
-      final ProcessResult applied = await execReleasePrepProcess(repo, '--apply');
+      final ProcessResult applied = await execReleasePrepProcess(
+        repo,
+        '--apply',
+      );
 
       expect(applied.exitCode, 64);
       expect(applied.stderr, contains('host surface golden'));
@@ -255,7 +267,10 @@ void main() {
       );
       final Map<String, List<int>> before = releaseFileBytes(repo);
 
-      final ProcessResult checked = await execReleasePrepProcess(repo, '--check');
+      final ProcessResult checked = await execReleasePrepProcess(
+        repo,
+        '--check',
+      );
 
       expect(checked.exitCode, 1);
       expect(checked.stdout, contains('[未过] version-references'));
@@ -269,12 +284,18 @@ void main() {
       writeFragment(repo, 'PB-040-20.bad.md', '- 类型非法。\n');
       final Map<String, List<int>> before = releaseFileBytes(repo);
 
-      final ProcessResult checked = await execReleasePrepProcess(repo, '--check');
+      final ProcessResult checked = await execReleasePrepProcess(
+        repo,
+        '--check',
+      );
       expect(checked.exitCode, 1);
       expect(checked.stdout, contains('[未过] changelog-fragments'));
       expect(checked.stdout, contains('PB-040-20.bad.md'));
 
-      final ProcessResult applied = await execReleasePrepProcess(repo, '--apply');
+      final ProcessResult applied = await execReleasePrepProcess(
+        repo,
+        '--apply',
+      );
       expect(applied.exitCode, 64);
       expect(applied.stderr, contains('CHANGELOG 碎片校验失败'));
       expect(releaseFileBytes(repo), before);
@@ -293,7 +314,10 @@ void main() {
       writeFragment(repo, 'PB-040-20.added.md', '- 不应被消费。\n');
       final Map<String, List<int>> before = releaseFileBytes(repo);
 
-      final ProcessResult applied = await execReleasePrepProcess(repo, '--apply');
+      final ProcessResult applied = await execReleasePrepProcess(
+        repo,
+        '--apply',
+      );
       expect(applied.exitCode, 64);
       expect(applied.stderr, contains('恰好有一个 `## Unreleased`'));
       expect(releaseFileBytes(repo), before);
@@ -313,7 +337,11 @@ void main() {
         'patchbay': '^0.4.0',
         'patchbay_transport': '^0.4.0',
       });
-      final ProcessResult check = await execReleasePrepProcess(repo, '--check', version: '0.4.0');
+      final ProcessResult check = await execReleasePrepProcess(
+        repo,
+        '--check',
+        version: '0.4.0',
+      );
       expect(check.stdout, contains('[通过] internal-dep-constraints'));
       expect(check.stdout, contains('[通过] local-overrides'));
     });
@@ -353,7 +381,11 @@ void main() {
       expect(still.stdout, contains('[未过] publish-switch'));
       expect(still.stdout, contains('[跳过] publish-dry-run'));
 
-      await execReleasePrepProcess(repo, '--apply', extra: <String>['--enable-publish']);
+      await execReleasePrepProcess(
+        repo,
+        '--apply',
+        extra: <String>['--enable-publish'],
+      );
       expect(pubspec.readAsStringSync(), isNot(contains('publish_to')));
       expect(readPubspecVersion(pubspec.readAsStringSync()), '0.3.0');
     });
@@ -386,7 +418,11 @@ void main() {
     });
 
     test('参数错按 usage 退 64', () async {
-      final ProcessResult result = await execReleasePrepProcess(repo, '--check', version: '0.3');
+      final ProcessResult result = await execReleasePrepProcess(
+        repo,
+        '--check',
+        version: '0.3',
+      );
       expect(result.exitCode, 64);
     });
   });

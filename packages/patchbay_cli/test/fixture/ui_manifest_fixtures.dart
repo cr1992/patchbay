@@ -44,7 +44,6 @@ Map<String, Object?> targetWire(
   generation: generation,
 );
 
-
 Map<String, Object?> semanticsNodeFixture(
   int nodeId, {
   required int generation,

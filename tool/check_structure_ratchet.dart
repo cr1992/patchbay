@@ -5,10 +5,7 @@ const int _maxTestLineBudget = 1000;
 const int _modularizedTargetBudget = 600;
 
 final class PackageRule {
-  const PackageRule({
-    required this.name,
-    required this.dirPath,
-  });
+  const PackageRule({required this.name, required this.dirPath});
 
   final String name;
   final String dirPath;
@@ -18,7 +15,10 @@ const List<PackageRule> _packages = <PackageRule>[
   PackageRule(name: 'patchbay', dirPath: 'packages/patchbay'),
   PackageRule(name: 'patchbay_cli', dirPath: 'packages/patchbay_cli'),
   PackageRule(name: 'patchbay_flutter', dirPath: 'packages/patchbay_flutter'),
-  PackageRule(name: 'patchbay_transport', dirPath: 'packages/patchbay_transport'),
+  PackageRule(
+    name: 'patchbay_transport',
+    dirPath: 'packages/patchbay_transport',
+  ),
 ];
 
 void main(List<String> args) {
@@ -70,7 +70,8 @@ void main(List<String> args) {
                 '$relativePath:${i + 1}: hand-written `part` directive forbidden',
               );
             }
-            if (trimmed.startsWith('part of ') && !relativePath.endsWith('.g.dart')) {
+            if (trimmed.startsWith('part of ') &&
+                !relativePath.endsWith('.g.dart')) {
               failures.add(
                 '$relativePath:${i + 1}: hand-written `part of` directive forbidden',
               );
@@ -129,7 +130,9 @@ void main(List<String> args) {
   }
 
   if (failures.isNotEmpty) {
-    stderr.writeln('Structure ratchet check FAILED (${failures.length} issues):');
+    stderr.writeln(
+      'Structure ratchet check FAILED (${failures.length} issues):',
+    );
     for (final failure in failures) {
       stderr.writeln('  - $failure');
     }

@@ -88,7 +88,9 @@ void main() {
     });
 
     test('a missing navigation capability stays a catalog refusal', () async {
-      final CliRun run = await emitManifestCli(clientFixture(navigationCataloged: false));
+      final CliRun run = await emitManifestCli(
+        clientFixture(navigationCataloged: false),
+      );
 
       expect(run.exitCode, PatchbayExitCode.protocol);
       expect(reportOf(run)['destinationSource'], 'navigation.current');
@@ -251,7 +253,8 @@ void main() {
       final StringBuffer err = StringBuffer();
       final int exitCode = await runPatchbayCli(
         <String>['--json', 'repl'],
-        connect: (_) async => clientFixture(uiTargets: <Object?>[targetFixture('a.b')]),
+        connect: (_) async =>
+            clientFixture(uiTargets: <Object?>[targetFixture('a.b')]),
         replInput: Stream<String>.fromIterable(<String>[
           'ui verify-manifest ${Directory.systemTemp.path}/patchbay-absent.json',
           'catalog',

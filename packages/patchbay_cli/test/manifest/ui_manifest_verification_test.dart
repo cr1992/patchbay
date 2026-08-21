@@ -139,7 +139,9 @@ void main() {
       final CliRun run = await runManifestCli(
         clientFixture(
           destination: 'login',
-          semanticsPayload: semanticsPayloadFixture(const <Map<String, Object?>>[]),
+          semanticsPayload: semanticsPayloadFixture(
+            const <Map<String, Object?>>[],
+          ),
         ),
         semanticsManifest,
       );
@@ -305,7 +307,11 @@ void main() {
             destination: 'login',
             uiTargets: <Object?>[targetFixture('login.submit')],
             semanticsPayload: semanticsPayloadFixture(<Map<String, Object?>>[
-              semanticsNodeFixture(2, generation: 1, identifier: 'login.submit'),
+              semanticsNodeFixture(
+                2,
+                generation: 1,
+                identifier: 'login.submit',
+              ),
             ]),
           ),
         );
@@ -343,7 +349,9 @@ void main() {
 
     test('declared but not mounted separates absent from unmounted', () async {
       final CliRun run = await runManifestCli(
-        clientFixture(uiTargets: <Object?>[targetFixture('login.phone', mounted: false)]),
+        clientFixture(
+          uiTargets: <Object?>[targetFixture('login.phone', mounted: false)],
+        ),
         '{"targets": ['
         '{"id": "login.phone", "kind": "text"},'
         '{"id": "login.otp", "kind": "text"}]}',

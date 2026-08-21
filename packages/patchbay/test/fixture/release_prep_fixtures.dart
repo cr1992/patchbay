@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:test/test.dart';
-
 import '../../tool/release_prep.dart';
 
 const String fixtureSha = 'd32f45e9d652920902e51f9c3dc25c189d804e46';
@@ -97,7 +95,8 @@ String hostSurfaceFixture(String version) => jsonEncode(<String, Object?>{
   },
 });
 
-String releaseReadmeFixture(String version, {required bool chinese}) => '''
+String releaseReadmeFixture(String version, {required bool chinese}) =>
+    '''
 > **${chinese ? '项目状态：' : 'Project status:'}** `v$version`, ${chinese ? '已发布到 pub.dev' : 'published on pub.dev'}
   patchbay_flutter: ^$version
 curl /releases/download/patchbay-v$version/patchbay-$version-macos-arm64
@@ -107,7 +106,8 @@ curl /releases/download/patchbay-v$version/patchbay-$version-macos-arm64
 Map<String, String> releaseDocumentsFixture(String version) => <String, String>{
   'README.md': releaseReadmeFixture(version, chinese: false),
   'README.zh-CN.md': releaseReadmeFixture(version, chinese: true),
-  'docs/guide.md': '''
+  'docs/guide.md':
+      '''
 # Guide
   patchbay_flutter: ^$version
 \$ dart pub global activate patchbay_cli $version

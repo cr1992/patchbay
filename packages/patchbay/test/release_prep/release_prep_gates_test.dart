@@ -183,8 +183,9 @@ sdks:
             inputs: releaseInputsFixture(
               released: true,
               documentOverrides: <String, String>{
-                'docs/guide.md': releaseDocumentsFixture('0.2.1')['docs/guide.md']!
-                    .replaceFirst('# Guide', '# Guide\n\n尚未发布到 pub.dev'),
+                'docs/guide.md':
+                    releaseDocumentsFixture('0.2.1')['docs/guide.md']!
+                        .replaceFirst('# Guide', '# Guide\n\n尚未发布到 pub.dev'),
               },
             ),
             resolveTag: (_) => null,
@@ -245,7 +246,10 @@ sdks:
       final ReleaseCheck check = checkOf(
         evaluateRelease(
           version: '0.3.0',
-          inputs: releaseInputsFixture(released: true, packageChangelogVersion: '0.2.1'),
+          inputs: releaseInputsFixture(
+            released: true,
+            packageChangelogVersion: '0.2.1',
+          ),
           resolveTag: (_) => null,
         ),
         'package-changelog',
@@ -290,7 +294,11 @@ sdks:
       test('回填成 peeled SHA 后转绿', () {
         final List<ReleaseCheck> checks = evaluateRelease(
           version: '0.3.0',
-          inputs: releaseInputsFixture(released: true, sha: fixtureSha, consumers: '内部接入方 ×2'),
+          inputs: releaseInputsFixture(
+            released: true,
+            sha: fixtureSha,
+            consumers: '内部接入方 ×2',
+          ),
           resolveTag: (tag) => tag == 'patchbay-v0.3.0' ? fixtureSha : null,
         );
         expect(
@@ -302,7 +310,11 @@ sdks:
       test('填错 SHA 也红', () {
         final List<ReleaseCheck> checks = evaluateRelease(
           version: '0.3.0',
-          inputs: releaseInputsFixture(released: true, sha: 'f' * 40, consumers: '内部接入方 ×2'),
+          inputs: releaseInputsFixture(
+            released: true,
+            sha: 'f' * 40,
+            consumers: '内部接入方 ×2',
+          ),
           resolveTag: (tag) => tag == 'patchbay-v0.3.0' ? fixtureSha : null,
         );
         final ReleaseCheck backfill = checkOf(checks, 'compat-matrix-backfill');

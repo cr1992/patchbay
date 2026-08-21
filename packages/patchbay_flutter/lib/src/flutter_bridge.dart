@@ -1,7 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show TextField;
@@ -191,7 +188,7 @@ final class PatchbayUiRegistry {
   }) => resolve(id: id, generation: generation, operation: operation);
 
   static PatchbayUiTargetDescriptor _descriptor(
-    _ObservedTarget target, {
+    PatchbayUiObservedTarget target, {
     required bool mounted,
     required bool ambiguous,
     required Set<PatchbayUiOperation> operations,
@@ -210,7 +207,9 @@ final class PatchbayUiRegistry {
     );
   }
 
-  static Set<PatchbayUiOperation> _supportedOperations(_ObservedTarget target) {
+  static Set<PatchbayUiOperation> _supportedOperations(
+    PatchbayUiObservedTarget target,
+  ) {
     final PatchbayUiTargetDeclaration declaration = target.key.declaration!;
     return switch (declaration.kind) {
       PatchbayUiTargetKind.text =>
@@ -398,7 +397,7 @@ final class PatchbayFlutterBridge {
     required PatchbayUiOperation operation,
     required String requestId,
   }) async {
-    _TargetResolution resolution = _registry._resolve(
+    PatchbayUiTargetResolution resolution = _registry._resolve(
       id: id,
       generation: generation,
       operation: operation,
@@ -445,7 +444,7 @@ final class PatchbayFlutterBridge {
       return _rejected(requestId, resolution);
     }
 
-    final _ObservedTarget target = resolution.target!;
+    final PatchbayUiObservedTarget target = resolution.target!;
     final _TextBinding? binding = _TextBinding.fromWidget(
       target.key.currentWidget,
     );
@@ -505,7 +504,7 @@ final class PatchbayFlutterBridge {
 
   static PatchbayInvocation _rejected(
     String requestId,
-    _TargetResolution resolution,
+    PatchbayUiTargetResolution resolution,
   ) => PatchbayInvocation.rejected(
     requestId: requestId,
     rejection: PatchbayRejection(
@@ -574,8 +573,6 @@ final class PatchbayUiRegistryEntry {
   int generation = 0;
 }
 
-typedef _RegistryEntry = PatchbayUiRegistryEntry;
-
 final class PatchbayUiObservedTarget {
   const PatchbayUiObservedTarget({
     required this.entry,
@@ -589,8 +586,6 @@ final class PatchbayUiObservedTarget {
   final Element? element;
   final int generation;
 }
-
-typedef _ObservedTarget = PatchbayUiObservedTarget;
 
 final class PatchbayUiTargetResolution {
   const PatchbayUiTargetResolution.resolved(
@@ -609,5 +604,3 @@ final class PatchbayUiTargetResolution {
 
   bool get resolved => target != null;
 }
-
-typedef _TargetResolution = PatchbayUiTargetResolution;

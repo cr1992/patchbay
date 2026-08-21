@@ -177,7 +177,10 @@ void main() {
       resumed = false;
       gateHeld.complete();
 
-      expect(rejectionOf(await pending)['code'], 'keepAwakeLifecycleNotResumed');
+      expect(
+        rejectionOf(await pending)['code'],
+        'keepAwakeLifecycleNotResumed',
+      );
       expect(delegate.calls, isEmpty);
     });
 
@@ -319,7 +322,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate(failOn: false);
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
@@ -354,7 +359,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate(failOn: false);
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 1000),
@@ -381,7 +388,9 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingDelegate delegate = RecordingDelegate(failOn: false);
-      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(delegate: delegate);
+      final PatchbayKeepAwakeBridge bridge = createKeepAwakeBridge(
+        delegate: delegate,
+      );
 
       await bridge.set(
         const PatchbayKeepAwakeRequestWire(enabled: true, leaseMs: 60000),
