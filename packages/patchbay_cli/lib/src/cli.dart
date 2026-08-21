@@ -1,44 +1,36 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:args/args.dart';
-import 'package:patchbay/patchbay.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
 import 'command_help.dart';
 import 'command_registry.dart';
-import 'direct_connection.dart';
+import 'commands/catalog_invoker.dart';
+import 'commands/command_dispatcher.dart';
+import 'commands/command_parser.dart';
+import 'commands/session_commands.dart';
+import 'commands/trace_commands.dart';
+import 'connection/connector.dart';
 import 'doctor.dart';
 import 'keep_awake_policy.dart';
 import 'launcher.dart';
 import 'legacy_payload_confirmation.dart';
-import 'performance_profile.dart';
+import 'output/output_formatter.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
 import 'repl.dart';
-import 'request_id.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
 import 'sensitive_input.dart';
 import 'session.dart';
-import 'runners/job_runner.dart';
-import 'runners/manifest_runner.dart';
-import 'runners/snapshot_runner.dart';
 import 'trace.dart';
+import 'trace/trace_context.dart';
 import 'ui_manifest.dart';
 
-const Symbol _traceZoneInitializedKey = #patchbayTraceZoneInitialized;
-const Symbol _traceRecorderKey = #patchbayTraceRecorder;
-const Symbol _traceIncludeLegacyPayloadKey = #patchbayTraceIncludeLegacyPayload;
-
-PatchbayTraceRecorder? get _traceRecorder =>
-    Zone.current[_traceRecorderKey] as PatchbayTraceRecorder?;
-
-bool get _traceIncludesLegacyPayload =>
-    Zone.current[_traceIncludeLegacyPayloadKey] == true;
+export 'commands/command_parser.dart';
 
 /// Runs one CLI invocation.
 ///
@@ -54,7 +46,7 @@ Future<int> runPatchbayCli(
   PatchbayPermissionCommandRunner? permissionCommands,
   Map<String, String>? environment,
 }) async {
-  if (Zone.current[_traceZoneInitializedKey] != true) {
+  if (!PatchbayTraceContext.isInitialized) {
     return _runPatchbayCliWithTrace(
       arguments,
       connect: connect,
@@ -72,8 +64,6 @@ Future<int> runPatchbayCli(
   try {
     parsed = parser.parse(arguments);
   } on FormatException catch (failure) {
-    // No ArgResults to ask yet, and a parse failure is exactly the kind of
-    // error a `--json` caller still has to be able to read.
     return _fail(
       out,
       error,
@@ -99,7 +89,7 @@ Future<int> runPatchbayCli(
       out.write(PatchbayCommandHelp.render(parser, topic));
       return PatchbayExitCode.accepted;
     }
-    _validateGlobalShape(parsed);
+    PatchbayConnector.validateGlobalShape(parsed);
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
     }
@@ -151,12 +141,10 @@ Future<int> runPatchbayCli(
         }
       }
     }
-    // Session bookkeeping answers before any transport exists: these commands
-    // are what an operator reaches for when the CLI cannot pick a session, so
-    // dialling first would make them unavailable exactly when they are needed.
     if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
         PatchbayCommandTarget.localSessionStore) {
-      final _LocalOutcome outcome = _runLocalSessionCommand(parsed);
+      final LocalOutcome outcome =
+          LocalSessionCommandHandler.runLocalSessionCommand(parsed);
       out.writeln(
         json
             ? const JsonEncoder.withIndent('  ').convert(outcome.response)
@@ -166,7 +154,8 @@ Future<int> runPatchbayCli(
     }
     if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
         PatchbayCommandTarget.localTraceStore) {
-      final _LocalOutcome outcome = _runLocalTraceCommand(parsed);
+      final LocalOutcome outcome =
+          LocalTraceCommandHandler.runLocalTraceCommand(parsed);
       out.writeln(
         json
             ? const JsonEncoder.withIndent('  ').convert(outcome.response)
@@ -174,20 +163,13 @@ Future<int> runPatchbayCli(
       );
       return PatchbayExitCode.accepted;
     }
-    // Doctor owns its own dial for the same reason: a failed connection is its
-    // subject matter, not its failure mode, so it must not be routed through
-    // the dispatcher's dial-then-execute path — that path is the one whose
-    // errors doctor exists to explain.
     if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
         PatchbayCommandTarget.localDiagnostics) {
-      // Resolved only for its shape policing: doctor takes no arguments and no
-      // command options, and that rule stays derived from the same table as
-      // every other command instead of being re-stated here.
       PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
       final PatchbayDoctorReport report = await runPatchbayDoctor(
         options: parsed,
-        connect: connect ?? _connect,
-        rpcTimeout: _rpcTimeout(parsed),
+        connect: connect ?? PatchbayConnector.connect,
+        rpcTimeout: PatchbayConnector.rpcTimeout(parsed),
       );
       out.writeln(
         json
@@ -205,31 +187,26 @@ Future<int> runPatchbayCli(
             parsed,
             invocation,
           );
-      _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
+      OutputFormatter.writeOutput(
+        out,
+        outcome.response,
+        json: json,
+        summary: outcome.summary,
+      );
       return outcome.exitCode;
     }
     final bool repl = _isRepl(parsed);
     if (repl) {
-      // Resolve the declaration purely for its option policing: `repl` accepts
-      // no command options, and running that check here keeps it derived from
-      // the same table as every other path instead of a second hand-written
-      // list. The invocation itself is unused — repl dispatches nothing.
       PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
       _validateReplShape(parsed);
     }
-    // The manifest is read and parsed before the dial, because it is caller
-    // input and a file the CLI refuses to read is the author's news whether or
-    // not an App happens to be reachable. Dialling first answered a syntax
-    // error with `sessionDirectoryEmpty`, which sends the author to look for a
-    // device when the actual problem is a comma in the file they just wrote.
-    final PatchbayUiManifest? manifest = _preReadUiManifest(parsed);
-    // Every wait for the App is bounded from here on, dialling included: a
-    // peer that stopped answering must not be able to hold the CLI open, and
-    // the discovery handshake is a round trip like any other.
-    final Duration rpcTimeout = _rpcTimeout(parsed);
+    final PatchbayUiManifest? manifest = CatalogInvoker.preReadUiManifest(
+      parsed,
+    );
+    final Duration rpcTimeout = PatchbayConnector.rpcTimeout(parsed);
     connection = PatchbayTimeoutClient(
       await dialPatchbayUnderBudget(
-        () => (connect ?? _connect)(parsed),
+        () => (connect ?? PatchbayConnector.connect)(parsed),
         rpcTimeout: rpcTimeout,
       ),
       rpcTimeout: rpcTimeout,
@@ -237,10 +214,9 @@ Future<int> runPatchbayCli(
     if (repl) {
       return await PatchbayReplSession(
         parser: parser,
-        // One connection, every line: this closure is the only thing the loop
-        // can reach, so a later command has no way to open a second one.
         execute: (ArgResults line) async {
-          final PatchbayTraceRecorder? trace = _traceRecorder;
+          final PatchbayTraceRecorder? trace =
+              PatchbayTraceContext.currentRecorder;
           final PatchbayFriendlyCommandSpec? lineSpec =
               PatchbayFriendlyCommandRegistry.specFor(line.rest);
           final String? runId = trace == null || lineSpec == null
@@ -249,7 +225,7 @@ Future<int> runPatchbayCli(
                   lineSpec.path.join(' '),
                   transport: _traceTransport(parsed),
                 );
-          final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
+          final Outcome outcome = await _renewKeepAwakeAfterSuccess(
             connection!,
             line,
             await _executeOnce(connection, line),
@@ -266,13 +242,18 @@ Future<int> runPatchbayCli(
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
-    final _Outcome outcome = await _renewKeepAwakeAfterSuccess(
+    final Outcome outcome = await _renewKeepAwakeAfterSuccess(
       connection,
       parsed,
       await _executeOnce(connection, parsed, manifest: manifest),
       resolveKeepAwakePolicy(),
     );
-    _writeOutput(out, outcome.response, json: json, summary: outcome.summary);
+    OutputFormatter.writeOutput(
+      out,
+      outcome.response,
+      json: json,
+      summary: outcome.summary,
+    );
     return outcome.exitCode;
   } on FormatException catch (failure) {
     return _fail(
@@ -298,9 +279,6 @@ Future<int> runPatchbayCli(
       error,
       json: json,
       message: 'patchbay protocol error: ${failure.code}',
-      // Whatever the host already said about this failure travels with it: a
-      // code alone would send the operator back to re-run the RPC that just
-      // answered.
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.protocol,
     );
@@ -335,8 +313,6 @@ Future<int> runPatchbayCli(
       error,
       json: json,
       message: message.toString(),
-      // The labels are already URI-free — that is what makes them printable —
-      // so the JSON reader gets the same choices the operator sees.
       envelope: PatchbayErrorEnvelope(
         failure.code,
         details: <String, Object?>{
@@ -361,9 +337,6 @@ Future<int> runPatchbayCli(
       exitCode: PatchbayExitCode.typedFailure,
     );
   } on PatchbayUiManifestException catch (failure) {
-    // Caller input the CLI refused to read, so it is a usage error like any
-    // other bad argument — but a file has more than one way to be wrong, and
-    // the envelope has to say which one rather than leave the author bisecting.
     return _fail(
       out,
       error,
@@ -405,8 +378,6 @@ Future<int> runPatchbayCli(
       exitCode: PatchbayExitCode.protocol,
     );
   } on Object catch (failure) {
-    // VM Service URIs and direct bearer tokens are authentication material.
-    // Socket exceptions can echo endpoints, so expose only the stable type.
     return _fail(
       out,
       error,
@@ -440,14 +411,6 @@ Future<int> _runPatchbayCliWithTrace(
       spec == null ||
       spec.target == PatchbayCommandTarget.localTraceStore ||
       _helpTopic(parsed) != null) {
-    // `--include-legacy-payload` only means something for a command whose
-    // answer gets recorded. On a local `trace ...` subcommand there is no
-    // answer to record, and this branch used to skip the confirmation gate
-    // entirely — so the flag was accepted, never confirmed and never applied.
-    // A silently ignored switch that exists to *loosen* redaction is the worst
-    // of the three options: the operator believes values are being stored, and
-    // nothing in the output says otherwise. It is also per invocation by
-    // design, so it cannot be "armed once" at `trace start`.
     if (parsed != null &&
         parsed.flag('include-legacy-payload') &&
         spec?.target == PatchbayCommandTarget.localTraceStore) {
@@ -477,7 +440,9 @@ Future<int> _runPatchbayCliWithTrace(
         permissionCommands: permissionCommands,
         environment: environment,
       ),
-      zoneValues: const <Object?, Object?>{_traceZoneInitializedKey: true},
+      zoneValues: const <Object?, Object?>{
+        PatchbayTraceZoneKeys.initialized: true,
+      },
     );
   }
 
@@ -500,7 +465,9 @@ Future<int> _runPatchbayCliWithTrace(
           permissionCommands: permissionCommands,
           environment: environment,
         ),
-        zoneValues: const <Object?, Object?>{_traceZoneInitializedKey: true},
+        zoneValues: const <Object?, Object?>{
+          PatchbayTraceZoneKeys.initialized: true,
+        },
       );
     }
     final bool includeLegacy = _confirmLegacyPayload(parsed);
@@ -523,9 +490,9 @@ Future<int> _runPatchbayCliWithTrace(
         environment: environment,
       ),
       zoneValues: <Object?, Object?>{
-        _traceZoneInitializedKey: true,
-        _traceRecorderKey: recorder,
-        _traceIncludeLegacyPayloadKey: includeLegacy,
+        PatchbayTraceZoneKeys.initialized: true,
+        PatchbayTraceZoneKeys.recorder: recorder,
+        PatchbayTraceZoneKeys.includeLegacyPayload: includeLegacy,
       },
     );
     recorder.commandFinished(runId, exitCode);
@@ -551,11 +518,110 @@ Future<int> _runPatchbayCliWithTrace(
   }
 }
 
-ArgResults? _tryParseForTrace(List<String> arguments) {
+Future<Outcome> _executeOnce(
+  PatchbayClient connection,
+  ArgResults parsed, {
+  PatchbayUiManifest? manifest,
+}) async {
   try {
-    return patchbayCliParser().parse(arguments);
-  } on FormatException {
-    return null;
+    final ExecutionResult execution = await CommandDispatcher.execute(
+      connection,
+      parsed,
+      manifest: manifest,
+    );
+    Map<String, Object?> output = execution.response;
+    if (execution.artifact case final ArtifactRequest artifact) {
+      if (patchbayExitCodeFor(output) == PatchbayExitCode.accepted) {
+        final PatchbayDownloadedArtifact downloaded =
+            await PatchbayArtifactDownloader(
+              chunkBytes: OutputFormatter.blobChunkBytes(execution.catalog!),
+              invoke: (String command, Map<String, Object?> arguments) =>
+                  CatalogInvoker.invokeAgainstCatalog(
+                    connection,
+                    execution.catalog!,
+                    command,
+                    arguments,
+                  ),
+            ).download(
+              metadataJson: OutputFormatter.artifactMetadata(
+                output,
+                artifact.disposition,
+              ),
+              outputPath: artifact.outputPath,
+              force: artifact.force,
+            );
+        PatchbayTraceContext.currentRecorder?.attachArtifact(
+          localPath: downloaded.path,
+          blobId: downloaded.blobId,
+          sha256Value: downloaded.sha256,
+          length: downloaded.length,
+          contentType: downloaded.contentType,
+        );
+        output = <String, Object?>{
+          ...output,
+          'localArtifact': downloaded.toJson(),
+        };
+      }
+    }
+    return Outcome(
+      output,
+      execution.exitCode ?? patchbayExitCodeFor(output),
+      summary: execution.summary,
+    );
+  } on PatchbayArtifactRejected catch (rejected) {
+    return Outcome(rejected.response, patchbayExitCodeFor(rejected.response));
+  }
+}
+
+Future<Outcome> _renewKeepAwakeAfterSuccess(
+  PatchbayClient connection,
+  ArgResults parsed,
+  Outcome outcome,
+  PatchbayKeepAwakePolicy policy,
+) async {
+  if (!policy.enabled || outcome.exitCode != PatchbayExitCode.accepted) {
+    return outcome;
+  }
+  final String? serviceCommand = PatchbayFriendlyCommandRegistry.specFor(
+    parsed.rest,
+  )?.serviceCommand;
+  if (serviceCommand == 'ui.keepAwake.set' ||
+      serviceCommand == 'ui.keepAwake.status') {
+    return outcome;
+  }
+  final PatchbayKeepAwakeAttempt renewal = await requestPatchbayKeepAwake(
+    connection,
+    enabled: true,
+    lease: policy.lease,
+  );
+  final String originalSummary =
+      outcome.summary ?? patchbayResponseSummary(outcome.response);
+  final String keepAwakeSummary = renewal.reasonCode == null
+      ? 'keepAwake=${renewal.state}'
+      : 'keepAwake=${renewal.state} reason=${renewal.reasonCode}';
+  return Outcome(
+    <String, Object?>{...outcome.response, 'localKeepAwake': renewal.toJson()},
+    renewal.success ? outcome.exitCode : PatchbayExitCode.typedFailure,
+    summary: '$originalSummary $keepAwakeSummary',
+  );
+}
+
+List<String>? _helpTopic(ArgResults parsed) {
+  final List<String> words = parsed.rest;
+  if (words case ['help', ...final List<String> topic]) return topic;
+  if (parsed.flag('help')) return words;
+  return null;
+}
+
+bool _isRepl(ArgResults parsed) =>
+    parsed.rest.length == 1 && parsed.rest.single == 'repl';
+
+void _validateReplShape(ArgResults parsed) {
+  if (parsed.option('direct-endpoint') != null) {
+    throw const FormatException(
+      'repl cannot use --direct-endpoint: the bearer token and the command '
+      'stream would have to share one stdin',
+    );
   }
 }
 
@@ -607,11 +673,24 @@ Map<String, Object?>? _traceSessionRef(ArgResults parsed) {
   };
 }
 
-/// Reports one failure on both channels and returns its exit code.
-///
-/// stderr keeps the sentence it always printed. `--json` adds the machine
-/// envelope on stdout, so stdout under `--json` is exactly one JSON document —
-/// the response or the error — and never a mix of JSON and prose.
+ArgResults? _tryParseForTrace(List<String> arguments) {
+  try {
+    return patchbayCliParser().parse(arguments);
+  } on FormatException {
+    return null;
+  }
+}
+
+bool _jsonRequestedIn(List<String> arguments) {
+  var json = false;
+  for (final String word in arguments) {
+    if (word == '--') break;
+    if (word == '--json') json = true;
+    if (word == '--no-json') json = false;
+  }
+  return json;
+}
+
 int _fail(
   StringSink out,
   StringSink error, {
@@ -627,1800 +706,8 @@ int _fail(
   return exitCode;
 }
 
-/// Usage errors have no code of their own; the sentence is the detail.
 PatchbayErrorEnvelope _usageEnvelope(FormatException failure) =>
     PatchbayErrorEnvelope(
       'usageError',
       details: <String, Object?>{'message': failure.message},
     );
-
-/// Whether `--json` appears in raw argv, for failures that precede parsing.
-bool _jsonRequestedIn(List<String> arguments) {
-  var json = false;
-  for (final String word in arguments) {
-    if (word == '--') break;
-    if (word == '--json') json = true;
-    if (word == '--no-json') json = false;
-  }
-  return json;
-}
-
-/// Whether this invocation opens a reusable session instead of one command.
-bool _isRepl(ArgResults parsed) =>
-    parsed.rest.length == 1 && parsed.rest.single == 'repl';
-
-void _validateReplShape(ArgResults parsed) {
-  // Direct mode reads its bearer token from stdin, which is the same stream
-  // the repl needs for commands. Sharing one stdin between a secret and a
-  // command stream is how a token ends up interpreted as a command, so refuse
-  // the combination instead of racing the two readers.
-  if (parsed.option('direct-endpoint') != null) {
-    throw const FormatException(
-      'repl cannot use --direct-endpoint: the bearer token and the command '
-      'stream would have to share one stdin',
-    );
-  }
-}
-
-/// Runs one resolved command and classifies its response.
-///
-/// One-shot and repl share this so a command cannot mean two different things
-/// depending on how it was launched.
-Future<_Outcome> _executeOnce(
-  PatchbayClient connection,
-  ArgResults parsed, {
-  PatchbayUiManifest? manifest,
-}) async {
-  try {
-    final _Execution execution = await _execute(
-      connection,
-      parsed,
-      manifest: manifest,
-    );
-    Map<String, Object?> output = execution.response;
-    if (execution.artifact case final _ArtifactRequest artifact) {
-      if (patchbayExitCodeFor(output) == PatchbayExitCode.accepted) {
-        final PatchbayDownloadedArtifact downloaded =
-            await PatchbayArtifactDownloader(
-              chunkBytes: _blobChunkBytes(execution.catalog!),
-              invoke: (String command, Map<String, Object?> arguments) =>
-                  _invokeAgainstCatalog(
-                    connection,
-                    execution.catalog!,
-                    command,
-                    arguments,
-                  ),
-            ).download(
-              metadataJson: _artifactMetadata(output, artifact.disposition),
-              outputPath: artifact.outputPath,
-              force: artifact.force,
-            );
-        _traceRecorder?.attachArtifact(
-          localPath: downloaded.path,
-          blobId: downloaded.blobId,
-          sha256Value: downloaded.sha256,
-          length: downloaded.length,
-          contentType: downloaded.contentType,
-        );
-        output = <String, Object?>{
-          ...output,
-          'localArtifact': downloaded.toJson(),
-        };
-      }
-    }
-    // A locally computed verdict classifies itself; everything that came off
-    // the wire is classified by what the App answered.
-    return _Outcome(
-      output,
-      execution.exitCode ?? patchbayExitCodeFor(output),
-      summary: execution.summary,
-    );
-  } on PatchbayArtifactRejected catch (rejected) {
-    // The App answered; the artifact simply is not downloadable. That is a
-    // normal typed response, not a CLI-level error.
-    return _Outcome(rejected.response, patchbayExitCodeFor(rejected.response));
-  }
-}
-
-Future<_Outcome> _renewKeepAwakeAfterSuccess(
-  PatchbayClient connection,
-  ArgResults parsed,
-  _Outcome outcome,
-  PatchbayKeepAwakePolicy policy,
-) async {
-  if (!policy.enabled || outcome.exitCode != PatchbayExitCode.accepted) {
-    return outcome;
-  }
-  final String? serviceCommand = PatchbayFriendlyCommandRegistry.specFor(
-    parsed.rest,
-  )?.serviceCommand;
-  // Generated active specs are the authority after command-surface sync; the
-  // deprecated enum façade is not guaranteed to preserve object identity.
-  if (serviceCommand == 'ui.keepAwake.set' ||
-      serviceCommand == 'ui.keepAwake.status') {
-    return outcome;
-  }
-  final PatchbayKeepAwakeAttempt renewal = await requestPatchbayKeepAwake(
-    connection,
-    enabled: true,
-    lease: policy.lease,
-  );
-  final String originalSummary =
-      outcome.summary ?? patchbayResponseSummary(outcome.response);
-  final String keepAwakeSummary = renewal.reasonCode == null
-      ? 'keepAwake=${renewal.state}'
-      : 'keepAwake=${renewal.state} reason=${renewal.reasonCode}';
-  return _Outcome(
-    <String, Object?>{...outcome.response, 'localKeepAwake': renewal.toJson()},
-    renewal.success ? outcome.exitCode : PatchbayExitCode.typedFailure,
-    summary: '$originalSummary $keepAwakeSummary',
-  );
-}
-
-ArgParser patchbayCliParser() => ArgParser()
-  ..addFlag(
-    'help',
-    abbr: 'h',
-    negatable: false,
-    help: 'Show root, group, or command help without connecting to an App.',
-  )
-  ..addOption('ws-uri', help: 'VM Service http(s) or ws(s) URI.')
-  ..addOption('session', help: 'Select one discovered Patchbay session ID.')
-  ..addOption(
-    'trace',
-    help: 'Append this command to an explicit local debug trace ID.',
-  )
-  ..addOption(
-    'trace-dir',
-    help: 'Override the local Patchbay trace directory.',
-    hide: true,
-  )
-  ..addFlag(
-    'include-legacy-payload',
-    defaultsTo: false,
-    help:
-        'Persist re-redacted values from legacy hosts after explicit '
-        'confirmation.',
-  )
-  ..addFlag(
-    'allow-non-tty-legacy-payload',
-    defaultsTo: false,
-    help: 'Explicitly allow legacy payload persistence without a TTY.',
-    hide: true,
-  )
-  ..addOption(
-    'session-dir',
-    help: 'Override the Patchbay launcher session directory.',
-    hide: true,
-  )
-  ..addOption(
-    'direct-endpoint',
-    help: 'Experimental cleartext direct endpoint (never contains a token).',
-  )
-  ..addFlag(
-    'direct-token-stdin',
-    defaultsTo: false,
-    help: 'Read the direct bearer token from no-echo stdin.',
-  )
-  ..addOption('direct-application-id', help: 'Expected direct App identity.')
-  ..addOption('direct-app-instance-id', help: 'Expected direct App instance.')
-  ..addOption(
-    'direct-schema-version',
-    defaultsTo: '1',
-    help: 'Expected direct protocol schema version.',
-  )
-  ..addOption(
-    'transport-timeout-ms',
-    // One source for the number: an option default that drifted from the
-    // documented one would make the exported constant a lie.
-    defaultsTo: '${patchbayDefaultRpcTimeout.inMilliseconds}',
-    help:
-        'Per-RPC timeout in milliseconds, on every transport. A command that '
-        'asks the App to wait (--timeout-ms) extends its own request by this '
-        'much rather than being cut short by it.',
-  )
-  ..addOption(
-    'path',
-    help:
-        'Dot path into the snapshot (a.b.c); answers that field or subtree '
-        'instead of the whole snapshot.',
-  )
-  ..addOption(
-    'from',
-    help: 'Retained snapshot revision used as the diff baseline.',
-  )
-  ..addOption('args', help: 'JSON object passed to a domain command.')
-  ..addFlag(
-    'stdin',
-    defaultsTo: false,
-    help: 'Read one no-echo stdin line; JSON merges over --args, stdin wins.',
-  )
-  ..addFlag(
-    'wait',
-    defaultsTo: false,
-    help: 'Wait for a returned jobId to reach a terminal event.',
-  )
-  ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
-  ..addFlag(
-    'keep-awake',
-    defaultsTo: false,
-    help:
-        'Renew the App keep-awake lease after successful commands; launch '
-        'also holds it for the supervised session. Disabled by default.',
-  )
-  ..addOption('revision', help: 'Observed navigation revision.')
-  ..addOption(
-    'generation',
-    help: 'Expected semantics generation; refuses a target that already moved.',
-  )
-  ..addOption('start', help: 'JSON target-local normalized gesture point.')
-  ..addOption('gesture-path', help: 'JSON array of target-local drag points.')
-  ..addOption('velocity', help: 'JSON normalized fling velocity vector.')
-  // 手势时长与性能画像窗口共用这一个选项名：allowedOptions 按命令分别限定，
-  // 所以一个声明服务两种用途，重复声明会让 ArgParser 直接抛错。
-  ..addOption(
-    'duration-ms',
-    help:
-        'Bounded gesture duration, or performance profile window, '
-        'in milliseconds.',
-  )
-  ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
-  ..addOption('cursor', help: 'Opaque structured-log cursor.')
-  ..addOption(
-    'direction',
-    allowed: const <String>['forward', 'backward'],
-    help: 'Structured-log traversal direction.',
-  )
-  ..addOption('limit', help: 'Maximum number of log records.')
-  ..addOption('levels', help: 'Comma-separated log levels.')
-  ..addOption('categories', help: 'Comma-separated log categories.')
-  ..addOption('since', help: 'ISO-8601 lower log time bound.')
-  // One option, two commands, never both at once: `_validateOptions` refuses
-  // it for every command that does not list it, so the two readings can never
-  // meet. The help says both because a shared option that documents only one
-  // of them is the kind of lie an operator finds out about at the prompt.
-  ..addOption(
-    'until',
-    help:
-        'logs query|export: ISO-8601 upper time bound. snapshot wait: the '
-        'condition to wait for (exists|absent|equals).',
-  )
-  ..addOption(
-    'ttl-ms',
-    help: 'Artifact lifetime, or inspect select-mode lease, in milliseconds.',
-  )
-  ..addOption(
-    'lease-ms',
-    help:
-        'Keep-awake lease in milliseconds; the App releases the screen on its '
-        'own when it runs out. Omit to use the App-declared default.',
-  )
-  ..addOption('pixel-ratio', help: 'Positive Flutter capture pixel ratio.')
-  ..addOption(
-    'sample-limit',
-    help: 'Maximum VM timeline events summarized (1..10000).',
-  )
-  ..addOption(
-    'after-frames',
-    help: 'Capture after this many Patchbay-observed Flutter frames (1..120).',
-  )
-  ..addOption('output', help: 'Local artifact output path.')
-  ..addOption('name', help: 'Human-readable local trace name.')
-  ..addFlag(
-    'activate',
-    defaultsTo: false,
-    help: 'Select the new trace for this workspace.',
-  )
-  ..addFlag(
-    'pin',
-    defaultsTo: false,
-    help: 'Exclude the new trace from retention pruning.',
-  )
-  ..addFlag(
-    'dry-run',
-    defaultsTo: false,
-    help: 'Report retention candidates without deleting them.',
-  )
-  ..addFlag(
-    'include-artifacts',
-    defaultsTo: true,
-    help: 'Include content-addressed artifacts in a trace export.',
-  )
-  ..addFlag('force', defaultsTo: false, help: 'Replace an existing output.')
-  ..addFlag(
-    'clear',
-    defaultsTo: false,
-    help: 'Unpin the selected session instead of selecting one.',
-  )
-  ..addOption(
-    'permission-driver',
-    help: 'Explicit external permission driver executable path.',
-  )
-  ..addOption('device-id', help: 'Explicit platform device selection.')
-  ..addOption('application-id', help: 'Explicit platform application ID.')
-  ..addOption(
-    'state',
-    allowed: <String>[
-      for (final PatchbayPermissionState state
-          in PatchbayPermissionState.values)
-        state.name,
-    ],
-    help: 'Desired or required closed permission state.',
-  )
-  ..addOption(
-    'decision',
-    allowed: <String>[
-      for (final PatchbayPermissionDecision decision
-          in PatchbayPermissionDecision.values)
-        decision.name,
-    ],
-    help: 'System permission decision for exercise.',
-  )
-  ..addFlag(
-    'confirm-system-permission',
-    defaultsTo: false,
-    negatable: false,
-    help: 'Explicitly confirm an exercise allow system permission action.',
-  )
-  ..addFlag(
-    'emit-manifest',
-    defaultsTo: false,
-    negatable: false,
-    help: 'Emit a v2 draft covering only targets mounted right now.',
-  )
-  ..addFlag(
-    'navigate',
-    defaultsTo: false,
-    negatable: false,
-    help: 'Opt in to navigation side effects and verify every destination.',
-  )
-  ..addFlag(
-    'continue-on-error',
-    defaultsTo: false,
-    negatable: false,
-    help: 'Continue the destination walkthrough after a screen fails.',
-  )
-  ..addFlag(
-    'restore',
-    defaultsTo: false,
-    negatable: false,
-    help: 'Try to restore the initial destination after a walkthrough.',
-  )
-  ..addOption(
-    'screen-timeout-ms',
-    help: 'Per-destination walkthrough budget (default 5000, max 120000).',
-  )
-  ..addOption(
-    'total-timeout-ms',
-    help: 'Whole walkthrough budget (default 120000, max 600000).',
-  );
-
-List<String>? _helpTopic(ArgResults parsed) {
-  final List<String> words = parsed.rest;
-  if (words case ['help', ...final List<String> topic]) return topic;
-  if (parsed.flag('help')) return words;
-  return null;
-}
-
-void _validateGlobalShape(ArgResults parsed) {
-  final bool direct = parsed.option('direct-endpoint') != null;
-  final bool hasVmSelection =
-      parsed.option('ws-uri') != null || parsed.option('session') != null;
-  if (parsed.option('ws-uri') != null && parsed.option('session') != null) {
-    throw const FormatException(
-      '--ws-uri and --session are mutually exclusive',
-    );
-  }
-  if (direct && hasVmSelection) {
-    throw const FormatException(
-      '--direct-endpoint is mutually exclusive with VM session options',
-    );
-  }
-  if (parsed.flag('direct-token-stdin') != direct ||
-      (parsed.option('direct-application-id') != null) != direct ||
-      (parsed.option('direct-app-instance-id') != null) != direct) {
-    throw const FormatException(
-      'direct mode requires --direct-endpoint, --direct-token-stdin, '
-      '--direct-application-id and --direct-app-instance-id together',
-    );
-  }
-  if (parsed.flag('stdin') && parsed.flag('direct-token-stdin')) {
-    throw const FormatException(
-      '--stdin and --direct-token-stdin cannot consume the same stdin',
-    );
-  }
-  if (parsed.flag('allow-non-tty-legacy-payload') &&
-      !parsed.flag('include-legacy-payload')) {
-    throw const FormatException(
-      '--allow-non-tty-legacy-payload requires --include-legacy-payload',
-    );
-  }
-}
-
-/// The per-RPC budget this invocation runs under.
-///
-/// `--transport-timeout-ms` already existed as the direct transport's socket
-/// budget and was silently ignored everywhere else. It is the same quantity —
-/// how long the CLI waits for one answer — so it governs every transport rather
-/// than growing a second switch beside it. `--timeout-ms` keeps its own,
-/// different meaning: the wait the *App* is asked to perform, which is sent on
-/// the wire and which extends this budget instead of competing with it.
-Duration _rpcTimeout(ArgResults parsed) =>
-    Duration(milliseconds: _positiveOption(parsed, 'transport-timeout-ms'));
-
-Future<PatchbayClient> _connect(ArgResults parsed) async {
-  final String? directEndpoint = parsed.option('direct-endpoint');
-  if (directEndpoint != null) {
-    final Uri endpoint = Uri.parse(directEndpoint);
-    if (endpoint.scheme != 'http' ||
-        endpoint.host.isEmpty ||
-        endpoint.userInfo.isNotEmpty ||
-        endpoint.hasQuery ||
-        endpoint.fragment.isNotEmpty ||
-        endpoint.path != PatchbayDirectConnection.protocolPath) {
-      throw const FormatException(
-        '--direct-endpoint must be a credential-free http URL',
-      );
-    }
-    final int schemaVersion = _positiveOption(parsed, 'direct-schema-version');
-    return PatchbayDirectConnection(
-      endpoint: endpoint,
-      bearerToken: readSensitiveStdinLine(),
-      schemaVersion: schemaVersion,
-      applicationId: parsed.option('direct-application-id')!,
-      appInstanceId: parsed.option('direct-app-instance-id')!,
-      timeout: _rpcTimeout(parsed),
-    );
-  }
-
-  final String? uriText = parsed.option('ws-uri');
-  if (uriText != null) return PatchbayConnection.connect(Uri.parse(uriText));
-  final PatchbaySessionStore sessionStore = PatchbaySessionStore(
-    parsed.option('session-dir'),
-  );
-  final PatchbayDiscoveredSession discovered = await PatchbaySessionResolver(
-    store: sessionStore,
-  ).resolve(sessionId: parsed.option('session'));
-  try {
-    return await PatchbayConnection.connect(
-      Uri.parse(discovered.record.wsUri!),
-      expectedIdentity: discovered.identity,
-    );
-  } on PatchbayProtocolException {
-    sessionStore.remove(discovered.record.sessionId);
-    // The transport connected but proved to be a different App/isolate.
-    // Removing the stale discovery record is lifecycle cleanup; callers must
-    // still receive the protocol/identity exit class (4), not transport (3).
-    throw const PatchbayProtocolException('sessionIdentityMismatch');
-  } on Object {
-    sessionStore.remove(discovered.record.sessionId);
-    throw const PatchbaySessionException('sessionStaleTransport');
-  }
-}
-
-/// Runs one session-directory command: no transport, no catalog, no App.
-///
-/// The switch has no default arm for the declarations it handles, so a fourth
-/// local command cannot be declared without being wired here.
-_LocalOutcome _runLocalSessionCommand(ArgResults parsed) {
-  _validateLocalSessionShape(parsed);
-  final PatchbayFriendlyInvocation friendly =
-      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
-  final PatchbaySessionResolver sessions = PatchbaySessionResolver(
-    store: PatchbaySessionStore(parsed.option('session-dir')),
-  );
-  return switch (friendly.spec) {
-    PatchbayFriendlyCommand.sessionsList => _listSessions(sessions),
-    PatchbayFriendlyCommand.sessionsPrune => _pruneSessions(sessions),
-    PatchbayFriendlyCommand.sessionUse => _useSession(sessions, friendly),
-    _ => throw StateError(
-      'unexpected local session command ${friendly.spec.name}',
-    ),
-  };
-}
-
-/// Refuses the options that would suggest these commands talk to an App.
-///
-/// `--session-dir` is the one connection-shaped option that does apply: it
-/// says *which* directory to read. The rest name a peer, and accepting them
-/// silently would imply the listing came from that peer.
-void _validateLocalSessionShape(ArgResults parsed) {
-  for (final String name in const <String>[
-    'ws-uri',
-    'session',
-    'direct-endpoint',
-    'direct-token-stdin',
-  ]) {
-    if (!parsed.wasParsed(name)) continue;
-    throw FormatException(
-      '--$name does not apply to a session-directory command: it reads the '
-      'local launcher records, not a running App',
-    );
-  }
-}
-
-_LocalOutcome _listSessions(PatchbaySessionResolver sessions) {
-  final List<PatchbaySessionListing> listings = sessions.inventory();
-  return _LocalOutcome(<String, Object?>{
-    'sessions': <Map<String, Object?>>[
-      for (final PatchbaySessionListing listing in listings) listing.toJson(),
-    ],
-    'selected': _selectedId(listings),
-  }, _sessionLines(listings));
-}
-
-_LocalOutcome _pruneSessions(PatchbaySessionResolver sessions) {
-  final PatchbaySessionPruneResult result = sessions.prune();
-  final String removed = result.removed.isEmpty
-      ? 'pruned nothing'
-      : 'pruned ${result.removed.length}: ${result.removed.join(', ')}';
-  return _LocalOutcome(
-    <String, Object?>{
-      'pruned': result.removed,
-      'selectionCleared': result.selectionCleared,
-      'sessions': <Map<String, Object?>>[
-        for (final PatchbaySessionListing listing in result.remaining)
-          listing.toJson(),
-      ],
-      'selected': _selectedId(result.remaining),
-    },
-    <String>[
-      result.selectionCleared
-          ? '$removed (the pinned session was among them and is now unpinned)'
-          : removed,
-      _sessionLines(result.remaining),
-    ].join('\n'),
-  );
-}
-
-_LocalOutcome _useSession(
-  PatchbaySessionResolver sessions,
-  PatchbayFriendlyInvocation friendly,
-) {
-  if (friendly.arguments['clear'] == true) {
-    final String? previous = sessions.selection;
-    sessions.clearSelection();
-    return _LocalOutcome(
-      <String, Object?>{'selected': null, 'previous': previous},
-      previous == null
-          ? 'no session was pinned'
-          : 'unpinned $previous; commands without --session now require a '
-                'single discoverable session',
-    );
-  }
-  final PatchbaySessionListing pinned = sessions.select(
-    friendly.arguments['sessionId']! as String,
-  );
-  return _LocalOutcome(<String, Object?>{
-    'selected': pinned.record.sessionId,
-    'session': pinned.toJson(),
-  }, 'pinned ${pinned.label}');
-}
-
-_LocalOutcome _runLocalTraceCommand(ArgResults parsed) {
-  _validateLocalTraceShape(parsed);
-  final PatchbayFriendlyInvocation friendly =
-      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
-  final PatchbayTraceStore traces = PatchbayTraceStore(
-    parsed.option('trace-dir'),
-  );
-  final String? explicit = parsed.option('trace');
-  switch (friendly.spec) {
-    case PatchbayFriendlyCommand.traceStart:
-      if (explicit != null) {
-        throw const FormatException('trace start does not accept --trace');
-      }
-      final Object? name = friendly.arguments['name'];
-      if (name is! String || name.trim().isEmpty) {
-        throw const FormatException('trace start requires --name <name>');
-      }
-      final PatchbayTraceManifest manifest = traces.start(
-        name: name,
-        cliVersion: patchbayPackageVersion,
-        activate: friendly.arguments['activate'] == true,
-        pinned: friendly.arguments['pinned'] == true,
-      );
-      return _LocalOutcome(<String, Object?>{
-        'trace': manifest.toJson(),
-        'active': friendly.arguments['activate'] == true,
-      }, 'traceId: ${manifest.traceId}');
-    case PatchbayFriendlyCommand.traceMark:
-      final PatchbayTraceManifest manifest = traces.mark(
-        explicit,
-        friendly.arguments['note']! as String,
-      );
-      return _LocalOutcome(<String, Object?>{
-        'trace': manifest.toJson(),
-        'marked': true,
-      }, 'marked ${manifest.traceId}');
-    case PatchbayFriendlyCommand.traceStop:
-      final String? positional = friendly.arguments['traceId'] as String?;
-      if (positional != null && explicit != null && positional != explicit) {
-        throw const FormatException(
-          'trace stop positional id and --trace must match',
-        );
-      }
-      final PatchbayTraceManifest manifest = traces.stop(
-        positional ?? explicit,
-      );
-      return _LocalOutcome(<String, Object?>{
-        'trace': manifest.toJson(),
-        'stopped': true,
-      }, 'stopped ${manifest.traceId}');
-    case PatchbayFriendlyCommand.traceShow:
-      final PatchbayTraceReadResult result = traces.show(
-        friendly.arguments['traceId']! as String,
-      );
-      return _LocalOutcome(result.toJson(), _traceTimeline(result));
-    case PatchbayFriendlyCommand.traceExport:
-      final Map<String, Object?> result = traces.exportDirectory(
-        friendly.arguments['traceId']! as String,
-        friendly.outputPath!,
-        includeArtifacts: friendly.arguments['includeArtifacts'] == true,
-      );
-      return _LocalOutcome(
-        result,
-        'exported ${result['traceId']} to ${result['output']}',
-      );
-    case PatchbayFriendlyCommand.traceDiff:
-      final Map<String, Object?> result = traces.diff(
-        friendly.arguments['before']! as String,
-        friendly.arguments['after']! as String,
-      );
-      final int changes =
-          (result['added']! as List<Object?>).length +
-          (result['removed']! as List<Object?>).length +
-          (result['changed']! as List<Object?>).length;
-      return _LocalOutcome(result, 'trace diff: $changes change(s)');
-    case PatchbayFriendlyCommand.tracePrune:
-      final PatchbayTracePruneResult result = traces.prune(
-        dryRun: friendly.arguments['dryRun'] == true,
-      );
-      return _LocalOutcome(
-        result.toJson(),
-        result.dryRun
-            ? 'would prune ${result.candidates.length} trace(s)'
-            : 'pruned ${result.candidates.length} trace(s)',
-      );
-    default:
-      throw StateError('unexpected local trace command ${friendly.spec.name}');
-  }
-}
-
-void _validateLocalTraceShape(ArgResults parsed) {
-  for (final String name in const <String>[
-    'ws-uri',
-    'session',
-    'direct-endpoint',
-    'direct-token-stdin',
-  ]) {
-    if (!parsed.wasParsed(name)) continue;
-    throw FormatException(
-      '--$name does not apply to a local trace-store command',
-    );
-  }
-}
-
-String _traceTimeline(PatchbayTraceReadResult result) {
-  final List<String> lines = <String>[
-    '${result.manifest.traceId} ${result.manifest.name} '
-        '${result.manifest.ended ? 'finished' : 'active'} '
-        'integrity=${result.integrity}',
-    for (final PatchbayTraceEvent event in result.events)
-      '${event.sequence.toString().padLeft(4)} '
-          '+${event.elapsedMs}ms ${event.type}'
-          '${event.requestId == null ? '' : ' request=${event.requestId}'}'
-          '${event.jobId == null ? '' : ' job=${event.jobId}'}',
-    if (result.truncatedTail) 'warning: truncatedTail',
-    for (final String digest in result.missingArtifacts)
-      'warning: missing artifact $digest',
-  ];
-  return lines.join('\n');
-}
-
-String? _selectedId(List<PatchbaySessionListing> listings) {
-  for (final PatchbaySessionListing listing in listings) {
-    if (listing.selected) return listing.record.sessionId;
-  }
-  return null;
-}
-
-/// The listing block both `sessions list` and `sessions prune` print.
-String _sessionLines(List<PatchbaySessionListing> listings) {
-  if (listings.isEmpty) return 'no session records';
-  final List<String> lines = <String>[
-    for (final PatchbaySessionListing listing in listings)
-      '${listing.selected ? '*' : ' '} ${listing.label}',
-  ];
-  if (listings.length > 1 &&
-      !listings.any((PatchbaySessionListing listing) => listing.selected)) {
-    lines.add(patchbaySessionAmbiguousHint);
-  }
-  return lines.join('\n');
-}
-
-/// Dispatches one resolved declaration.
-///
-/// There is deliberately no second command table here: every path the CLI
-/// accepts comes from [PatchbayFriendlyCommandRegistry], and the switch below has no
-/// default arm, so a new declaration cannot be added without wiring dispatch
-/// and help at the same time.
-Future<_Execution> _execute(
-  PatchbayClient connection,
-  ArgResults parsed, {
-  PatchbayUiManifest? manifest,
-}) async {
-  final PatchbayFriendlyInvocation? friendly =
-      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
-  if (friendly == null) {
-    throw FormatException(PatchbayCommandHelp.usageLine());
-  }
-  switch (friendly.spec.target) {
-    case PatchbayCommandTarget.clientIdentity:
-      return _Execution(await connection.identity());
-    case PatchbayCommandTarget.clientCatalog:
-      return _Execution(await connection.catalog());
-    case PatchbayCommandTarget.localCatalogDescription:
-      return _Execution(
-        _describeCatalogCommand(
-          await connection.catalog(),
-          friendly.arguments['command']! as String,
-        ),
-      );
-    case PatchbayCommandTarget.clientSnapshot:
-      if (friendly.spec == PatchbayFriendlyCommand.snapshotDiff) {
-        return _Execution(
-          await _snapshotDiff(
-            connection,
-            friendly.arguments['fromRevision']! as int,
-          ),
-        );
-      }
-      final PatchbaySnapshotRequest? selection = _selection(friendly);
-      return _Execution(
-        selection == null
-            ? await connection.snapshot()
-            : await _selectedSnapshot(connection, selection),
-      );
-    case PatchbayCommandTarget.clientWidgetTree:
-      return _Execution(await connection.widgetTree());
-    case PatchbayCommandTarget.clientRenderTree:
-      return _Execution(await connection.renderTree());
-    case PatchbayCommandTarget.clientFocusTree:
-      return _Execution(await connection.focusTree());
-    case PatchbayCommandTarget.clientPerformanceProfile:
-      final PatchbayProfilingClient profiling = _profilingClient(
-        connection,
-        capability: 'performanceProfile',
-      );
-      final PatchbayPerformanceProfileRequest request =
-          PatchbayPerformanceProfileRequest(
-            duration: Duration(
-              milliseconds: friendly.arguments['durationMs']! as int,
-            ),
-            eventLimit: friendly.arguments['sampleLimit']! as int,
-          );
-      request.validate();
-      return _Execution(await profiling.performanceProfile(request));
-    case PatchbayCommandTarget.clientNetworkProfile:
-      return _Execution(
-        await _profilingClient(
-          connection,
-          capability: 'networkProfile',
-        ).networkProfile(),
-      );
-    case PatchbayCommandTarget.localManifestVerification:
-      final PatchbayUiManifest verified =
-          manifest ?? _readUiManifest(friendly.manifestPath!);
-      final Map<String, Object?> catalog = await connection.catalog();
-      if (parsed.flag('navigate')) {
-        return _walkUiManifest(connection, catalog, verified, parsed);
-      }
-      return _verifyManifestCurrent(connection, catalog, verified);
-    case PatchbayCommandTarget.localManifestEmission:
-      final Map<String, Object?> catalog = await connection.catalog();
-      final Map<String, Object?> current = await _invokeAgainstCatalog(
-        connection,
-        catalog,
-        'navigation.current',
-        const <String, Object?>{},
-      );
-      if (current['admission'] == 'rejected') {
-        return _Execution(
-          _withSource(current, 'destinationSource'),
-          catalog: catalog,
-        );
-      }
-      final String? destination = _navigationDestination(current);
-      if (destination == null || destination.isEmpty) {
-        throw const PatchbayProtocolException(
-          'manifestDestinationUnavailable',
-          details: <String, Object?>{
-            'reason':
-                'navigation.current did not report a settled destination; '
-                'the CLI will not invent one for a manifest draft',
-          },
-        );
-      }
-      PatchbayUiManifestSemanticsRuntime? semantics;
-      if (_CatalogCommand.find(catalog, 'ui.semantics.tree') != null) {
-        final Map<String, Object?> observed = await _invokeAgainstCatalog(
-          connection,
-          catalog,
-          'ui.semantics.tree',
-          const <String, Object?>{},
-        );
-        if (observed['admission'] == 'rejected') {
-          return _Execution(
-            _withSource(observed, 'semanticsSource'),
-            catalog: catalog,
-          );
-        }
-        semantics = _manifestSemanticsRuntime(observed);
-      }
-      final Map<String, Object?> draft = emitPatchbayMountedUiManifest(
-        runtime: decodePatchbayCatalogUiTargets(catalog),
-        destination: destination,
-        semantics: semantics,
-      );
-      return _Execution(
-        draft,
-        catalog: catalog,
-        exitCode: PatchbayExitCode.accepted,
-        // A manifest is an artifact intended to be redirected and edited, not
-        // a response to collapse into a one-line human summary.
-        summary: const JsonEncoder.withIndent('  ').convert(draft),
-      );
-    case PatchbayCommandTarget.clientReplSession:
-      // `runPatchbayCli` routes a repl to its own loop before dispatch, and
-      // the loop refuses a nested `repl` line, so reaching here is a wiring
-      // bug rather than caller input.
-      throw StateError('repl is a session, not a dispatchable command');
-    case PatchbayCommandTarget.localSessionStore:
-      // Answered before the dial, and refused inside a repl, so this arm is
-      // unreachable for the same reason the one above is.
-      throw StateError('session-directory commands run without a connection');
-    case PatchbayCommandTarget.localTraceStore:
-      throw StateError('trace-store commands run without a connection');
-    case PatchbayCommandTarget.localLauncher:
-      throw StateError('launcher runs without a connection');
-    case PatchbayCommandTarget.localDiagnostics:
-      // Answered before the dial as well: doctor dials for itself so that a
-      // failed dial becomes a finding instead of ending the command.
-      throw StateError('doctor owns its own connection');
-    case PatchbayCommandTarget.localPermissionDriver:
-      // Permission commands are handled before the App dial. A repl cannot
-      // spawn an external process because its connection/session identity is
-      // not the full launcher trust record required for writes.
-      throw StateError('permission commands own their external driver');
-    case PatchbayCommandTarget.declaredServiceCommand:
-    case PatchbayCommandTarget.callerServiceCommand:
-      final String command = friendly.serviceCommand!;
-      final Map<String, Object?> catalog = await connection.catalog();
-      _refuseSensitiveArgv(catalog, command, friendly.plaintextArgumentKeys);
-      Map<String, Object?> arguments = friendly.arguments;
-      String? captureMode;
-      // 重构后 capture 由生成的协议命令承载，枚举常量只是兼容外壳，
-      // 因此按服务命令名识别，而不是按枚举同一性。
-      if (friendly.spec.serviceCommand == 'ui.capture' &&
-          arguments.containsKey('afterFrames')) {
-        final Set<String>? features = patchbayDeclaredFeatures(
-          await connection.identity(),
-        );
-        if (features?.contains(PatchbayFeature.captureAfterFrames.name) ==
-            true) {
-          captureMode = 'observedFrames';
-        } else {
-          arguments = <String, Object?>{...arguments}..remove('afterFrames');
-          captureMode = 'legacyImmediate';
-        }
-      }
-      if (friendly.resolvesRevision) {
-        final Map<String, Object?> current = await _invokeAgainstCatalog(
-          connection,
-          catalog,
-          'navigation.current',
-          const <String, Object?>{},
-        );
-        // A refused read is reported as itself, marked with where it came
-        // from: pretending the navigation command was refused would hide which
-        // gate actually spoke.
-        if (current['admission'] == 'rejected') {
-          return _Execution(_withRevisionSource(current), catalog: catalog);
-        }
-        arguments = <String, Object?>{
-          ...arguments,
-          'revision': _navigationRevision(current),
-        };
-      }
-      Map<String, Object?> response = await _invokeCataloged(
-        connection,
-        catalog,
-        command,
-        arguments,
-        wait: parsed.flag('wait'),
-      );
-      if (captureMode != null) {
-        response = <String, Object?>{
-          ...response,
-          'captureMode': captureMode,
-          if (captureMode == 'legacyImmediate')
-            'captureNotice':
-                'host did not declare captureAfterFrames; captured in legacy '
-                'immediate mode',
-        };
-      }
-      return _Execution(
-        friendly.resolvesRevision ? _withRevisionSource(response) : response,
-        catalog: catalog,
-        artifact: friendly.spec.artifact == PatchbayArtifactDisposition.none
-            ? null
-            : _ArtifactRequest(
-                disposition: friendly.spec.artifact,
-                outputPath: friendly.outputPath!,
-                force: friendly.force,
-              ),
-      );
-  }
-}
-
-Future<_Execution> _walkUiManifest(
-  PatchbayClient connection,
-  Map<String, Object?> initialCatalog,
-  PatchbayUiManifest manifest,
-  ArgResults parsed,
-) async {
-  final ManifestWalkthroughResult result =
-      await ManifestWalkthroughRunner.walkUiManifest(
-        connection: connection,
-        initialCatalog: initialCatalog,
-        manifest: manifest,
-        parsed: parsed,
-        hasCatalogCommand: (cat, cmd) => _CatalogCommand.find(cat, cmd) != null,
-        invokeAgainstCatalog: _invokeAgainstCatalog,
-        getNavigationDestination: _navigationDestination,
-        getNavigationRevision: _navigationRevision,
-        getManifestSemanticsRuntime: _manifestSemanticsRuntime,
-        withSource: _withSource,
-      );
-  return _Execution(
-    result.response,
-    catalog: initialCatalog,
-    exitCode: result.exitCode,
-    summary: result.summary,
-  );
-}
-
-Future<_Execution> _verifyManifestCurrent(
-  PatchbayClient connection,
-  Map<String, Object?> catalog,
-  PatchbayUiManifest manifest,
-) async {
-  final ManifestWalkthroughResult result =
-      await ManifestWalkthroughRunner.verifyManifestCurrent(
-        connection: connection,
-        catalog: catalog,
-        manifest: manifest,
-        hasCatalogCommand: (cat, cmd) => _CatalogCommand.find(cat, cmd) != null,
-        invokeAgainstCatalog: _invokeAgainstCatalog,
-        getNavigationDestination: _navigationDestination,
-        getManifestSemanticsRuntime: _manifestSemanticsRuntime,
-        withSource: _withSource,
-      );
-  return _Execution(
-    result.response,
-    catalog: catalog,
-    exitCode: result.exitCode,
-    summary: result.summary,
-  );
-}
-
-PatchbayProfilingClient _profilingClient(
-  PatchbayClient client, {
-  required String capability,
-}) {
-  if (client is PatchbayProfilingClient) {
-    return client as PatchbayProfilingClient;
-  }
-  throw PatchbayProtocolException(
-    capability == 'networkProfile'
-        ? 'networkProfilingUnavailable'
-        : 'profilingVmServiceRequired',
-    details: <String, Object?>{'capability': capability},
-  );
-}
-
-/// Stable code for "this App is too old to understand a snapshot selector".
-const String patchbaySnapshotSelectorUnsupportedCode =
-    'snapshotSelectionUnsupportedByHost';
-
-/// Sends one selector-bearing snapshot only when the host declared support.
-///
-/// Identity capabilities are an open string set on the client: unknown names
-/// remain valid, while the one name this command understands is required. A
-/// missing declaration therefore degrades before the selector reaches the
-/// wire. Once declared, every failure from the snapshot RPC stays exactly what
-/// it was; a real transport or protocol failure must never be rewritten as a
-/// version skew.
-Future<Map<String, Object?>> _selectedSnapshot(
-  PatchbayClient connection,
-  PatchbaySnapshotRequest request,
-) => SnapshotRunner.selectedSnapshot(connection, request);
-
-Future<Map<String, Object?>> _snapshotDiff(
-  PatchbayClient connection,
-  int fromRevision,
-) => SnapshotRunner.snapshotDiff(connection, fromRevision);
-
-/// The snapshot selection this invocation asks for, or null for the whole
-/// snapshot.
-///
-/// The declaration already produced the wire object; decoding it through the
-/// same request type the App validates is what keeps the CLI from having a
-/// second, looser opinion about what a selector may say. A malformed one is a
-/// usage error here rather than a round trip that comes back rejected.
-PatchbaySnapshotRequest? _selection(PatchbayFriendlyInvocation friendly) {
-  if (friendly.arguments.isEmpty) return null;
-  return PatchbaySnapshotRequest.fromWire(
-    PatchbaySnapshotRequestWire.fromJson(friendly.arguments),
-  );
-}
-
-/// The `blob.read` chunk size this host will actually accept.
-///
-/// The descriptor declares the host's ceiling as the `limit` default and the
-/// host refuses anything above it, so the CLI asks for no more than the App
-/// offers. Taking the smaller of the two keeps a host that raises its ceiling
-/// from silently enlarging every CLI request as well.
-int _blobChunkBytes(Map<String, Object?> catalog) {
-  final int? declared = _CatalogCommand.find(
-    catalog,
-    'blob.read',
-  )?.positiveIntegerDefault('limit');
-  if (declared == null) return PatchbayArtifactDownloader.defaultChunkBytes;
-  return min(declared, PatchbayArtifactDownloader.defaultChunkBytes);
-}
-
-/// Marks a response whose revision fence the CLI read instead of the caller.
-///
-/// The marker is the only trace the convenience leaves in the output: a reader
-/// can tell an operator-observed revision from one the CLI fetched a moment
-/// before dispatching, which is exactly the difference that matters when a
-/// navigation raced the command.
-Map<String, Object?> _withRevisionSource(Map<String, Object?> response) =>
-    _withSource(response, 'revisionSource');
-
-Map<String, Object?> _withSource(Map<String, Object?> response, String field) =>
-    <String, Object?>{...response, field: 'navigation.current'};
-
-/// The revision an App reports as current, or a protocol error.
-int _navigationRevision(Map<String, Object?> response) {
-  final Object? payload = response['payload'];
-  final Object? revision = payload is Map<Object?, Object?>
-      ? payload['navigationRevision']
-      : null;
-  if (revision is! int || revision < 0) {
-    throw const PatchbayProtocolException('navigationRevisionContractViolated');
-  }
-  return revision;
-}
-
-/// The destination an App reports as current, which may legitimately be none.
-///
-/// `destinationId` is declared nullable on the wire — an App between screens
-/// has no settled destination — so `null` is an answer, not a violation. Only a
-/// value of the wrong type is one.
-String? _navigationDestination(Map<String, Object?> response) {
-  final Object? payload = response['payload'];
-  if (payload is! Map<Object?, Object?>) {
-    throw const PatchbayProtocolException(
-      'navigationDestinationContractViolated',
-    );
-  }
-  final Object? destination = payload['destinationId'];
-  if (destination != null && destination is! String) {
-    throw const PatchbayProtocolException(
-      'navigationDestinationContractViolated',
-    );
-  }
-  return destination as String?;
-}
-
-PatchbayUiManifestSemanticsRuntime _manifestSemanticsRuntime(
-  Map<String, Object?> response,
-) {
-  final Object? payload = response['payload'];
-  if (payload is! Map<String, Object?>) {
-    throw const PatchbayProtocolException(
-      'manifestSemanticsContractViolated',
-      details: <String, Object?>{
-        'reason': 'ui.semantics.tree did not return an object payload',
-      },
-    );
-  }
-  return decodePatchbayManifestSemantics(payload);
-}
-
-/// Parses the manifest of a one-shot `ui verify-manifest`, or returns `null`.
-///
-/// Ordering, not convenience: this runs before the dial so that a manifest the
-/// CLI refuses to read is reported as itself. Reading it after the dial made an
-/// offline machine answer every bad manifest with a session error, which is a
-/// true statement about the wrong thing — the file is wrong no matter which
-/// device is plugged in, and only one of those two failures the author can fix
-/// from where they are sitting.
-///
-/// Every other command returns `null` here and is unaffected, including a repl:
-/// its lines are dispatched against a connection that already exists, so there
-/// is no dial left for a parse to precede.
-PatchbayUiManifest? _preReadUiManifest(ArgResults parsed) {
-  if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target !=
-      PatchbayCommandTarget.localManifestVerification) {
-    return null;
-  }
-  // Resolution is what turns argv into the path; it also polices the command's
-  // shape, and doing that before the dial is the same improvement for the same
-  // reason.
-  final PatchbayFriendlyInvocation? friendly =
-      PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
-  if (friendly?.manifestPath case final String path) {
-    return _readUiManifest(path);
-  }
-  return null;
-}
-
-/// Reads the manifest file the caller named.
-///
-/// The path is argv, so it may be echoed back; the operating system's reason
-/// travels with it because "which file, and why not" is the whole content of
-/// this failure. No part of the file itself does.
-PatchbayUiManifest _readUiManifest(String path) {
-  final PatchbayUiManifestFormat format = switch (path) {
-    final String value when value.endsWith('.json') =>
-      PatchbayUiManifestFormat.json,
-    final String value when value.endsWith('.yaml') || value.endsWith('.yml') =>
-      PatchbayUiManifestFormat.yaml,
-    _ => throw PatchbayUiManifestException(
-      'manifestFormatUnsupported',
-      details: const <String, Object?>{
-        'reason': 'manifest extension must be .json, .yaml, or .yml',
-      },
-    ),
-  };
-  final List<int> bytes;
-  try {
-    final RandomAccessFile file = File(path).openSync();
-    try {
-      // Never allocate from the file's claimed length and never read more than
-      // one byte beyond the accepted budget, including if the file changes
-      // between open and read.
-      bytes = file.readSync(patchbayUiManifestMaximumBytes + 1);
-    } finally {
-      file.closeSync();
-    }
-  } on FileSystemException catch (failure) {
-    throw PatchbayUiManifestException(
-      'manifestUnreadable',
-      details: <String, Object?>{
-        'path': path,
-        'reason': ?failure.osError?.message,
-      },
-    );
-  } on Object catch (failure) {
-    throw PatchbayUiManifestException(
-      'manifestUnreadable',
-      details: <String, Object?>{
-        'path': path,
-        'reason': '${failure.runtimeType}',
-      },
-    );
-  }
-  if (bytes.length > patchbayUiManifestMaximumBytes) {
-    throw const PatchbayUiManifestException(
-      'manifestResourceLimit',
-      details: <String, Object?>{
-        'reason': 'manifest byte limit exceeded',
-        'limit': patchbayUiManifestMaximumBytes,
-      },
-    );
-  }
-  final String source;
-  try {
-    source = utf8.decode(bytes);
-  } on FormatException {
-    throw const PatchbayUiManifestException(
-      'manifestInvalid',
-      details: <String, Object?>{
-        'reason': 'manifest must be valid UTF-8',
-        'line': 1,
-        'column': 1,
-      },
-    );
-  }
-  return PatchbayUiManifest.parseSource(source, format: format);
-}
-
-/// Refuses to send a catalog-declared sensitive parameter through argv.
-///
-/// `--stdin` merges over `--args`, so "this request used stdin" no longer
-/// implies "every value came from stdin". Only the descriptor knows which key
-/// is sensitive, and the CLI already holds the catalog here, so the check
-/// belongs on this side of the wire: a secret must never reach argv, where the
-/// shell history records it.
-void _refuseSensitiveArgv(
-  Map<String, Object?> catalog,
-  String command,
-  Set<String> plaintextKeys,
-) {
-  if (plaintextKeys.isEmpty) return;
-  final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
-  if (descriptor == null) return;
-  for (final String name in plaintextKeys) {
-    if (!descriptor.sensitiveParameters.contains(name)) continue;
-    throw FormatException(
-      '$command declares "$name" sensitive: it must come from --stdin, '
-      'never from --args',
-    );
-  }
-}
-
-Future<Map<String, Object?>> _invokeCataloged(
-  PatchbayClient connection,
-  Map<String, Object?> catalog,
-  String command,
-  Map<String, Object?> arguments, {
-  required bool wait,
-}) async {
-  final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
-  final Map<String, Object?> admission = await _invokeAgainstCatalog(
-    connection,
-    catalog,
-    command,
-    arguments,
-    deadline: _declaredWait(arguments),
-  );
-  final bool serverWaitAvailable =
-      _CatalogCommand.find(catalog, 'patchbay.job.wait') != null;
-  if (!wait) return admission;
-  final Map<String, Object?> terminal = await _waitForJob(
-    connection,
-    catalog,
-    admission,
-    descriptor?.suggestedWaitTimeout,
-    serverWaitAvailable: serverWaitAvailable,
-  );
-  return _validateTerminalPayload(terminal, descriptor);
-}
-
-Map<String, Object?> _validateTerminalPayload(
-  Map<String, Object?> response,
-  _CatalogCommand? descriptor,
-) {
-  if (descriptor == null || response['admission'] != 'accepted') {
-    return response;
-  }
-  final List<PatchbayResponseValidationIssue> issues =
-      <PatchbayResponseValidationIssue>[];
-  if (descriptor.responseSchema case final PatchbayResponseSchema schema) {
-    issues.addAll(validatePatchbayTerminalPayload(schema, response['payload']));
-  }
-  final PatchbayExecutionValidationResult execution =
-      _validateTerminalExecution(response, descriptor.executionContract);
-  issues.addAll(execution.issues);
-  if (issues.isNotEmpty) return _cliResponseSchemaViolation(response, issues);
-  return _withCliExecutionDetails(<String, Object?>{
-    ...response,
-    'schemaMode': descriptor.responseSchema == null
-        ? 'legacyUnvalidated'
-        : 'validated',
-  }, execution);
-}
-
-PatchbayExecutionValidationResult _validateTerminalExecution(
-  Map<String, Object?> response,
-  PatchbayExecutionContract contract,
-) {
-  final Object? payload = response['payload'];
-  final Object? events = payload is Map<Object?, Object?>
-      ? payload['events']
-      : null;
-  if (events is! List<Object?> || events.isEmpty) {
-    return const PatchbayExecutionValidationResult();
-  }
-  final Object? event = events.last;
-  if (event is! Map<Object?, Object?> || event['phase'] is! String) {
-    return const PatchbayExecutionValidationResult();
-  }
-  final Object? rawAt = event['at'];
-  final DateTime? at = rawAt is String ? DateTime.tryParse(rawAt) : null;
-  final int eventIndex = events.length - 1;
-  return validatePatchbayExecutionEvidence(
-    contract,
-    event['payload'],
-    path:
-        r'$.payload.events'
-        '[$eventIndex].payload',
-    terminalPhase: event['phase']! as String,
-    nowMs: at?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
-  );
-}
-
-/// The "now" an execution-evidence age is measured against.
-///
-/// `unchanged` evidence carries two App-side timestamps: when the prior value
-/// was observed and when this answer was produced. Both come from the device
-/// clock. Measuring their distance against the **workstation** clock turns any
-/// skew between the two machines into `providerProtocolViolation` — the CLI
-/// would blame the App for a clock difference it does not control, and a device
-/// running even slightly ahead makes valid evidence unreadable.
-///
-/// So the App's own `observedAtMs` is the baseline when it is present. This is
-/// the same rule the job-event path already follows, where the event's `at`
-/// timestamp is the baseline. The local clock remains the fallback for payloads
-/// that report no observation time, where there is nothing else to compare to.
-int _evidenceNowMs(Object? payload) {
-  if (payload is Map<Object?, Object?>) {
-    final Object? execution = payload['execution'];
-    if (execution is Map<Object?, Object?>) {
-      final Object? observedAtMs = execution['observedAtMs'];
-      if (observedAtMs is int) return observedAtMs;
-    }
-  }
-  return DateTime.now().millisecondsSinceEpoch;
-}
-
-/// A command that asks the App to wait server-side (`ui.wait`, `logs.tail`,
-/// `patchbay.job.wait`) declares that budget in `timeoutMs`. The transport must
-/// be told, or a short default transport deadline would abandon — and on the
-/// direct transport previously tear down — a request the App is still serving.
-Duration? _declaredWait(Map<String, Object?> arguments) {
-  final Object? declared = arguments['timeoutMs'];
-  return declared is int && declared > 0
-      ? Duration(milliseconds: declared)
-      : null;
-}
-
-Future<Map<String, Object?>> _invokeAgainstCatalog(
-  PatchbayClient connection,
-  Map<String, Object?> catalog,
-  String command,
-  Map<String, Object?> arguments, {
-  Duration? deadline,
-}) async {
-  final bool cataloged = _CatalogCommand.find(catalog, command) != null;
-  final PatchbayRetryPolicy? retryPolicy = _retryPolicyFor(catalog, command);
-  final PatchbayTraceRecorder? trace = _traceRecorder;
-  String? issuedRequestId;
-  final Map<String, Object?> response;
-  if (retryPolicy == null) {
-    issuedRequestId = trace == null ? null : patchbayCliRequestId('trace');
-    response = await connection.invoke(
-      command: command,
-      arguments: arguments,
-      requestId: issuedRequestId,
-      deadline: deadline,
-    );
-  } else {
-    final String requestId = patchbayCliRequestId('retry');
-    issuedRequestId = requestId;
-    Map<String, Object?>? answer;
-    for (var attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
-      try {
-        answer = await connection.invoke(
-          command: command,
-          arguments: arguments,
-          requestId: requestId,
-          deadline: deadline,
-        );
-        break;
-      } on PatchbayTransportException catch (failure) {
-        if (!_isRetryableTransportFailure(failure)) rethrow;
-        if (attempt == retryPolicy.maxAttempts) rethrow;
-        if (retryPolicy.backoffMs > 0) {
-          await Future<void>.delayed(
-            Duration(milliseconds: retryPolicy.backoffMs),
-          );
-        }
-      }
-    }
-    response = answer!;
-  }
-  if (!cataloged && !_isCommandNotRegistered(response)) {
-    throw PatchbayProtocolException(
-      'catalogInvocationDrift',
-      details: _driftDetails(command, catalog, response),
-    );
-  }
-  final _CatalogCommand? descriptor = _CatalogCommand.find(catalog, command);
-  final PatchbayResponseSchema? responseSchema = descriptor?.responseSchema;
-  PatchbayExecutionValidationResult execution =
-      const PatchbayExecutionValidationResult();
-  final List<PatchbayResponseValidationIssue> issues =
-      <PatchbayResponseValidationIssue>[];
-  if (response['admission'] == 'accepted') {
-    if (responseSchema != null) {
-      issues.addAll(
-        validatePatchbayResponsePayload(
-          responseSchema.accepted,
-          response['payload'],
-        ),
-      );
-    }
-    if (issues.isEmpty && descriptor != null) {
-      execution = validatePatchbayExecutionEvidence(
-        descriptor.executionContract,
-        response['payload'],
-        nowMs: _evidenceNowMs(response['payload']),
-      );
-      issues.addAll(execution.issues);
-    }
-  }
-  final Map<String, Object?> result = issues.isNotEmpty
-      ? _cliResponseSchemaViolation(response, issues)
-      : _withCliExecutionDetails(<String, Object?>{
-          ...response,
-          'schemaMode': responseSchema == null
-              ? 'legacyUnvalidated'
-              : 'validated',
-        }, execution);
-  if (trace != null) {
-    final Object? rawRow = _catalogRow(catalog, command);
-    final String descriptorDigest = rawRow == null
-        ? 'uncataloged'
-        : PatchbayCatalogDigest.ofCommands(<Object?>[rawRow]).value;
-    final Object? responseRequestId = result['requestId'];
-    final String requestId = responseRequestId is String
-        ? responseRequestId
-        : issuedRequestId ?? '';
-    trace.admission(
-      command: command,
-      requestId: requestId,
-      arguments: arguments,
-      sensitiveParameters: descriptor?.sensitiveParameters ?? const <String>{},
-      descriptorDigest: descriptorDigest,
-      response: result,
-      includeLegacyPayload: _traceIncludesLegacyPayload,
-    );
-  }
-  return result;
-}
-
-Map<String, Object?> _withCliExecutionDetails(
-  Map<String, Object?> response,
-  PatchbayExecutionValidationResult validation,
-) {
-  if (!validation.legacyDispatchedConflict) return response;
-  final Object? existing = response['details'];
-  return <String, Object?>{
-    ...response,
-    'details': <String, Object?>{
-      if (existing is Map<Object?, Object?>)
-        for (final MapEntry<Object?, Object?> entry in existing.entries)
-          if (entry.key is String) entry.key! as String: entry.value,
-      'legacyDispatchedConflict': true,
-    },
-  };
-}
-
-bool _isRetryableTransportFailure(PatchbayTransportException failure) =>
-    const <String>{
-      patchbayAppUnresponsiveCode,
-      'transportError',
-      'transportUnavailable',
-      'socketClosed',
-    }.contains(failure.code);
-
-PatchbayRetryPolicy? _retryPolicyFor(
-  Map<String, Object?> catalog,
-  String command,
-) {
-  final Map<Object?, Object?>? row = _catalogRow(catalog, command);
-  if (row == null || !row.containsKey('retryPolicy')) return null;
-  if (row['sideEffect'] != 'external') {
-    throw const PatchbayProtocolException('catalogRetryPolicyInvalid');
-  }
-  try {
-    return PatchbayRetryPolicy.fromJson(row['retryPolicy']);
-  } on FormatException {
-    throw const PatchbayProtocolException('catalogRetryPolicyInvalid');
-  }
-}
-
-Map<String, Object?> _describeCatalogCommand(
-  Map<String, Object?> catalog,
-  String command,
-) {
-  final Map<Object?, Object?>? row = _catalogRow(catalog, command);
-  if (row == null) {
-    throw PatchbayProtocolException(
-      'commandNotRegistered',
-      details: <String, Object?>{'command': command},
-    );
-  }
-  final String retryEligibility;
-  if (row['sideEffect'] != 'external') {
-    retryEligibility = 'notExternal';
-  } else if (!row.containsKey('retryPolicy')) {
-    retryEligibility = 'notDeclared';
-  } else {
-    _retryPolicyFor(catalog, command);
-    retryEligibility = 'eligible';
-  }
-  return <String, Object?>{
-    'command': <String, Object?>{
-      for (final MapEntry<Object?, Object?> entry in row.entries)
-        '${entry.key}': entry.value,
-    },
-    'schemaMode': row.containsKey('responseSchema')
-        ? 'validated'
-        : 'legacyUnvalidated',
-    'retryEligibility': retryEligibility,
-  };
-}
-
-Map<Object?, Object?>? _catalogRow(
-  Map<String, Object?> catalog,
-  String command,
-) {
-  final Object? rows = catalog['commands'];
-  if (rows is! List<Object?>) return null;
-  for (final Object? row in rows) {
-    if (row is Map<Object?, Object?> && row['name'] == command) return row;
-  }
-  return null;
-}
-
-Map<String, Object?> _cliResponseSchemaViolation(
-  Map<String, Object?> response,
-  List<PatchbayResponseValidationIssue> issues,
-) {
-  final List<PatchbayResponseValidationIssue> capped = issues
-      .take(patchbayResponseValidationMaxIssues)
-      .toList(growable: false);
-  final PatchbayResponseValidationIssue first = capped.first;
-  return <String, Object?>{
-    'schemaVersion': response['schemaVersion'] ?? 1,
-    'requestId': response['requestId'] ?? '',
-    'admission': 'rejected',
-    'payload': const <String, Object?>{},
-    'notice': null,
-    'jobId': response['jobId'],
-    'rejection': <String, Object?>{
-      'code': 'providerProtocolViolation',
-      'details': <String, Object?>{
-        'reason': first.reason,
-        'field': first.field,
-        if (first.expected != null) 'expected': first.expected!,
-        'violations': capped
-            .map((PatchbayResponseValidationIssue issue) => issue.toJson())
-            .toList(growable: false),
-      },
-    },
-    'schemaMode': 'validated',
-  };
-}
-
-/// What the host already said about the catalog this invoke disagreed with.
-///
-/// `catalogInvocationDrift` means "the command is absent from the catalog and
-/// the App did not answer `commandNotRegistered` either". By far the most
-/// common cause is a catalog the host itself refused to serve — an invalid or
-/// duplicated command name — and the host answers with the precise reason in
-/// `details.catalog`. Throwing a bare code discarded exactly that half, leaving
-/// an operator to re-run `patchbay catalog` to learn what this response already
-/// carried. Everything here is host data passed through unchanged.
-Map<String, Object?> _driftDetails(
-  String command,
-  Map<String, Object?> catalog,
-  Map<String, Object?> response,
-) {
-  final Map<Object?, Object?>? rejection = _rejectionOf(response);
-  final Object? details = rejection?['details'];
-  final Object? reason = details is Map<Object?, Object?>
-      ? details['reason']
-      : null;
-  // The invoke answer describes this request, so it wins. The catalog read is
-  // the fallback for a host that refused the catalog without repeating why in
-  // the invoke response.
-  final Object? violation = details is Map<Object?, Object?>
-      ? details['catalog']
-      : null;
-  final Object? fromCatalog = _rejectionOf(catalog)?['details'];
-  return <String, Object?>{
-    'command': command,
-    if (rejection?['code'] case final String code) 'rejection': code,
-    if (reason case final String value) 'reason': value,
-    if (violation ?? fromCatalog case final Object value) 'catalog': value,
-  };
-}
-
-Map<Object?, Object?>? _rejectionOf(Map<String, Object?> response) {
-  if (response['admission'] != 'rejected') return null;
-  final Object? rejection = response['rejection'];
-  return rejection is Map<Object?, Object?> ? rejection : null;
-}
-
-bool _isCommandNotRegistered(Map<String, Object?> response) =>
-    _rejectionOf(response)?['code'] == 'commandNotRegistered';
-
-/// Waits for an admitted job and returns its terminal response.
-///
-/// The admission envelope carries `jobId` at the top level while a job snapshot
-/// carries its own inside `payload`, so `--wait` used to answer with the id in
-/// a different place than the request that started it. Both stay — the payload
-/// one is the App's snapshot field — but the top level is restated here so one
-/// path reads the same in both outputs: **top-level `jobId` is the stable place
-/// to read the id of the job this command admitted.**
-Future<Map<String, Object?>> _waitForJob(
-  PatchbayClient connection,
-  Map<String, Object?> catalog,
-  Map<String, Object?> admission,
-  Duration? descriptorTimeout, {
-  required bool serverWaitAvailable,
-}) => JobRunner.waitForJob(
-  connection,
-  catalog,
-  admission,
-  descriptorTimeout,
-  serverWaitAvailable: serverWaitAvailable,
-  invokeAgainstCatalog: _invokeAgainstCatalog,
-);
-
-Map<String, Object?> _artifactMetadata(
-  Map<String, Object?> response,
-  PatchbayArtifactDisposition disposition,
-) {
-  final Object? payload = response['payload'];
-  if (payload is! Map<String, Object?>) {
-    throw const PatchbayArtifactDownloadException(
-      'artifactPayloadContractViolated',
-    );
-  }
-  final Object? metadata = switch (disposition) {
-    PatchbayArtifactDisposition.responseBlob => payload,
-    PatchbayArtifactDisposition.payloadBlob => payload['blob'],
-    PatchbayArtifactDisposition.none => null,
-  };
-  if (metadata is! Map<String, Object?>) {
-    throw const PatchbayArtifactDownloadException(
-      'artifactMetadataContractViolated',
-    );
-  }
-  return metadata;
-}
-
-void _writeOutput(
-  StringSink out,
-  Map<String, Object?> output, {
-  required bool json,
-  String? summary,
-}) {
-  out.writeln(
-    json
-        ? const JsonEncoder.withIndent('  ').convert(output)
-        : summary ?? patchbayResponseSummary(output),
-  );
-}
-
-int _positiveOption(ArgResults options, String name) {
-  final int? value = int.tryParse(options.option(name)!);
-  if (value == null || value <= 0) {
-    throw FormatException('--$name must be a positive integer');
-  }
-  return value;
-}
-
-/// One catalog row, read only for what the CLI itself has to decide.
-///
-/// The row stays the App's data: nothing here upgrades it into a capability
-/// claim. The parameter declarations matter because two CLI-side decisions —
-/// which value may never touch argv, and how large a `blob.read` chunk the host
-/// will accept — are the App's to make, not the CLI's to hardcode.
-final class _CatalogCommand {
-  const _CatalogCommand(
-    this.suggestedWaitTimeout,
-    this._parameters,
-    this.responseSchema,
-    this.executionContract,
-  );
-
-  final Duration? suggestedWaitTimeout;
-  final List<Map<Object?, Object?>> _parameters;
-  final PatchbayResponseSchema? responseSchema;
-  final PatchbayExecutionContract executionContract;
-
-  Set<String> get sensitiveParameters => <String>{
-    for (final Map<Object?, Object?> parameter in _parameters)
-      if (parameter['sensitive'] == true)
-        if (parameter['name'] case final String name) name,
-  };
-
-  /// Positive integer default declared for [name], when the App declares one.
-  int? positiveIntegerDefault(String name) {
-    for (final Map<Object?, Object?> parameter in _parameters) {
-      if (parameter['name'] != name) continue;
-      final Object? value = parameter['defaultValue'];
-      return value is int && value > 0 ? value : null;
-    }
-    return null;
-  }
-
-  static _CatalogCommand? find(Map<String, Object?> catalog, String command) {
-    final Object? rows = catalog['commands'];
-    if (rows is! List<Object?>) return null;
-    for (final Object? row in rows) {
-      if (row is! Map<Object?, Object?> || row['name'] != command) continue;
-      final Object? milliseconds = row['suggestedWaitTimeoutMs'];
-      final Object? parameters = row['parameters'];
-      return _CatalogCommand(
-        milliseconds is int && milliseconds > 0
-            ? Duration(milliseconds: milliseconds)
-            : null,
-        <Map<Object?, Object?>>[
-          if (parameters is List<Object?>)
-            for (final Object? parameter in parameters)
-              if (parameter is Map<Object?, Object?>) parameter,
-        ],
-        row.containsKey('responseSchema')
-            ? PatchbayResponseSchema.fromJson(row['responseSchema'])
-            : null,
-        PatchbayExecutionContract.fromCatalogRow(row),
-      );
-    }
-    return null;
-  }
-}
-
-final class _Outcome {
-  const _Outcome(this.response, this.exitCode, {this.summary});
-
-  final Map<String, Object?> response;
-  final int exitCode;
-
-  /// Human rendering for the one-shot path, when one line cannot carry the
-  /// result. `null` keeps the shared per-response summary.
-  final String? summary;
-}
-
-/// A session-directory answer, in both the shapes the CLI prints.
-///
-/// It carries its own human rendering instead of going through
-/// `patchbayResponseSummary`: that function summarises one App response into a
-/// single line, and a session listing is a table whose whole value is the rows.
-final class _LocalOutcome {
-  const _LocalOutcome(this.response, this.text);
-
-  final Map<String, Object?> response;
-  final String text;
-}
-
-final class _Execution {
-  const _Execution(
-    this.response, {
-    this.catalog,
-    this.artifact,
-    this.exitCode,
-    this.summary,
-  });
-
-  final Map<String, Object?> response;
-  final Map<String, Object?>? catalog;
-  final _ArtifactRequest? artifact;
-
-  /// Set only when the CLI itself decided the outcome, so the classification of
-  /// an App response stays in one place.
-  final int? exitCode;
-  final String? summary;
-}
-
-final class _ArtifactRequest {
-  const _ArtifactRequest({
-    required this.disposition,
-    required this.outputPath,
-    required this.force,
-  });
-
-  final PatchbayArtifactDisposition disposition;
-  final String outputPath;
-  final bool force;
-}

@@ -58,7 +58,7 @@
 | PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
 | PB-040-38 | `patchbay_cli` 大文件拆解与执行流解耦：将 `cli.dart` 内联的 Manifest 遍历引擎、Snapshot 差异比对与 Job 轮询提取为独立 Runner | `cli.dart` 达 3,270 行，承担了入口解析、500+ 行的 manifest walkthrough、snapshot diff 与 job 轮询等多重职责，成为高频冲突热点 | 0.4.1 | 已验证 | 保持 CLI 外部 JSON/退出码行为完全一致的前提下完成独立 Runner 拆解 |
 | PB-040-39 | 跨平台进程探测与底层系统命令抽象（`PlatformProcessUtils`） | `session.dart`、`doctor.dart`、`android_permission_adapter.dart`、`launcher.dart` 分散手写 `kill -0`、`tasklist`、`chmod`、`stat` 等命令，缺乏统一跨平台封装 | 0.4.1 | 已验证 | 收敛进程存活判断与权限文件保护逻辑 |
-| PB-040-40 | `patchbay_cli` 源码目录分层与命令分派器模块化 | `patchbay_cli/lib/src/` 扁平放置 27 个文件，`command_registry.dart`（1,925 行）过度集中；按 `commands/`、`platform/`、`session/`、`manifest/` 建立子目录分层 | 0.4.1 | 已排期 | 降低单目录复杂度与代码认知负荷 |
+| PB-040-40 | `patchbay_cli` 源码目录分层与命令分派器模块化 | `patchbay_cli/lib/src/` 扁平放置 27 个文件，`command_registry.dart`（1,925 行）过度集中；按 `commands/`、`platform/`、`session/`、`manifest/` 建立子目录分层 | 0.4.1 | 已验证 | 拆解 commands, connection, output, trace 模块并将 cli.dart 降至 639 行 |
 | PB-041-01 | pub.dev 评分可复现门禁：按实际发布 archive 对四包执行当期 Pana，并在发布后核对 score API | 本地 analyze / publish dry-run 全绿仍不能替代 pub.dev 解包后的评分；四包同版依赖链也会让未发布上游造成假扣分 | 0.4.1 | 已排期 | 只改发布验收与包内质量，不扩展公共 API / wire / 命令面 |
 | PB-041-02 | 发布收尾自动化：按范围变更和证据状态分型归档 backlog，消费目标版本碎片并冻结版本计划 | 0.4.0 发布后仍残留目标行和 changelog 碎片，证明“打完 tag 再人肉清账”不可持续；但实现中与已验证不能直接批量删除 | 0.4.1 | 已排期 | finalize 必须显式执行、先生成计划再 apply；不得把未结真机证据静默标成完成 |
 | PB-041-03 | 手写源码结构预算与依赖方向门禁 | 四包生产代码有 10 个手写文件超过 800 行；仅靠评审提醒无法阻止新职责继续堆入热点文件 | 0.4.1 | 已排期 | 生成物例外；对现有超限文件使用只降不升 ratchet，禁止用 `part` 碎片或空转发层规避职责拆分 |
