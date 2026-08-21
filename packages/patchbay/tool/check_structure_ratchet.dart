@@ -3,10 +3,15 @@
 // 分两类，权重不同：
 //
 // **硬规则（判红）** —— 与文件长短无关的结构性错误，靠人眼评审抓不住：
-//   1. 手写 part / part of 碎片；
-//   2. 跨包 src/ 私有导入；
-//   3. 越出包根的相对导入（在 pub 发布归档里会悬空）；
-//   4. 领域目录之间的循环依赖。
+//   1. 跨包 src/ 私有导入；
+//   2. 越出包根的相对导入（在 pub 发布归档里会悬空）；
+//   3. 领域目录之间的循环依赖。
+//
+// 这里**不再禁止手写 `part`**。早期版本把 part 一律判红，本意是防止有人靠拆 part
+// 碎片绕过体积门禁；体积改成警戒线之后这个动机已经不存在，而该规则真实造成过一次
+// 公共 API 回归：为了消掉 part，capture/gesture 桥被改成独立 library，Dart 随即把
+// 所有跨文件私有符号提升为公开。part 是 Dart 里唯一能跨文件共享私有符号的机制，
+// 属于正当封装手段。真正要守的不变量由 `check_api_surface.dart` 负责。
 //
 // **警戒线（只告警，不阻断）** —— 体积指标。要不要拆得看内容，不能看数字，
 // 所以这里只负责把可疑的地方摆出来，判断权在评审：
@@ -103,17 +108,8 @@ List<String> _collectFiles(String repoRoot) {
 // ---------------------------------------------------------------- 硬规则
 
 void _checkStructure(String rel, List<String> lines, List<Finding> hard) {
-  final isGenerated = rel.endsWith('.g.dart');
   for (var i = 0; i < lines.length; i++) {
     final t = lines[i].trim();
-    if (!isGenerated && !_isTestFile(rel)) {
-      if (t.startsWith('part ') && !t.contains('.g.dart')) {
-        hard.add(Finding('part', '$rel:${i + 1}: 禁止手写 `part` 碎片'));
-      }
-      if (t.startsWith('part of ')) {
-        hard.add(Finding('part', '$rel:${i + 1}: 禁止手写 `part of`'));
-      }
-    }
     if (!t.startsWith('import ') && !t.startsWith('export ')) continue;
     for (final other in _packages) {
       if (rel.startsWith('packages/$other/')) continue;
