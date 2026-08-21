@@ -1,4 +1,17 @@
-part of 'flutter_bridge.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
+import 'package:patchbay/patchbay.dart';
+
+import 'flutter_bridge.dart';
+import 'frame_observer.dart';
+import 'lifecycle.dart';
 
 typedef PatchbayCaptureEncoder =
     Future<PatchbayEncodedCapture> Function(
@@ -477,7 +490,7 @@ final class PatchbayCaptureBridge {
         'captureTargetGenerationRequired',
       );
     }
-    final _TargetResolution resolution = _registry._resolve(
+    final PatchbayUiTargetResolution resolution = _registry.resolve(
       id: targetId,
       generation: generation,
       operation: PatchbayUiOperation.capture,

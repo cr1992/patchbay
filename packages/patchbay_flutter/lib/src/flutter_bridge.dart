@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
+import 'capture_bridge.dart';
 import 'frame_observer.dart';
 import 'inspect_bridge.dart';
 import 'keep_awake_bridge.dart';
@@ -18,7 +19,7 @@ import 'navigation_bridge.dart';
 import 'semantics_bridge.dart';
 import 'ui_wait_bridge.dart';
 
-part 'capture_bridge.dart';
+export 'capture_bridge.dart';
 
 /// A target key whose GlobalKey semantics stay identical in every build mode.
 ///
@@ -74,17 +75,19 @@ final class PatchbayUiRegistry {
 
   static final PatchbayUiRegistry instance = PatchbayUiRegistry();
 
-  final Map<String, List<_RegistryEntry>> _entries =
-      <String, List<_RegistryEntry>>{};
+  final Map<String, List<PatchbayUiRegistryEntry>> _entries =
+      <String, List<PatchbayUiRegistryEntry>>{};
   final Map<String, int> _nextGenerationById = <String, int>{};
 
-  void _register(PatchbayKey key) {
+  void register(PatchbayKey key) {
     final PatchbayUiTargetDeclaration? declaration = key.declaration;
     if (declaration == null) return;
     _entries
-        .putIfAbsent(declaration.id, () => <_RegistryEntry>[])
-        .add(_RegistryEntry(WeakReference<PatchbayKey>(key)));
+        .putIfAbsent(declaration.id, () => <PatchbayUiRegistryEntry>[])
+        .add(PatchbayUiRegistryEntry(WeakReference<PatchbayKey>(key)));
   }
+
+  void _register(PatchbayKey key) => register(key);
 
   /// Returns one entry per stable ID. Duplicate mounted targets are marked
   /// ambiguous and expose no operation.
@@ -93,13 +96,13 @@ final class PatchbayUiRegistry {
         <PatchbayUiTargetDescriptor>[];
     final List<String> ids = _entries.keys.toList()..sort();
     for (final String id in ids) {
-      final List<_ObservedTarget> live = _observe(id);
+      final List<PatchbayUiObservedTarget> live = _observe(id);
       if (live.isEmpty) continue;
-      final List<_ObservedTarget> mounted = live
-          .where((_ObservedTarget target) => target.element != null)
+      final List<PatchbayUiObservedTarget> mounted = live
+          .where((PatchbayUiObservedTarget target) => target.element != null)
           .toList(growable: false);
       final bool ambiguous = mounted.length > 1;
-      final _ObservedTarget representative = mounted.isNotEmpty
+      final PatchbayUiObservedTarget representative = mounted.isNotEmpty
           ? mounted.first
           : live.first;
       result.add(
@@ -116,12 +119,14 @@ final class PatchbayUiRegistry {
     return List<PatchbayUiTargetDescriptor>.unmodifiable(result);
   }
 
-  List<_ObservedTarget> _observe(String id) {
-    final List<_RegistryEntry>? entries = _entries[id];
-    if (entries == null) return const <_ObservedTarget>[];
-    final List<_ObservedTarget> result = <_ObservedTarget>[];
-    entries.removeWhere((_RegistryEntry entry) => entry.key.target == null);
-    for (final _RegistryEntry entry in entries) {
+  List<PatchbayUiObservedTarget> _observe(String id) {
+    final List<PatchbayUiRegistryEntry>? entries = _entries[id];
+    if (entries == null) return const <PatchbayUiObservedTarget>[];
+    final List<PatchbayUiObservedTarget> result = <PatchbayUiObservedTarget>[];
+    entries.removeWhere(
+      (PatchbayUiRegistryEntry entry) => entry.key.target == null,
+    );
+    for (final PatchbayUiRegistryEntry entry in entries) {
       final PatchbayKey? key = entry.key.target;
       if (key == null) continue;
       final Element? element = key.currentContext as Element?;
@@ -134,7 +139,7 @@ final class PatchbayUiRegistry {
         entry.element = WeakReference<Element>(element);
       }
       result.add(
-        _ObservedTarget(
+        PatchbayUiObservedTarget(
           entry: entry,
           key: key,
           element: element,
@@ -146,36 +151,44 @@ final class PatchbayUiRegistry {
     return result;
   }
 
-  _TargetResolution _resolve({
+  PatchbayUiTargetResolution resolve({
     required String id,
     required int generation,
     required PatchbayUiOperation operation,
   }) {
-    final List<_ObservedTarget> live = _observe(id);
+    final List<PatchbayUiObservedTarget> live = _observe(id);
     if (live.isEmpty) {
-      return const _TargetResolution.rejected('uiTargetNotFound');
+      return const PatchbayUiTargetResolution.rejected('uiTargetNotFound');
     }
-    final List<_ObservedTarget> mounted = live
-        .where((_ObservedTarget target) => target.element != null)
+    final List<PatchbayUiObservedTarget> mounted = live
+        .where((PatchbayUiObservedTarget target) => target.element != null)
         .toList(growable: false);
     if (mounted.isEmpty) {
-      return const _TargetResolution.rejected('uiTargetUnmounted');
+      return const PatchbayUiTargetResolution.rejected('uiTargetUnmounted');
     }
     if (mounted.length > 1) {
-      return const _TargetResolution.rejected('uiTargetAmbiguous');
+      return const PatchbayUiTargetResolution.rejected('uiTargetAmbiguous');
     }
-    final _ObservedTarget target = mounted.single;
+    final PatchbayUiObservedTarget target = mounted.single;
     if (target.generation != generation) {
-      return _TargetResolution.rejected(
+      return PatchbayUiTargetResolution.rejected(
         'uiGenerationStale',
         details: <String, Object?>{'currentGeneration': target.generation},
       );
     }
     if (!_supportedOperations(target).contains(operation)) {
-      return const _TargetResolution.rejected('uiOperationUnavailable');
+      return const PatchbayUiTargetResolution.rejected(
+        'uiOperationUnavailable',
+      );
     }
-    return _TargetResolution.resolved(target);
+    return PatchbayUiTargetResolution.resolved(target);
   }
+
+  PatchbayUiTargetResolution _resolve({
+    required String id,
+    required int generation,
+    required PatchbayUiOperation operation,
+  }) => resolve(id: id, generation: generation, operation: operation);
 
   static PatchbayUiTargetDescriptor _descriptor(
     _ObservedTarget target, {
@@ -553,41 +566,48 @@ final class _TextBinding {
   }
 }
 
-final class _RegistryEntry {
-  _RegistryEntry(this.key);
+final class PatchbayUiRegistryEntry {
+  PatchbayUiRegistryEntry(this.key);
 
   final WeakReference<PatchbayKey> key;
   WeakReference<Element>? element;
   int generation = 0;
 }
 
-final class _ObservedTarget {
-  const _ObservedTarget({
+typedef _RegistryEntry = PatchbayUiRegistryEntry;
+
+final class PatchbayUiObservedTarget {
+  const PatchbayUiObservedTarget({
     required this.entry,
     required this.key,
     required this.element,
     required this.generation,
   });
 
-  final _RegistryEntry entry;
+  final PatchbayUiRegistryEntry entry;
   final PatchbayKey key;
   final Element? element;
   final int generation;
 }
 
-final class _TargetResolution {
-  const _TargetResolution.resolved(_ObservedTarget this.target)
-    : code = null,
+typedef _ObservedTarget = PatchbayUiObservedTarget;
+
+final class PatchbayUiTargetResolution {
+  const PatchbayUiTargetResolution.resolved(
+    PatchbayUiObservedTarget this.target,
+  ) : code = null,
       details = const <String, Object?>{};
 
-  const _TargetResolution.rejected(
+  const PatchbayUiTargetResolution.rejected(
     String this.code, {
     this.details = const <String, Object?>{},
   }) : target = null;
 
-  final _ObservedTarget? target;
+  final PatchbayUiObservedTarget? target;
   final String? code;
   final Map<String, Object?> details;
 
   bool get resolved => target != null;
 }
+
+typedef _TargetResolution = PatchbayUiTargetResolution;
