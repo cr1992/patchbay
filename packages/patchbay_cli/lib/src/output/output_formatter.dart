@@ -3,7 +3,7 @@ import 'dart:math';
 
 import '../artifact_download.dart';
 import '../command_registry.dart';
-import '../commands/catalog_invoker.dart';
+import '../support/catalog_descriptor.dart';
 import '../result.dart';
 
 /// Request for downloading an artifact from command output.
