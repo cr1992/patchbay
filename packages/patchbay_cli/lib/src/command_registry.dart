@@ -6,9 +6,15 @@ import 'registry/friendly_command_registry.dart';
 import 'registry/friendly_commands.dart';
 import 'sensitive_input.dart';
 
-export 'registry/argument_decoder.dart';
-export 'registry/command_spec.dart';
-export 'registry/friendly_command_registry.dart';
+// 只导出拆分前就公开的符号；ArgumentDecoder 与 FriendlyCommandRegistryResolver
+// 是拆分产物，属于内部实现。
+export 'registry/command_spec.dart'
+    show
+        PatchbayArtifactDisposition,
+        PatchbayCommandDeclarationSource,
+        PatchbayCommandTarget,
+        PatchbayFriendlyCommandSpec,
+        PatchbayFriendlyInvocation;
 export 'registry/friendly_commands.dart';
 
 part 'generated/protocol_cli_commands.g.dart';

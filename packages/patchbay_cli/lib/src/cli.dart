@@ -27,9 +27,14 @@ import 'rpc_timeout.dart';
 import 'sensitive_input.dart';
 import 'session.dart';
 import 'trace.dart';
+import 'trace/trace_context.dart';
 import 'ui_manifest.dart';
 
 export 'commands/command_parser.dart';
+// 拆分把这个常量从 cli.dart 挪进了 runners/，若不再导出就会从公共面消失——
+// 那是补丁版不能接受的移除。
+export 'runners/snapshot_runner.dart'
+    show patchbaySnapshotSelectorUnsupportedCode;
 
 /// Runs one CLI invocation.
 ///

@@ -13,6 +13,7 @@ import '../support/catalog_descriptor.dart';
 import '../rpc_timeout.dart';
 import '../runners/job_runner.dart';
 import '../trace.dart';
+import '../trace/trace_context.dart';
 import '../ui_manifest.dart';
 
 /// Invoker responsible for catalog command dispatch, RPC execution, retries, trace admission, and validation.
