@@ -2,6 +2,33 @@
 
 本文件记录尚未发布和已发布版本中会影响接入方、协议行为或安全边界的变化。
 
+## 0.4.1 - 2026-08-21
+
+0.4.1 是 0.4 系列的内部质量与架构解耦版本，全面完成 Core Host、Flutter Host、CLI 领域服务与大型测试套件的模块化分层治理，建立源码体积预算门禁（生产 ≤ 800 行、测试 ≤ 1000 行）、Pana 满分评分门禁与两阶段发布收尾自动化。
+
+<!-- PUB_CHANGELOG:START -->
+Patchbay 0.4.1 is an internal quality and architectural modularization release,
+decoupling high-churn core host, Flutter host, and CLI subsystems into focused
+domains while establishing strict structure ratchet budgets and release gates.
+
+### Highlights
+
+- Modularized core `ServiceHost`, Flutter semantics/gesture bridges, CLI runners,
+  and large test suites into clean domain directories.
+- Introduced automated structure ratchet enforcement (`tool/check_structure_ratchet.dart`)
+  capping production files at 800 lines and test files at 1,000 lines.
+- Extracted `PlatformProcessUtils` abstraction for unified cross-platform process
+  detection across macOS, Linux, and Windows.
+- Added reproducible Pana scoring budget verification and release finalize automation.
+<!-- PUB_CHANGELOG:END -->
+
+### Added
+
+- 提取跨平台进程与底层系统调用抽象 `PlatformProcessUtils` 与 `ProcessRunner`，统一 macOS、Linux 和 Windows 平台上的 PID 探测与进程管理。
+
+- 新增架构与测试单文件体积预算门禁 `tool/check_structure_ratchet.dart`，严格限制生产单文件 ≤ 800 行、测试单文件 ≤ 1000 行并消除手写 `part` 碎片与跨包私有依赖。
+
+
 ## 0.4.0 - 2026-08-20
 
 0.4.0 把调试闭环从“能调用”推进到“可观察、可确认、可复盘”：新增锚定手势、导航与 UI 等待、

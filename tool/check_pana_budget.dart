@@ -46,28 +46,33 @@ final class PanaBudgetEvaluator {
 
     // 1. Check LICENSE
     final licenseFile = File('${pkgDir.path}/LICENSE');
-    if (!licenseFile.existsSync() || licenseFile.readAsStringSync().trim().isEmpty) {
+    if (!licenseFile.existsSync() ||
+        licenseFile.readAsStringSync().trim().isEmpty) {
       issues.add('Missing or empty LICENSE file');
       score -= 30;
     }
 
     // 2. Check README
     final readmeFile = File('${pkgDir.path}/README.md');
-    if (!readmeFile.existsSync() || readmeFile.readAsStringSync().trim().length < 50) {
+    if (!readmeFile.existsSync() ||
+        readmeFile.readAsStringSync().trim().length < 50) {
       issues.add('Missing or too short README.md');
       score -= 20;
     } else {
       final content = readmeFile.readAsStringSync();
       // Check for broken relative links
       if (content.contains('](docs/') || content.contains('](../')) {
-        issues.add('README contains relative repository links that will break on pub.dev');
+        issues.add(
+          'README contains relative repository links that will break on pub.dev',
+        );
         score -= 10;
       }
     }
 
     // 3. Check CHANGELOG
     final changelogFile = File('${pkgDir.path}/CHANGELOG.md');
-    if (!changelogFile.existsSync() || changelogFile.readAsStringSync().trim().isEmpty) {
+    if (!changelogFile.existsSync() ||
+        changelogFile.readAsStringSync().trim().isEmpty) {
       issues.add('Missing or empty CHANGELOG.md');
       score -= 10;
     }
@@ -79,7 +84,8 @@ final class PanaBudgetEvaluator {
       score -= 40;
     } else {
       final pubspec = pubspecFile.readAsStringSync();
-      if (!pubspec.contains('description:') || pubspec.contains('description: ""')) {
+      if (!pubspec.contains('description:') ||
+          pubspec.contains('description: ""')) {
         issues.add('Missing or empty description in pubspec.yaml');
         score -= 20;
       }
@@ -98,7 +104,10 @@ final class PanaBudgetEvaluator {
     );
   }
 
-  PanaPackageCheck parsePubScoreResponse(String packageName, String jsonResponse) {
+  PanaPackageCheck parsePubScoreResponse(
+    String packageName,
+    String jsonResponse,
+  ) {
     try {
       final data = jsonDecode(jsonResponse) as Map<String, Object?>;
       final grantedPoints = (data['grantedPoints'] as num?)?.toInt() ?? 0;
@@ -145,7 +154,9 @@ void main(List<String> args) {
     results.add(check);
 
     final status = check.isFullScore ? 'PASS' : 'FAIL';
-    stdout.writeln('[$status] ${check.name} (${check.grantedPoints}/${check.maxPoints} pts)');
+    stdout.writeln(
+      '[$status] ${check.name} (${check.grantedPoints}/${check.maxPoints} pts)',
+    );
     for (final issue in check.issues) {
       stdout.writeln('  - $issue');
     }
@@ -153,10 +164,14 @@ void main(List<String> args) {
 
   final allPassed = results.every((c) => c.isFullScore);
   if (!allPassed) {
-    stderr.writeln('\nPana budget check FAILED: Not all packages achieved full score.');
+    stderr.writeln(
+      '\nPana budget check FAILED: Not all packages achieved full score.',
+    );
     exitCode = 1;
     return;
   }
 
-  stdout.writeln('\nAll 4 release packages met 100% Pana score budget requirements.');
+  stdout.writeln(
+    '\nAll 4 release packages met 100% Pana score budget requirements.',
+  );
 }

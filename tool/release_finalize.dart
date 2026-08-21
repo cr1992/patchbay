@@ -48,7 +48,8 @@ final class ReleaseFinalizer {
         canApply: false,
         blockingReasons: <String>[
           if (!backlogFile.existsSync()) 'docs/backlog.md does not exist',
-          if (!releaseFile.existsSync()) 'docs/releases/$version.md does not exist',
+          if (!releaseFile.existsSync())
+            'docs/releases/$version.md does not exist',
         ],
       );
     }
@@ -95,7 +96,8 @@ final class ReleaseFinalizer {
               title: title,
               status: status,
               action: 'BLOCK',
-              reason: 'Unverified item ($status) cannot be finalized without --allow-defer',
+              reason:
+                  'Unverified item ($status) cannot be finalized without --allow-defer',
             ),
           );
           blockingReasons.add(
@@ -173,7 +175,9 @@ final class ReleaseFinalizer {
 }
 
 void main(List<String> args) {
-  final version = args.isNotEmpty && !args.first.startsWith('--') ? args.first : '0.4.1';
+  final version = args.isNotEmpty && !args.first.startsWith('--')
+      ? args.first
+      : '0.4.1';
   final apply = args.contains('--apply');
   final allowDefer = args.contains('--allow-defer');
 
@@ -187,7 +191,9 @@ void main(List<String> args) {
   stdout.writeln('=== Release Finalize Plan for $version (PB-041-02) ===\n');
 
   for (final item in plan.items) {
-    stdout.writeln('[${item.action}] ${item.id} (${item.status}) - ${item.title}: ${item.reason}');
+    stdout.writeln(
+      '[${item.action}] ${item.id} (${item.status}) - ${item.title}: ${item.reason}',
+    );
   }
 
   if (!plan.canApply) {
@@ -211,6 +217,8 @@ void main(List<String> args) {
       exitCode = 1;
     }
   } else {
-    stdout.writeln('\nPlan generated successfully. Run with --apply to execute.');
+    stdout.writeln(
+      '\nPlan generated successfully. Run with --apply to execute.',
+    );
   }
 }

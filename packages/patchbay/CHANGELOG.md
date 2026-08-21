@@ -6,6 +6,22 @@ this file directly.
 
 [root]: https://github.com/cr1992/patchbay/blob/main/CHANGELOG.md
 
+## 0.4.1 - 2026-08-21
+
+Patchbay 0.4.1 is an internal quality and architectural modularization release,
+decoupling high-churn core host, Flutter host, and CLI subsystems into focused
+domains while establishing strict structure ratchet budgets and release gates.
+
+### Highlights
+
+- Modularized core `ServiceHost`, Flutter semantics/gesture bridges, CLI runners,
+  and large test suites into clean domain directories.
+- Introduced automated structure ratchet enforcement (`tool/check_structure_ratchet.dart`)
+  capping production files at 800 lines and test files at 1,000 lines.
+- Extracted `PlatformProcessUtils` abstraction for unified cross-platform process
+  detection across macOS, Linux, and Windows.
+- Added reproducible Pana scoring budget verification and release finalize automation.
+
 ## 0.4.0 - 2026-08-20
 
 Patchbay 0.4.0 completes the observable automation loop for running Dart and

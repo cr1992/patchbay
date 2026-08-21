@@ -9,4 +9,4 @@
 /// `test/release_version_parity_test.dart` pins it to those manifests: a stale
 /// constant here would make every host lie about itself, and lying is worse
 /// than not reporting at all.
-const String patchbayPackageVersion = '0.4.0';
+const String patchbayPackageVersion = '0.4.1';

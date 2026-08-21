@@ -28,7 +28,7 @@ widgets by stable ID, and pull redacted logs and screenshots.
 adb looks at a device from outside the system; Patchbay looks at the runtime from inside the app.
 On iOS in particular, it fills in the in-app debugging surface that system tooling cannot provide.
 
-> **Project status:** `v0.4.0`, published on pub.dev; requires Dart `>=3.11.0`, and Flutter
+> **Project status:** `v0.4.1`, published on pub.dev; requires Dart `>=3.11.0`, and Flutter
 > `>=3.38.0` for the Flutter UI capabilities. The control plane is enabled only in debug /
 > profile; the packages can take part in a release compile, but the consumer must keep the host
 > and adapters unreachable through compile-time branching at the composition root.
@@ -58,7 +58,7 @@ Use the hosted package for normal integration:
 
 ```yaml
 dependencies:
-  patchbay_flutter: ^0.4.0
+  patchbay_flutter: ^0.4.1
 ```
 
 `patchbay_flutter` re-exports the core API; for pure Dart integration use `packages/patchbay`
@@ -71,7 +71,7 @@ The following installs the native AOT GitHub Release artifact on macOS arm64. Se
 
 ```console
 $ mkdir -p ~/.local/bin
-$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.0/patchbay-0.4.0-macos-arm64 \
+$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.1/patchbay-0.4.1-macos-arm64 \
     -o ~/.local/bin/patchbay
 $ chmod +x ~/.local/bin/patchbay
 $ patchbay --help
@@ -84,7 +84,7 @@ AOT executable; do not use it to measure native AOT startup.
 When that compatibility form is required, pin it to the same package version:
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.0
+$ dart pub global activate patchbay_cli 0.4.1
 ```
 
 ### 3. Register at the composition root
