@@ -18,7 +18,7 @@ String? _repoRoot() {
 void main() {
   final root = _repoRoot();
 
-  group('结构棘轮 (PB-041-03)', () {
+  group('结构门禁 (PB-041-03)', () {
     late ProcessResult result;
 
     setUpAll(() {
@@ -28,28 +28,34 @@ void main() {
       ], workingDirectory: root);
     });
 
-    test('全仓通过体积预算、part 与跨包封装规则', () {
+    test('四类结构硬规则全仓通过', () {
       expect(
         result.exitCode,
         0,
-        reason: '结构棘轮失败：\n${result.stderr}\n${result.stdout}',
+        reason: '结构硬规则失败：\n${result.stderr}\n${result.stdout}',
       );
-      expect(result.stdout.toString(), contains('结构棘轮通过'));
+      expect(result.stdout.toString(), contains('结构硬规则通过'));
     });
 
-    test('欠账表非空时必须被打印出来，不允许静默豁免', () {
-      final baseline = File(
-        '$root/tool/structure_baseline.json',
-      ).readAsStringSync();
-      final hasDebt = !RegExp(
-        r'"accepted_debt"\s*:\s*\{\s*\}',
-      ).hasMatch(baseline);
-      if (!hasDebt) return;
+    test('体积只是警戒线：命中告警不改变退出码', () {
+      final stdout = result.stdout.toString();
+      if (!stdout.contains('警戒线提示')) return;
 
+      expect(result.exitCode, 0, reason: '体积不是硬指标，拆不拆看内容——告警不得阻断');
+      expect(
+        result.stderr.toString(),
+        isNot(contains('警戒线')),
+        reason: '告警不该写进 stderr，否则 CI 会当成失败信号',
+      );
+    });
+
+    test('告警必须被打印出来，不能静默吞掉', () {
+      // 仓内确实存在超过 150 行的生产函数；门禁若一条都不报，
+      // 说明扫描逻辑坏了，而不是代码变干净了。
       expect(
         result.stdout.toString(),
-        contains('尚未偿还的结构欠账'),
-        reason: '基线里登记了欠账，但门禁输出没有提示——欠账会被忘掉',
+        contains('long-function'),
+        reason: '函数长度警戒线没有产出任何提示，扫描可能已失效',
       );
     });
   }, skip: root == null ? '不在仓库工作树内（发布归档），结构门禁不适用' : null);

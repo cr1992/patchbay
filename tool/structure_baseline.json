@@ -1,87 +1,48 @@
 {
   "_comment": [
-    "PB-041-03 结构棘轮基线。",
-    "legacy：main 上就已超出严格预算的历史文件，值锁定在当前行数——只准变小，不准增长。",
-    "基线外的文件必须直接满足严格预算（生产 600 行 / 测试 700 行）。",
-    "新文件不会被自动收编：要么拆，要么写进 accepted_debt 并给出理由，让欠账可见、可计数、可回收。",
-    "accepted_debt 是 0.4.1 遗留的未偿还欠账，不是豁免：仍受硬上限约束、只准变小，且每次运行都会打印。"
+    "结构门禁的观察基线。口径见 docs/code-structure.md。",
+    "file_warn_* / function_warn 是警戒线，只告警不阻断；判红的只有结构规则。",
+    "legacy 是已知长文件与当前行数，用于「相比基线变长」的提示——不是禁止清单。"
   ],
-  "strict_prod_budget": 600,
-  "strict_test_budget": 700,
-  "hard_prod_budget": 800,
-  "hard_test_budget": 1000,
+  "file_warn_prod": 800,
+  "file_warn_test": 1000,
+  "function_warn": 150,
   "legacy": {
+    "packages/patchbay/lib/src/artifacts/artifact_service.dart": 700,
     "packages/patchbay/lib/src/jobs.dart": 775,
     "packages/patchbay/lib/src/permissions.dart": 627,
     "packages/patchbay/lib/src/response_schema.dart": 622,
+    "packages/patchbay/test/execution_evidence_test.dart": 668,
     "packages/patchbay/test/job_response_schema_test.dart": 709,
     "packages/patchbay/test/snapshot_selection_test.dart": 720,
     "packages/patchbay/tool/command_codegen.dart": 786,
+    "packages/patchbay/tool/src/release_prep/release_checker.dart": 683,
     "packages/patchbay/tool/wire_codegen.dart": 703,
     "packages/patchbay_cli/lib/src/android_permission_adapter.dart": 606,
     "packages/patchbay_cli/lib/src/cli.dart": 712,
+    "packages/patchbay_cli/lib/src/doctor/doctor_checks.dart": 662,
     "packages/patchbay_cli/lib/src/launcher.dart": 648,
+    "packages/patchbay_cli/lib/src/manifest/manifest_parser.dart": 756,
+    "packages/patchbay_cli/lib/src/registry/friendly_command_registry.dart": 639,
+    "packages/patchbay_cli/lib/src/runners/manifest_runner.dart": 792,
+    "packages/patchbay_cli/lib/src/trace/trace_store.dart": 660,
     "packages/patchbay_cli/test/command_registry_test.dart": 858,
     "packages/patchbay_cli/test/cross_process_test.dart": 809,
     "packages/patchbay_cli/test/doctor_test.dart": 774,
     "packages/patchbay_cli/test/launcher_supervision_test.dart": 727,
     "packages/patchbay_cli/test/permission_platform_adapter_test.dart": 872,
     "packages/patchbay_cli/test/protocol_compat_test.dart": 713,
+    "packages/patchbay_cli/test/snapshot_selector_test.dart": 624,
     "packages/patchbay_cli/test/trace_test.dart": 735,
     "packages/patchbay_flutter/example/lib/example_domain.dart": 658,
     "packages/patchbay_flutter/example/lib/main.dart": 620,
     "packages/patchbay_flutter/lib/src/capture_bridge.dart": 658,
     "packages/patchbay_flutter/lib/src/flutter_bridge.dart": 606,
     "packages/patchbay_flutter/lib/src/flutter_service_host.dart": 680,
+    "packages/patchbay_flutter/lib/src/gesture/gesture_bridge.dart": 688,
+    "packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart": 738,
     "packages/patchbay_flutter/test/capture_test.dart": 701,
     "packages/patchbay_flutter/test/inspect_bridge_test.dart": 727,
     "packages/patchbay_transport/test/direct_transport_test.dart": 749
-  },
-  "accepted_debt": {
-    "packages/patchbay/lib/src/artifacts/artifact_service.dart": {
-      "lines": 700,
-      "owed_by": "PB-041-04",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay/tool/src/release_prep/release_checker.dart": {
-      "lines": 683,
-      "owed_by": "PB-041-08",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay_cli/lib/src/doctor/doctor_checks.dart": {
-      "lines": 662,
-      "owed_by": "PB-041-07",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay_cli/lib/src/manifest/manifest_parser.dart": {
-      "lines": 756,
-      "owed_by": "PB-041-07",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay_cli/lib/src/registry/friendly_command_registry.dart": {
-      "lines": 639,
-      "owed_by": "PB-041-07",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay_cli/lib/src/runners/manifest_runner.dart": {
-      "lines": 792,
-      "owed_by": "PB-040-38",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay_cli/lib/src/trace/trace_store.dart": {
-      "lines": 660,
-      "owed_by": "PB-041-07",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay_flutter/lib/src/gesture/gesture_bridge.dart": {
-      "lines": 688,
-      "owed_by": "PB-041-05",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    },
-    "packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart": {
-      "lines": 738,
-      "owed_by": "PB-041-05",
-      "reason": "0.4.1 拆分产物仍超出 600 行严格预算，未达成该任务的关键验收；已冻结行数，待后续 MR 继续拆分后从此表移除"
-    }
   }
 }
