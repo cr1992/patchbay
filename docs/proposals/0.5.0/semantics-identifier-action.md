@@ -35,13 +35,17 @@
 
 ## 契约
 
-新增 service command `ui.semantics.actionByIdentifier`，以及 CLI：
+新增 service command `ui.semantics.actionByIdentifier`。CLI 路径由 DG-050-06 在两个候选中裁决；本稿推荐与
+既有 `ui tap` 同处顶层的短路径 `ui action`：
 
 ```console
-$ patchbay ui semantics action-by-identifier <identifier> <action> [text]
-$ patchbay --generation <generation> ui semantics action-by-identifier <identifier> <action> [text]
-$ patchbay --stdin ui semantics action-by-identifier <identifier> setText
+$ patchbay ui action <identifier> <action> [text]
+$ patchbay ui action <identifier> <action> [text] --generation <generation>
+$ patchbay --stdin ui action <identifier> setText
 ```
+
+对照候选是 `ui semantics action-by-identifier`。两者只允许选一个 canonical path，不同时发布 alias；无论选择
+哪一个，`generation` 都是 path/位置参数之后的 per-command option，只有 `--stdin` 是全局 flag。
 
 wire 参数：
 
@@ -52,13 +56,26 @@ wire 参数：
 - `text`：仅 `setText` 可带，其他 action 携带即稳定拒绝；
 - `inputWasStdin`：沿用现有 CLI provenance marker，调用方不能用普通 JSON 值伪造 stdin 来源。
 
+registration 必须与现有 `ui.semantics.tap` 一样设置 `strictKeys: true`。允许的 argument key 只有
+`identifier`、`action`、`generation`、`text`、`inputWasStdin`；任何额外 key 在进入 bridge/policy 前按
+现有 unknown-field 失败形状拒绝，不得静默忽略。nodeId `ui.semantics.action` 未启用 strictKeys 的历史行为
+不扩散到这条新命令。
+
 `PatchbaySemanticsBridge` 新增 `invokeIdentifier` 公共入口，参数与 wire 同构。`generation` 省略时不是“不检查”：
 第一次唯一解析得到的 generation 会被 pin，随后传入第二次解析。显式 generation 先作为调用方前置围栏，
 第一次解析不一致即拒绝；一致后仍按同一个值完成门后二次复核。
 
-成功/执行失败 payload 沿用 `ui.semantics.tap` 和 `ui.semantics.action` 已有字段：`outcome`、`source`、
-`identifier`、实际 `nodeId`、实际 `generation`、`action`、`beforeTreeRevision`、`afterTreeRevision`，以及
-setText 的脱敏长度。不得回显 text。`ui.semantics.tap` 保留原 command name、CLI 语法和 JSON，内部可委托
+执行 payload 沿用 `ui.semantics.tap` 和 `ui.semantics.action` 现有的两种不同形状，不得合并字段：
+
+| 字段 | `outcome: dispatched` | `outcome: failed` |
+|---|---:|---:|
+| `outcome`、`source`、`identifier`、`nodeId`、`generation`、`action` | 必有 | 必有 |
+| `beforeTreeRevision`、`afterTreeRevision` | 必有 | 不得出现 |
+| `failureType` | 不得出现 | 必有，仅 `runtimeType`，不含异常 message |
+| `length` | 仅 setText 必有 | 不得出现 |
+| `valueRedacted` | 仅 sensitive setText 为 `true`；普通 setText 不出现 | 不得出现 |
+
+两种 payload 都不得回显 text。`ui.semantics.tap` 保留原 command name、CLI 语法和 JSON，内部可委托
 `invokeIdentifier(action: tap)`，但兼容 golden 必须逐字节不变。
 
 ## 状态、失败与预算
@@ -110,7 +127,7 @@ release 构建继续由现有编译期裁除边界控制，不因新增 public m
 ## 验证
 
 - descriptor/codegen/CLI parity：新 command 的 service/CLI 参数、enum、stdin marker 与 help 一致；catalog
-  digest 只因 commands 集变化。
+  digest 只因 commands 集变化；unknown key 在 bridge/policy 调用前稳定拒绝。
 - widget test：七个公开 action 的唯一 identifier 路径；not found、20 条 mounted identifier 截断、重复
   identifier、blocked/unavailable、lifecycle 与 policy deny。
 - generation 竞态：第一次解析前替换在无 caller fence 时可选中当前实例；第一次解析后、gate await 中替换
@@ -118,14 +135,17 @@ release 构建继续由现有编译期裁除边界控制，不因新增 public m
 - policy 竞态：二次 policy 的 gate IDs 或 sensitiveInput 漂移稳定 `uiSemanticsPolicyChanged`。
 - setText：缺 text、意外 text、普通输入、obscured/policy-sensitive + stdin/non-stdin，所有输出均不含原文。
 - 兼容 golden：0.4.1 reader 读取新 catalog；旧 tap/nodeId action 的 valid/rejection JSON 逐字节不变；新 CLI
-  对老 host 不做 two-step 降级。
+  对老 host 不做 two-step 降级；新命令的 dispatched/failed 分别按字段表断言 presence 与 absence。
 - VM/direct 运行同一矩阵；debug example 覆盖 identifier focus/scroll/setText，接入方真机至少覆盖一个在
   gate await 期间重挂载的目标并证明没有误击新实例。
 
 ## 待裁决
 
-- 是否接受 `ui.semantics.actionByIdentifier` / `ui semantics action-by-identifier` 作为独立新命令，而不是给
-  既有 nodeId command 增加互斥参数联合？本稿建议接受，保持旧 descriptor required 字段不变。
+- 是否接受 `ui.semantics.actionByIdentifier` 作为独立 service command，而不是给既有 nodeId command 增加
+  互斥参数联合？本稿建议接受，保持旧 descriptor required 字段不变。
+- CLI canonical path 选择与 `ui tap` 对称的 `ui action`，还是更显式但更深的
+  `ui semantics action-by-identifier`？本稿建议 `ui action`；只发布一个 path，不增加 alias，并在 help 中与
+  nodeId `ui semantics action` 互相指路。
 - generation 是否可选？本稿建议与 `ui.semantics.tap` 一致可选，但省略只省调用方前置围栏，不省 App 内部
   pin 与二次复核。
 - 是否严格复用现有七项 public allowlist？本稿建议是；其余 enum 值另行排期，避免无意扩张 policy 面。
