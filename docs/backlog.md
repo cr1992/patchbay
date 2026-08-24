@@ -2,7 +2,7 @@
 
 > 本仓已确认缺陷与待实现特性的**唯一真源**。本文件只维护编号、标题、动机、目标版本、实施状态和
 > Proposal 指针；优先级、依赖、验收与技术方案分别由版本计划和 Proposal 维护。完整权责见
-> [规划与交付治理](planning.md)。完成后随发版移入 CHANGELOG 对应版本段并从此处删行。
+> [规划与交付治理](planning.md)。完成后由发布 MR 聚合进 CHANGELOG 对应版本段，并在四包实际发布之后由 finalize 从此处删行。
 > `design-gate` 条目未经仓主裁决不得进入实现 MR。
 > 已裁决不做的方向见 [design.md 的非目标台账](design.md)，此处不重复、不重提。
 >
@@ -56,16 +56,17 @@
 | PB-040-35 | iOS 真机权限 `status/normalize` 的权威事实源 | XCTest 能 reset 与操作系统弹窗，但没有面向任意真机 App 的通用公开授权查询/grant API；不能把 XCTest 命令退出 0 当成设备状态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持 capability unsupported，落地前补 Proposal |
 | PB-040-36 | iOS notifications reset 与接入方触发端到端矩阵 | XCTest 没有 notifications 的 protected resource reset，且系统弹窗必须由 App 自己发起；当前 runner 只能处理已出现的弹窗，尚不能形成可重复初始态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；0.4.0 降级边界见 SC-040-05 |
 | PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
-| PB-040-38 | `patchbay_cli` 大文件拆解与执行流解耦：将 `cli.dart` 内联的 Manifest 遍历引擎、Snapshot 差异比对与 Job 轮询提取为独立 Runner | `cli.dart` 达 3,270 行，承担了入口解析、500+ 行的 manifest walkthrough、snapshot diff 与 job 轮询等多重职责，成为高频冲突热点 | 0.4.1 | 已排期 | 保持 CLI 外部 JSON/退出码行为完全一致的前提下进行纯内部重构 |
-| PB-040-39 | 跨平台进程探测与底层系统命令抽象（`PlatformProcessUtils`） | `session.dart`、`doctor.dart`、`android_permission_adapter.dart`、`launcher.dart` 分散手写 `kill -0`、`tasklist`、`chmod`、`stat` 等命令，缺乏统一跨平台封装 | 0.4.1 | 已排期 | 收敛进程存活判断与权限文件保护逻辑 |
-| PB-040-40 | `patchbay_cli` 源码目录分层与命令分派器模块化 | `patchbay_cli/lib/src/` 扁平放置 27 个文件，`command_registry.dart`（1,925 行）过度集中；按 `commands/`、`platform/`、`session/`、`manifest/` 建立子目录分层 | 0.4.1 | 已排期 | 降低单目录复杂度与代码认知负荷 |
-| PB-041-01 | pub.dev 评分可复现门禁：按实际发布 archive 对四包执行当期 Pana，并在发布后核对 score API | 本地 analyze / publish dry-run 全绿仍不能替代 pub.dev 解包后的评分；四包同版依赖链也会让未发布上游造成假扣分 | 0.4.1 | 已排期 | 只改发布验收与包内质量，不扩展公共 API / wire / 命令面 |
-| PB-041-02 | 发布收尾自动化：按范围变更和证据状态分型归档 backlog，消费目标版本碎片并冻结版本计划 | 0.4.0 发布后仍残留目标行和 changelog 碎片，证明“打完 tag 再人肉清账”不可持续；但实现中与已验证不能直接批量删除 | 0.4.1 | 已排期 | finalize 必须显式执行、先生成计划再 apply；不得把未结真机证据静默标成完成 |
-| PB-041-03 | 手写源码结构预算与依赖方向门禁 | 四包生产代码有 10 个手写文件超过 800 行；仅靠评审提醒无法阻止新职责继续堆入热点文件 | 0.4.1 | 已排期 | 生成物例外；对现有超限文件使用只降不升 ratchet，禁止用 `part` 碎片或空转发层规避职责拆分 |
-| PB-041-04 | `patchbay` core host 与领域服务分层 | `service_host.dart` 1,426 行且影响 115 个符号，混合 VM Service 适配、snapshot、invoke、审计、schema 校验；`artifacts.dart` 889 行 | 0.4.1 | 已排期 | 按 `host/`、`commands/`、`artifacts/`、`jobs/`、`protocol/`、`ui/`、`permissions/` 收敛依赖方向；`patchbay_transport` 只补边界测试，不为目录对称制造搬迁 |
-| PB-041-05 | `patchbay_flutter` host 与 UI bridge 领域分层 | `semantics_bridge.dart` 938 行、`gesture_bridge.dart` 835 行，service host 同时承担 descriptor、decoder 与注册编排，桥接职责持续横向增长 | 0.4.1 | 已排期 | 按 `host/`、`ui/`、`diagnostics/`、`platform/` 分类；保持 debug/profile 可用性、lifecycle 闸和 direct/VM Service 语义一致 |
-| PB-041-06 | 大型测试套件拆分与共享测试支撑收敛 | 现有 5 个测试文件超过 1,000 行，重复 host/fixture 构造使重构时难以判断行为变化还是测试接线变化 | 0.4.1 | 已排期 | 按行为域拆 suite，共享 helper 只提供接线不隐藏断言；测试数量、断言边界和兼容语料不得缩水 |
-| PB-041-07 | `patchbay_cli` 领域服务继续拆分 | 除 `cli.dart` 外，`command_registry.dart` 1,925 行、`ui_manifest.dart` 1,654 行、`trace.dart` 1,302 行、`doctor.dart` 1,129 行、`session.dart` 830 行，仍会把目录分层变成“移动大文件” | 0.4.1 | 已排期 | 分离 descriptor/dispatch、parse/model/walkthrough、store/render/diff、probe/report 与 process/store；保持命令帮助、JSON、stderr、退出码和超时语义 |
+| PB-040-38 | `patchbay_cli` 大文件拆解与执行流解耦：将 `cli.dart` 内联的 Manifest 遍历引擎、Snapshot 差异比对与 Job 轮询提取为独立 Runner | `cli.dart` 达 3,270 行，承担了入口解析、500+ 行的 manifest walkthrough、snapshot diff 与 job 轮询等多重职责，成为高频冲突热点 | 0.4.1 | 已验证 | 保持 CLI 外部 JSON/退出码行为完全一致的前提下完成独立 Runner 拆解 |
+| PB-040-39 | 跨平台进程探测与底层系统命令抽象（`PlatformProcessUtils`） | `session.dart`、`doctor.dart`、`android_permission_adapter.dart`、`launcher.dart` 分散手写 `kill -0`、`tasklist`、`chmod`、`stat` 等命令，缺乏统一跨平台封装 | 0.4.1 | 已验证 | 收敛进程存活判断与权限文件保护逻辑 |
+| PB-040-40 | `patchbay_cli` 源码目录分层与命令分派器模块化 | `patchbay_cli/lib/src/` 扁平放置 27 个文件，`command_registry.dart`（1,925 行）过度集中；按 `commands/`、`platform/`、`session/`、`manifest/` 建立子目录分层 | 0.4.1 | 已验证 | 拆解 commands, connection, output, trace 模块并将 cli.dart 降至 639 行 |
+| PB-041-01 | pub.dev 评分可复现门禁：按实际发布 archive 对四包执行当期 Pana，并在发布后核对 score API | 本地 analyze / publish dry-run 全绿仍不能替代 pub.dev 解包后的评分；四包同版依赖链也会让未发布上游造成假扣分 | 0.4.1 | 已验证 | 落地 `tool/check_pana_budget.dart` 与单测：实跑当期 pana，四包逐 section 满分（160/160，pana 0.23.18），取不到真实分数即 fail-closed；`--published` 支持发布后核对 score API。发布后 score API 复核仍待执行 |
+| PB-041-02 | 发布收尾自动化：按范围变更和证据状态分型归档 backlog，消费目标版本碎片并冻结版本计划 | 0.4.0 发布后仍残留目标行和 changelog 碎片，证明“打完 tag 再人肉清账”不可持续；但实现中与已验证不能直接批量删除 | 0.4.1 | 已验证 | 落地 `tool/release_finalize.dart` 与单测，支持两阶段 plan/apply 归档与未结验证 fail-closed 阻断 |
+| PB-041-03 | 手写源码结构预算与依赖方向门禁 | 四包生产代码有 10 个手写文件超过 800 行；仅靠评审提醒无法阻止新职责继续堆入热点文件 | 0.4.1 | 已验证 | 建立 `docs/code-structure.md` 结构规范并落地门禁与单测：四类结构错误判红（含新增的领域环与越包根导入检测），体积改为警戒线；函数长度警戒线（150 行）比文件长度更有信号，实测抓出 14 处、其中 3 处经复核确需拆分 |
+| PB-041-04 | `patchbay` core host 与领域服务分层 | `service_host.dart` 1,426 行且影响 115 个符号，混合 VM Service 适配、snapshot、invoke、审计、schema 校验；`artifacts.dart` 889 行 | 0.4.1 | 已验证 | 按 `host/` 与 `artifacts/` 完成拆分，原文件收敛为 Facade，全量单测保持 100% 绿灯 |
+| PB-041-05 | `patchbay_flutter` host 与 UI bridge 领域分层 | `semantics_bridge.dart` 938 行、`gesture_bridge.dart` 835 行，service host 同时承担 descriptor、decoder 与注册编排，桥接职责持续横向增长 | 0.4.1 | 已验证 | 拆分为 `semantics/` 与 `gesture/` 模块并消除 `part` 碎片，保持 151 个单测绿灯 |
+| PB-041-06 | 大型测试套件拆分与共享测试支撑收敛 | 现有 5 个测试文件超过 1,000 行，重复 host/fixture 构造使重构时难以判断行为变化还是测试接线变化 | 0.4.1 | 已验证 | 完成 5 个超千行大型测试套件模块化拆解，提取独立子套件与共享夹具，测试文件全部 ≤ 1000 行且 100% 断言保持绿灯 |
+| PB-041-07 | `patchbay_cli` 领域服务继续拆分 | 除 `cli.dart` 外，`command_registry.dart` 1,925 行、`ui_manifest.dart` 1,654 行、`trace.dart` 1,302 行、`doctor.dart` 1,129 行、`session.dart` 830 行，仍会把目录分层变成“移动大文件” | 0.4.1 | 已验证 | 完成 `registry/`、`manifest/`、`trace/`、`doctor/`、`session/` 模块化，全量单测保持 100% 绿灯 |
+| PB-041-08 | `release_prep` 定版工具模块化拆解与架构解耦 | `release_prep.dart` 单文件 2,727 行，混合模型、pubspec 扫描、CHANGELOG 碎片聚合、矩阵改写与 IO 编排；拆解为子模块并保持全部测试和 bin 入口兼容 | 0.4.1 | 已验证 | 拆解为 `tool/src/release_prep/` 10 个子模块并保持全部测试与 facade 兼容 |
 
 ## 文档债（快赢，可随任意批次走）
 

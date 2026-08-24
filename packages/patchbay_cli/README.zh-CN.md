@@ -13,7 +13,7 @@
 从 pub.dev 安装 CLI，并与 App 侧使用的版本保持一致：
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.0
+$ dart pub global activate patchbay_cli 0.4.1
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```

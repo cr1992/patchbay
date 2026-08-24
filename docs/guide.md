@@ -15,7 +15,7 @@
 
 ```yaml
 dependencies:
-  patchbay_flutter: ^0.4.0
+  patchbay_flutter: ^0.4.1
 ```
 
 ### CLI
@@ -40,7 +40,7 @@ CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什
 #### pub global app snapshot（兼容形态）
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.0
+$ dart pub global activate patchbay_cli 0.4.1
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```
@@ -61,7 +61,7 @@ $ patchbay --help
 **目标机器上不需要 Dart SDK**，这是给「只用 CLI、不写 Dart」的人和 CI 镜像准备的形态：
 
 ```console
-$ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.0/patchbay-0.4.0-macos-arm64
+$ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.1/patchbay-0.4.1-macos-arm64
 $ shasum -a 256 patchbay-0.4.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
 $ chmod +x patchbay-0.4.0-macos-arm64
 $ mkdir -p ~/.local/bin

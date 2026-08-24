@@ -27,7 +27,7 @@ Patchbay 是一条伸进 Flutter runtime 的类型化控制通道：从终端连
 adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iOS 来说，它补上了
 系统工具无法提供的 App 内部调试面。
 
-> **项目状态：** `v0.4.0`，已发布到 pub.dev；需要 Dart `>=3.11.0`，Flutter UI 能力需要
+> **项目状态：** `v0.4.1`；需要 Dart `>=3.11.0`，Flutter UI 能力需要
 > Flutter `>=3.38.0`。控制面仅在 debug / profile 启用；package 可以参与 release 编译，但接入方
 > 必须在组合根通过编译期分支让 host 与 adapter 保持不可达。
 
@@ -54,7 +54,7 @@ Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架；
 
 ```yaml
 dependencies:
-  patchbay_flutter: ^0.4.0
+  patchbay_flutter: ^0.4.1
 ```
 
 `patchbay_flutter` 已导出 core API；纯 Dart 接入可改用 `packages/patchbay`。
@@ -66,7 +66,7 @@ dependencies:
 
 ```console
 $ mkdir -p ~/.local/bin
-$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.0/patchbay-0.4.0-macos-arm64 \
+$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.1/patchbay-0.4.1-macos-arm64 \
     -o ~/.local/bin/patchbay
 $ chmod +x ~/.local/bin/patchbay
 $ patchbay --help
@@ -77,7 +77,7 @@ $ patchbay --help
 需要该兼容形态时按同一 package 版本固定安装：
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.0
+$ dart pub global activate patchbay_cli 0.4.1
 ```
 
 ### 3. 在组合根注册

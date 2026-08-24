@@ -2,6 +2,50 @@
 
 本文件记录尚未发布和已发布版本中会影响接入方、协议行为或安全边界的变化。
 
+## 0.4.1 - 2026-08-24
+
+0.4.1 是 0.4 系列的内部质量与架构解耦版本，全面完成 Core Host、Flutter Host、CLI 领域服务与大型测试套件的模块化分层治理，建立源码体积预算门禁（生产 ≤ 800 行、测试 ≤ 1000 行）、Pana 满分评分门禁与两阶段发布收尾自动化。
+
+<!-- PUB_CHANGELOG:START -->
+Patchbay 0.4.1 is an internal quality and architectural modularization release,
+decoupling high-churn core host, Flutter host, and CLI subsystems into focused
+domains while establishing strict structure ratchet budgets and release gates.
+
+### Highlights
+
+- Modularized core `ServiceHost`, Flutter semantics/gesture bridges, CLI runners,
+  and large test suites into clean domain directories.
+- Introduced automated structure ratchet enforcement (`tool/check_structure_ratchet.dart`)
+  capping production files at 800 lines and test files at 1,000 lines.
+- Extracted `PlatformProcessUtils` abstraction for unified cross-platform process
+  detection across macOS, Linux, and Windows.
+- Added reproducible Pana scoring budget verification and release finalize automation.
+<!-- PUB_CHANGELOG:END -->
+
+### Added
+
+- 提取跨平台进程与底层系统调用抽象 `PlatformProcessUtils` 与 `ProcessRunner`，统一 macOS、Linux 和 Windows 平台上的 PID 探测与进程管理。
+
+- 新增架构与测试单文件体积预算门禁 `tool/check_structure_ratchet.dart`，严格限制生产单文件 ≤ 800 行、测试单文件 ≤ 1000 行并消除手写 `part` 碎片与跨包私有依赖。
+
+- 新增 pub.dev 评分预算门禁 `tool/check_pana_budget.dart`：对四个发布包实跑当期 pana，逐 section 要求满分，并支持 `--published` 核对 pub.dev Scores API 的 `grantedPoints == maxPoints`；取不到真实分数一律 fail-closed，不再以本地启发式代替评分。
+
+- 新增两阶段发布收尾工具 `tool/release_finalize.dart`：计划分「已发布 / 仅缺证据 / 已延期」三档，欠真机验收证据的条目需显式 `--allow-evidence-pending` 且保留在 backlog 不归档，「实现中」条目必须逐条 `--defer-item` 点名才能延期。
+
+- 新增公共 API surface 门禁 `tool/check_api_surface.dart` 与 golden `tool/api_surface.json`：按 `export` / `show` / `hide` / `part` 展开计算四包从入口可见的符号集合，任何新增或移除都判红。barrel 文本不变并不代表公共面不变，这道门禁看的是符号集合本身。
+
+### Changed
+
+- 建立源码结构规范 `docs/code-structure.md`：拆分依据是职责边界与依赖方向而非行数。结构门禁只对四类结构错误判红（手写 `part` 碎片、跨包 `src/` 私有导入、越出包根的相对导入、领域目录循环依赖），函数与文件体积改为不阻断的警戒线，并新增比文件长度更有信号的函数长度检查；检查范围扩展到 `tool/` 与 `example/`。
+
+### Fixed
+
+- 修复 `release_prep` 的文档阶段门禁假绿：定版前 README 提前宣称已发布到 pub.dev 现在会硬失败；受管文档改为只陈述可随 tag 固化的当前版本事实，不再要求尚未发生的发布结果。
+
+- 修复 `patchbay` 包缺少 `analysis_options.yaml` 导致本地 `dart analyze` 与 pub.dev 评分口径脱节的问题：`patchbay` 与 `patchbay_transport` 现按 `package:lints/core.yaml` 分析，并修正两处触发 pana 扣分的流程控制写法，四包 pub.dev 静态分析恢复满分。
+
+- 修复模块化拆分意外扩大公共 API 面的问题：拆分产物（gesture / semantics / trace / doctor / manifest / registry 等领域类型与内部 helper）不再随兼容 wrapper 整库导出，`PatchbayUiRegistry` 的内部注册与解析入口恢复为私有；同时补回被拆分挪走而从公共面消失的 `patchbaySnapshotSelectorUnsupportedCode`。四包公共符号集合与 0.4.0 完全一致。
+
 ## 0.4.0 - 2026-08-20
 
 0.4.0 把调试闭环从“能调用”推进到“可观察、可确认、可复盘”：新增锚定手势、导航与 UI 等待、
