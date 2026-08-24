@@ -91,7 +91,7 @@
 | DG-050-03 | audit 队列满时的保留/丢弃策略、丢失报告与 dispose drain 预算 | 0.5.0 | 待裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md) |
 | DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md) |
 | DG-050-05 | semantics owner 已可用时是否仍主动请帧、`ui.wait` 的观察 cadence，以及 identifier cache 的失效与 generation 复核 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md) |
-| DG-050-06 | 通用 identifier action 的独立命令形状、可选 caller generation 与公开 action allowlist | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md) |
+| DG-050-06 | 通用 identifier action 的独立命令形状、CLI canonical path、`strictKeys` 与 unknown key 处置、可选 caller generation 与公开 action allowlist | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md) |
 
 ## 维护规则
 
