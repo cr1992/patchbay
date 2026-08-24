@@ -197,6 +197,29 @@ sdks:
         expect(check.detail, contains('patchbay-v0.2.1'));
       });
 
+      test('定版前提前宣称已发布会阻断', () {
+        final Map<String, String> documents = releaseDocumentsFixture('0.3.0');
+        final ReleaseCheck check = checkOf(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: releaseInputsFixture(
+              released: true,
+              documentOverrides: <String, String>{
+                'README.md':
+                    '${documents['README.md']}\npublished on pub.dev\n',
+                'README.zh-CN.md':
+                    '${documents['README.zh-CN.md']}\n已发布到 pub.dev\n',
+              },
+            ),
+            resolveTag: (_) => null,
+          ),
+          'documentation-current',
+        );
+        expect(check.status, ReleaseCheckStatus.failed);
+        expect(check.detail, contains('published on pub.dev'));
+        expect(check.detail, contains('已发布到 pub.dev'));
+      });
+
       test('业务命令泄漏与架构 SVG 能力缺失会阻断', () {
         final Map<String, String> documents = releaseDocumentsFixture('0.3.0');
         final ReleaseCheck check = checkOf(

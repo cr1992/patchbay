@@ -140,27 +140,19 @@ ReleaseCheck _checkDocumentationCurrent(String version, ReleaseInputs inputs) {
     );
   }
 
-  const List<String> unavailablePhrases = <String>[
+  const List<String> stageInconsistentPhrases = <String>[
     'not published to pub.dev yet',
     '尚未发布到 pub.dev',
     'will be published to pub.dev',
     '届时发布到 pub.dev',
+    'published on pub.dev',
+    '已发布到 pub.dev',
   ];
   for (final MapEntry<String, String> entry in inputs.readmes.entries) {
-    for (final String phrase in unavailablePhrases) {
+    for (final String phrase in stageInconsistentPhrases) {
       if (entry.value.toLowerCase().contains(phrase.toLowerCase())) {
-        problems.add('${entry.key} 仍声明 `$phrase`');
+        problems.add('${entry.key} 含与定版阶段不一致的声明 `$phrase`');
       }
-    }
-  }
-
-  const Map<String, String> publicationMarkers = <String, String>{
-    'README.md': 'published on pub.dev',
-    'README.zh-CN.md': '已发布到 pub.dev',
-  };
-  for (final MapEntry<String, String> marker in publicationMarkers.entries) {
-    if (!inputs.readmes[marker.key]!.contains(marker.value)) {
-      problems.add('${marker.key} 缺当前发布状态 `${marker.value}`');
     }
   }
 
@@ -213,7 +205,7 @@ ReleaseCheck _checkDocumentationCurrent(String version, ReleaseInputs inputs) {
   if (problems.isEmpty) {
     return ReleaseCheck.ok(
       'documentation-current',
-      '当前文档无旧安装口径，双语入口、架构 SVG 与中性示例已纳入门禁',
+      '当前文档无发布阶段假事实和旧安装口径，双语入口、架构 SVG 与中性示例已纳入门禁',
       hard: true,
     );
   }
