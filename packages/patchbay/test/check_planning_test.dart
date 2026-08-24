@@ -29,9 +29,16 @@ String _fixture({
 
 void main() {
   final checker = File('../../tool/check_planning.dart').absolute.path;
-  final activeVersion = RegExp(
-    r"const _activeVersion = '([^']+)';",
-  ).firstMatch(File(checker).readAsStringSync())!.group(1)!;
+  final activeVersionMatch = RegExp(
+    r'''const\s+_activeVersion\s*=\s*['"]([^'"]+)['"]\s*;''',
+  ).firstMatch(File(checker).readAsStringSync());
+  if (activeVersionMatch == null) {
+    throw FormatException(
+      'Could not parse _activeVersion from tool/check_planning.dart.',
+      checker,
+    );
+  }
+  final activeVersion = activeVersionMatch.group(1)!;
 
   ProcessResult runChecker(String root) => Process.runSync(
     Platform.resolvedExecutable,

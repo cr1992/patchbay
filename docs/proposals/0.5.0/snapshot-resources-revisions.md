@@ -69,10 +69,13 @@ legacy source 返回 `revisionSource: hostObserved`。versioned source 的有效
 | single snapshot canonical bytes | 1 MiB | 64 KiB..4 MiB |
 | total retained canonical bytes | 8 MiB | 不小于单份上限，最大 32 MiB |
 
-新 revision 的处理顺序固定为：冻结/编码候选 → 检查单份上限 → 驱逐最老 revision 直到数量与累计字节
-都能容纳 → 原子提交。单份超限返回既有 rejection 信封中的新稳定 code `snapshotPayloadTooLarge`，details
-只含 `encodedBytes/maxSnapshotBytes`；失败不改变 latest 或 retention。因累计预算淘汰 baseline 后，diff
-继续返回既有 `snapshotRevisionUnavailable`，并增加 `retainedByteLimit` 便于解释。
+新 revision 的处理顺序固定为：按 PB-050-01 的同一次有界遍历冻结候选，并把 canonical UTF-8 写入
+**增量计数、超限即中止**的 sink（有效上限取配置 `maxSnapshotBytes` 与 4 MiB 安全天花板的较小值）→
+驱逐最老 revision 直到数量与累计字节都能容纳 → 原子提交。不得先产生完整 canonical String/bytes 再
+检查长度。单份超过运行预算返回既有 rejection 信封中的新稳定 code `snapshotPayloadTooLarge`，details
+只含 `encodedBytesAtLeast/maxSnapshotBytes`；碰到 PB-050-01 硬天花板则返回其
+`snapshotPayloadInvalid/payloadTooLarge` provider failure。两类失败都不改变 latest 或 retention。因累计预算
+淘汰 baseline 后，diff 继续返回既有 `snapshotRevisionUnavailable`，并增加 `retainedByteLimit` 便于解释。
 
 single-flight 只覆盖正在进行的 provider sampling。owner Future settle 后立即清除；失败对本批共享，下一次
 调用可重试。等待循环中每一轮可以加入当时的 sampling flight，但自己的 stopwatch、poll count 与 timeout
@@ -101,7 +104,8 @@ versioned source 还需校验：负数或倒退返回 `providerProtocolViolation
 ## 验证
 
 - 单元/协议测试：单份边界 ±1、总字节双淘汰、计数/字节同时触发、超限不污染 latest、淘汰后的 diff、
-  sampling failure 重试、并发 1/10/100 caller 只调用 source 一次。
+  sampling failure 重试、并发 1/10/100 caller 只调用 source 一次；单份边界用 sink 写入计数证明未生成
+  完整超限 canonical。
 - versioned source：same/increase/regress、appInstance 重建、同 revision 不触碰新 body、legacy adapter。
 - VM/direct：相同 retention/revision metadata；direct response 上限另有正负用例。
 - 接入方/真机：example 记录典型与最大 snapshot 分布；默认值接受前至少提供两类树规模的 profile 数据。
@@ -117,6 +121,7 @@ versioned source 还需校验：负数或倒退返回 `providerProtocolViolation
 ## 被否决方案
 
 - 只按 revision 数保留：无法限制大 body 的 retained memory。
+- 完整 canonical 后再检查字节：指数扇出或超长 scalar 会在预算判定前耗尽 CPU/内存。
 - 只存 sha256 不存 canonical/body：diff 仍需要冻结 body，hash 也不能免除首次遍历。
 - 给既有 `PatchbaySnapshotSource` 增加参数或改变返回类型：这是破坏式公共 API。
 - 把所有 wait 合成一个响应 Future：path、condition 与 deadline 不同，合并会串改调用方语义。

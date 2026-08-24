@@ -33,6 +33,7 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 - [Invocation catalog policy 缓存与失效协议](0.5.0/catalog-policy-cache.md)
 - [Audit sink 顺序投递与有界背压](0.5.0/audit-delivery.md)
 - [Invocation cooperative cancellation、deadline 与统一受理预算](0.5.0/invocation-cancellation.md)
+- [Semantics probe 请帧策略与 identifier 索引](0.5.0/semantics-probe-scheduling.md)
 
 已延期、尚未进入版本范围的候选方案：
 
