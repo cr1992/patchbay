@@ -65,7 +65,7 @@
 | PB-050-07 | semantics probe 请帧策略与 identifier 索引 | 减少主动请帧或按 tree revision 缓存 identifier 都会改变 `ui.wait` 的观察时机、elapsed/frameRevision 与 generation 边界，不能作为“透明降载”越过默认行为门禁 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md)；DG-050-05；以 PB-050-04 量测为裁决输入 |
 | PB-050-08 | REPL 终止错误与单行流契约 | 正常 `--json repl` 已按行输出 compact JSON，但 transport / protocol / session failure 冒到 one-shot `_fail` 后会变成多行 pretty JSON；按行消费方无法把它识别为终止事实，FIFO 写端随后可能在 reader 已退出时挂死 | 0.5.0 | 已排期 | 复用既有 error envelope 与退出码，只修复已承诺的 JSONL 一致性；不在本条加入 reconnect |
 | PB-050-09 | CLI 诊断与命令语义可发现性 | 重度使用实证 `sessionDirectoryEmpty` 无恢复指引，已能自动分块落盘的 `capture ... --output` / `blob get ... --output` 未从 raw service 路径就地指向，`text.set` / `text.enter` 的 callback 差异虽已冻结但只在包文档可见，`id` / `identifier` 与 request `limit` / response `length` 的不同事实域也要靠试错辨认 | 0.5.0 | 已排期 | 只改 hint、人读成功摘要、help、文档与回归测试；复用 REPL `describe`，不新增别名/schema 命令，不改 JSON、text 行为或 wire 参数 |
-| PB-050-10 | identifier 锚定的通用 semantics action | `ui tap <identifier>` 已有单请求解析与 generation 复核，但非 tap action 仍只能携带快照的 `nodeId + generation`，高变动树上需要调用方自行重取重试 | — | 待排期 | 落地前补 Proposal；新增 identifier 命令而非把现有 integer `generation` 扩成 `latest` 字符串 |
+| PB-050-10 | identifier 锚定的通用 semantics action | `ui tap <identifier>` 已有单请求解析与 generation 复核，但非 tap action 仍只能携带快照的 `nodeId + generation`，高变动树上需要调用方自行重取重试 | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md)；DG-050-06；新增独立命令，不把 integer `generation` 扩成 `latest` 字符串 |
 | PB-050-11 | 结构化日志 event 身份与服务端过滤 | record 只冻结 `message + fields`，接入方可把同一事件名分别放进 `fields.event` 或 message，消费方会漏检；现有 query 只有 level/category/time 过滤 | — | 待排期 | 接入方 log source 先统一映射；核心落地前补 Proposal，联合裁决一等 event 字段、legacy 兼容及 query/tail/export 过滤 |
 
 ## 文档债（快赢，可随任意批次走）
@@ -91,6 +91,7 @@
 | DG-050-03 | audit 队列满时的保留/丢弃策略、丢失报告与 dispose drain 预算 | 0.5.0 | 待裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md) |
 | DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md) |
 | DG-050-05 | semantics owner 已可用时是否仍主动请帧、`ui.wait` 的观察 cadence，以及 identifier cache 的失效与 generation 复核 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md) |
+| DG-050-06 | 通用 identifier action 的独立命令形状、可选 caller generation 与公开 action allowlist | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md) |
 
 ## 维护规则
 
