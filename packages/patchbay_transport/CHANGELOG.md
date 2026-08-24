@@ -6,7 +6,7 @@ this file directly.
 
 [root]: https://github.com/cr1992/patchbay/blob/main/CHANGELOG.md
 
-## 0.4.1 - 2026-08-21
+## 0.4.1 - 2026-08-24
 
 Patchbay 0.4.1 is an internal quality and architectural modularization release,
 decoupling high-churn core host, Flutter host, and CLI subsystems into focused

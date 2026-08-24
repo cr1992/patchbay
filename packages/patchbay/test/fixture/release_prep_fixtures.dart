@@ -97,7 +97,7 @@ String hostSurfaceFixture(String version) => jsonEncode(<String, Object?>{
 
 String releaseReadmeFixture(String version, {required bool chinese}) =>
     '''
-> **${chinese ? '项目状态：' : 'Project status:'}** `v$version`, ${chinese ? '已发布到 pub.dev' : 'published on pub.dev'}
+> **${chinese ? '项目状态：' : 'Project status:'}** `v$version`
   patchbay_flutter: ^$version
 curl /releases/download/patchbay-v$version/patchbay-$version-macos-arm64
 \$ dart pub global activate patchbay_cli $version
