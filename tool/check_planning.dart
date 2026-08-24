@@ -83,23 +83,28 @@ void main() {
   }
 
   final releaseScope = _releaseScope(releaseFile, failures);
-  final targeted = pbRows.entries
-      .where((entry) => entry.value[3] == _activeVersion)
-      .map((entry) => entry.key)
-      .toSet();
+  // 已发布计划是版本史，scope 中的已交付条目已经由 release_finalize
+  // 从活跃 backlog 归档。只对仍活跃的计划做双向目标对账，否则 finalize
+  // 按设计归档后会让本检查稳定报“missing backlog item”。
+  if (!_isPublishedRelease(releaseFile)) {
+    final targeted = pbRows.entries
+        .where((entry) => entry.value[3] == _activeVersion)
+        .map((entry) => entry.key)
+        .toSet();
 
-  for (final id in targeted.difference(releaseScope)) {
-    failures.add(
-      '$id: target is $_activeVersion but item is missing from P0/P1/P2',
-    );
-  }
-  for (final id in releaseScope.difference(targeted)) {
-    if (!pbRows.containsKey(id)) {
-      failures.add('$id: release scope references a missing backlog item');
-    } else {
+    for (final id in targeted.difference(releaseScope)) {
       failures.add(
-        '$id: release scope includes item not targeted at $_activeVersion',
+        '$id: target is $_activeVersion but item is missing from P0/P1/P2',
       );
+    }
+    for (final id in releaseScope.difference(targeted)) {
+      if (!pbRows.containsKey(id)) {
+        failures.add('$id: release scope references a missing backlog item');
+      } else {
+        failures.add(
+          '$id: release scope includes item not targeted at $_activeVersion',
+        );
+      }
     }
   }
 
@@ -124,6 +129,11 @@ void main() {
     '${releaseScope.length} release entries)',
   );
 }
+
+bool _isPublishedRelease(File releaseFile) => RegExp(
+  r'^> 状态：已发布(?:（.+）)?$',
+  multiLine: true,
+).hasMatch(releaseFile.readAsStringSync());
 
 void _validateAgentInstructionEntryPoints(List<String> failures) {
   final agents = File('AGENTS.md');
