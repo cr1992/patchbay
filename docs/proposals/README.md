@@ -26,6 +26,15 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 - [调试轨迹持久化](0.4.0/debug-traces.md)
 - [平台权限编排与系统弹窗恢复](0.4.0/platform-permissions.md)
 
+0.5.0 提案中：
+
+- [Snapshot provider JSON 边界与冻结读视图](0.5.0/snapshot-provider-boundary.md)
+- [Snapshot 双预算、single-flight 与可选 source revision](0.5.0/snapshot-resources-revisions.md)
+- [Invocation catalog policy 缓存与失效协议](0.5.0/catalog-policy-cache.md)
+- [Audit sink 顺序投递与有界背压](0.5.0/audit-delivery.md)
+- [Invocation cooperative cancellation、deadline 与统一受理预算](0.5.0/invocation-cancellation.md)
+- [Semantics probe 请帧策略与 identifier 索引](0.5.0/semantics-probe-scheduling.md)
+
 已延期、尚未进入版本范围的候选方案：
 
 - [调试轨迹 scenario 与受控回放](future/trace-replay.md)
