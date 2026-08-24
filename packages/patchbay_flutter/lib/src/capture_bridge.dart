@@ -1,3 +1,7 @@
+// `flutter_bridge.dart` 库的一部分。
+//
+// 保持 part 而不是独立 library：两者共享 PatchbayUiRegistry 的私有解析入口，
+// 拆成独立库会迫使这些内部符号变成公共 API（0.4.1 曾因此泄漏公共面）。
 part of 'flutter_bridge.dart';
 
 typedef PatchbayCaptureEncoder =

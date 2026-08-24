@@ -1,3 +1,6 @@
+# 与 pub.dev 评分口径对齐：pana 按 package:lints/core.yaml 计分。
+include: package:lints/core.yaml
+
 analyzer:
   errors:
     dead_code: error

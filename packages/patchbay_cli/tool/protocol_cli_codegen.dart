@@ -101,9 +101,9 @@ String _render() {
           : 'final';
       out
         ..writeln(
-          '$binding _GeneratedProtocolCommand _${syntax.id}ProtocolCommand =',
+          '$binding GeneratedProtocolCommand _${syntax.id}ProtocolCommand =',
         )
-        ..writeln('    _GeneratedProtocolCommand(')
+        ..writeln('    GeneratedProtocolCommand(')
         ..writeln(
           '      descriptor: ${_descriptorIdentifier(descriptor.name)},',
         )
