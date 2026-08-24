@@ -61,7 +61,9 @@ legacy source 返回 `revisionSource: hostObserved`。versioned source 的有效
 
 ## 状态、失败与预算
 
-推荐默认候选如下，须由 DG-050-01 结合 example 与接入方 snapshot 分布裁决：
+推荐默认候选如下，须由 DG-050-01 结合 example 与接入方 snapshot 分布裁决。PB-050-01 的
+2,097,152-occurrence backstop 刻意位于 4 MiB canonical 天花板之后，不是可配置运行预算，也不得让
+1..4 MiB 区间提前变成 provider violation：
 
 | 预算 | 推荐候选 | 可配置范围 |
 |---|---:|---:|
@@ -114,6 +116,8 @@ versioned source 还需校验：负数或倒退返回 `providerProtocolViolation
 ## 待裁决
 
 - 接受推荐的 1 MiB 单份、8 MiB 总量、32 份默认，还是以基准调整？
+- 确认所有可配置单份字节值都不超过 PB-050-01 的 4 MiB 天花板，并以常量关系测试保证 occurrence
+  backstop 不先于字节预算触发。
 - `revisionSource: consumerReported` 是否足以表达信任边界，还是需要另加 capability 供 CLI 分支？
 - versioned source 的 revision 前进但 canonical 相同，是否递增 host snapshotRevision（本稿建议递增，忠实于
   provider 的内容提交事实）？

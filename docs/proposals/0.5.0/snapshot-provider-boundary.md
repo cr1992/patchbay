@@ -68,18 +68,25 @@ provider 违规继续使用既有 `providerProtocolViolation` rejection，不新
 验证必须是显式有界、不会依赖 Dart 调用栈深度的遍历，并同时执行三条独立硬闸：
 
 - 最大容器嵌套深度 128：根 map 深度为 0，每进入一个 map/list 加 1，超过即拒绝 `nestingTooDeep`；
-- 最大展开节点数 65,536：每次出现在 JSON 输出树中的 map、list、key 和 scalar 都计一次，**按出现次数
+- 最大展开 occurrence 数 2,097,152：每次出现在 JSON 输出树中的 map、list、key 和 scalar 都计一次，**按出现次数
   而不是 Dart object identity 计费**，超过即拒绝 `payloadTooLarge`；
 - 最大 canonical UTF-8 字节 4 MiB：canonical 生成必须写入有上限的 byte sink，每次写入前检查剩余预算，
   超过即中止并拒绝 `payloadTooLarge`，不得先构造完整 String 再量长度。
 
-深度只防递归链，展开节点数负责拦截共享 DAG 的指数扇出，增量字节负责拦截少量超长 scalar/key；三者
-不能互相替代。实现可以使用 identity ancestry set 检测活动路径循环；节点离开当前路径后必须移除，
+深度只防递归链，展开 occurrence 数负责给遍历步骤加独立 backstop，增量字节负责实际 payload 尺寸；三者
+不能互相替代。2,097,152 由 `4 MiB / 2 bytes` 得出：canonical JSON 中最密的重复合法形状是数组里的
+单字节 scalar，除首项外每项至少再占一个分隔符，因此 4 MiB 内最多容纳 2,097,152 个计数 occurrence
+（含根容器时只会更少）。节点 backstop 刻意不比 4 MiB 字节闸更紧，合法但超过运行预算的 payload 应先
+落入 PB-050-02 的 `snapshotPayloadTooLarge`，不能被误判成 provider 违规。
+
+实现可以使用 identity ancestry set 检测活动路径循环；节点离开当前路径后必须移除，
 避免把共享无环子树误报为 cycle，但同一子树第二次出现时仍须重新展开、重新计节点和字节。共享无环
 子树只有在三条硬闸内才合法。
 
 `payloadTooLarge` details 固定为 `limitKind: expandedNodes | canonicalBytes`、`limit` 与已消耗的 `observed`，
-不返回原始值。65,536 / 4 MiB 是 PB-050-01 防止 host 被单份 provider payload 挂死的不可配置安全天花板；
+不返回原始值；同一个 occurrence 同时越过两条上限时 `canonicalBytes` 优先，避免同一 payload 因检查
+语句顺序得到不同 failure。2,097,152 occurrences / 4 MiB 是 PB-050-01 防止 host 被单份 provider payload 挂死的
+不可配置安全天花板；
 PB-050-02 可以在天花板内提供更小的可配置运行预算，但不能放宽它。
 
 冻结或 canonical 编码的内部错误统一收敛成 `snapshotPayloadInvalid`；只有进程级不可恢复错误不在普通
@@ -103,8 +110,10 @@ provider failure 契约内。不得先修改 revision 再尝试编码。
 
 - 单元/协议测试：合法 primitives/嵌套结构、插入顺序 golden、source 返回后 mutation、非字符串 key、
   `NaN`/infinity、自定义对象、直接/间接 cycle、深度 128/129、共享无环子树在预算内合法。
-- 扇出失败注入：逐层把同一子树挂到两个 key，分别覆盖展开节点边界 ±1 与 canonical 字节边界 ±1；断言
-  在构造完整展开 String/副本前中止，revision、latest 与 retention 均不改变。
+- 扇出失败注入：逐层把同一子树挂到两个 key，用可注入的小测试预算分别覆盖展开 occurrence 边界 ±1 与
+  canonical 字节边界 ±1；断言在构造完整展开 String/副本前中止，revision、latest 与 retention 均不改变。
+- 常量关系测试：生产 `maxExpandedOccurrences >= maxCanonicalBytes ~/ 2`，并用最密单字节 scalar 数组证明
+  4 MiB 内不会先触发 expandedNodes；同一步同时超限时稳定选择 canonicalBytes。
 - VM/direct：同一失败的 code/details 一致；有效响应由复刻 0.4.1 reader 读取。
 - 接入方/真机：不需要业务真机；example debug 主链补一个合法 snapshot 回归即可。
 - 失败注入：canonical helper 与冻结器注入异常时不递增 revision、不淘汰 baseline、不泄漏 payload。

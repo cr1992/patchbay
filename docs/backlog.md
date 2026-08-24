@@ -82,7 +82,7 @@
 | DG-040-06 | 轨迹回放的写操作确认、目标重解析、敏感值重新注入和失败停止语义 | — | 待裁决 | [未来回放](proposals/future/trace-replay.md) |
 | DG-040-07 | platform driver 的信任边界、`exercise allow` 确认模型、Android/iOS P0 权限集合与 HarmonyOS 验证基线 | 0.4.0 | 已裁决 | [平台权限](proposals/0.4.0/platform-permissions.md) |
 | DG-040-08 | 损坏轨迹的恢复与阻断语义，以及权限专用事件扩展写入侧封闭表的前置条件 | — | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
-| DG-050-01 | snapshot 单份/总保留字节默认值、超限失败，以及 consumer revision 的事实来源与兼容形状 | 0.5.0 | 待裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md) |
+| DG-050-01 | snapshot 单份/总保留字节默认值、与 4 MiB/occurrence 硬天花板的对齐、超限失败，以及 consumer revision 的事实来源与兼容形状 | 0.5.0 | 待裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md) |
 | DG-050-02 | catalog policy 缓存的失效信号，以及动态目录无 revision 时继续逐次校验还是禁止缓存 | 0.5.0 | 待裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md) |
 | DG-050-03 | audit 队列满时的保留/丢弃策略、丢失报告与 dispose drain 预算 | 0.5.0 | 待裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md) |
 | DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md) |
