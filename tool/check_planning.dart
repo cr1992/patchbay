@@ -1,6 +1,6 @@
 import 'dart:io';
 
-const _activeVersion = '0.4.1';
+const _activeVersion = '0.5.0';
 
 const _allowedBacklogStatuses = <String>{'待排期', '待裁决', '已排期', '实现中', '已验证'};
 
