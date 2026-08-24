@@ -8,8 +8,7 @@
 
 ## 提交改动
 
-1. 从 MR 的目标分支拉分支：0.4.0 期间目标是 `main`；自 0.4.1 起版本功能目标是对应
-   `dev/<SemVer>`，hotfix 和仓库治理仍从 `main` 拉。
+1. 从 MR 的目标分支拉分支：版本功能目标是对应 `dev/<SemVer>`，hotfix 和仓库治理从 `main` 拉。
    MR 保持一个可独立评审、验收和回退的交付单元，具体颗粒度见[规划与交付治理](docs/planning.md)；
 2. 跑绿再提 MR：仓根 `dart format --output=none --set-exit-if-changed .` 零改动，
    四包 `dart test` / `flutter test` 全过，`dart analyze` 无问题；
@@ -64,5 +63,5 @@ CHANGELOG 仍由根表统一派生，不是独立真源。完整命名、内容�
 
 ## 发版
 
-只由 maintainer 操作：完成 RC 与真机验收（0.4.0 在 `main` 上，自 0.4.1 起在 `dev/<SemVer>` 上）→
+只由 maintainer 操作：在 `dev/<SemVer>` 上完成 RC 与真机验收 →
 发布 MR 合入 `main` → 将同一 `main` SHA 同步到 GitHub → 打 `patchbay-vX.Y.Z` tag → 下游按 pin 升级。

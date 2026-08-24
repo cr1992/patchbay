@@ -181,3 +181,30 @@ $ (cd packages/patchbay && PUB_HOSTED_URL=https://pub.dev dart pub publish)
       **不代表**验收通过
 - [ ] 参考 [使用指南「边界」](guide.md#边界)：CLI 结果是调试证据，不是产品验收证据——不证明像素
       正确或设备物理行为，真机验收需另行确认
+
+## 10. 人工项：发布收尾（finalize）
+
+**必须在四包实际发布之后执行。** finalize 会把版本计划标为已发布并删除 backlog 行——在包还没上
+pub.dev 时执行等于替未发生的事实背书；而四包是按依赖顺序逐个推、可能中途被拒的，先删行再发布
+会留下 backlog 已清空、版本却没发出去且无处回滚的悬空状态。
+
+- [ ] 先出计划（只读，不写盘）：
+
+```console
+dart run tool/release_finalize.dart X.Y.Z
+```
+
+- [ ] 逐条核对三档分类：
+      - `ARCHIVE`（`已验证`）：确实随本版发布，可从 backlog 删行；
+      - `EVIDENCE_PENDING`（`待真机验收`）：实现已完成但真机 / 接入方证据未闭合，**保留在 backlog
+        不删**，需显式 `--allow-evidence-pending` 才放行；
+      - `DEFER`：延期条目，清空目标版本退回 `待排期`。`实现中` 不接受批量延期，必须逐条
+        `--defer-item PB-XXX-XX` 点名。
+- [ ] 核对无误后执行：
+
+```console
+dart run tool/release_finalize.dart X.Y.Z --apply
+```
+
+- [ ] 复跑 `dart run tool/check_planning.dart`，确认 backlog 与版本计划仍一致
+- [ ] finalize 的改动走一个小 MR 合回 `main`（`main` 受保护，不接受直接推送）
