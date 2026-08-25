@@ -508,6 +508,136 @@ void main() {
     });
   });
 
+  group('0.4.1 reader ↔ 带 origin 的新 localArtifact 回执', () {
+    // PB-050-20 给回执加了 `origin`，并且**对既有 blob 路径同样写入**——
+    // `capture` / `blob get` / `logs export` 的回执从此多一个键。多加一个键
+    // 是不是 additive，取决于当年那份 reader 会不会因为看见没见过的键而失败；
+    // 这里按仓内惯例**复刻**当年的读法，而不是 import 今天的实现。
+    //
+    // 0.4.1 的读法有两处：`patchbayResponseSummary` 逐键取 `path` / `length`
+    // 并把 `verified` 当常量印出来；机器消费方按 `--json` 逐键取自己要的那几个。
+    // 两者都不做键集合校验，这正是 additive 成立的全部依据。
+    ({String path, int length, String sha256, String? blobId})?
+    readLocalArtifactThe041Way(Map<String, Object?> response) {
+      final Object? artifact = response['localArtifact'];
+      if (artifact is! Map<Object?, Object?>) return null;
+      final Object? path = artifact['path'];
+      final Object? length = artifact['length'];
+      final Object? digest = artifact['sha256'];
+      if (path is! String || length is! int || digest is! String) return null;
+      return (
+        path: path,
+        length: length,
+        sha256: digest,
+        blobId: artifact['blobId'] as String?,
+      );
+    }
+
+    String summariseThe041Way(Map<String, Object?> response) {
+      final Object? artifact = response['localArtifact'];
+      if (artifact is! Map<Object?, Object?>) return '';
+      return 'artifact=${artifact['path']} length=${artifact['length']} '
+          'verified=true';
+    }
+
+    Map<String, Object?> responseWith(Map<String, Object?> receipt) =>
+        <String, Object?>{
+          'schemaVersion': 1,
+          'requestId': 'compat-request',
+          'admission': 'accepted',
+          'payload': <String, Object?>{
+            'blob': <String, Object?>{'blobId': 'blob-1'},
+          },
+          'localArtifact': receipt,
+        };
+
+    const String digestA =
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const String digestB =
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const String digestC =
+        'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+
+    test('老读法读今天的 hostBlob 回执：新增的 origin 键被忽略', () {
+      final Map<String, Object?> response = responseWith(
+        const PatchbayDownloadedArtifact(
+          path: '/tmp/capture.png',
+          blobId: 'blob-1',
+          length: 12,
+          sha256: digestA,
+          contentType: 'image/png',
+          origin: 'hostBlob',
+        ).toJson(),
+      );
+
+      expect(
+        (response['localArtifact']! as Map<String, Object?>).keys,
+        contains('origin'),
+        reason: '前提：新回执确实带上了这个老 reader 没见过的键',
+      );
+      final read = readLocalArtifactThe041Way(response);
+      expect(read, isNotNull);
+      expect(read!.path, '/tmp/capture.png');
+      expect(read.length, 12);
+      expect(read.blobId, 'blob-1');
+      expect(
+        summariseThe041Way(response),
+        'artifact=/tmp/capture.png length=12 verified=true',
+        reason: '0.4.1 的人读行逐字不变',
+      );
+    });
+
+    test('老读法读 cliRendered 回执：没有 blobId 也不炸，只是读不到 blob', () {
+      // 老 reader 没有 `cliRendered` 这个概念，但它对回执的用法是「按路径取
+      // 文件」，而这条路径同样是本机绝对路径、同样已按 sha256 校验过。缺
+      // `blobId` 只影响「回头再向 host 要一次」这类用法，那是 blob 路径独有的；
+      // 树类载荷本来就没有 host blob 可要——不编造一个正是这条的用意。
+      final Map<String, Object?> response = responseWith(
+        const PatchbayDownloadedArtifact(
+          path: '/tmp/ui-semantics-tree.json',
+          blobId: null,
+          length: 812345,
+          sha256: digestB,
+          contentType: 'application/json',
+          origin: 'cliRendered',
+        ).toJson(),
+      );
+
+      final read = readLocalArtifactThe041Way(response);
+      expect(read, isNotNull);
+      expect(read!.path, '/tmp/ui-semantics-tree.json');
+      expect(read.length, 812345);
+      expect(read.blobId, isNull);
+      expect(
+        summariseThe041Way(response),
+        'artifact=/tmp/ui-semantics-tree.json length=812345 verified=true',
+      );
+    });
+
+    test('additive 的另一半：既有键的值一个都没被改动', () {
+      const PatchbayDownloadedArtifact artifact = PatchbayDownloadedArtifact(
+        path: '/tmp/logs.ndjson',
+        blobId: 'blob-2',
+        length: 7,
+        sha256: digestC,
+        contentType: 'application/x-ndjson',
+        origin: 'hostBlob',
+      );
+      final Map<String, Object?> withoutOrigin = <String, Object?>{
+        ...artifact.toJson(),
+      }..remove('origin');
+
+      expect(withoutOrigin, <String, Object?>{
+        'path': '/tmp/logs.ndjson',
+        'blobId': 'blob-2',
+        'length': 7,
+        'sha256': digestC,
+        'contentType': 'application/x-ndjson',
+        'verified': true,
+      }, reason: '去掉 origin 之后必须与 0.4.1 的回执逐键相同');
+    });
+  });
+
   group('更新的 host ↔ 当前 CLI', () {
     Map<String, Object?> modernIdentity({
       List<String> features = const <String>['catalogDigest', 'lifecycleState'],

@@ -234,7 +234,15 @@ PB-050-08 承诺的「每条结果一行 LF 结尾 compact JSON」不变。
 | trace 附件：`attachArtifact` 的 `blobId` **已经是可选参数** | `trace/trace_recorder.dart` |
 | 单份 artifact 硬顶 64 MiB，与 `maxArtifactBytes` / `patchbayTraceMaxArtifactBytes` 同值 | 同上 |
 
-`blob get --output`、`capture` 与 `logs export` 的行为、JSON 与退出码本条一律不动。
+`blob get --output`、`capture` 与 `logs export` 的**行为、落盘链路与退出码**本条一律不动；它们的
+`localArtifact` 回执按上一节的授权**新增一个 `origin: "hostBlob"` 键**，除此之外既有键的名字、
+位置与值逐字节不变。
+
+> **消歧（2026-08-25）**：本行原文是"行为、JSON 与退出码本条一律不动"，与上一节"`origin` 对既有
+> blob 路径同样写入"直接冲突。按授权句裁定：`origin` **写**，因此这三条命令的 JSON 确实多一个键。
+> 这是 additive——新增键不改动任何既有键，老 reader 逐键读、多余键忽略（复刻用例见
+> `packages/patchbay_cli/test/protocol_compat_test.dart` 的「0.4.1 reader ↔ 带 origin 的新
+> localArtifact 回执」）。本行只改措辞与这条结论对齐，不重新裁决。
 
 ### Skill 与 help 接缝
 
