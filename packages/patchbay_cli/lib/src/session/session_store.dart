@@ -28,11 +28,30 @@ final class PatchbaySessionStore {
         }
         records.add(record);
       } on Object {
-        _removeFile(entity);
+        _quarantineFile(entity);
       }
     }
     records.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return records;
+  }
+
+  /// Files [readAll] could not parse, moved aside rather than deleted.
+  ///
+  /// A record that fails to parse is evidence of something worth explaining
+  /// (a bug, a downgrade, a half-written file that lost the temp+rename
+  /// race) -- deleting it destroys that evidence and, worse, makes a
+  /// version bump on the record schema look like "the session vanished"
+  /// instead of "the CLI refused to read it" (see `docs/design.md`,
+  /// 本地会话文件是第三个兼容面). Nothing in this package re-reads these
+  /// files: `patchbay doctor` is expected to report their existence and
+  /// path so an operator can inspect them.
+  List<File> quarantinedFiles() {
+    if (!directory.existsSync()) return const [];
+    return directory
+        .listSync(followLinks: false)
+        .whereType<File>()
+        .where((File file) => file.path.contains(_quarantineMarker))
+        .toList(growable: false);
   }
 
   void write(PatchbaySessionRecord record) {
@@ -115,6 +134,35 @@ final class PatchbaySessionStore {
       if (file.existsSync()) file.deleteSync();
     } on FileSystemException {
       // A concurrent launcher may already have replaced or removed it.
+    }
+  }
+
+  /// The infix a quarantined file's name always contains.
+  ///
+  /// Renaming rather than appending keeps the original `.json` filename
+  /// intact as a prefix (so it stays identifiable at a glance) while no
+  /// longer ending in `.json` -- which is exactly what makes [readAll]'s
+  /// directory scan skip it on every later pass, with no extra state to
+  /// track: the rename itself is the "already processed" marker.
+  static const String _quarantineMarker = '.quarantine-';
+
+  /// Moves a file `readAll` could not parse aside instead of deleting it.
+  ///
+  /// The unique `pid`+microsecond suffix means a second corrupt file that
+  /// reuses the same session id filename (e.g. after a crash-loop) quarantines
+  /// alongside the first instead of overwriting it.
+  void _quarantineFile(File file) {
+    try {
+      if (!file.existsSync()) return;
+      final String quarantined =
+          '${file.path}$_quarantineMarker$pid-${DateTime.now().microsecondsSinceEpoch}';
+      file.renameSync(quarantined);
+    } on FileSystemException {
+      // Best-effort: if the rename itself fails (permissions, a concurrent
+      // process already moved or removed it), leave the file where it is.
+      // It still won't parse next time either, so the caller sees the same
+      // evidence again rather than losing it -- and readAll must keep going
+      // either way, never abort the rest of the directory scan over this.
     }
   }
 
