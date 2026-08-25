@@ -31,8 +31,8 @@
   `PointerDownEvent` / `PointerUpEvent`，异常路径补 `PointerCancelEvent`。
 - 完整复用既有 gesture 准入管线：解析 → 基础门 → policy → 声明门 → 门后二次 resolve/policy 比对 →
   逐点 clip/hit-test 准入 → 注入。不为 tap 开任何旁路。
-- 冻结 tap 与 `pressHold` 的语义边界：tap 的按压时长上限严格低于长按识别阈值，越界如实拒绝，而不是
-  静默滑向长按。
+- 冻结 tap 与 `pressHold` 的语义边界：tap 是「按下即抬起」的最短固定序列，down→up 间隔不进 wire、
+  不可调；要按住就用 `pressHold`。两者的差别写在命令名与参数形状上，不写进一个可调数值里。
 - `ui.semantics.tap` 的 wire、CLI、payload 与失败码逐字节不变；两条路径并存，选择指引进 help 与文档。
 - 零新增稳定错误码。
 
@@ -56,60 +56,69 @@ wire 参数：
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |---|---|---:|---|---|
 | `identifier` | string | 是 | — | 非空 Flutter Semantics identifier，与既有 gesture 家族同一身份域 |
+| `generation` | integer | 是 | — | 非负；调用方从先前观察取得的前置围栏，与既有 gesture 家族一致 |
 | `start` | json | 否 | `{"x":0.5,"y":0.5}` | 目标边界内归一化点，各轴 `[0,1]`，只允许 `x`/`y` 两个 key |
-| `durationMs` | integer | 否 | `50` | down→up 间隔，合法范围 `1..200` |
-| `generation` | integer | 否 | — | 非负；调用方从先前观察取得的前置围栏 |
 
-registration 与既有三条一样设置 `strictKeys: true` 与 `includeReason: true`；允许的 key 只有上表四个，
-任何额外 key 在进入 bridge 与 policy 之前按现有 unknown-field 形状拒绝。
+registration 与既有三条一样设置 `strictKeys: true` 与 `includeReason: true`；允许的 key 只有上表三个。
+**`durationMs` 对 tap 是未知 key**，出现即按现有 unknown-field 形状拒绝，其他额外 key 同样在进入
+bridge 与 policy 之前拒绝。
 
 三处形状选择需要说明理由，因为它们各自都有一个看起来更“对称”的替代：
 
 **`start` 沿用既有 key 名并可选。** 它在既有三条里是必填的路径起点；在 tap 里没有路径，它就是唯一
-那个点。仍叫 `start` 换来两件事：CLI 不需要新增第五个手势 option（`--start` 已在 parser 与 friendly
-option allowlist 中），decoder 的 key 集合与既有 `_decodeGesture` 同构。默认值是**目标中心**，并写进
-descriptor 的 `default` 字段而不是只写在文档里——catalog 是调用方唯一读得到的声明面，默认值藏在
-实现里等于没有声明。canonical JSON 对 map 递归排序，object 默认值不会让 digest 不稳定。
+那个点。仍叫 `start` 换来两件事：CLI 不需要新增手势 option（`--start` 已在 parser 与 friendly option
+allowlist 中），decoder 沿用既有 `_decodeGesture` 的同一个 key 名与同一段点位解码，不引入第二套点位
+形状。默认值是**目标中心**，并写进 descriptor 的 `default` 字段而不是只写在文档里——catalog 是调用方
+唯一读得到的声明面，默认值藏在实现里等于没有声明。canonical JSON 对 map 递归排序，object 默认值不会
+让 digest 不稳定。
 
-**`durationMs` 沿用既有 key 名，但上限是另一个数。** 家族里三条命令的 `durationMs` 已经各有默认值
-（500 / 300 / 100），再加一条默认 50 不制造新的不一致。真正的新东西是上限：**`200`，严格低于 Flutter
-`kLongPressTimeout`（500 ms），并留出约 300 ms 的调度抖动余量**。`LongPressGestureRecognizer` 用真实
-时钟的 timer 判定长按，不是用合成事件的 `timeStamp`，所以余量必须按真实调度留，不能按名义值卡在
-499。这条上限是**语义边界**：tap 不是“时长更短的 pressHold”，而是“保证不会被长按识别器认走的那一
-档”。要长按就用 `ui.gesture.pressHold`，那是它存在的理由。
+**down→up 间隔不进 wire。** 家族里三条命令都有可调的 `durationMs`（默认 500 / 300 / 100），tap 不加
+这个旋钮：它注入的是「按下即抬起」的最短固定序列，间隔是**内部固定常数 50 ms**——实现细节，不进
+参数表、不进 CLI、不进 payload，接入方与调用方都改不了它。理由是可调数值会把语义重新藏回数值里，
+而“这一次到底是点按还是长按”正是本条要从数值里取出来、放回命令名上的东西。
 
-**`generation` 可选。** 这一条与 [0.4.0 锚定式手势](../0.4.0/anchored-gestures.md) 判例不同，那里三条
-写手势的 `generation` 是必填的，理由是“fling 甩出后没有第二次确认的机会”。tap 不在那个风险档：它
-没有惯性、没有路径、没有跨帧位移，错点一次的后果与 `ui.semantics.tap` 错点一次同级。而
-`ui.semantics.tap` 的 `generation` 本来就是可选的——如果 tap 的指针版反而必填，就等于告诉调用方
-“想要防误击的那条路径，请先多做一次全树 dump”，而防误击恰恰是裁决记录里指定它为首选的原因。
-省略不等于不检查：第一次唯一解析得到的 generation 会被 pin，随后传入门后第二次解析，围栏一格不少。
-这一条列入待裁决。
+需要如实说明这个常数**担保什么、不担保什么**：50 ms 远低于 Flutter `kLongPressTimeout`（500 ms），
+`LongPressGestureRecognizer` 用真实时钟的 timer 判定，所以余量必须按真实调度留——固定 50 ms 把
+“被框架默认长按识别器认走”的风险压到默认阈值的工程余量之下。但它**不担保**这次注入不会被识别成
+别的手势：接入方可以注册阈值更短的 `LongPressGestureRecognizer`、可以写自定义 recognizer、竞技场里
+也可以有别的成员。对这些识别器来说，本命令注入的指针序列与用户手指按下 50 ms 完全同构，它们该怎么
+认还怎么认。**这是指针真实性的固有属性，不是本命令能担保的**：要求“真实指针”和要求“保证不被别的
+识别器认走”是互斥的两件事，本条选前者。要长按就用 `ui.gesture.pressHold`，那是它存在的理由。
+
+**`generation` 必填。** 与既有三条锚定手势一致（[0.4.0 锚定式手势](../0.4.0/anchored-gestures.md)），
+也因此与 `ui.semantics.tap` 的可选形状**不同**——这处差异是有意的，理由如下：内部 pin 只能防住
+“第一次 resolve 之后目标换代”，防不住“调用方上次观察之后、本次命令开始之前 identifier 已经被一个新
+节点复用”。后一个窗口只有调用方手里那个 generation 能关上。tap 被裁决记录定位为**防误击场景的首选
+路径**，首选路径就该用最强的那道围栏，而不是最省事的那道。代价是调用方要先有一次观察——这正是防
+误击本身的成本，不是本命令额外加的。`ui.semantics.tap` 维持可选是既有契约，不在本条内收紧
+（其形状变更属另立条目）。
 
 ### CLI 面
 
 canonical path 只有一条，不发布 alias：
 
 ```console
-$ patchbay ui gesture tap <identifier>
-$ patchbay ui gesture tap <identifier> --start '{"x":0.5,"y":0.5}'
-$ patchbay ui gesture tap <identifier> --duration-ms 50 --generation 12
+$ patchbay ui gesture tap <identifier> <generation>
+$ patchbay ui gesture tap <identifier> <generation> --start '{"x":0.5,"y":0.5}'
 ```
 
-`identifier` 是唯一位置参数；`start` / `durationMs` / `generation` 都是 per-command option，分别映射到
-已存在的 `--start`、`--duration-ms`、`--generation`。**不新增任何 CLI option**，
-`command_parser.dart` 与 friendly option allowlist 不变。
+usage suffix：`<identifier> <generation> [--start <json>]`。
 
-既有三条 gesture 命令的位置参数是 `<identifier> <generation>`；tap 因为 `generation` 可选而把它移到
-option 位，与 `ui tap <identifier> --generation <n>` 的形状对齐。这是家族内的一处不齐，代价换来
-的是与它真正的对照物（`ui.semantics.tap`）齐。
+位置参数是 `<identifier> <generation>`，**与既有三条 gesture 命令完全一致**；`start` 是唯一的
+per-command option，映射到已存在的 `--start`。**不新增任何 CLI option**，`command_parser.dart` 与
+friendly option allowlist 不变；`--duration-ms` 不出现在本命令上。
+
+与 `ui tap <identifier> --generation <n>` 的形状差异如实存在：那条命令的 `generation` 可选，所以在
+option 位；本命令必填，所以在位置参数位。形状跟着必填性走，家族内不再有两种 generation 形状。
 
 help 必须承载选择指引，因为 `ui tap` 与 `ui gesture tap` 在命令行上只差两个词，而它们是两条通道：
 
 - `ui gesture tap` 的 summary：`Tap an anchored target through the real pointer pipeline.`
 - `ui tap` 的现有 summary 不变，help 正文补一句指向 `ui gesture tap`，说明它经过 hit-test；
-- 两条 help 都写明：**默认用 `ui gesture tap`；只有目标不接收指针（自定义无障碍 action、
-  平台视图代理、测试专用 Semantics 节点）时才用 `ui tap`。**
+- 两条 help 都按**调用目的**给指引，不设默认优劣：要证明「真实指针可达并能触发」用
+  `ui gesture tap`；要驱动「声明了语义 action 的目标（含指针不可达者：自定义无障碍 action、平台视图
+  代理、测试专用 Semantics 节点）」用 `ui tap`。**两条路径证明的是不同的事实**，选哪条取决于你要的
+  是哪个事实；只在“防误击”这个目的下，指针路径才是首选（DG-050-08 记录）。
 
 ### 与 `ui.semantics.tap` 的并存语义
 
@@ -121,34 +130,43 @@ help 必须承载选择指引，因为 `ui tap` 与 `ui gesture tap` 在命令�
 | 遮挡 | 逐点 clip + hit-test 复核，被盖住即 `uiGestureTargetObscured` | 本版由 PB-050-16 单独收紧，本条不动 |
 | 生效对象 | `GestureDetector` / `InkWell` / 竞技场 / 按压态 | 已声明 `onTap` 语义的 widget（含无指针命中的） |
 | policy | `PatchbayGesturePolicy` | `PatchbaySemanticsActionPolicy` |
-| generation | 可选，内部 pin + 门后复核 | 可选，内部 pin + 门后复核 |
+| generation | **必填**，首解析即核对 + 门后复核 | 可选，内部 pin + 门后复核 |
 | 定位精度 | 目标框内可选比例偏移 | 整个节点，无点位概念 |
 | 缺 policy 时 | 不进 catalog | 不进 catalog |
 
-**两条路径都不证明业务成功。** 差别在“它证明的那一点”是否包含“用户真能点到”：指针路径包含，
-Semantics 路径不包含。所以指针路径是防误击首选，Semantics 路径是它打不到时的补集，而不是它的
-简写。两个 policy 独立也意味着：只注入了 action policy 的接入方升级 package 之后不会凭空获得合成
-指针能力，反之亦然。
+**两条路径都不证明业务成功，也不互为简写。** 差别在“它证明的那一点”是否包含“用户真能点到”：指针
+路径包含，Semantics 路径不包含；反过来，Semantics 路径能驱动指针打不到但声明了 action 的目标，指针
+路径不能。**按调用目的选**：要证明「真实指针可达并能触发」选 `ui.gesture.tap`，要驱动「声明了语义
+action 的目标」选 `ui.semantics.tap`。在“防误击”这个具体目的下指针路径是首选（DG-050-08 记录），但
+这不是一条无条件的默认优劣。两个 policy 独立也意味着：只注入了 action policy 的接入方升级 package
+之后不会凭空获得合成指针能力，反之亦然。
 
 ### codegen 与注册表影响面（只声明，不在本提案执行）
 
 实现 MR 需要触及、且必须一次改齐的面：
 
 1. `packages/patchbay/lib/src/ui_protocol_commands.dart`：新增 `patchbayUiGestureTapCommandDescriptor`。
-   现有 `_gesture(...)` 辅助函数把 `identifier`/`generation` 硬编码成必填位置参数，tap 用不了它原样；
-   实现应给 `_gesture` 加一个显式的 generation 形状开关，或让 tap 走独立声明——**不允许**为了复用
-   helper 而把 generation 改回必填，也不允许把 helper 改成会连带改变既有三条 descriptor 字节的形状。
+   现有 `_gesture(...)` 辅助函数把 `identifier`/`generation` 硬编码成必填位置参数——这一处 tap 直接
+   合用。剩下的两处不合：helper 把 `start` 声明为必填且不带默认值，而 tap 需要可选 + 目标中心默认；
+   helper 的调用点都追加 `durationMs`，而 tap 没有这个参数。实现应给 `_gesture` 加一个显式的 `start`
+   形状开关（可选性 + 默认值），或让 tap 走独立声明——**不允许**把 helper 改成会连带改变既有三条
+   descriptor 字节的形状（既有三条的 `start` 必填、`durationMs` 默认值一律不动）。
 2. `packages/patchbay_cli/tool/protocol_cli_codegen.dart` 重新生成
    `packages/patchbay_cli/lib/src/generated/protocol_cli_commands.g.dart`：新增
    `_uiGestureTapProtocolCommand` 及注册表条目。生成文件不手改。
 3. `packages/patchbay_flutter/lib/src/flutter_service_host.dart`：`_uiCommandDescriptors` 列表加一项、
    新增一条 `_uiRegistration`（`strictKeys: true`、`includeReason: true`、`available: bridge.gesture.enabled`）、
-   `_decodeGesture` 的 key 集合按 kind 放行 tap 的四个 key，并把 `start` 从必填改为按 kind 可选。
+   `_decodeGesture` 的 key 集合按 kind 收敛为 tap 的三个 key（`identifier`/`generation`/`start`，
+   **`durationMs` 按 kind 排除**，对 tap 是未知 key），并把 `start` 从必填改为按 kind 可选；
+   registration 的调用点不向 bridge 传任何时长参数。
 4. `packages/patchbay_flutter/lib/src/gesture/gesture_models.dart`：`PatchbayGestureKind` **追加**
    `tap`（追加到枚举末尾，不插队，保既有值的 index 不变）；`_dispatchedPoints` 增加
    `PatchbayGestureKind.tap => <GesturePoint>[start]` 分支。
-5. `packages/patchbay_flutter/lib/src/gesture/gesture_bridge.dart`：新增公共入口 `tap(...)`，`_run` 的
-   `generation` 参数放宽为可空并引入 pin，`_inject` 增加 tap 分支。
+5. `packages/patchbay_flutter/lib/src/gesture/gesture_bridge.dart`：新增公共入口 `tap(...)`——签名只收
+   `identifier`/`generation`/`start`/`requestId`，**不暴露时长参数**；down→up 间隔取 bridge 内的私有
+   常数（50 ms）后传入 `_run`。`_run` 的 `generation` 保持必填、**不放宽为可空**；tap kind 在第一次
+   `_resolveTarget` 就传 `expectedGeneration`（既有三条维持只在门后核对，不动）。`_inject` 增加 tap
+   分支：down → 私有常数延时 → up。
 6. `tool/api_surface.json`：新增 descriptor 符号与枚举值，按 golden 更新。
 7. 文档：`packages/patchbay_flutter/doc/ui-inspection-and-actions.md` 的“CLI 面”与选择指引、四包
    README 中英双语的手势段落、`changelog.d/0.5.0/` 下本 MR 独占的碎片。
@@ -163,21 +181,22 @@ Semantics 路径不包含。所以指针路径是防误击首选，Semantics 路
 
 一次 `ui.gesture.tap` 的状态固定为下列顺序，任何一步失败都在注入开始前返回 `admission: rejected`：
 
-1. **参数校验**：`identifier` 非空、`generation` 缺省或非负、`start` 只含数值 `x`/`y`；形状不合法即
-   `invalidUiArguments`。
-2. **边界校验**：`start` 两轴落在 `[0,1]` 之外即 `uiGesturePointOutOfBounds`；`durationMs` 不在
-   `1..200` 即 `uiGestureBudgetExceeded`。
+1. **参数校验**：`identifier` 非空、`generation` **存在**且非负、`start` 缺省或只含数值 `x`/`y`；缺
+   `generation`、类型不符或形状不合法均为 `invalidUiArguments`。
+2. **边界校验**：`start` 两轴落在 `[0,1]` 之外即 `uiGesturePointOutOfBounds`。本命令没有调用方可控的
+   时长，因此这一步没有时长边界可校验。
 3. **能力与生命周期**：未注入 `PatchbayGesturePolicy` 即 `uiGesturesDisabled`（catalog 层面该命令根本
    不出现，这条兜住直调）；App 非 `resumed` 即 `uiLifecycleNotResumed`，details 带既有 lifecycle 快照。
 4. **第一次 resolve**：按 identifier 遍历当前 Semantics 树，零命中 `uiTargetNotFound`，多命中
-   `uiTargetAmbiguous`（不按树顺序选）。**若调用方给了 `generation`，在这一步就核对**，不一致即
-   `uiGenerationStale`；随后把本次观察到的 generation **pin** 下来。
+   `uiTargetAmbiguous`（不按树顺序选）。**在这一步就核对调用方给的 `generation`**，不一致即
+   `uiGenerationStale`。核对通过后该值即本次调用全程使用的 generation。
 5. **基础门** → 再查 lifecycle。
 6. **policy 第一次求值**：`policy(target, PatchbayGestureKind.tap)`；拒绝即返回 policy 自带的
-   `rejectionCode`（默认 `uiGestureDenied`）与 notice；预算不合法或被收紧到低于本次调用即
-   `uiGestureBudgetExceeded`。
+   `rejectionCode`（默认 `uiGestureDenied`）与 notice；预算不合法，或被接入方收紧到低于本次调用实际
+   使用的量（对 tap 而言即 `maxDurationMs` 低于内部常数 50 ms）即 `uiGestureBudgetExceeded`——内部
+   常数同样受接入方预算约束，不因为它不进 wire 就绕过 policy。
 7. **声明门**（policy 返回的 `gateIds`）→ 再查 lifecycle。
-8. **门后二次 resolve**：按同一 identifier 重新解析，并核对 **pinned generation**；换代/歧义/消失即
+8. **门后二次 resolve**：按同一 identifier 重新解析，并核对同一个 generation；换代/歧义/消失即
    按第 4 步同一套码拒绝。
 9. **policy 第二次求值并逐字段比对**：allowed、rejectionCode、rejectionNotice、gateIds、三项预算中
    任一项漂移即 `uiGesturePolicyChanged`。
@@ -189,12 +208,15 @@ Semantics 路径不包含。所以指针路径是防误击首选，Semantics 路
     点数为 1 的退化情形。
 12. **注入**（下节）。
 
-第 4 步 pin、第 8 步复核这一对，是本条与 `ui.semantics.tap`、PB-050-10 共享的同一个安全原语：
-**省略 caller generation 只省调用方的前置围栏，不省 App 内部的围栏。**
+第 4 步核对、第 8 步复核这一对，是本条与 `ui.semantics.tap`、PB-050-10 共享的同一个安全原语，
+本条把两道围栏都拉满：**调用方 generation 关住「上次观察之后、命令开始之前 identifier 被新节点复用」
+那个窗口，门后复核关住「命令开始之后目标换代」那个窗口。** 两个窗口互不覆盖，所以两道都要。
 
 ### 注入与取消补偿
 
-注入序列固定为：`PointerDownEvent(position: p)` → 等待 `durationMs` → `PointerUpEvent(position: p)`。
+注入序列固定为：`PointerDownEvent(position: p)` → 等待**内部固定常数 50 ms** → `PointerUpEvent(position: p)`。
+这个间隔是实现细节，不进 wire、不进 payload，调用方与接入方都改不了它的值——接入方能做的只是用
+policy 预算把这次调用整体拒掉（见准入管线第 6 步），不是把常数调大或调小。
 
 **不发 `PointerMoveEvent`，up 的位置与 down 严格相同。** 这不是省事：任何位移都会进 touch slop 判定
 并把这次调用推进拖动/竞技场竞争，那时“它是不是一次 tap”就不再由本命令决定。
@@ -215,10 +237,11 @@ Semantics 路径不包含。所以指针路径是防误击首选，Semantics 路
 | `layoutChangedDuringGesture` | 必有 | 必有 |
 | `failureType` | 不得出现 | 必有 |
 
-`gesture` 固定为 `"tap"`；`source` 固定为 `uiObserved`；`generation` 报**实际使用的 pinned 值**（不是
-调用方传的那个可空值），因此该字段在两种 outcome 下都是确定整数。`layoutChangedDuringGesture` 沿用
-既有判定：注入后按 identifier + pinned generation 重解析，解析失败或全局矩形变化即 `true`。tap 时长短，
-这一位通常为 `false`；保留它是为了让家族的 payload 可以被同一个 reader 处理。
+`gesture` 固定为 `"tap"`；`source` 固定为 `uiObserved`；`generation` 报**本次调用实际使用的值**——因为
+它必填且在第一次 resolve 就核对过，该值恒等于调用方传入的那个整数，与既有三条 gesture 命令的语义
+逐字一致。`layoutChangedDuringGesture` 沿用既有判定：注入后按 identifier + 同一 generation 重解析，
+解析失败或全局矩形变化即 `true`。tap 序列短，这一位通常为 `false`；保留它是为了让家族的 payload
+可以被同一个 reader 处理。
 
 **换算后的全局坐标不出现在 payload、日志、审计事件与 Debug Trace 中。** 轨迹里 `ui.gesture.tap` 只留
 identifier、generation 与归一化 `start`。
@@ -230,13 +253,13 @@ identifier、generation 与归一化 `start`。
 | code | 触发 |
 |---|---|
 | `commandNotRegistered` | 接入方未注入 gesture policy，命令不在 catalog |
-| `invalidUiArguments` | identifier 空、generation 负、`start` 形状非法、未知 key |
+| `invalidUiArguments` | identifier 空、缺 generation、generation 负、`start` 形状非法、未知 key（含 `durationMs`） |
 | `uiGesturePointOutOfBounds` | `start` 越出 `[0,1]` |
-| `uiGestureBudgetExceeded` | `durationMs` 越出 `1..200`，或 policy 预算不合法/被收紧到低于本次调用 |
+| `uiGestureBudgetExceeded` | policy 预算不合法，或被收紧到低于本次调用实际使用的量（`maxDurationMs` < 50） |
 | `uiGesturesDisabled` | release 构建或 policy 缺席时的直调兜底 |
 | `uiLifecycleNotResumed` | App 非 resumed（三个检查点任一） |
 | `uiTargetNotFound` / `uiTargetAmbiguous` | identifier 零命中 / 多命中（两次 resolve 共用） |
-| `uiGenerationStale` | 显式 generation 与首解析不符，或 pinned generation 在门后换代 |
+| `uiGenerationStale` | 调用方 generation 与首解析不符，或同一 generation 在门后换代 |
 | `uiGesturePolicyChanged` | 门后 policy 决定与首次不一致 |
 | `uiGestureTargetObscured` | 几何不可解析，或 clip/hit-test 逐点准入不通过 |
 | policy / gate 自带 code | `uiGestureDenied` 默认值，或接入方 gate 返回的 code |
@@ -263,9 +286,10 @@ identifier、generation 与归一化 `start`。
 
 ### 预算
 
-本命令不引入新的 timer、retry 或独立 deadline。一次调用最多两次 identifier 遍历（与
-`ui.semantics.tap` 同）、一次 hit-test、一个 `durationMs ≤ 200 ms` 的延时，整体受 host invocation
-deadline 约束。若 PB-050-07 接受统一的 identifier traversal/index 预算，本命令与 `ui.semantics.tap`、
+本命令不引入新的 timer、retry 或独立 deadline，也不引入任何调用方可控的时间预算。一次调用最多两次
+identifier 遍历（与 `ui.semantics.tap` 同）、一次 hit-test、一个固定 50 ms 的内部延时，整体受 host
+invocation deadline 约束。接入方 policy 的 `maxDurationMs` 仍然对这 50 ms 生效：收紧到 50 以下即拒绝，
+不静默超预算注入。若 PB-050-07 接受统一的 identifier traversal/index 预算，本命令与 `ui.semantics.tap`、
 PB-050-10 必须同时切换，不能只让其中一条拥有不同的选择边界。
 
 ## 兼容与降级
@@ -274,7 +298,7 @@ PB-050-10 必须同时切换，不能只让其中一条拥有不同的选择边�
   0.4.1 复刻 reader 严格解码仍通过。老 CLI 没有 `ui gesture tap` 的 friendly path，但可经 raw
   `invoke ui.gesture.tap` 调用。
 - **新 CLI + 老 host**：catalog 无该 descriptor 时类型化报告 command unavailable。**不降级**：不改发
-  `ui.semantics.tap`，不改发 `ui.gesture.pressHold --duration-ms 50`，不退回坐标。降级会把“这台 host
+  `ui.semantics.tap`，不改发短时长的 `ui.gesture.pressHold`，不退回坐标。降级会把“这台 host
   没有指针 tap”悄悄换成“这次点击没经过 hit-test”，而两者的证据强度不同。
 - **VM Service ↔ direct**：共享同一 registration、decoder 与 Flutter bridge，transport 不参与 identifier
   解析、generation 策略或 hit-test。同一请求返回相同 schemaMode、稳定 code、requestId 与 payload。
@@ -305,8 +329,8 @@ PB-050-10 必须同时切换，不能只让其中一条拥有不同的选择边�
 - 比例偏移只在**已锚定目标的边界内**合法，且必须落在 `[0,1]`。换算后的全局坐标是单次调用内的瞬时
   实现细节，不进 payload、目录、日志、审计与轨迹。这是「不做坐标定位」红线在本版唯一会被侵蚀的地方
   ——一旦全局坐标被持久化，任何回放能力都天然有了一个绝对坐标入口。
-- 本命令**不接收任何文本**，因此不涉及 stdin provenance、sensitive input 与脱敏；`start` 与 `durationMs`
-  都是无隐私含义的数值，可以原样进 details。
+- 本命令**不接收任何文本**，因此不涉及 stdin provenance、sensitive input 与脱敏；`start` 与
+  `generation` 都是无隐私含义的数值，可以原样进 details。
 - 未注入 gesture policy 即命令不进 catalog，与 action policy 缺席时 Semantics 动作不进目录同构；升级
   package 不会替接入方默认放行。
 - release 构建继续由既有编译期裁除边界控制（`enabled` 已含 `!kReleaseMode`），不因新增 public method
@@ -317,13 +341,16 @@ PB-050-10 必须同时切换，不能只让其中一条拥有不同的选择边�
 ## 验证
 
 - **单元/协议测试**：
-  - descriptor 冻结：name、plane、mode、sideEffect、factSources、四个参数的 required/type/默认值、
-    CLI path `['ui','gesture','tap']`、恰好一条 cliSyntax；
+  - descriptor 冻结：name、plane、mode、sideEffect、factSources、三个参数的 required/type/默认值
+    （`identifier`/`generation` 必填、`start` 可选带默认）、位置参数恰为 `['identifier','generation']`、
+    CLI path `['ui','gesture','tap']`、恰好一条 cliSyntax，且参数表中**没有** `durationMs`；
   - `start` 默认值以 object 形式出现在 catalog，且 canonical/digest 稳定可复现；
-  - unknown key、`start` 多余 key、非数值 `x`/`y`、负 generation 在进入 bridge/policy 前稳定拒绝；
-  - `durationMs` 边界：`0`、`1`、`200`、`201` 四点，其中 `201` 必须 `uiGestureBudgetExceeded` 而不是
-    被 clamp；
-  - CLI 注册表对拍：`ui gesture tap` 可解析、help 含选择指引、未新增 CLI option；
+  - unknown key、**显式传入 `durationMs`**、`start` 多余 key、非数值 `x`/`y`、负 generation 在进入
+    bridge/policy 前稳定拒绝（均为 `invalidUiArguments`）；
+  - **缺 `generation` 的调用被拒**：wire 侧省略该 key 即 `invalidUiArguments`，不落任何默认值、不进
+    bridge；CLI 侧少一个位置参数即 usage 错误，不静默补齐；
+  - CLI 注册表对拍：`ui gesture tap <identifier> <generation>` 可解析、help 含按目的选择的指引、
+    未新增 CLI option，且本命令不接受 `--duration-ms`；
   - 公共 API golden 与 `wire_surface.json` 按预期分别“变”和“不变”。
 - **widget 测试矩阵**：
   - *可达*：普通按钮 → `outcome: dispatched`，`GestureDetector.onTap` 实际触发；默认 `start` 命中中心；
@@ -334,14 +361,22 @@ PB-050-10 必须同时切换，不能只让其中一条拥有不同的选择边�
     合法用法不得被误拒（沿用 0.4.0 遮挡可行性结论的同一组用例）；
   - *gate 漂移*：声明门 await 期间 policy 改变 `gateIds`/预算/决定 → `uiGesturePolicyChanged`，
     且没有任何指针事件发出；
-  - *generation 换代*：首解析后、门 await 中目标重挂载 → `uiGenerationStale`；显式 generation 与首解析
-    不符 → 在第一次 resolve 即 stale；省略 generation 时可选中受理时唯一挂载的实例，但换代后必须拒绝；
-    禁止任何自动重试；
+  - *接入方预算收紧*：policy 返回 `maxDurationMs` 小于内部常数 → `uiGestureBudgetExceeded`，
+    且没有任何指针事件发出（证明内部常数不绕过 policy 预算）；
+  - *generation 换代*：首解析后、门 await 中目标重挂载 → `uiGenerationStale`；调用方 generation 与首
+    解析不符 → 在第一次 resolve 即 stale（断言拒绝发生在基础门之前）；**identifier 在调用方观察之后
+    被另一个新节点复用** → 首解析即 stale，这条正是 generation 必填要关住的窗口；禁止任何自动重试；
   - *歧义*：同 identifier 两个 mounted 节点 → `uiTargetAmbiguous`，不按树顺序选；
-  - *长按边界*：`durationMs` 取上限时，同时挂 `onTap` 与 `onLongPress` 的目标只触发 `onTap`；
+  - *内部常数不触发框架默认长按*：同时挂 `onTap` 与 `onLongPress` 的目标只触发 `onTap`，
+    `onLongPress` 未触发（断言的是内部 50 ms 常数对 Flutter 默认 `kLongPressTimeout` 的行为，
+    不是任何可调参数的边界）；
+  - *自定义更短阈值 recognizer 的如实行为*：目标注册一个 `duration` 显著短于 50 ms 的
+    `LongPressGestureRecognizer`（或等效自定义 recognizer）时，断言**该 recognizer 确实可能赢下竞技场**，
+    而本命令仍按注入结果如实返回 `outcome: dispatched`——不做补偿、不改判、不拒绝。这条测试冻结的是
+    “本命令不担保手势归属”这个口径，防止后续实现悄悄加一层“确保是 tap”的兜底；
   - *与 `ui.semantics.tap` 对照*：同一个被非模态层覆盖的目标，`ui.gesture.tap` 拒绝而
-    `ui.semantics.tap` 在本条实现后行为不变（其收紧属 PB-050-16）——这条对照是“指针路径为防误击
-    首选”的证据，必须写成断言而不是文档口径；
+    `ui.semantics.tap` 在本条实现后行为不变（其收紧属 PB-050-16）——这条对照是“两条路径证明不同事实、
+    防误击这个目的下指针路径更强”的证据，必须写成断言而不是文档口径；
   - *坐标不外泄*：断言全局坐标不出现在响应 payload、日志与 trace 事件中。
 - **VM/direct**：同一矩阵在 VM Service 与 direct 两端各跑一遍，断言 schemaMode、code、requestId 与
   payload 一致；transport 侧无 identifier/hit-test 逻辑。
@@ -359,6 +394,9 @@ PB-050-10 必须同时切换，不能只让其中一条拥有不同的选择边�
 
 ## 待裁决
 
+> 以下五条是**提出裁决时的原始问题记录**，逐字保留以便回溯；生效结论以下面「裁决结论」小节为准，
+> 其中三条已被仓主复核改判。
+
 - **`generation` 是否可选？** 本稿建议可选（内部 pin + 门后复核不变），理由见契约小节；代价是 gesture
   家族内部出现两种 generation 形状。反方案是与既有三条一致必填，代价是把防误击首选路径变成两跳。
 - **显式 `generation` 是否在第一次 resolve 就核对？** 本稿建议是，与 PB-050-10 对齐。这比既有三条
@@ -371,22 +409,40 @@ PB-050-10 必须同时切换，不能只让其中一条拥有不同的选择边�
 - **是否给 `ui tap` 的 help 加一句反向指引？** 本稿建议加（互相指路，不改 JSON、不改语法）。这会动
   既有命令的 help 文本，虽不属 wire 变更，仍需确认不与 PB-050-09 的 help 治理撞车。
 
-### 裁决结论（2026-08-25，仓主授权代理裁决，记录于范围扩充流程）
+### 裁决结论（2026-08-25，仓主授权代理裁决 + 同日仓主复核改判，记录于范围扩充流程）
 
-- `generation` **可选**：tap 是防误击首选路径，须一跳可用；内部 pin + 门后复核不损安全。对照物是
-  `ui.semantics.tap` 与 PB-050-10 的形状（语义邻居），不是既有三条（语法邻居）；家族内两种形状的
-  代价由文档解释。
-- 显式 `generation` **在第一次 resolve 即核对**（与 PB-050-10 对齐，属收紧）。既有三条不动；家族
+**同日经仓主复核，第 1、4、5 条改判，第 2 条维持但措辞随之更新。下列为复核后的生效结论，原代理
+结论以引用形式保留在各条内以便回溯。**
+
+- **【仓主复核改判】`generation` 必填。**（原代理结论：“可选：tap 是防误击首选路径，须一跳可用；
+  内部 pin + 门后复核不损安全。”）改判理由：内部 pin 只能防住第一次 resolve 之后换代，防不住
+  “调用方上次观察之后、命令开始之前 identifier 已被新节点复用”；只有调用方手里的 generation 能关住
+  那个窗口。tap 定位为**防误击首选**，首选路径就该用最强围栏。连带裁决：CLI **回归家族位置参数形状
+  `<identifier> <generation>`**，与既有三条完全一致，“家族内两种形状”的张力就此消除；与
+  `ui.semantics.tap` 可选形状的差异如实写进文档，不反过来收紧既有命令。
+- **【仓主复核维持】`generation` 在第一次 resolve 即核对**（与 PB-050-10 对齐，属收紧）。必填之后这
+  一条更自然：既然参数必给，就没有“先看看现在挂着什么”的语义，早核对早拒绝。既有三条不动；家族
   内两种核对时机并存如实记录，未来统一的方向是把旧三条前移，另立条目，不在本条夹带。
 - `start` **沿用现名**：零新增 CLI option 与 decoder 同构的工程收益优先；help 一句话说明含义。
-- `durationMs` 上限 **200 ms 采纳**；验证矩阵必须含 0/1/200/201 边界与「上限时长不触发长按」断言，
-  真机证据不支持时回本 Proposal 改数值，不得在实现 MR 内悄调。
-- `ui tap` help **加反向指引**：实现排 PB-050-09 之后合入，同段 help 撞车由后合方 rebase。
+- **【仓主复核改判】down→up 间隔不公开，取内部固定常数 50 ms。**（原代理结论：“`durationMs` 上限
+  200 ms 采纳；验证矩阵必须含 0/1/200/201 边界与「上限时长不触发长按」断言。”）改判理由：把时长
+  做成可调参数就是把语义重新藏回数值里，而本条存在的理由正是把它取出来。该常数是实现细节，不进
+  wire、CLI、payload，接入方与调用方都改不了；改这个数字属实现细节调整，但仍须有测试证据支撑。
+  同时**撤回“保证不会被长按识别器认走”这类担保**：固定短间隔只把误触发框架默认长按的风险压到默认
+  阈值的工程余量之下；接入方自定义更短阈值的 recognizer 仍可能把任何真实指针序列识别成别的手势，
+  这是指针真实性的固有属性，不是本命令能担保的。验证矩阵相应改为「内部常数不触发框架默认长按」
+  断言 + 「自定义更短阈值 recognizer 的如实行为」测试。
+- **【仓主复核微调】`ui tap` help 加反向指引保留**，但两条 help 的指引按**调用目的**表述，不写
+  “默认用哪条”。（原代理结论隐含“默认用 `ui gesture tap`”。）要证明「真实指针可达并能触发」用
+  `ui gesture tap`；要驱动「声明了语义 action 的目标（含指针不可达者）」用 `ui tap`；两条路径证明不同
+  事实，不设默认优劣，只在“防误击”这个目的下指针路径为首选。实现排 PB-050-09 之后合入，同段 help
+  撞车由后合方 rebase。
 
 ## 被否决方案
 
-- **用 `ui.gesture.pressHold --duration-ms 50` 冒充点按**：语义藏在数值里，跨过 `kLongPressTimeout`
-  后同一条命令变成长按而调用方无从察觉；也无法在 descriptor 上声明“这是一次点按”。
+- **把 `ui.gesture.pressHold` 的按压时长调到 50 ms 冒充点按**：语义藏在数值里，跨过
+  `kLongPressTimeout` 后同一条命令变成长按而调用方无从察觉；也无法在 descriptor 上声明“这是一次
+  点按”。同理，本条也不给 tap 开一个可调时长——那等于把刚取出来的语义再塞回数值里。
 - **把 tap 做成 `ui.semantics.tap` 的一个 `mode` 参数**：会给既有 descriptor 加参数并引入联合形状，
   老 reader 的 required 约束与 help 都要改；两条路径的 policy 也不同源，塞进一条命令等于让一个
   policy 决定另一个 policy 的事。
