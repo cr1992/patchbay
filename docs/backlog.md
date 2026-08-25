@@ -68,7 +68,7 @@
 | PB-050-10 | identifier 锚定的通用 semantics action | `ui tap <identifier>` 已有单请求解析与 generation 复核，但非 tap action 仍只能携带快照的 `nodeId + generation`，高变动树上需要调用方自行重取重试 | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md)；DG-050-06；新增独立命令，不把 integer `generation` 扩成 `latest` 字符串 |
 | PB-050-11 | 结构化日志 event 身份与服务端过滤 | record 只冻结 `message + fields`，接入方可把同一事件名分别放进 `fields.event` 或 message，消费方会漏检；现有 query 只有 level/category/time 过滤 | — | 待排期 | 接入方 log source 先统一映射；核心落地前补 Proposal，联合裁决一等 event 字段、legacy 兼容及 query/tail/export 过滤 |
 | PB-050-12 | 最低支持 SDK 组合与 CI 证据 | package 声明 Dart `>=3.11.0`、Flutter `>=3.38.0`，但合入 CI 只跑 Flutter 3.44.9 自带的 Dart；文档下限与两个约束的真实可安装交集尚未被机检证明 | 0.5.0 | 已排期 | 解析并记录最早可安装的 Dart/Flutter 组合，增加最低组合 CI lane；若现有声明无法形成文档承诺的组合，先如实纠正文档，任何提高公开下限的改动另走 Proposal |
-| PB-050-13 | 公共 API surface 分类与 0.5.0 增量预算 | 0.4.1 四包 golden 已有 475 个公共符号，其中 CLI 为 203 个；现有门禁能发现漂移，但没有区分稳定 consumer API、CLI 嵌入面、生成 wire 与意外实现暴露 | 0.5.0 | 已排期 | 本版只做分类、增量归属和后续收缩清单，不移除 0.4.1 符号；0.5.0 新增公共符号必须逐项归属已接受 PB，实际收缩另走兼容版本与 Proposal |
+| PB-050-13 | CLI 公共 API surface 收口 | 0.4.1 的 canonical CLI library 暴露 203 个符号，包内 47 个文件通过根 barrel 访问实现与测试 seam，API golden 只能冻结漂移，不能证明 launcher/trace/session/doctor 等实现应成为 SDK | 0.5.0 | 待裁决 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)；DG-050-07；根入口保留 2 个、8 个迁入 opt-in client，其余 193 个彻底退出公共面，本版完成不延期 |
 
 ## 文档债（快赢，可随任意批次走）
 
@@ -94,6 +94,7 @@
 | DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md) |
 | DG-050-05 | semantics owner 已可用时是否仍主动请帧、`ui.wait` 的观察 cadence，以及 identifier cache 的失效与 generation 复核 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md) |
 | DG-050-06 | 通用 identifier action 的独立命令形状、CLI canonical path、`strictKeys` 与 unknown key 处置、可选 caller generation 与公开 action allowlist | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md) |
+| DG-050-07 | CLI 公共 API 收口：canonical 入口保留 2 个、8 个迁入 opt-in client、其余 193 个彻底退出公共面，且不提供 legacy/testing 过渡入口 | 0.5.0 | 待裁决 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md) |
 
 ## 维护规则
 
