@@ -1,6 +1,6 @@
 # 0.5.0 identifier 锚定的 scroll-to-reveal
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-17
 >
