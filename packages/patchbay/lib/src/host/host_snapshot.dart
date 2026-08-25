@@ -1,16 +1,21 @@
 import 'dart:convert';
 
-import '../catalog_digest.dart';
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
 import '../snapshot.dart';
 import 'host_models.dart';
+import 'snapshot_payload.dart';
 
 final class HostSnapshotHandler {
-  HostSnapshotHandler({required PatchbaySnapshotSource snapshotSource})
-    : _snapshot = snapshotSource;
+  HostSnapshotHandler({
+    required PatchbaySnapshotSource snapshotSource,
+    PatchbaySnapshotPayloadFreezer snapshotFreezer =
+        const PatchbaySnapshotPayloadFreezer(),
+  }) : _snapshot = snapshotSource,
+       _snapshotFreezer = snapshotFreezer;
 
   final PatchbaySnapshotSource _snapshot;
+  final PatchbaySnapshotPayloadFreezer _snapshotFreezer;
   final List<PatchbaySnapshotRevision> _snapshotRevisions =
       <PatchbaySnapshotRevision>[];
   var _nextSnapshotRevision = 0;
@@ -150,7 +155,18 @@ final class HostSnapshotHandler {
         ),
       );
     }
-    final String canonical = patchbayCanonicalJson(declared);
+    final PatchbayFrozenSnapshotPayload frozen;
+    try {
+      frozen = _snapshotFreezer.freeze(declared);
+    } on PatchbaySnapshotPayloadViolation catch (error) {
+      return PatchbaySnapshotRead.violated(
+        patchbayProviderViolationEnvelope(
+          'The App snapshot source violates the Patchbay JSON contract.',
+          error.details,
+        ),
+      );
+    }
+    final String canonical = frozen.canonical;
     PatchbaySnapshotRevision revision;
     if (_snapshotRevisions.isNotEmpty &&
         _snapshotRevisions.last.canonical == canonical) {
@@ -159,9 +175,7 @@ final class HostSnapshotHandler {
       revision = PatchbaySnapshotRevision(
         revision: ++_nextSnapshotRevision,
         canonical: canonical,
-        body: Map<String, Object?>.from(
-          jsonDecode(canonical) as Map<String, Object?>,
-        ),
+        body: frozen.body,
       );
       _snapshotRevisions.add(revision);
       if (_snapshotRevisions.length > patchbaySnapshotRevisionRetention) {
@@ -176,8 +190,8 @@ final class HostSnapshotHandler {
       'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
     };
     return PatchbaySnapshotRead.valid(
-      <String, Object?>{...declared, 'schemaVersion': 1, ...metadata},
-      declared,
+      <String, Object?>{...frozen.body, 'schemaVersion': 1, ...metadata},
+      frozen.body,
       metadata,
     );
   }
