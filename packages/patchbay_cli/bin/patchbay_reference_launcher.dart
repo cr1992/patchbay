@@ -17,6 +17,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/platform/process_utils.dart';
 
 Future<int> main(List<String> arguments) async {
   final Map<String, String> options = _parse(arguments);
@@ -112,6 +113,8 @@ Future<int> main(List<String> arguments) async {
     ownerPid: context.ownerPid,
     launchId: context.launchId,
     observedAtMs: DateTime.now().millisecondsSinceEpoch,
+    // 启动身份在记录创建时采集一次；采集不到保持 null（老记录语义，纯 PID 判定）。
+    processStartTime: PlatformProcessUtils.processStartTimeSignature(app.pid),
   );
   store.write(pending);
   declared = true;

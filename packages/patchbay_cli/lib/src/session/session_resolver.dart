@@ -10,7 +10,7 @@ final class PatchbaySessionResolver {
     PatchbaySessionStore? store,
     PatchbayIdentityProbe? identityProbe,
     PatchbayPidProbe? pidProbe,
-    PatchbayProcessStartTimeProbe? processStartTimeProbe,
+    String? Function(int processId)? processStartTimeProbe,
     PatchbaySessionClock? clock,
   }) : store = store ?? PatchbaySessionStore(),
        _identityProbe = identityProbe ?? _probeIdentity,
@@ -21,7 +21,7 @@ final class PatchbaySessionResolver {
   final PatchbaySessionStore store;
   final PatchbayIdentityProbe _identityProbe;
   final PatchbayPidProbe _pidProbe;
-  final PatchbayProcessStartTimeProbe _processStartTimeProbe;
+  final String? Function(int processId) _processStartTimeProbe;
   final PatchbaySessionClock _clock;
 
   /// The pinned session id, or `null` when nothing is pinned.

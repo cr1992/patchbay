@@ -438,10 +438,6 @@ typedef PatchbayIdentityProbe =
     Future<PatchbayRuntimeIdentity> Function(Uri uri);
 typedef PatchbayPidProbe = bool Function(int processId);
 
-/// Captures a live PID's current OS-reported launch-time signature, or
-/// `null` when the platform cannot answer. See
-/// [PlatformProcessUtils.processStartTimeSignature].
-typedef PatchbayProcessStartTimeProbe = String? Function(int processId);
 typedef PatchbaySessionClock = DateTime Function();
 
 extension<T> on Iterable<T> {
