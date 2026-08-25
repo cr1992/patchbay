@@ -1,6 +1,7 @@
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
 
+import '../output/local_artifact.dart' show patchbayDefaultMaxInlineBytes;
 import '../rpc_timeout.dart';
 
 /// Constructs the CLI option parser with all supported flags and options.
@@ -86,6 +87,15 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Wait for a returned jobId to reach a terminal event.',
   )
   ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
+  ..addOption(
+    'view',
+    allowed: <String>['full', 'brief'],
+    defaultsTo: 'full',
+    help:
+        'JSON view: full keeps every field, brief keeps the decision facts '
+        'and lists what it omitted. Requires --json (repl: overridable per '
+        'line).',
+  )
   ..addFlag(
     'keep-awake',
     defaultsTo: false,
@@ -144,6 +154,13 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Capture after this many Patchbay-observed Flutter frames (1..120).',
   )
   ..addOption('output', help: 'Local artifact output path.')
+  ..addOption(
+    'max-inline-bytes',
+    help:
+        'Inline-size ceiling, in bytes of the stdout document, before a '
+        'tree command spills its unbounded member to a local artifact '
+        '(default $patchbayDefaultMaxInlineBytes; 0 disables spilling).',
+  )
   ..addOption('name', help: 'Human-readable local trace name.')
   ..addFlag(
     'activate',

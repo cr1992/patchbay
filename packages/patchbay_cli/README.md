@@ -102,7 +102,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay trace show <trace-id>` | local CLI declaration | — |
 | `patchbay trace start --name <name> [--activate] [--pin]` | local CLI declaration | — |
 | `patchbay trace stop [trace-id]` | local CLI declaration | — |
-| `patchbay ui focus-tree` | client CLI declaration | — |
+| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` |
 | `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.pressHold` |
@@ -112,7 +112,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay ui keep-awake off` | protocol descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake on [--lease-ms <ms>]` | protocol descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake status` | protocol descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree` | client CLI declaration | — |
+| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
 | `patchbay ui semantics action <node-id> <generation> <action> [text]` | protocol descriptor | `ui.semantics.action` |
 | `patchbay ui semantics tree` | protocol descriptor | `ui.semantics.tree` |
 | `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` |
@@ -126,7 +126,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay ui wait semantics-unmounted <identifier>` | protocol descriptor | `ui.wait` |
 | `patchbay ui wait semantics-value <identifier> <value>` | protocol descriptor | `ui.wait` |
 | `patchbay ui wait tree-revision <revision>` | protocol descriptor | `ui.wait` |
-| `patchbay ui widget-tree` | client CLI declaration | — |
+| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
 <!-- PATCHBAY_COMMAND_REFERENCE:END -->
 
 Once the app is launched by the `flutter run --machine` launcher, the CLI discovers the unique

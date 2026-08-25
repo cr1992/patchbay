@@ -5,6 +5,9 @@ import 'package:args/args.dart';
 import 'command_help.dart';
 import 'command_registry.dart';
 import 'doctor.dart';
+import 'output/brief_view.dart';
+import 'output/local_artifact.dart';
+import 'registry/argument_decoder.dart';
 import 'result.dart';
 import 'ui_manifest.dart';
 
@@ -105,17 +108,31 @@ final class PatchbayReplSession {
     required StringSink out,
     required StringSink err,
     required bool json,
+    required PatchbayLocalArtifactWriter outputWriter,
+    String sessionView = patchbayViewFull,
+    Map<String, String>? environment,
   }) : _parser = parser,
        _execute = execute,
        _out = out,
        _err = err,
-       _json = json;
+       _json = json,
+       _outputWriter = outputWriter,
+       _sessionView = sessionView,
+       _environment = environment;
 
   final ArgParser _parser;
   final PatchbayReplCommand _execute;
   final StringSink _out;
   final StringSink _err;
   final bool _json;
+  final PatchbayLocalArtifactWriter _outputWriter;
+
+  /// The view `patchbay --json --view brief ... repl` opened the session
+  /// with; a line's own `--view` overrides it for that line only (PB-050-21
+  /// section 6 — this is the only per-line override `--view` gets, and it
+  /// deliberately does not reconnect).
+  final String _sessionView;
+  final Map<String, String>? _environment;
 
   /// Whether this session has already explained a non-resumed App.
   ///
@@ -138,6 +155,9 @@ final class PatchbayReplSession {
         words = tokenizePatchbayReplLine(line);
         parsed = _parser.parse(words);
         _rejectSessionScopedOptions(parsed);
+        if (_resolvedView(parsed) == patchbayViewBrief && !_json) {
+          throw const FormatException('--view brief requires --json');
+        }
       } on FormatException catch (error) {
         _writeFailure(
           number,
@@ -173,7 +193,7 @@ final class PatchbayReplSession {
 
       try {
         final PatchbayReplOutcome outcome = await _execute(parsed);
-        _writeResult(number, parsed.rest, outcome);
+        await _writeResult(number, parsed, outcome);
       } on FormatException catch (error) {
         _writeFailure(
           number,
@@ -257,28 +277,86 @@ final class PatchbayReplSession {
     }
   }
 
-  void _writeResult(
+  Future<void> _writeResult(
     int number,
-    List<String> command,
+    ArgResults parsed,
     PatchbayReplOutcome outcome,
-  ) {
+  ) async {
     _explainLifecycleOnce(outcome.response);
+    final List<String> command = parsed.rest;
+    final PatchbayFriendlyCommandSpec? spec =
+        PatchbayFriendlyCommandRegistry.specFor(command);
+    final Map<String, Object?> response = await _finishReplRendering(
+      spec: spec,
+      parsed: parsed,
+      outcome: outcome,
+      number: number,
+      command: command,
+    );
     if (_json) {
       _out.writeln(
         jsonEncode(<String, Object?>{
           'line': number,
           'command': command,
           'exitCode': outcome.exitCode,
-          'response': outcome.response,
+          'response': response,
         }),
       );
       return;
     }
     _out.writeln(
       '[$number] exit=${outcome.exitCode} '
-      '${patchbayResponseSummary(outcome.response)}',
+      '${patchbayResponseSummary(response)}',
     );
   }
+
+  /// The PB-050-20 / PB-050-21 render-time seam for one repl line: spill
+  /// first, project second, matching the one-shot path in `cli.dart`.
+  ///
+  /// The `renderDocument` closures below reproduce exactly what `_json`/
+  /// human rendering below would print unspilled, so the PB-050-20
+  /// threshold measures the real per-line document — compact JSON or a
+  /// human summary line — not the one-shot shape.
+  Future<Map<String, Object?>> _finishReplRendering({
+    required PatchbayFriendlyCommandSpec? spec,
+    required ArgResults parsed,
+    required PatchbayReplOutcome outcome,
+    required int number,
+    required List<String> command,
+  }) async {
+    final int maxInlineBytes =
+        ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes') ??
+        patchbayDefaultMaxInlineBytes;
+    final PatchbayRenderedMemberSpillResult spilled =
+        await maybeSpillRenderedMember(
+          writer: _outputWriter,
+          spec: spec,
+          response: outcome.response,
+          exitCode: outcome.exitCode,
+          explicitOutputPath: parsed.option('output'),
+          force: parsed.flag('force'),
+          maxInlineBytes: maxInlineBytes,
+          renderDocument: (Map<String, Object?> candidate) => _json
+              ? jsonEncode(<String, Object?>{
+                  'line': number,
+                  'command': command,
+                  'exitCode': outcome.exitCode,
+                  'response': candidate,
+                })
+              : '[$number] exit=${outcome.exitCode} '
+                    '${patchbayResponseSummary(candidate)}',
+          environment: _environment,
+        );
+    if (_resolvedView(parsed) != patchbayViewBrief) return spilled.response;
+    return projectPatchbayBriefView(
+      spec: spec,
+      response: spilled.response,
+      exitCode: outcome.exitCode,
+    );
+  }
+
+  String _resolvedView(ArgResults parsed) =>
+      parsed.wasParsed('view') ? parsed.option('view')! : _sessionView;
 
   /// Prints the lifecycle remedies the first time a line proves they apply.
   ///

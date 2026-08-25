@@ -305,6 +305,11 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     summary: 'Type text into a registered input target and submit it.',
     usageSuffix: '<target-id> <generation> [text]',
   ),
+  // Never matched: `_patchbayFriendlyCommands` filters every
+  // `.compatibilityFrozen` stub out, so path resolution for `ui semantics
+  // tree` always lands on the generated `_uiSemanticsTreeProtocolCommand`
+  // instead. Its `renderedMember` disposition and `spilledMember` therefore
+  // live on `GeneratedProtocolCommand` (see the comment there), not here.
   @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
   uiSemanticsTree.compatibilityFrozen('ui.semantics.tree', <String>[
     'ui',
@@ -384,19 +389,28 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     null,
     <String>['ui', 'widget-tree'],
     summary: 'Read the Flutter widget tree diagnostic (SDK passthrough).',
+    usageSuffix: '[--output <path>] [--force] [--max-inline-bytes <n>]',
     target: PatchbayCommandTarget.clientWidgetTree,
+    artifact: PatchbayArtifactDisposition.renderedMember,
+    spilledMember: 'data',
   ),
   uiRenderTree(
     null,
     <String>['ui', 'render-tree'],
     summary: 'Read the Flutter render tree diagnostic (SDK passthrough).',
+    usageSuffix: '[--output <path>] [--force] [--max-inline-bytes <n>]',
     target: PatchbayCommandTarget.clientRenderTree,
+    artifact: PatchbayArtifactDisposition.renderedMember,
+    spilledMember: 'data',
   ),
   uiFocusTree(
     null,
     <String>['ui', 'focus-tree'],
     summary: 'Read the Flutter focus tree diagnostic (SDK passthrough).',
+    usageSuffix: '[--output <path>] [--force] [--max-inline-bytes <n>]',
     target: PatchbayCommandTarget.clientFocusTree,
+    artifact: PatchbayArtifactDisposition.renderedMember,
+    spilledMember: 'data',
   ),
   performanceProfile(
     null,
@@ -470,6 +484,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     this.artifact = PatchbayArtifactDisposition.none,
     this.target = PatchbayCommandTarget.declaredServiceCommand,
     this.waitCondition,
+    this.spilledMember,
     bool fencesNavigationRevision = false,
   }) : _summary = summary,
        _usageSuffix = usageSuffix,
@@ -485,6 +500,11 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
          (waitCondition != null) == (_serviceCommand == 'ui.wait'),
          'every ui.wait declaration names the condition it sends, and only '
          'those declarations have one',
+       ),
+       assert(
+         (spilledMember != null) ==
+             (artifact == PatchbayArtifactDisposition.renderedMember),
+         'spilledMember is declared exactly for renderedMember commands',
        );
 
   const PatchbayFriendlyCommand.compatibility(this._compatibilityProtocol)
@@ -495,6 +515,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
       artifact = PatchbayArtifactDisposition.none,
       target = PatchbayCommandTarget.declaredServiceCommand,
       waitCondition = null,
+      spilledMember = null,
       _fencesNavigationRevision = false,
       _isCompatibilityStub = true;
 
@@ -511,6 +532,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
        _fencesNavigationRevision = fencesNavigationRevision,
        _compatibilityProtocol = null,
        _isCompatibilityStub = true,
+       spilledMember = null,
        target = PatchbayCommandTarget.declaredServiceCommand;
 
   final String? _serviceCommand;
@@ -542,6 +564,8 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
   final PatchbayCommandTarget target;
   @override
   final String? waitCondition;
+  @override
+  final String? spilledMember;
 
   @override
   bool get fencesNavigationRevision =>

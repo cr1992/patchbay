@@ -1,6 +1,7 @@
 import 'package:args/args.dart';
 
 import 'command_registry.dart';
+import 'output/local_artifact.dart' show patchbayDefaultMaxInlineBytes;
 import 'result.dart';
 
 /// Renders CLI help from the parser and friendly-command declarations.
@@ -302,6 +303,40 @@ abstract final class PatchbayCommandHelp {
     String? serviceCommand,
     List<String>? path,
   }) {
+    final bool isTreeSpillCommand =
+        serviceCommand == 'ui.semantics.tree' ||
+        (path != null &&
+            (_pathIs(path, <String>['ui', 'widget-tree']) ||
+                _pathIs(path, <String>['ui', 'render-tree']) ||
+                _pathIs(path, <String>['ui', 'focus-tree'])));
+    if (isTreeSpillCommand) {
+      output
+        ..writeln()
+        ..writeln(
+          'Past $patchbayDefaultMaxInlineBytes inline bytes (the stdout '
+          'document that would carry the tree), this spills to a local '
+          'artifact and the response gets a verified path/length/sha256 '
+          'receipt in its place; --output/--force always write, '
+          '--max-inline-bytes overrides the ceiling and 0 disables '
+          'spilling. --json (indented) and repl JSON (compact) measure '
+          'different documents, so the same tree can trip one and not '
+          'the other.',
+        );
+    }
+    final bool hasBriefProjection =
+        isTreeSpillCommand ||
+        serviceCommand == 'logs.query' ||
+        (path != null && _pathIs(path, <String>['catalog']));
+    if (hasBriefProjection) {
+      output
+        ..writeln()
+        ..writeln(
+          '--json --view brief keeps this response\'s decision facts and '
+          'drops its unbounded field; the dropped path is always listed in '
+          '`localView.omitted`, and --view full (repl: per line) restores '
+          'it.',
+        );
+    }
     if (serviceCommand == 'ui.capture') {
       output
         ..writeln()
@@ -483,4 +518,7 @@ abstract final class PatchbayCommandHelp {
     }
     return true;
   }
+
+  static bool _pathIs(List<String> path, List<String> other) =>
+      path.length == other.length && _startsWith(path, other);
 }
