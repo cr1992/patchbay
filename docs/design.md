@@ -106,6 +106,22 @@ sequenceDiagram
 键，并在 `details.violations` 里一次列全所有违规项。跳过坏行会让接入方以为自己只是少注册了几条
 命令，而不是目录本身坏了。
 
+### Provider JSON 先冻结，再进入协议
+
+consumer provider 返回的 snapshot 等结构必须是严格 JSON：`null`、bool、有限 number、String、
+string-key map 和这些值组成的 list。host 在同一个 provider 边界内完成显式有界验证、冻结和 canonical
+编码；非字符串 key、非有限数、未知对象、循环、过深或过大的结构统一以既有
+`providerProtocolViolation` 拒绝，不让异常、原值或 consumer 的 `toString()` 越过边界。
+
+snapshot 的响应、selector、revision 与 diff 共用同一份冻结读视图。冻结保持 consumer map/list 的迭代
+顺序，排序 canonical 只负责相等比较和字节计量，因此 consumer 返回后的 mutation 不会改写已观察事实，
+也不会用排序副本改变既有响应字段顺序。验证不依赖递归调用栈：容器深度、展开 occurrence 与 canonical
+UTF-8 分别受 128、2,097,152 和 4 MiB 的固定安全天花板约束；共享无环子树按每次出现重新计费，只以
+活动路径判循环。VM Service 与 direct 复用同一个 host handler，失败形态不得在 transport 层分叉。
+
+完整失败分类、预算优先级与兼容矩阵见已接受的
+[Snapshot provider JSON 边界与冻结读视图](proposals/0.5.0/snapshot-provider-boundary.md)。
+
 ### job 的异步分支
 
 长流程命令受理即返回 `admission: accepted` + 顶层 `jobId`，controller 在 App 侧继续跑。
