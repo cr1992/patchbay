@@ -249,6 +249,7 @@ fail-closed。能力缺失、tree 截断、payload 不完整分别有稳定 prot
 ```text
 dart run bin/patchbay.dart --ws-uri <uri> --json repl <<'EOF'
 identity
+describe ui.capture
 ui semantics tree
 ui tap login.submit
 EOF
@@ -257,6 +258,7 @@ EOF
 repl 建一次连接，然后逐行执行 typed 命令，语法与一次性调用完全相同。每行输出自带 `exitCode`
 （`--json` 下是一行一个 JSON 信封，否则是 `[n] exit=<code> <摘要>`）：进程退出码承载不了逐条结果，
 会话码只描述会话本身——干净跑完是 `0`，被错误终止则是该错误的类别。
+`describe <service-command>` 可直接在会话内读取 live catalog；它不会调用所描述的命令。
 
 被拒绝或类型化失败的行不终止会话；transport / protocol / session 错误终止，因为它们说明复用的连接或
 对端已经不是操作者选定的那个，CLI 不会悄悄重连。

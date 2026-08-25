@@ -107,7 +107,12 @@ final class PatchbaySessionResolver {
   Future<PatchbayDiscoveredSession> resolve({String? sessionId}) async {
     final all = store.readAll();
     if (all.isEmpty) {
-      throw const PatchbaySessionException('sessionDirectoryEmpty');
+      throw const PatchbaySessionException(
+        'sessionDirectoryEmpty',
+        hint:
+            'start the App under `patchbay launch -- <consumer command>` '
+            'or connect explicitly with `--ws-uri <uri>`',
+      );
     }
     final String? pinned = sessionId == null ? store.readSelection() : null;
     final String? wanted = sessionId ?? pinned;

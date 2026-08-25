@@ -132,6 +132,30 @@ void main() {
     expect(result.err, contains('--session fixture-one'));
   });
 
+  test('sessionDirectoryEmpty carries both recovery paths', () async {
+    final Directory sessions = Directory.systemTemp.createTempSync(
+      'patchbay-empty-sessions-',
+    );
+    addTearDown(() => sessions.deleteSync(recursive: true));
+
+    final _Run result = await _run(<String>[
+      '--session-dir',
+      sessions.path,
+      '--json',
+      'identity',
+    ], connected: false);
+
+    expect(result.exitCode, PatchbayExitCode.transport);
+    expect(result.error['code'], 'sessionDirectoryEmpty');
+    expect(
+      result.details['hint'],
+      contains('patchbay launch -- <consumer command>'),
+    );
+    expect(result.details['hint'], contains('--ws-uri'));
+    expect(result.err, contains('patchbay launch -- <consumer command>'));
+    expect(result.err, contains('--ws-uri'));
+  });
+
   test('a transport-class failure keeps its own stable code', () async {
     final _Run result = await _run(<String>['--json', 'ui', 'widget-tree']);
 

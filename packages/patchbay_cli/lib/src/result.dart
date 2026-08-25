@@ -137,6 +137,19 @@ String patchbayResponseSummary(Map<String, Object?> value) {
     return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} '
         'uiTargets=${targets.length}';
   }
+  if (value['payload'] case {
+    'outcome': 'applied',
+    'targetId': final Object targetId,
+    'generation': final Object generation,
+    'operation': final String operation,
+    'length': final Object length,
+  } when operation == 'text.set' || operation == 'text.enter') {
+    final String callbacks = operation == 'text.set'
+        ? 'formatters=skipped onChanged=skipped'
+        : 'formatters=run onChanged=calledIfConfigured';
+    return 'targetId=$targetId generation=$generation operation=$operation '
+        'length=$length $callbacks';
+  }
   // A terminal job answers with both an id and an outcome; summarising it as
   // just the id would hide the half the operator was waiting for.
   if (value['payload'] case final Map<Object?, Object?> payload

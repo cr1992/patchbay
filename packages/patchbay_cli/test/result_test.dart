@@ -1,4 +1,5 @@
 import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/output/output_formatter.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -78,6 +79,47 @@ void main() {
       }),
       'jobId=job-7',
     );
+  });
+
+  test('text summaries state the formatter and onChanged behavior', () {
+    Map<String, Object?> response(String operation) => <String, Object?>{
+      'admission': 'accepted',
+      'payload': <String, Object?>{
+        'outcome': 'applied',
+        'source': 'uiObserved',
+        'targetId': 'form.code',
+        'generation': 7,
+        'operation': operation,
+        'value': 'ABC',
+        'length': 3,
+      },
+    };
+
+    expect(
+      patchbayResponseSummary(response('text.set')),
+      contains('formatters=skipped onChanged=skipped'),
+    );
+    expect(
+      patchbayResponseSummary(response('text.enter')),
+      contains('formatters=run onChanged=calledIfConfigured'),
+    );
+
+    final Map<String, Object?> unchanged = response('text.set');
+    final StringBuffer output = StringBuffer();
+    OutputFormatter.writeOutput(output, unchanged, json: true);
+    expect(output.toString(), '''{
+  "admission": "accepted",
+  "payload": {
+    "outcome": "applied",
+    "source": "uiObserved",
+    "targetId": "form.code",
+    "generation": 7,
+    "operation": "text.set",
+    "value": "ABC",
+    "length": 3
+  }
+}
+''');
   });
 
   test('typed execution supersedes legacy dispatched for immediate exits', () {

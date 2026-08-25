@@ -256,6 +256,48 @@ Availability is still decided by the running App catalog.
     );
   });
 
+  test('raw artifact help points to verified download commands', () {
+    final ArgParser parser = patchbayCliParser();
+    final String capture = PatchbayCommandHelp.render(parser, <String>[
+      'ui.capture',
+    ]);
+    expect(capture, contains('capture root --output <path>'));
+    expect(
+      capture,
+      contains('capture target <target-id> <generation> --output <path>'),
+    );
+
+    final String blob = PatchbayCommandHelp.render(parser, <String>[
+      'blob.read',
+    ]);
+    expect(blob, contains('blob get <blob-id> --output <path>'));
+    expect(blob, contains('request `limit`'));
+    expect(blob, contains('response `length`'));
+  });
+
+  test('text help distinguishes target and Semantics identities', () {
+    final ArgParser parser = patchbayCliParser();
+    final String set = PatchbayCommandHelp.render(parser, <String>[
+      'ui.text.set',
+    ]);
+    expect(set, contains('does not run input formatters or `onChanged`'));
+    expect(set, contains('catalog target `id`'));
+    expect(set, contains('Semantics `identifier`'));
+
+    final String enter = PatchbayCommandHelp.render(parser, <String>[
+      'ui.text.enter',
+    ]);
+    expect(enter, contains('runs input formatters'));
+    expect(enter, contains('calls `onChanged`'));
+  });
+
+  test('repl help shows live describe as an in-session example', () {
+    expect(
+      PatchbayCommandHelp.render(patchbayCliParser(), <String>['repl']),
+      contains('describe <service-command>'),
+    );
+  });
+
   test('every declared service command answers as a help topic', () {
     final ArgParser parser = patchbayCliParser();
     for (final PatchbayFriendlyCommandSpec command

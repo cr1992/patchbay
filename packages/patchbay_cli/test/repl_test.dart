@@ -315,6 +315,26 @@ void main() {
     expect(session.client.invoked, isEmpty);
   });
 
+  test(
+    'describe reads the live catalog without invoking the command',
+    () async {
+      final _Session session = await _repl(<String>[
+        'describe ui.semantics.tree',
+      ]);
+
+      expect(session.exitCode, PatchbayExitCode.accepted);
+      expect(session.envelopes, hasLength(1));
+      final Map<String, Object?> response =
+          session.envelopes.single['response']! as Map<String, Object?>;
+      expect(
+        (response['command']! as Map<String, Object?>)['name'],
+        'ui.semantics.tree',
+      );
+      expect(session.client.catalogReads, 1);
+      expect(session.client.invoked, isEmpty);
+    },
+  );
+
   test('without --json each line still reports its own exit code', () async {
     final _Session session = await _repl(
       <String>['identity', 'ui tap absent.id'],
