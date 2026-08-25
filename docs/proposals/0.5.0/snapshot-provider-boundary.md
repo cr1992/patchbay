@@ -1,6 +1,6 @@
 # 0.5.0 Snapshot provider JSON 边界与冻结读视图
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-01
 >
@@ -118,9 +118,10 @@ provider failure 契约内。不得先修改 revision 再尝试编码。
 - 接入方/真机：不需要业务真机；example debug 主链补一个合法 snapshot 回归即可。
 - 失败注入：canonical helper 与冻结器注入异常时不递增 revision、不淘汰 baseline、不泄漏 payload。
 
-## 待裁决
+## 裁决结果
 
-无。评审只需确认本提案对“0.4.1 合法 JSON”的定义与 key 顺序兼容，没有产品策略选择。
+已接受。0.4.1 已合法的严格 JSON 保持字段顺序与响应字节兼容；provider 违规统一收敛到既有
+`providerProtocolViolation`，冻结读视图、活动路径循环判定与三条固定安全天花板按本文实现。
 
 ## 被否决方案
 
