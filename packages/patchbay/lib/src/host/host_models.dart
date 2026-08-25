@@ -17,6 +17,24 @@ typedef PatchbayInvocationSource =
 typedef PatchbayExtensionRegistrar =
     void Function(String method, ServiceExtensionHandler handler);
 
+/// A complete catalog observation bound to the commands revision it describes.
+final class PatchbayCatalogSample {
+  const PatchbayCatalogSample({
+    required this.commandsRevision,
+    required this.catalog,
+  });
+
+  final int commandsRevision;
+  final Map<String, Object?> catalog;
+}
+
+/// A catalog source with an explicit, cheap commands invalidation signal.
+abstract interface class PatchbayCatalogProvider {
+  int get commandsRevision;
+
+  Future<PatchbayCatalogSample> readCatalog();
+}
+
 final RegExp patchbayCommandNamePattern = RegExp(
   r'^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$',
 );
@@ -185,21 +203,25 @@ final class PatchbayCommandPolicy {
     }
     for (final Object? entry in commands) {
       if (entry is! Map<Object?, Object?> || entry['name'] != command) continue;
-      final Object? parameters = entry['parameters'];
-      return PatchbayCommandPolicy(
-        sensitiveParameters: <String>{
-          if (parameters is List<Object?>)
-            for (final Object? parameter in parameters)
-              if (parameter is Map<Object?, Object?> &&
-                  parameter['sensitive'] == true &&
-                  parameter['name'] is String)
-                parameter['name']! as String,
-        },
-        retainsStdinProvenance:
-            entry['plane'] == PatchbayPlaneWire.flutterUi.name,
-      );
+      return PatchbayCommandPolicy.fromCatalogRow(entry);
     }
     return const PatchbayCommandPolicy.undeclared();
+  }
+
+  factory PatchbayCommandPolicy.fromCatalogRow(Map<Object?, Object?> command) {
+    final Object? parameters = command['parameters'];
+    return PatchbayCommandPolicy(
+      sensitiveParameters: Set<String>.unmodifiable(<String>{
+        if (parameters is List<Object?>)
+          for (final Object? parameter in parameters)
+            if (parameter is Map<Object?, Object?> &&
+                parameter['sensitive'] == true &&
+                parameter['name'] is String)
+              parameter['name']! as String,
+      }),
+      retainsStdinProvenance:
+          command['plane'] == PatchbayPlaneWire.flutterUi.name,
+    );
   }
 
   const PatchbayCommandPolicy.undeclared()
