@@ -122,6 +122,66 @@ print($1)
 "
 }
 
+# 路由命令的答复只证明导航请求已受理，不证明平台动画已经移除旧 route。
+# 读取当前 revision 后等待下一帧；不用 sleep 猜 iOS / Android 的动画时长。
+wait_next_frame() {
+  local revision
+  if ! example_session_cli --json ui wait frame-revision 0 >"$OUT" 2>&1; then
+    return 1
+  fi
+  revision="$(read_json "(doc.get('payload') or doc)['frameRevision']")"
+  example_session_cli --json ui wait frame-revision "$revision" \
+    --timeout-ms 5000 >"$OUT" 2>&1
+}
+
+# capture 自己会跨一帧后二次解析 target。页面恰好处于 route 过渡时，第一次
+# catalog 可能读到即将卸载的 generation；bridge 必须 fail-closed，我们则推进
+# 一帧、重读 catalog 后有界重试。只放行这三种动态失效，其他拒绝立即失败。
+check_capture_target() {
+  local name="$1" target_id="$2" output_path="$3"
+  local attempt=1 max_attempts=5 actual=0 code='' target_state=''
+  while [ "$attempt" -le "$max_attempts" ]; do
+    actual=0
+    example_session_cli --json catalog >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then
+      code='catalogFailed'; break
+    fi
+    target_state="$(read_json "next((str(t['generation']) if t.get('mounted') and 'capture' in t.get('operations', []) else 'unmounted' if not t.get('mounted') else 'operationUnavailable' for t in doc['uiTargets'] if t['id'] == '$target_id'), 'notFound')")"
+    case "$target_state" in
+      notFound) code='uiTargetNotFound'; break ;;
+      operationUnavailable) code='uiOperationUnavailable'; break ;;
+      unmounted) code='uiTargetUnmounted'; actual=5 ;;
+      *)
+        actual=0
+        example_session_cli --json --output "$output_path" capture target \
+          "$target_id" "$target_state" >"$OUT" 2>&1 || actual=$?
+        if [ "$actual" = 0 ]; then
+          printf '  ✓ %-42s generation=%s attempts=%s\n' \
+            "$name" "$target_state" "$attempt"
+          PASS=$((PASS + 1)); return 0
+        fi
+        code="$(read_json "(doc.get('rejection') or {}).get('code', '')" 2>/dev/null || true)"
+        case "$code" in
+          uiTargetUnmounted|uiGenerationStale|captureTargetChanged) ;;
+          *) break ;;
+        esac
+        ;;
+    esac
+    if [ "$attempt" = "$max_attempts" ]; then
+      break
+    fi
+    wait_next_frame
+    actual=$?
+    if [ "$actual" != 0 ]; then
+      code='uiWaitFrameFailed'; break
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf '  ✗ %-42s 退出码 %s，code=%s（%s 次尝试）\n' \
+    "$name" "$actual" "${code:-unknown}" "$attempt"
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+}
+
 echo "== 启动 example =="
 if ! example_session_start "${1:-}"; then
   echo "预检未开始：会话启动失败（原因见上方 [session] 行）" >&2
@@ -309,17 +369,13 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 echo
 echo "== capture / blob =="
 check 'capture root' 0 "" --output "$PRECHECK_TMP/capture.png" capture root
-# 导航往返会重新挂载页面并递增 target generation。这里不能复用启动时的
-# catalog，否则真机预检会把合法的 stale-generation 拒绝误判成 capture 失败。
-# capture target 不保证有独立 semantics 节点，因此通过 catalog 强制确认并读取。
+# 导航往返会重新挂载页面并递增 target generation。capture target 不保证有
+# 独立 semantics 节点，因此由 helper 在每次有界尝试前重读 catalog。
 check 'catalog capture target available' 0 \
   "any(t['id'] == 'example.card.capture' for t in doc['uiTargets'])" \
   --json catalog
-example_session_cli --json catalog >"$OUT" 2>&1
-CARD_CAPTURE_GEN="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.card.capture'][0]")"
-echo "  capture target generation：card=$CARD_CAPTURE_GEN"
-check 'capture target' 0 "" --output "$PRECHECK_TMP/capture-target.png" \
-  capture target example.card.capture "$CARD_CAPTURE_GEN"
+check_capture_target 'capture target' example.card.capture \
+  "$PRECHECK_TMP/capture-target.png"
 example_session_cli --json --output "$PRECHECK_TMP/cap1.png" capture root >"$OUT" 2>&1
 BLOB1="$(read_json "doc['payload']['blob']['blobId']")"
 example_session_cli --json exec example.counter.increment >/dev/null 2>&1

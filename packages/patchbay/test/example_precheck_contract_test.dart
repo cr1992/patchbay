@@ -28,22 +28,39 @@ void main() {
     );
   });
 
-  test('capture target refreshes generation after navigation', () {
+  test('capture target retries only bounded dynamic remount failures', () {
     final String source = _examplePrecheck().readAsStringSync();
     const String homeStep = "check 'ui wait destination home'";
     const String catalogStep = "check 'catalog capture target available'";
     final int navigationHome = source.indexOf(homeStep);
     final int catalogCheck = source.indexOf(catalogStep);
-    final int generationRefresh = source.indexOf(
-      'CARD_CAPTURE_GEN="\$(read_json',
+    final int captureTarget = source.indexOf(
+      "check_capture_target 'capture target'",
     );
-    final int captureTarget = source.indexOf("check 'capture target'");
+    final int helper = source.indexOf('check_capture_target()');
+    final int helperCatalog = source.indexOf(
+      'example_session_cli --json catalog',
+      helper,
+    );
+    final int helperCapture = source.indexOf(
+      'example_session_cli --json --output "\$output_path" capture target',
+      helper,
+    );
+    final int helperFrameWait = source.indexOf('wait_next_frame', helper);
 
     expect(navigationHome, isNonNegative);
     expect(catalogCheck, greaterThan(navigationHome));
-    expect(generationRefresh, greaterThan(catalogCheck));
-    expect(captureTarget, greaterThan(generationRefresh));
-    expect(source, isNot(contains(r'if [ -n "$CARD_CAPTURE_GEN" ]; then')));
+    expect(captureTarget, greaterThan(catalogCheck));
+    expect(helper, isNonNegative);
+    expect(helperCatalog, greaterThan(helper));
+    expect(helperCapture, greaterThan(helperCatalog));
+    expect(helperFrameWait, greaterThan(helperCapture));
+    expect(source, contains('local attempt=1 max_attempts=5'));
+    expect(
+      source,
+      contains('uiTargetUnmounted|uiGenerationStale|captureTargetChanged'),
+    );
+    expect(source, isNot(contains('CARD_CAPTURE_GEN=')));
   });
 }
 
