@@ -1,16 +1,21 @@
 import 'dart:convert';
 
-import '../catalog_digest.dart';
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
 import '../snapshot.dart';
 import 'host_models.dart';
+import 'snapshot_payload.dart';
 
 final class HostSnapshotHandler {
-  HostSnapshotHandler({required PatchbaySnapshotSource snapshotSource})
-    : _snapshot = snapshotSource;
+  HostSnapshotHandler({
+    required PatchbaySnapshotSource snapshotSource,
+    PatchbaySnapshotPayloadFreezer snapshotFreezer =
+        const PatchbaySnapshotPayloadFreezer(),
+  }) : _snapshot = snapshotSource,
+       _snapshotFreezer = snapshotFreezer;
 
   final PatchbaySnapshotSource _snapshot;
+  final PatchbaySnapshotPayloadFreezer _snapshotFreezer;
   final List<PatchbaySnapshotRevision> _snapshotRevisions =
       <PatchbaySnapshotRevision>[];
   var _nextSnapshotRevision = 0;
@@ -150,18 +155,44 @@ final class HostSnapshotHandler {
         ),
       );
     }
-    final String canonical = patchbayCanonicalJson(declared);
+    final PatchbayFrozenSnapshotPayload frozen;
+    final Object violationToken = Object();
+    try {
+      frozen = _snapshotFreezer.freeze(
+        declared,
+        violationToken: violationToken,
+      );
+    } on PatchbaySnapshotPayloadViolation catch (error) {
+      final Map<String, Object?> details = error.belongsTo(violationToken)
+          ? error.details
+          : <String, Object?>{
+              'reason': 'snapshotPayloadInvalid',
+              'failure': 'unsupportedType',
+              'path': r'$',
+              'type': error.runtimeType.toString(),
+            };
+      return PatchbaySnapshotRead.violated(
+        patchbayProviderViolationEnvelope(
+          'The App snapshot source violates the Patchbay JSON contract.',
+          details,
+        ),
+      );
+    }
+    final String canonical = frozen.canonical;
     PatchbaySnapshotRevision revision;
     if (_snapshotRevisions.isNotEmpty &&
         _snapshotRevisions.last.canonical == canonical) {
-      revision = _snapshotRevisions.last;
+      revision = PatchbaySnapshotRevision(
+        revision: _snapshotRevisions.last.revision,
+        canonical: canonical,
+        body: frozen.body,
+      );
+      _snapshotRevisions[_snapshotRevisions.length - 1] = revision;
     } else {
       revision = PatchbaySnapshotRevision(
         revision: ++_nextSnapshotRevision,
         canonical: canonical,
-        body: Map<String, Object?>.from(
-          jsonDecode(canonical) as Map<String, Object?>,
-        ),
+        body: frozen.body,
       );
       _snapshotRevisions.add(revision);
       if (_snapshotRevisions.length > patchbaySnapshotRevisionRetention) {
@@ -176,8 +207,8 @@ final class HostSnapshotHandler {
       'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
     };
     return PatchbaySnapshotRead.valid(
-      <String, Object?>{...declared, 'schemaVersion': 1, ...metadata},
-      declared,
+      <String, Object?>{...revision.body, 'schemaVersion': 1, ...metadata},
+      revision.body,
       metadata,
     );
   }
