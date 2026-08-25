@@ -10,7 +10,6 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
 void main() {
@@ -118,9 +117,7 @@ PatchbayFlutterServiceHost _host({
           ? const PatchbayGateDecision.allow()
           : const PatchbayGateDecision.reject(code: 'baseGateRejected'),
       consumerGate: (String gateId) => closedGateIds.contains(gateId)
-          ? const PatchbayGateDecision.reject(
-              code: 'writeGateClosedByDefault',
-            )
+          ? const PatchbayGateDecision.reject(code: 'writeGateClosedByDefault')
           : const PatchbayGateDecision.allow(),
     ),
   ),
