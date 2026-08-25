@@ -7,7 +7,7 @@
   "warnings": ["Flutter diagnostic fields may change with the Flutter SDK."],
   "localView": {
     "view": "brief",
-    "projection": "ui.diagnosticTree",
+    "projection": "diagnosticTree",
     "omitted": ["$.data"],
     "expand": "--view full"
   }

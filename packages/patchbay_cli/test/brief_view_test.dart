@@ -69,7 +69,7 @@ void main() {
         );
         expect(
           (brief['localView']! as Map<String, Object?>)['projection'],
-          'ui.diagnosticTree',
+          'diagnosticTree',
         );
         expect(brief.containsKey('data'), isFalse);
       }

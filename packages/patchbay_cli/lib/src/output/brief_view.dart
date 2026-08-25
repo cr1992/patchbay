@@ -147,7 +147,7 @@ _Family _familyFor(PatchbayFriendlyCommandSpec? spec) {
   if (spec.target == PatchbayCommandTarget.clientWidgetTree ||
       spec.target == PatchbayCommandTarget.clientRenderTree ||
       spec.target == PatchbayCommandTarget.clientFocusTree) {
-    return const _Family('ui.diagnosticTree', _diagnosticTreeRules);
+    return const _Family('diagnosticTree', _diagnosticTreeRules);
   }
   if (spec.serviceCommand == 'logs.query') {
     return const _Family('logs.query', _logsQueryRules);
@@ -294,15 +294,11 @@ Map<String, Object?> projectPatchbayBriefView({
 /// family). Exists only so tests can assert the table and the checked-in
 /// `test/golden/view_brief/*.{full,brief}.json` pairs cover each other in
 /// both directions — never called from production code.
-Map<String, List<String>> patchbayBriefViewRulePatternsForTesting() =>
-    <String, List<String>>{
-      'general': <String>[_noticeRule.pattern],
-      'catalog': <String>[for (final r in _catalogRules) r.pattern],
-      'ui.semantics.tree': <String>[
-        for (final r in _semanticsTreeRules) r.pattern,
-      ],
-      'ui.diagnosticTree': <String>[
-        for (final r in _diagnosticTreeRules) r.pattern,
-      ],
-      'logs.query': <String>[for (final r in _logsQueryRules) r.pattern],
-    };
+Map<String, List<String>>
+patchbayBriefViewRulePatternsForTesting() => <String, List<String>>{
+  'general': <String>[_noticeRule.pattern],
+  'catalog': <String>[for (final r in _catalogRules) r.pattern],
+  'ui.semantics.tree': <String>[for (final r in _semanticsTreeRules) r.pattern],
+  'diagnosticTree': <String>[for (final r in _diagnosticTreeRules) r.pattern],
+  'logs.query': <String>[for (final r in _logsQueryRules) r.pattern],
+};
