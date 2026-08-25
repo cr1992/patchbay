@@ -58,13 +58,13 @@
 | PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
 | PB-050-01 | snapshot provider JSON 边界与冻结读视图 | source 返回非 JSON、非字符串 key、循环引用或过深结构时，canonical 化可能越过 provider 违规边界直接抛错；有效结果又返回 consumer 活对象而非已冻结 revision body | 0.5.0 | 已验证 | [Snapshot provider 边界](proposals/0.5.0/snapshot-provider-boundary.md)；Proposal 接受前只允许失败注入与原型验证 |
 | PB-050-02 | snapshot 双预算、single-flight 与可选 source revision | revision 目前只按 32 份计数、没有字节上限；高频 wait 会重复拉取并全量 canonical 编码，consumer 又没有可选的内容 revision 快路径 | 0.5.0 | 待裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md)；DG-050-01 |
-| PB-050-03 | invocation catalog policy 热路径与失效协议 | 每次带参数调用都会重建完整 catalog、UI target 与 digest；直接绕过 catalog 又会破坏“任一非法条目使整份目录失效”的 fail-closed 契约 | 0.5.0 | 已排期 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md)；DG-050-02 |
+| PB-050-03 | invocation catalog policy 热路径与失效协议 | 每次带参数调用都会重建完整 catalog、UI target 与 digest；直接绕过 catalog 又会破坏“任一非法条目使整份目录失效”的 fail-closed 契约 | 0.5.0 | 已验证 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md)；DG-050-02 |
 | PB-050-04 | semantics probe 帧放大量测与决策证据 | 每次 probe 都可能主动 `scheduleFrame` 并等待 `endOfFrame`，`ui.wait` 随后还会再等一帧；先量化帧驱动与遍历各自占比，避免在没有事实时优化小头 | 0.5.0 | 已验证 | [量测报告](verification/0.5.0-semantics-probe-benchmark.md)；只交付 instrumentation、benchmark 与建议，不改变请帧、等待、缓存或 generation 行为 |
 | PB-050-05 | audit sink 顺序投递与有界背压 | 当前异步 sink 独立启动，完成/持久化顺序无保证，慢 sink 的 pending Future 数量也无上限；审计账本与外部投递缺少一致的丢失报告 | 0.5.0 | 已排期 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md)；DG-050-03 |
 | PB-050-06 | invocation cooperative cancellation、deadline 与统一受理预算 | direct timeout 后保留 slot 是防止卡死 handler 后继续堆积的刻意语义；registry 路径又未纳入统一运行预算，缺少可证明的取消确认与统一生命周期 | 0.5.0 | 已排期 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md)；DG-050-04 已裁决；execution 默认 8、active-owner record 上限 256；不改写既有 job cancellation 契约 |
 | PB-050-07 | semantics probe 请帧策略与 identifier 索引 | 减少主动请帧或按 tree revision 缓存 identifier 都会改变 `ui.wait` 的观察时机、elapsed/frameRevision 与 generation 边界，不能作为“透明降载”越过默认行为门禁 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md)；DG-050-05；以 PB-050-04 量测为裁决输入 |
 | PB-050-08 | REPL 终止错误与单行流契约 | 正常 `--json repl` 已按行输出 compact JSON，但 transport / protocol / session failure 冒到 one-shot `_fail` 后会变成多行 pretty JSON；按行消费方无法把它识别为终止事实，FIFO 写端随后可能在 reader 已退出时挂死 | 0.5.0 | 已验证 | 复用既有 error envelope 与退出码，只修复已承诺的 JSONL 一致性；不在本条加入 reconnect |
-| PB-050-09 | CLI 诊断与命令语义可发现性 | 重度使用实证 `sessionDirectoryEmpty` 无恢复指引，已能自动分块落盘的 `capture ... --output` / `blob get ... --output` 未从 raw service 路径就地指向，`text.set` / `text.enter` 的 callback 差异虽已冻结但只在包文档可见，`id` / `identifier` 与 request `limit` / response `length` 的不同事实域也要靠试错辨认 | 0.5.0 | 已排期 | 只改 hint、人读成功摘要、help、文档与回归测试；复用 REPL `describe`，不新增别名/schema 命令，不改 JSON、text 行为或 wire 参数 |
+| PB-050-09 | CLI 诊断与命令语义可发现性 | 重度使用实证 `sessionDirectoryEmpty` 无恢复指引，已能自动分块落盘的 `capture ... --output` / `blob get ... --output` 未从 raw service 路径就地指向，`text.set` / `text.enter` 的 callback 差异虽已冻结但只在包文档可见，`id` / `identifier` 与 request `limit` / response `length` 的不同事实域也要靠试错辨认 | 0.5.0 | 实现中 | 只改 hint、人读成功摘要、help、文档与回归测试；复用 REPL `describe`，不新增别名/schema 命令，不改 JSON、text 行为或 wire 参数 |
 | PB-050-10 | identifier 锚定的通用 semantics action | `ui tap <identifier>` 已有单请求解析与 generation 复核，但非 tap action 仍只能携带快照的 `nodeId + generation`，高变动树上需要调用方自行重取重试 | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md)；DG-050-06；新增独立命令，不把 integer `generation` 扩成 `latest` 字符串 |
 | PB-050-11 | 结构化日志 event 身份与服务端过滤 | record 只冻结 `message + fields`，接入方可把同一事件名分别放进 `fields.event` 或 message，消费方会漏检；现有 query 只有 level/category/time 过滤 | — | 待排期 | 接入方 log source 先统一映射；核心落地前补 Proposal，联合裁决一等 event 字段、legacy 兼容及 query/tail/export 过滤 |
 | PB-050-12 | 最低支持 SDK 组合与 CI 证据 | package 声明 Dart `>=3.11.0`、Flutter `>=3.38.0`，但合入 CI 只跑 Flutter 3.44.9 自带的 Dart；文档下限与两个约束的真实可安装交集尚未被机检证明 | 0.5.0 | 已排期 | 解析并记录最早可安装的 Dart/Flutter 组合，增加最低组合 CI lane；若现有声明无法形成文档承诺的组合，先如实纠正文档，任何提高公开下限的改动另走 Proposal |
@@ -78,8 +78,9 @@
 | PB-050-20 | 树类大载荷落 artifact | `ui semantics tree` 等全量进 stdout，大树即数千行；agent 消费方直接吃满上下文，破坏按需展开的信息层级 | 0.5.0 | 已排期 | 超阈值落 artifact、stdout 回校验路径；复用既有 `--output`/blob 形状不新增别名；阈值内输出逐字节不变；落地前补 Proposal |
 | PB-050-21 | `--view brief` 瘦 JSON 视图 | `--json` 无分层，机器消费方每次吃全量信封，无法先读决策所需最小事实再选择是否展开 | 0.5.0 | 已排期 | opt-in，默认输出逐字节不变；瘦身字段清单由 Proposal 冻结并 golden 锁定；排 PB-050-08/09 之后 |
 | PB-050-22 | gate 出厂默认策略 | `PatchbayGateEvaluator` 生产代码零构造，quick-start 与 example 的基础门是 `allow()`，最短接入路径没有形成“只读默认、写入显式开放”的安全起点 | 0.5.0 | 已排期 | 提供写拒绝带解释 code 的预设门；example 与双语 README 同步 |
-| PB-050-23 | error code 注册表 ratchet 测试 | 稳定 code 集合目前靠自觉维护，无全树扫描锁定，新增散装码不会被机检拦截 | 0.5.0 | 已排期 | 全树扫描断言 code 字面量属于封闭注册表；纯测试 MR |
+| PB-050-23 | error code 注册表 ratchet 测试 | 稳定 code 集合目前靠自觉维护，无全树扫描锁定，新增散装码不会被机检拦截 | 0.5.0 | 已验证 | 全树扫描断言 code 字面量属于封闭注册表；纯测试 MR |
 | PB-050-24 | 消费者侧 Skill、INSTALL 与渐进式披露接入漏斗 | 接入与使用路径主要依赖大型 guide，agent 宿主没有从发现、安装、只读起步到按需展开的短漏斗；手写命令示例又会随 CLI 漂移 | 0.5.0 | 实现中 | `skills/use-patchbay/SKILL.md` + `INSTALL.md`；Skill 随 Patchbay tag 版本化，命令示例由 CLI registry 生成或对拍；干净 consumer/Agent 验收 `INSTALL -> SKILL -> identity/catalog/snapshot`，不以预载完整 guide 替代 |
+| PB-050-25 | domain-plane 写命令的 gate 强制执行 | PB-050-22 实现中实证：`host_invoker.dart` 的 `_dispatchExternal` 直调 domainInvoke，descriptor `gates` 对 plane:domain 是 catalog-only 装饰，双层门安全叙事存在实质缺口 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-11；落地前补 Proposal |
 
 ## 文档债（快赢，可随任意批次走）
 
@@ -109,6 +110,7 @@
 | DG-050-08 | 锚定式合成 tap 的命令形状、指针注入语义与 `ui.semantics.tap` 并存边界 | 0.5.0 | 已裁决 | [锚定式合成 tap](proposals/0.5.0/anchored-tap.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
 | DG-050-09 | 点性 semantics 派发的遮挡准入范围、拒绝码与不提供 bypass 的边界 | 0.5.0 | 已裁决 | [遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
 | DG-050-10 | scroll-to-reveal 的写操作定性、Semantics 域实现边界与成功判据 | 0.5.0 | 已裁决 | [Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
+| DG-050-11 | domain 写命令过声明门的强制执行边界、受影响面与老 consumer 兼容语义 | 0.5.0 | 已裁决 | 裁决记录见 [0.5.0 版本计划](releases/0.5.0.md)；Proposal 落地前补 |
 
 ## 维护规则
 
