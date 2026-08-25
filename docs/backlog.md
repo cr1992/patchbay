@@ -67,6 +67,8 @@
 | PB-050-09 | CLI 诊断与命令语义可发现性 | 重度使用实证 `sessionDirectoryEmpty` 无恢复指引，已能自动分块落盘的 `capture ... --output` / `blob get ... --output` 未从 raw service 路径就地指向，`text.set` / `text.enter` 的 callback 差异虽已冻结但只在包文档可见，`id` / `identifier` 与 request `limit` / response `length` 的不同事实域也要靠试错辨认 | 0.5.0 | 已排期 | 只改 hint、人读成功摘要、help、文档与回归测试；复用 REPL `describe`，不新增别名/schema 命令，不改 JSON、text 行为或 wire 参数 |
 | PB-050-10 | identifier 锚定的通用 semantics action | `ui tap <identifier>` 已有单请求解析与 generation 复核，但非 tap action 仍只能携带快照的 `nodeId + generation`，高变动树上需要调用方自行重取重试 | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md)；DG-050-06；新增独立命令，不把 integer `generation` 扩成 `latest` 字符串 |
 | PB-050-11 | 结构化日志 event 身份与服务端过滤 | record 只冻结 `message + fields`，接入方可把同一事件名分别放进 `fields.event` 或 message，消费方会漏检；现有 query 只有 level/category/time 过滤 | — | 待排期 | 接入方 log source 先统一映射；核心落地前补 Proposal，联合裁决一等 event 字段、legacy 兼容及 query/tail/export 过滤 |
+| PB-050-12 | 最低支持 SDK 组合与 CI 证据 | package 声明 Dart `>=3.11.0`、Flutter `>=3.38.0`，但合入 CI 只跑 Flutter 3.44.9 自带的 Dart；文档下限与两个约束的真实可安装交集尚未被机检证明 | 0.5.0 | 已排期 | 解析并记录最早可安装的 Dart/Flutter 组合，增加最低组合 CI lane；若现有声明无法形成文档承诺的组合，先如实纠正文档，任何提高公开下限的改动另走 Proposal |
+| PB-050-13 | 公共 API surface 分类与 0.5.0 增量预算 | 0.4.1 四包 golden 已有 475 个公共符号，其中 CLI 为 203 个；现有门禁能发现漂移，但没有区分稳定 consumer API、CLI 嵌入面、生成 wire 与意外实现暴露 | 0.5.0 | 已排期 | 本版只做分类、增量归属和后续收缩清单，不移除 0.4.1 符号；0.5.0 新增公共符号必须逐项归属已接受 PB，实际收缩另走兼容版本与 Proposal |
 
 ## 文档债（快赢，可随任意批次走）
 
