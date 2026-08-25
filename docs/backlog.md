@@ -58,7 +58,7 @@
 | PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
 | PB-050-01 | snapshot provider JSON 边界与冻结读视图 | source 返回非 JSON、非字符串 key、循环引用或过深结构时，canonical 化可能越过 provider 违规边界直接抛错；有效结果又返回 consumer 活对象而非已冻结 revision body | 0.5.0 | 已验证 | [Snapshot provider 边界](proposals/0.5.0/snapshot-provider-boundary.md)；Proposal 接受前只允许失败注入与原型验证 |
 | PB-050-02 | snapshot 双预算、single-flight 与可选 source revision | revision 目前只按 32 份计数、没有字节上限；高频 wait 会重复拉取并全量 canonical 编码，consumer 又没有可选的内容 revision 快路径 | 0.5.0 | 待裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md)；DG-050-01 |
-| PB-050-03 | invocation catalog policy 热路径与失效协议 | 每次带参数调用都会重建完整 catalog、UI target 与 digest；直接绕过 catalog 又会破坏“任一非法条目使整份目录失效”的 fail-closed 契约 | 0.5.0 | 待裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md)；DG-050-02 |
+| PB-050-03 | invocation catalog policy 热路径与失效协议 | 每次带参数调用都会重建完整 catalog、UI target 与 digest；直接绕过 catalog 又会破坏“任一非法条目使整份目录失效”的 fail-closed 契约 | 0.5.0 | 已排期 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md)；DG-050-02 |
 | PB-050-04 | semantics probe 帧放大量测与决策证据 | 每次 probe 都可能主动 `scheduleFrame` 并等待 `endOfFrame`，`ui.wait` 随后还会再等一帧；先量化帧驱动与遍历各自占比，避免在没有事实时优化小头 | 0.5.0 | 已验证 | [量测报告](verification/0.5.0-semantics-probe-benchmark.md)；只交付 instrumentation、benchmark 与建议，不改变请帧、等待、缓存或 generation 行为 |
 | PB-050-05 | audit sink 顺序投递与有界背压 | 当前异步 sink 独立启动，完成/持久化顺序无保证，慢 sink 的 pending Future 数量也无上限；审计账本与外部投递缺少一致的丢失报告 | 0.5.0 | 待裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md)；DG-050-03 |
 | PB-050-06 | invocation cooperative cancellation、deadline 与统一受理预算 | direct timeout 后保留 slot 是防止卡死 handler 后继续堆积的刻意语义；registry 路径又未纳入 external 的 256 条账本，缺少可证明的取消确认与统一生命周期 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md)；DG-050-04；不改写既有 job cancellation 契约 |
@@ -89,7 +89,7 @@
 | DG-040-07 | platform driver 的信任边界、`exercise allow` 确认模型、Android/iOS P0 权限集合与 HarmonyOS 验证基线 | 0.4.0 | 已裁决 | [平台权限](proposals/0.4.0/platform-permissions.md) |
 | DG-040-08 | 损坏轨迹的恢复与阻断语义，以及权限专用事件扩展写入侧封闭表的前置条件 | — | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
 | DG-050-01 | snapshot 单份/总保留字节默认值、与 4 MiB/occurrence 硬天花板的对齐、超限失败，以及 consumer revision 的事实来源与兼容形状 | 0.5.0 | 待裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md) |
-| DG-050-02 | catalog policy 缓存的失效信号，以及动态目录无 revision 时继续逐次校验还是禁止缓存 | 0.5.0 | 待裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md) |
+| DG-050-02 | catalog policy 缓存的失效信号，以及动态目录无 revision 时继续逐次校验还是禁止缓存 | 0.5.0 | 已裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md) |
 | DG-050-03 | audit 队列满时的保留/丢弃策略、丢失报告与 dispose drain 预算 | 0.5.0 | 待裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md) |
 | DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md) |
 | DG-050-05 | semantics owner 已可用时是否仍主动请帧、`ui.wait` 的观察 cadence，以及 identifier cache 的失效与 generation 复核 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md) |
