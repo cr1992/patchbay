@@ -203,8 +203,51 @@ void main() {
       expect(session.client.invoked, isEmpty);
       expect(session.client.closed, isTrue);
       expect(session.err, contains('socketClosed'));
+      expect(
+        session.out,
+        '${jsonEncode(const PatchbayErrorEnvelope('socketClosed').toJson())}\n',
+      );
     },
   );
+
+  test('terminal failures keep the JSON repl stream line-delimited', () async {
+    final List<({Object failure, int exitCode, String code})> cases =
+        <({Object failure, int exitCode, String code})>[
+          (
+            failure: const PatchbayProtocolException(
+              'responseSchemaMismatch',
+              details: <String, Object?>{'field': 'payload'},
+            ),
+            exitCode: PatchbayExitCode.protocol,
+            code: 'responseSchemaMismatch',
+          ),
+          (
+            failure: const PatchbaySessionException('sessionIdentityMismatch'),
+            exitCode: PatchbayExitCode.protocol,
+            code: 'sessionIdentityMismatch',
+          ),
+        ];
+
+    for (final ({Object failure, int exitCode, String code}) testCase
+        in cases) {
+      final _Session session = await _repl(<String>[
+        'ui semantics tree',
+        'ui tap login.submit',
+      ], client: _FakeClient()..failNextWith = testCase.failure);
+
+      expect(session.exitCode, testCase.exitCode);
+      expect(session.out, endsWith('\n'));
+      expect(session.lines, hasLength(1));
+      expect(session.envelopes.single['error'], <String, Object?>{
+        'code': testCase.code,
+        'details': testCase.code == 'responseSchemaMismatch'
+            ? <String, Object?>{'field': 'payload'}
+            : <String, Object?>{},
+      });
+      expect(session.client.invoked, isEmpty);
+      expect(session.client.closed, isTrue);
+    }
+  });
 
   test('connection options are refused per line, never reconnected', () async {
     final _Session session = await _repl(<String>[
