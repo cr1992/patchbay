@@ -227,6 +227,14 @@ Future<int> runPatchbayCli(
       rpcTimeout: rpcTimeout,
     );
     if (repl) {
+      // The run a line opened stays open until that line has been rendered:
+      // PB-050-20 spills at render time, so closing the run inside `execute`
+      // would put `command.finished` ahead of the line's own
+      // `artifact.attached`. The session calls `onLineRendered` once the line
+      // is genuinely done.
+      PatchbayTraceRecorder? lineTrace;
+      String? lineRunId;
+      var lineExitCode = PatchbayExitCode.accepted;
       return await PatchbayReplSession(
         parser: parser,
         execute: (ArgResults line) async {
@@ -246,8 +254,15 @@ Future<int> runPatchbayCli(
             await _executeOnce(connection, line),
             resolveKeepAwakePolicy(),
           );
-          if (runId != null) trace!.commandFinished(runId, outcome.exitCode);
+          lineTrace = trace;
+          lineRunId = runId;
+          lineExitCode = outcome.exitCode;
           return PatchbayReplOutcome(outcome.response, outcome.exitCode);
+        },
+        onLineRendered: () {
+          final String? runId = lineRunId;
+          lineRunId = null;
+          if (runId != null) lineTrace!.commandFinished(runId, lineExitCode);
         },
         out: out,
         err: error,
@@ -787,6 +802,7 @@ Future<Map<String, Object?>> _finishRendering({
         renderDocument: renderDocument,
         environment: environment,
       );
+  attachSpilledArtifactToTrace(spilled.artifact);
   if (view != patchbayViewBrief) return spilled.response;
   return projectPatchbayBriefView(
     spec: spec,

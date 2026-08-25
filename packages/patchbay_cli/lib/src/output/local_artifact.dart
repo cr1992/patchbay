@@ -17,6 +17,7 @@ import '../artifact_download.dart';
 import '../registry/command_spec.dart';
 import '../result.dart';
 import '../session/session_models.dart' show createRestrictedFileSync;
+import '../trace/trace_context.dart';
 
 /// Default inline-size ceiling, in UTF-8 bytes of the stdout document that
 /// would otherwise carry the unbounded member. `--max-inline-bytes`
@@ -398,5 +399,30 @@ Future<PatchbayRenderedMemberSpillResult> maybeSpillRenderedMember({
   return PatchbayRenderedMemberSpillResult(
     response: spilledResponse,
     artifact: artifact,
+  );
+}
+
+/// Records a spilled artifact against the active trace, exactly the way the
+/// host-blob download path in `cli.dart` already records one.
+///
+/// `tree-artifact-output.md`'s reuse table lists `attachArtifact` — whose
+/// `blobId` is already optional — as the trace seam for this condition, so a
+/// `cliRendered` file is content-addressed into the trace directory and shows
+/// up in `trace show` / `trace export` beside every `hostBlob` one. Without
+/// this a trace taken over a spilling session would silently lose the only
+/// copy of what the command actually observed, and `--include-artifacts`
+/// would export a trace that points at a path outside it.
+///
+/// A no-op when nothing spilled or no trace is active. The call must happen
+/// before the run's `command.finished` event, so the attachment lands inside
+/// the run that produced it rather than at the head of the next one.
+void attachSpilledArtifactToTrace(PatchbayDownloadedArtifact? artifact) {
+  if (artifact == null) return;
+  PatchbayTraceContext.currentRecorder?.attachArtifact(
+    localPath: artifact.path,
+    blobId: artifact.blobId,
+    sha256Value: artifact.sha256,
+    length: artifact.length,
+    contentType: artifact.contentType,
   );
 }

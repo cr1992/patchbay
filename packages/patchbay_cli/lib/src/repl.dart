@@ -111,6 +111,7 @@ final class PatchbayReplSession {
     required PatchbayLocalArtifactWriter outputWriter,
     String sessionView = patchbayViewFull,
     Map<String, String>? environment,
+    void Function()? onLineRendered,
   }) : _parser = parser,
        _execute = execute,
        _out = out,
@@ -118,7 +119,8 @@ final class PatchbayReplSession {
        _json = json,
        _outputWriter = outputWriter,
        _sessionView = sessionView,
-       _environment = environment;
+       _environment = environment,
+       _onLineRendered = onLineRendered;
 
   final ArgParser _parser;
   final PatchbayReplCommand _execute;
@@ -126,6 +128,18 @@ final class PatchbayReplSession {
   final StringSink _err;
   final bool _json;
   final PatchbayLocalArtifactWriter _outputWriter;
+
+  /// Called once a line has been fully rendered, including any PB-050-20
+  /// spill the rendering triggered.
+  ///
+  /// A repl line's trace run cannot be closed by [_execute] itself: spilling
+  /// happens at render time, which is after [_execute] has returned, so a
+  /// `command.finished` written inside the closure would land *before* the
+  /// `artifact.attached` event belonging to that same line — and the
+  /// attachment would then read as the first thing the next line did. The
+  /// caller therefore hands the run's closing step here, where "this line is
+  /// done" is actually true.
+  final void Function()? _onLineRendered;
 
   /// The view `patchbay --json --view brief ... repl` opened the session
   /// with; a line's own `--view` overrides it for that line only (PB-050-21
@@ -193,7 +207,15 @@ final class PatchbayReplSession {
 
       try {
         final PatchbayReplOutcome outcome = await _execute(parsed);
-        await _writeResult(number, parsed, outcome);
+        try {
+          await _writeResult(number, parsed, outcome);
+        } finally {
+          // Even a line whose rendering threw (an `--output` that already
+          // exists, say) ran to completion as far as the trace is concerned:
+          // the run must be closed, or the next line's events would be read
+          // as belonging to this one.
+          _onLineRendered?.call();
+        }
       } on FormatException catch (error) {
         _writeFailure(
           number,
@@ -347,6 +369,7 @@ final class PatchbayReplSession {
                     '${patchbayResponseSummary(candidate)}',
           environment: _environment,
         );
+    attachSpilledArtifactToTrace(spilled.artifact);
     if (_resolvedView(parsed) != patchbayViewBrief) return spilled.response;
     return projectPatchbayBriefView(
       spec: spec,

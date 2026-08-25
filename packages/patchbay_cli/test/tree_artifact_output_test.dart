@@ -310,6 +310,180 @@ void main() {
     });
   });
 
+  group('PB-050-20: the spilled artifact joins the active trace', () {
+    late Directory traceSandbox;
+
+    setUp(() {
+      traceSandbox = Directory.systemTemp.createTempSync(
+        'patchbay-tree-trace-',
+      );
+    });
+    tearDown(() => traceSandbox.deleteSync(recursive: true));
+
+    test('a cliRendered spill is attached, content-addressed, and lands '
+        'inside the run that produced it', () async {
+      final PatchbayTraceStore store = PatchbayTraceStore(traceSandbox.path);
+      final PatchbayTraceManifest trace = store.start(
+        name: 'spill',
+        cliVersion: 'test',
+        activate: true,
+      );
+      final result = await run(<String>[
+        '--trace-dir',
+        store.root.path,
+        '--json',
+        'ui',
+        'semantics',
+        'tree',
+      ], semanticsTreeClient(bigSemanticsTreePayload()));
+
+      expect(result.exitCode, PatchbayExitCode.accepted);
+      final Map<String, Object?> localArtifact =
+          (jsonDecode(result.out) as Map<String, Object?>)['localArtifact']!
+              as Map<String, Object?>;
+
+      final List<PatchbayTraceEvent> events = store.read(trace.traceId).events;
+      final List<String> types = <String>[
+        for (final PatchbayTraceEvent event in events) event.type,
+      ];
+      expect(
+        types,
+        contains('artifact.attached'),
+        reason:
+            'a trace taken over a spilling session would otherwise lose the '
+            'only copy of what the command observed',
+      );
+      expect(
+        types.indexOf('artifact.attached'),
+        lessThan(types.indexOf('command.finished')),
+        reason: 'the attachment belongs to the run that produced it',
+      );
+
+      final PatchbayTraceEvent attached = events.singleWhere(
+        (PatchbayTraceEvent event) => event.type == 'artifact.attached',
+      );
+      expect(attached.payload['sha256'], localArtifact['sha256']);
+      expect(attached.payload['length'], localArtifact['length']);
+      expect(attached.payload['contentType'], 'application/json');
+      expect(
+        attached.payload.containsKey('blobId'),
+        isFalse,
+        reason: 'a cliRendered member has no host blob to name',
+      );
+      expect(
+        File(
+          '${store.root.path}/${trace.traceId}/'
+          '${attached.payload['relativePath']}',
+        ).readAsStringSync(),
+        File(localArtifact['path']! as String).readAsStringSync(),
+      );
+    });
+
+    test('a repl line attaches before its own command.finished, not after '
+        'it', () async {
+      final PatchbayTraceStore store = PatchbayTraceStore(traceSandbox.path);
+      final PatchbayTraceManifest trace = store.start(
+        name: 'repl-spill',
+        cliVersion: 'test',
+        activate: true,
+      );
+      final StringBuffer out = StringBuffer();
+      final int exitCode = await runPatchbayCli(
+        <String>['--trace-dir', store.root.path, '--json', 'repl'],
+        connect: (_) async => semanticsTreeClient(bigSemanticsTreePayload()),
+        replInput: Stream<String>.fromIterable(<String>['ui semantics tree']),
+        output: out,
+        errorOutput: StringBuffer(),
+        environment: <String, String>{'PATCHBAY_OUTPUT_DIR': outputDir.path},
+      );
+
+      expect(exitCode, PatchbayExitCode.accepted);
+      final Map<String, Object?> response =
+          (jsonDecode(out.toString().trim())
+                  as Map<String, Object?>)['response']!
+              as Map<String, Object?>;
+      final Map<String, Object?> localArtifact =
+          response['localArtifact']! as Map<String, Object?>;
+
+      final List<String> types = <String>[
+        for (final PatchbayTraceEvent event in store.read(trace.traceId).events)
+          event.type,
+      ];
+      // Spilling happens at render time, which is after the line's `execute`
+      // returned. Closing the run inside `execute` put `command.finished`
+      // first, so the attachment read as the first thing the *next* line did.
+      expect(
+        types.indexOf('artifact.attached'),
+        allOf(
+          greaterThan(types.indexOf('command.started')),
+          lessThan(types.indexOf('command.finished')),
+        ),
+      );
+      final PatchbayTraceEvent attached = store
+          .read(trace.traceId)
+          .events
+          .singleWhere(
+            (PatchbayTraceEvent event) => event.type == 'artifact.attached',
+          );
+      expect(attached.payload['sha256'], localArtifact['sha256']);
+    });
+
+    test('a line that spills nothing still closes its own run', () async {
+      // The run-closing step moved out of `execute` and into the session's
+      // post-render callback; a line with no artifact must still produce one
+      // `command.finished`, and the next line must get its own.
+      final PatchbayTraceStore store = PatchbayTraceStore(traceSandbox.path);
+      final PatchbayTraceManifest trace = store.start(
+        name: 'repl-plain',
+        cliVersion: 'test',
+        activate: true,
+      );
+      final int exitCode = await runPatchbayCli(
+        <String>['--trace-dir', store.root.path, '--json', 'repl'],
+        connect: (_) async =>
+            semanticsTreeClient(bigSemanticsTreePayload(nodeCount: 1)),
+        replInput: Stream<String>.fromIterable(<String>[
+          'ui semantics tree',
+          'ui semantics tree',
+        ]),
+        output: StringBuffer(),
+        errorOutput: StringBuffer(),
+        environment: <String, String>{'PATCHBAY_OUTPUT_DIR': outputDir.path},
+      );
+
+      expect(exitCode, PatchbayExitCode.accepted);
+      final List<PatchbayTraceEvent> events = store.read(trace.traceId).events;
+      List<Object?> runIdsOf(String type) => <Object?>[
+        for (final PatchbayTraceEvent event in events)
+          if (event.type == type) event.payload['commandRunId'],
+      ];
+      final List<Object?> started = runIdsOf('command.started');
+      final List<Object?> finished = runIdsOf('command.finished');
+
+      expect(
+        started,
+        hasLength(3),
+        reason: 'the `repl` invocation itself, plus one run per line',
+      );
+      expect(
+        finished.toSet(),
+        started.toSet(),
+        reason: 'every run that opened was closed',
+      );
+      expect(
+        finished,
+        hasLength(started.length),
+        reason: 'and none of them was closed twice',
+      );
+      expect(
+        events.where(
+          (PatchbayTraceEvent event) => event.type == 'artifact.attached',
+        ),
+        isEmpty,
+      );
+    });
+  });
+
   group('PB-050-21: --view brief', () {
     test('--view brief requires --json', () async {
       final FakePatchbayClient client = FakePatchbayClient(
