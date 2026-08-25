@@ -79,6 +79,7 @@ Future<int> runPatchbayCli(
   }
 
   final bool json = parsed.flag('json');
+  final bool repl = _isRepl(parsed);
   PatchbayKeepAwakePolicy? keepAwakePolicy;
   PatchbayKeepAwakePolicy resolveKeepAwakePolicy() =>
       keepAwakePolicy ??= PatchbayKeepAwakePolicy.resolve(
@@ -199,7 +200,6 @@ Future<int> runPatchbayCli(
       );
       return outcome.exitCode;
     }
-    final bool repl = _isRepl(parsed);
     if (repl) {
       PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
       _validateReplShape(parsed);
@@ -264,6 +264,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: failure.message,
       envelope: _usageEnvelope(failure),
       exitCode: PatchbayExitCode.usage,
@@ -273,6 +274,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay protocol error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code),
       exitCode: PatchbayExitCode.protocol,
@@ -282,6 +284,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay protocol error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.protocol,
@@ -292,6 +295,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: unresponsive
           ? 'patchbay transport error: ${failure.code}\n'
                 '  $patchbayAppUnresponsiveHint'
@@ -316,6 +320,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: message.toString(),
       envelope: PatchbayErrorEnvelope(
         failure.code,
@@ -333,6 +338,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay job failed: waitTimeout',
       envelope: PatchbayErrorEnvelope(
         'waitTimeout',
@@ -345,6 +351,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: failure.sentence,
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.usage,
@@ -354,6 +361,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay sensitive input error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code),
       exitCode: PatchbayExitCode.usage,
@@ -366,6 +374,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay permission driver error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: failure.code == 'permissionTimeoutInvalid'
@@ -377,6 +386,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay trace error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.protocol,
@@ -386,6 +396,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay transport error: ${failure.runtimeType}',
       envelope: PatchbayErrorEnvelope(
         'transportError',
@@ -699,13 +710,18 @@ int _fail(
   StringSink out,
   StringSink error, {
   required bool json,
+  bool compactJson = false,
   required String message,
   required PatchbayErrorEnvelope envelope,
   required int exitCode,
 }) {
   error.writeln(message);
   if (json) {
-    out.writeln(const JsonEncoder.withIndent('  ').convert(envelope.toJson()));
+    out.writeln(
+      compactJson
+          ? jsonEncode(envelope.toJson())
+          : const JsonEncoder.withIndent('  ').convert(envelope.toJson()),
+    );
   }
   return exitCode;
 }
