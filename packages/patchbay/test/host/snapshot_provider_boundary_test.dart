@@ -139,6 +139,20 @@ void main() {
       expect(violation.details, containsPair('type', 'int'));
     });
 
+    test('does not append descendants after an unsafe object key', () {
+      for (final Object? nested in <Object?>[
+        <String, Object?>{'child': double.nan},
+        <Object?>[double.nan],
+      ]) {
+        final PatchbaySnapshotPayloadViolation violation = _violationOf(
+          <String, Object?>{'unsafe.key': nested},
+        );
+
+        expect(violation.details, containsPair('failure', 'nonFiniteNumber'));
+        expect(violation.details, containsPair('path', r'$'));
+      }
+    });
+
     test('rejects every non-finite JSON number', () {
       for (final double value in <double>[
         double.nan,

@@ -135,7 +135,7 @@ final class _SnapshotFreezingTraversal {
   var _expandedOccurrences = 0;
 
   Object? freeze(Object? source) {
-    _PendingValue? pending = _PendingValue(source, r'$', 0);
+    _PendingValue? pending = _PendingValue(source, _SnapshotPath.root, 0);
     _CompletedValue? completed;
     while (true) {
       if (pending != null) {
@@ -170,7 +170,7 @@ final class _SnapshotFreezingTraversal {
           break;
         }
         _frames.removeLast();
-        _bytes.currentPath = frame.path;
+        _bytes.currentPath = frame.path.value;
         _bytes.add(frame.isMap ? _closeMap : _closeList);
         _ancestry.remove(frame.source);
         completed = _CompletedValue(frame.complete());
@@ -180,20 +180,23 @@ final class _SnapshotFreezingTraversal {
 
   void _startContainer(
     Object source,
-    String path,
+    _SnapshotPath path,
     int depth, {
     required bool isMap,
   }) {
     if (depth > limits.maxContainerDepth) {
       throw _SnapshotPayloadFault.invalid(
         failure: 'nestingTooDeep',
-        path: path,
+        path: path.value,
       );
     }
     if (!_ancestry.add(source)) {
-      throw _SnapshotPayloadFault.invalid(failure: 'cycleDetected', path: path);
+      throw _SnapshotPayloadFault.invalid(
+        failure: 'cycleDetected',
+        path: path.value,
+      );
     }
-    _bytes.currentPath = path;
+    _bytes.currentPath = path.value;
     _bytes.add(isMap ? _openMap : _openList);
     _countOccurrence(path);
     _frames.add(
@@ -203,52 +206,56 @@ final class _SnapshotFreezingTraversal {
     );
   }
 
-  void _writeScalar(Object? value, String path) {
+  void _writeScalar(Object? value, _SnapshotPath path) {
     if (value is double && !value.isFinite) {
       throw _SnapshotPayloadFault.invalid(
         failure: 'nonFiniteNumber',
-        path: path,
+        path: path.value,
       );
     }
     if (value != null && value is! bool && value is! num && value is! String) {
       throw _SnapshotPayloadFault.invalid(
         failure: 'unsupportedType',
-        path: path,
+        path: path.value,
         type: value.runtimeType.toString(),
       );
     }
-    _bytes.currentPath = path;
+    _bytes.currentPath = path.value;
     _writeJsonScalar(_bytes, value);
     _countOccurrence(path);
   }
 
-  void _writeMapKey(String parentPath, String key, {required bool first}) {
-    final String path = _objectPath(parentPath, key);
-    _bytes.currentPath = path;
+  void _writeMapKey(
+    _SnapshotPath parentPath,
+    String key, {
+    required bool first,
+  }) {
+    final _SnapshotPath path = parentPath.objectKey(key);
+    _bytes.currentPath = path.value;
     if (!first) _bytes.add(_comma);
     _writeJsonScalar(_bytes, key);
     _bytes.add(_colon);
     _countOccurrence(path);
   }
 
-  void _writeListSeparator(String path, {required bool first}) {
-    _bytes.currentPath = path;
+  void _writeListSeparator(_SnapshotPath path, {required bool first}) {
+    _bytes.currentPath = path.value;
     if (!first) _bytes.add(_comma);
   }
 
-  Never nonStringKey(String parentPath, Object? key) {
+  Never nonStringKey(_SnapshotPath parentPath, Object? key) {
     throw _SnapshotPayloadFault.invalid(
       failure: 'nonStringKey',
-      path: parentPath,
+      path: parentPath.value,
       type: key.runtimeType.toString(),
     );
   }
 
-  void _countOccurrence(String path) {
+  void _countOccurrence(_SnapshotPath path) {
     final int observed = _expandedOccurrences + 1;
     if (observed > limits.maxExpandedOccurrences) {
       throw _SnapshotPayloadFault.tooLarge(
-        path: path,
+        path: path.value,
         limitKind: 'expandedNodes',
         limit: limits.maxExpandedOccurrences,
         observed: observed,
@@ -262,7 +269,7 @@ abstract base class _FreezeFrame {
   _FreezeFrame(this.source, this.path, this.depth);
 
   final Object source;
-  final String path;
+  final _SnapshotPath path;
   final int depth;
   bool get isMap;
   _PendingValue? next(_SnapshotFreezingTraversal traversal);
@@ -271,7 +278,7 @@ abstract base class _FreezeFrame {
 }
 
 final class _MapFreezeFrame extends _FreezeFrame {
-  _MapFreezeFrame(Map<Object?, Object?> source, String path, int depth)
+  _MapFreezeFrame(Map<Object?, Object?> source, _SnapshotPath path, int depth)
     : _entries = source.entries.iterator,
       super(source, path, depth);
 
@@ -292,7 +299,7 @@ final class _MapFreezeFrame extends _FreezeFrame {
     _key = rawKey;
     traversal._writeMapKey(path, rawKey, first: _first);
     _first = false;
-    return _PendingValue(entry.value, _objectPath(path, rawKey), depth + 1);
+    return _PendingValue(entry.value, path.objectKey(rawKey), depth + 1);
   }
 
   @override
@@ -306,7 +313,7 @@ final class _MapFreezeFrame extends _FreezeFrame {
 }
 
 final class _ListFreezeFrame extends _FreezeFrame {
-  _ListFreezeFrame(List<Object?> source, String path, int depth)
+  _ListFreezeFrame(List<Object?> source, _SnapshotPath path, int depth)
     : _items = source.iterator,
       super(source, path, depth);
 
@@ -320,7 +327,7 @@ final class _ListFreezeFrame extends _FreezeFrame {
   @override
   _PendingValue? next(_SnapshotFreezingTraversal traversal) {
     if (!_items.moveNext()) return null;
-    final String childPath = '$path[${_index++}]';
+    final _SnapshotPath childPath = path.listIndex(_index++);
     traversal._writeListSeparator(childPath, first: _index == 1);
     return _PendingValue(_items.current, childPath, depth + 1);
   }
@@ -341,12 +348,12 @@ final class _CanonicalJsonWriter {
   String encode(Object? root) {
     final List<_CanonicalFrame> frames = <_CanonicalFrame>[];
     Object? pending = root;
-    var pendingPath = r'$';
+    var pendingPath = _SnapshotPath.root;
     var hasPending = true;
     while (true) {
       if (hasPending) {
         final Object? value = pending;
-        _sink.currentPath = pendingPath;
+        _sink.currentPath = pendingPath.value;
         if (value is Map<String, Object?>) {
           _sink.add(_openMap);
           frames.add(_CanonicalMapFrame(value, pendingPath));
@@ -370,7 +377,7 @@ final class _CanonicalJsonWriter {
           break;
         }
         frames.removeLast();
-        _sink.currentPath = frame.path;
+        _sink.currentPath = frame.path.value;
         _sink.add(frame.isMap ? _closeMap : _closeList);
       }
     }
@@ -378,7 +385,7 @@ final class _CanonicalJsonWriter {
 }
 
 abstract base class _CanonicalFrame {
-  String get path;
+  _SnapshotPath get path;
   bool get isMap;
   _CanonicalNext? next(_BoundedByteSink sink);
 }
@@ -389,7 +396,7 @@ final class _CanonicalMapFrame extends _CanonicalFrame {
 
   final Map<String, Object?> source;
   @override
-  final String path;
+  final _SnapshotPath path;
   final List<String> _keys;
   var _index = 0;
 
@@ -403,7 +410,7 @@ final class _CanonicalMapFrame extends _CanonicalFrame {
     final String key = _keys[_index++];
     _writeJsonScalar(sink, key);
     sink.add(_colon);
-    return _CanonicalNext(source[key], _objectPath(path, key));
+    return _CanonicalNext(source[key], path.objectKey(key));
   }
 }
 
@@ -412,7 +419,7 @@ final class _CanonicalListFrame extends _CanonicalFrame {
 
   final List<Object?> source;
   @override
-  final String path;
+  final _SnapshotPath path;
   var _index = 0;
 
   @override
@@ -423,7 +430,7 @@ final class _CanonicalListFrame extends _CanonicalFrame {
     if (_index >= source.length) return null;
     if (_index > 0) sink.add(_comma);
     final int index = _index++;
-    return _CanonicalNext(source[index], '$path[$index]');
+    return _CanonicalNext(source[index], path.listIndex(index));
   }
 }
 
@@ -485,9 +492,24 @@ void _writeJsonScalar(_BoundedByteSink sink, Object? value) {
   input.close();
 }
 
-String _objectPath(String parent, String key) {
-  if (key.length <= 128 && _simplePathKey.hasMatch(key)) return '$parent.$key';
-  return parent;
+final class _SnapshotPath {
+  const _SnapshotPath._(this.value, this._appendable);
+
+  static const _SnapshotPath root = _SnapshotPath._(r'$', true);
+
+  final String value;
+  final bool _appendable;
+
+  _SnapshotPath objectKey(String key) {
+    if (!_appendable) return this;
+    if (key.length <= 128 && _simplePathKey.hasMatch(key)) {
+      return _SnapshotPath._('$value.$key', true);
+    }
+    return _SnapshotPath._(value, false);
+  }
+
+  _SnapshotPath listIndex(int index) =>
+      _appendable ? _SnapshotPath._('$value[$index]', true) : this;
 }
 
 final RegExp _simplePathKey = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
@@ -496,7 +518,7 @@ final class _PendingValue {
   const _PendingValue(this.value, this.path, this.depth);
 
   final Object? value;
-  final String path;
+  final _SnapshotPath path;
   final int depth;
 }
 
@@ -510,7 +532,7 @@ final class _CanonicalNext {
   const _CanonicalNext(this.value, this.path);
 
   final Object? value;
-  final String path;
+  final _SnapshotPath path;
 }
 
 const List<int> _openMap = <int>[0x7b];
