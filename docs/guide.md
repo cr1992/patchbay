@@ -1019,6 +1019,7 @@ descriptor 标了 `sensitive: true` 的参数只能走 stdin：它出现在 `--a
 
 ```console
 $ patchbay --json repl <<'EOF'
+describe ui.capture
 ui wait semantics-mounted app.settings
 ui tap app.settings.save
 ui semantics tree
@@ -1028,6 +1029,7 @@ EOF
 repl 只做「连一次、连续执行」，命令语法与一次性调用完全相同；它不是宏系统，不做脚本录制、回放
 或变量。每行结果自带 `exitCode`，进程退出码只描述会话本身（干净跑完 `0`，被错误终止则是该错误的
 类别）。被拒绝或失败的行不终止会话，连接类错误终止——CLI 不会替你悄悄换一条连接。
+`describe <service-command>` 也能直接写在会话里：它只读本次连接的 live catalog，不调用所描述的命令。
 
 连接类参数、`--json` 与 `--stdin` 在 repl 内逐行 fail-closed；敏感输入请用一次性调用。direct HTTP
 不支持 repl（bearer token 会与命令流抢同一个 stdin）。`doctor` 在 repl 内也不可用：它诊断的是

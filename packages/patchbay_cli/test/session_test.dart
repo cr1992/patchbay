@@ -24,7 +24,22 @@ void main() {
         pidProbe: (_) => true,
         identityProbe: (_) async => _identity('instance-1'),
       ).resolve(),
-      throwsA(_sessionError('sessionDirectoryEmpty')),
+      throwsA(
+        allOf(
+          _sessionError('sessionDirectoryEmpty'),
+          isA<PatchbaySessionException>()
+              .having(
+                (PatchbaySessionException error) => error.hint,
+                'hint',
+                contains('patchbay launch -- <consumer command>'),
+              )
+              .having(
+                (PatchbaySessionException error) => error.hint,
+                'hint',
+                contains('--ws-uri'),
+              ),
+        ),
+      ),
     );
   });
 

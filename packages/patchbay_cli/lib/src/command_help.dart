@@ -38,6 +38,7 @@ abstract final class PatchbayCommandHelp {
       if (byService.length > 1) {
         return _serviceCommand(parser, topic.single, byService);
       }
+      if (topic.single == 'blob.read') return _blobRead(parser);
     }
     throw FormatException('unknown help topic: ${topic.join(' ')}');
   }
@@ -180,6 +181,7 @@ abstract final class PatchbayCommandHelp {
         '  ${usages[index].padRight(width)}  ${sorted[index].summary}',
       );
     }
+    _writeDiscoverabilityNotes(output, serviceCommand: serviceCommand);
     _writeConditions(output, sorted);
     _writeOptions(output, parser, <String>{
       for (final PatchbayFriendlyCommandSpec command in sorted)
@@ -236,6 +238,11 @@ abstract final class PatchbayCommandHelp {
       ..writeln()
       ..writeln(command.summary)
       ..writeln(protocolLine(command));
+    _writeDiscoverabilityNotes(
+      output,
+      serviceCommand: command.serviceCommand,
+      path: command.path,
+    );
     if (command.fencesNavigationRevision) {
       output
         ..writeln(
@@ -260,6 +267,79 @@ abstract final class PatchbayCommandHelp {
       ..writeln()
       ..writeln(availabilityLine(command));
     return output.toString();
+  }
+
+  static String _blobRead(ArgParser parser) {
+    final StringBuffer output = StringBuffer()
+      ..writeln('Usage: patchbay exec blob.read --args <json> [options]')
+      ..writeln()
+      ..writeln('Read one raw base64 blob chunk.')
+      ..writeln('Service command: blob.read')
+      ..writeln()
+      ..writeln(
+        'Prefer `patchbay blob get <blob-id> --output <path>`: it downloads '
+        'all chunks and verifies length and SHA-256.',
+      )
+      ..writeln(
+        'The request `limit` is the maximum chunk size; response `length` is '
+        'the number of bytes actually returned.',
+      );
+    _writeOptions(
+      output,
+      parser,
+      PatchbayFriendlyCommandRegistry.allowedOptions(
+        PatchbayFriendlyCommand.exec,
+      ),
+    );
+    output
+      ..writeln()
+      ..writeln('Availability is still decided by the running App catalog.');
+    return output.toString();
+  }
+
+  static void _writeDiscoverabilityNotes(
+    StringBuffer output, {
+    String? serviceCommand,
+    List<String>? path,
+  }) {
+    if (serviceCommand == 'ui.capture') {
+      output
+        ..writeln()
+        ..writeln(
+          'Safe artifact commands (automatic chunk download and verification):',
+        )
+        ..writeln('  patchbay capture root --output <path>')
+        ..writeln(
+          '  patchbay capture target <target-id> <generation> --output <path>',
+        );
+    }
+    if (serviceCommand == 'ui.text.set' || serviceCommand == 'ui.text.enter') {
+      output
+        ..writeln()
+        ..writeln(
+          'Identity: the catalog target `id` and Semantics `identifier` are '
+          'separate identity domains.',
+        );
+      if (serviceCommand == 'ui.text.set') {
+        output.writeln(
+          '`text.set` replaces the controller value directly; it does not '
+          'run input formatters or `onChanged`.',
+        );
+      } else {
+        output.writeln(
+          '`text.enter` runs input formatters and calls `onChanged` when the '
+          'target configured it.',
+        );
+      }
+    }
+    if (path case <String>['repl']) {
+      output
+        ..writeln()
+        ..writeln(
+          'Inside the session, `describe <service-command>` reads that row '
+          'from the live catalog without invoking it.',
+        );
+    }
   }
 
   /// Where the command's availability is actually decided.

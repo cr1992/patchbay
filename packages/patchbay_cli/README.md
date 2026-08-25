@@ -295,6 +295,7 @@ cross-namespace IDs instead of inventing a representative.
 ```text
 dart run bin/patchbay.dart --ws-uri <uri> --json repl <<'EOF'
 identity
+describe ui.capture
 ui semantics tree
 ui tap login.submit
 EOF
@@ -305,6 +306,8 @@ syntax as one-shot invocations. Each line's output carries its own `exitCode` (u
 JSON envelope per line; otherwise `[n] exit=<code> <summary>`): a process exit code cannot carry
 per-line results, so the session code describes only the session itself — `0` for a clean run, or
 the category of the error that terminated it.
+`describe <service-command>` can run inside the session to read the live catalog row without
+invoking the command it describes.
 
 A rejected or typed-failure line does not end the session; transport / protocol / session errors
 do, because they mean the reused connection or the peer is no longer the one the operator selected,
