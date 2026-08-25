@@ -152,6 +152,7 @@ void main() {
           idempotentTouchCommand,
           permissionRequestCommand,
           permissionStatusCommand,
+          semanticsBenchmarkCommand,
           jobGetCommand,
           jobWaitCommand,
           jobCancelCommand,
@@ -192,6 +193,22 @@ void main() {
           gestureListSemanticsId,
           gestureNestedListSemanticsId,
         }),
+      );
+
+      final Map<String, Object?> benchmark = await _pumpUntilComplete(
+        tester,
+        _call(handlers, PatchbayServiceHost.invokeMethod, <String, String>{
+          'command': semanticsBenchmarkCommand,
+          'args': '{"samples":2}',
+          'requestId': 'benchmark-request',
+        }),
+      );
+      expect(benchmark['admission'], 'accepted');
+      expect(benchmark['payload'], containsPair('buildMode', 'debug'));
+      expect(benchmark['payload'], containsPair('sampleRuns', 2));
+      expect(
+        benchmark['payload'],
+        containsPair('scannedNodes', greaterThanOrEqualTo(nodes.length)),
       );
 
       final Map<String, Object?> invocation = await _call(

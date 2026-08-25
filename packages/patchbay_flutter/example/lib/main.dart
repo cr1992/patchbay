@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
 import 'example_direct_transport.dart';
@@ -13,6 +14,7 @@ const String counterSemanticsId = 'example.counter.value';
 const String incrementSemanticsId = 'example.counter.increment';
 const String noteTargetId = 'example.note';
 const String cardCaptureTargetId = 'example.card.capture';
+const String semanticsBenchmarkCommand = 'example.benchmark.semanticsProbe';
 
 /// Semantics identifier of the anchored-gesture surface (press-hold / drag).
 const String gestureSurfaceSemanticsId = 'example.gesture.surface';
@@ -205,6 +207,7 @@ final class PatchbayExampleHost {
     'commands': <Object?>[
       for (final PatchbayCommandDescriptor descriptor in domain.descriptors)
         descriptor.toJson(),
+      _semanticsBenchmarkDescriptor.toJson(),
     ],
   };
 
@@ -226,7 +229,183 @@ final class PatchbayExampleHost {
     String command,
     Map<String, Object?> arguments,
     String requestId,
-  ) => domain.invoke(command, arguments, requestId);
+  ) => command == semanticsBenchmarkCommand
+      ? _benchmarkSemantics(arguments, requestId)
+      : domain.invoke(command, arguments, requestId);
+
+  Future<Map<String, Object?>> _benchmarkSemantics(
+    Map<String, Object?> arguments,
+    String requestId,
+  ) async {
+    final Object? rawSamples = arguments['samples'];
+    if (arguments.keys.any((String key) => key != 'samples') ||
+        (rawSamples != null && rawSamples is! int)) {
+      return _benchmarkRejected(
+        requestId,
+        'samples must be the only argument and must be an integer',
+      );
+    }
+    final int sampleRuns = (rawSamples as int?) ?? 12;
+    if (sampleRuns < 1 || sampleRuns > 50) {
+      return _benchmarkRejected(requestId, 'samples must be between 1 and 50');
+    }
+
+    final PatchbayInvocation snapshot = await bridge.semantics.snapshot(
+      maxNodes: 10000,
+    );
+    if (snapshot.admission != PatchbayAdmission.accepted) {
+      return _benchmarkStageRejected(requestId, 'snapshot', snapshot);
+    }
+    final int scannedNodes =
+        (snapshot.payload['nodes']! as List<Object?>).length;
+
+    const int warmupRuns = 2;
+    for (var run = 0; run < warmupRuns; run += 1) {
+      await _benchmarkEndOfFrame();
+      await _benchmarkMeasure(bridge.semantics.ensureOwner);
+      await _benchmarkIdentifierProbe();
+      final _ExampleBenchmarkSample wait = await _benchmarkWaitFrame();
+      if (wait.value case final PatchbayInvocation invocation
+          when invocation.admission != PatchbayAdmission.accepted) {
+        return _benchmarkStageRejected(requestId, 'warmupWait', invocation);
+      }
+    }
+
+    final List<_ExampleBenchmarkSample> endOfFrame =
+        <_ExampleBenchmarkSample>[];
+    final List<_ExampleBenchmarkSample> ensureOwner =
+        <_ExampleBenchmarkSample>[];
+    final List<_ExampleBenchmarkSample> probes = <_ExampleBenchmarkSample>[];
+    final List<_ExampleBenchmarkSample> waitFrames =
+        <_ExampleBenchmarkSample>[];
+    for (var run = 0; run < sampleRuns; run += 1) {
+      endOfFrame.add(await _benchmarkEndOfFrame());
+      ensureOwner.add(await _benchmarkMeasure(bridge.semantics.ensureOwner));
+      final _ExampleBenchmarkSample probe = await _benchmarkIdentifierProbe();
+      if (probe.value == null) {
+        return _benchmarkRejected(requestId, 'Semantics owner unavailable');
+      }
+      probes.add(probe);
+      final _ExampleBenchmarkSample wait = await _benchmarkWaitFrame();
+      if (wait.value case final PatchbayInvocation invocation
+          when invocation.admission != PatchbayAdmission.accepted) {
+        return _benchmarkStageRejected(requestId, 'uiWait', invocation);
+      }
+      waitFrames.add(wait);
+    }
+
+    return PatchbayInvocation.accepted(
+      requestId: requestId,
+      payload: <String, Object?>{
+        'outcome': 'completed',
+        'source': PatchbayFactSource.uiObserved.name,
+        'buildMode': kProfileMode
+            ? 'profile'
+            : kDebugMode
+            ? 'debug'
+            : 'release',
+        'scannedNodes': scannedNodes,
+        'warmupRuns': warmupRuns,
+        'sampleRuns': sampleRuns,
+        'metrics': <String, Object?>{
+          'endOfFrame': _exampleBenchmarkSummary(endOfFrame),
+          'ensureOwner': _exampleBenchmarkSummary(ensureOwner),
+          'identifierProbe': <String, Object?>{
+            ..._exampleBenchmarkSummary(probes),
+            'matchedNodes': 0,
+          },
+          'uiWaitAdditionalFrame': _exampleBenchmarkSummary(waitFrames),
+        },
+        'derived': <String, Object?>{
+          'unsatisfiedSemanticsWaitFramesPerPoll':
+              _exampleMedianFrames(probes) + _exampleMedianFrames(waitFrames),
+          'scanExclusiveEstimateMedianUs':
+              (_exampleMedianElapsed(probes) -
+                      _exampleMedianElapsed(ensureOwner))
+                  .clamp(0, 1 << 31),
+        },
+      },
+    ).toJson();
+  }
+
+  Future<_ExampleBenchmarkSample> _benchmarkEndOfFrame() =>
+      _benchmarkMeasure(() async {
+        SchedulerBinding.instance.scheduleFrame();
+        await SchedulerBinding.instance.endOfFrame;
+        return null;
+      });
+
+  Future<_ExampleBenchmarkSample> _benchmarkIdentifierProbe() =>
+      _benchmarkMeasure(
+        () =>
+            bridge.semantics.observeIdentifier('benchmark.missing.identifier'),
+      );
+
+  Future<_ExampleBenchmarkSample> _benchmarkWaitFrame() {
+    final int before = bridge.frameRevision;
+    return _benchmarkMeasure(
+      () => bridge.wait.wait(
+        PatchbayUiWaitRequest(
+          condition: PatchbayUiWaitCondition.frameRevision,
+          timeout: const Duration(seconds: 1),
+          revision: before,
+        ),
+      ),
+    );
+  }
+
+  static Future<_ExampleBenchmarkSample> _benchmarkMeasure(
+    Future<Object?> Function() operation,
+  ) async {
+    var completed = false;
+    var frames = 0;
+    void countFrame(Duration _) {
+      if (completed) return;
+      frames += 1;
+      SchedulerBinding.instance.addPostFrameCallback(countFrame);
+    }
+
+    SchedulerBinding.instance.addPostFrameCallback(countFrame);
+    final Stopwatch elapsed = Stopwatch()..start();
+    try {
+      final Object? value = await operation();
+      return _ExampleBenchmarkSample(
+        value: value,
+        elapsedUs: elapsed.elapsedMicroseconds,
+        frames: frames,
+      );
+    } finally {
+      completed = true;
+      elapsed.stop();
+    }
+  }
+
+  static Map<String, Object?> _benchmarkRejected(
+    String requestId,
+    String reason,
+  ) => PatchbayInvocation.rejected(
+    requestId: requestId,
+    rejection: PatchbayRejection(
+      code: 'benchmarkInvalid',
+      details: <String, Object?>{'reason': reason},
+    ),
+  ).toJson();
+
+  static Map<String, Object?> _benchmarkStageRejected(
+    String requestId,
+    String stage,
+    PatchbayInvocation invocation,
+  ) => PatchbayInvocation.rejected(
+    requestId: requestId,
+    rejection: PatchbayRejection(
+      code: 'benchmarkProbeFailed',
+      details: <String, Object?>{
+        'stage': stage,
+        if (invocation.rejection case final PatchbayRejection rejection)
+          'cause': rejection.code,
+      },
+    ),
+  ).toJson();
 
   void _audit(PatchbayAuditEvent event) => logs.write(
     category: 'audit',
@@ -256,6 +435,60 @@ final class PatchbayExampleHost {
   );
 
   void dispose() => bridge.dispose();
+}
+
+const PatchbayCommandDescriptor _semanticsBenchmarkDescriptor =
+    PatchbayCommandDescriptor(
+      name: semanticsBenchmarkCommand,
+      summary: 'Measure Semantics probe stages in the example App.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.uiObserved},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'samples',
+          type: PatchbayParameterType.integer,
+          required: false,
+          defaultValue: 12,
+        ),
+      ],
+    );
+
+Map<String, Object?> _exampleBenchmarkSummary(
+  List<_ExampleBenchmarkSample> samples,
+) => <String, Object?>{
+  'medianUs': _exampleMedianElapsed(samples),
+  'medianFrames': _exampleMedianFrames(samples),
+  'minUs': samples
+      .map((_ExampleBenchmarkSample sample) => sample.elapsedUs)
+      .reduce((int left, int right) => left < right ? left : right),
+  'maxUs': samples
+      .map((_ExampleBenchmarkSample sample) => sample.elapsedUs)
+      .reduce((int left, int right) => left > right ? left : right),
+};
+
+int _exampleMedianElapsed(List<_ExampleBenchmarkSample> samples) =>
+    _exampleMedian(samples.map((sample) => sample.elapsedUs));
+
+int _exampleMedianFrames(List<_ExampleBenchmarkSample> samples) =>
+    _exampleMedian(samples.map((sample) => sample.frames));
+
+int _exampleMedian(Iterable<int> values) {
+  final List<int> sorted = values.toList()..sort();
+  return sorted[sorted.length ~/ 2];
+}
+
+final class _ExampleBenchmarkSample {
+  const _ExampleBenchmarkSample({
+    required this.value,
+    required this.elapsedUs,
+    required this.frames,
+  });
+
+  final Object? value;
+  final int elapsedUs;
+  final int frames;
 }
 
 FutureOr<PatchbayGateDecision> _allowBaseGate() =>
