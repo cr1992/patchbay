@@ -39,6 +39,9 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 - [Semantics probe 请帧策略与 identifier 索引](0.5.0/semantics-probe-scheduling.md)
 - [identifier 锚定的通用 Semantics action](0.5.0/semantics-identifier-action.md)
 - [CLI 公共 API surface 收口](0.5.0/cli-public-api-surface.md)
+- [锚定式合成 tap（ui.gesture.tap）](0.5.0/anchored-tap.md)
+- [点性 semantics 派发的遮挡准入](0.5.0/semantics-occlusion-admission.md)
+- [identifier 锚定的 scroll-to-reveal](0.5.0/semantics-scroll-reveal.md)
 
 已延期、尚未进入版本范围的候选方案：
 

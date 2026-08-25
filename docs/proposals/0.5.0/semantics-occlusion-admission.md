@@ -254,6 +254,16 @@ action 的开销为零（分支不进入）。若 PB-050-07 统一 identifier �
   若真实用例存在，回到本 Proposal 引入绘制顺序比较，不放宽语义换合入。
 - `longPress` 是否借本条进入公开 descriptor allowlist？本稿建议否，只做分类不扩面。
 
+### 裁决结论（2026-08-25，仓主授权代理裁决，记录于范围扩充流程）
+
+- `details` **附带 `occluderIdentifier`**（仅覆盖层最近语义节点声明 identifier 时出现）：诊断价值高，
+  隐私尺度与 `mountedIdentifiers` 一致；presence/absence 两分支都上 golden。
+- 探针点集 **五点 ANY-pass**：只探中心会把「中心被悬浮控件压住、大片露出」判死，违背防误击但不误拒
+  的平衡；与 gesture 逐点管线共享基元。
+- 「无占位目标叠在无关不透明兄弟之上」的保守误拒 **接受**：fail-closed 优先，实现 MR 负举证义务；
+  真实用例出现时回本 Proposal 引入绘制顺序比较，不放宽语义换合入。
+- `longPress` **不借本条进入公开 allowlist**：只做分类不扩面，扩 allowlist 是独立条目。
+
 ## 被否决方案
 
 - **继续只用 `areUserActionsBlocked`**：它只有 `BlockSemantics` 会置真，正是缺陷本身。
