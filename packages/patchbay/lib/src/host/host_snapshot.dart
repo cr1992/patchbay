@@ -156,13 +156,25 @@ final class HostSnapshotHandler {
       );
     }
     final PatchbayFrozenSnapshotPayload frozen;
+    final Object violationToken = Object();
     try {
-      frozen = _snapshotFreezer.freeze(declared);
+      frozen = _snapshotFreezer.freeze(
+        declared,
+        violationToken: violationToken,
+      );
     } on PatchbaySnapshotPayloadViolation catch (error) {
+      final Map<String, Object?> details = error.belongsTo(violationToken)
+          ? error.details
+          : <String, Object?>{
+              'reason': 'snapshotPayloadInvalid',
+              'failure': 'unsupportedType',
+              'path': r'$',
+              'type': error.runtimeType.toString(),
+            };
       return PatchbaySnapshotRead.violated(
         patchbayProviderViolationEnvelope(
           'The App snapshot source violates the Patchbay JSON contract.',
-          error.details,
+          details,
         ),
       );
     }

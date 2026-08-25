@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:developer';
 
@@ -26,6 +27,28 @@ PatchbaySnapshotPayloadViolation _violationWith(
     return error;
   }
   fail('expected a snapshot payload violation');
+}
+
+final class _ThrowingSnapshotMap extends MapBase<String, Object?> {
+  _ThrowingSnapshotMap(this.error);
+
+  final Object error;
+
+  @override
+  Iterable<String> get keys => throw error;
+
+  @override
+  Object? operator [](Object? key) => null;
+
+  @override
+  void operator []=(String key, Object? value) =>
+      throw UnsupportedError('read-only test map');
+
+  @override
+  void clear() => throw UnsupportedError('read-only test map');
+
+  @override
+  Object? remove(Object? key) => throw UnsupportedError('read-only test map');
 }
 
 void main() {
@@ -422,6 +445,37 @@ void main() {
           );
           expect(jsonEncode(response), isNot(contains('secret')));
         }
+      },
+    );
+
+    test(
+      'does not trust a violation captured from another freeze call',
+      () async {
+        final PatchbaySnapshotPayloadViolation captured = _violationOf(
+          <String, Object?>{'reading': double.nan},
+        );
+        expect(
+          () => captured.details['secret'] = DateTime.utc(2026),
+          throwsUnsupportedError,
+        );
+        final HostSnapshotHandler handler = HostSnapshotHandler(
+          snapshotSource: () async => _ThrowingSnapshotMap(captured),
+        );
+
+        final Map<String, Object?> response = await handler.dispatchSnapshot();
+
+        expect(_rejection(response)['code'], 'providerProtocolViolation');
+        expect(
+          _details(response),
+          containsPair('reason', 'snapshotPayloadInvalid'),
+        );
+        expect(_details(response), containsPair('failure', 'unsupportedType'));
+        expect(_details(response), containsPair('path', r'$'));
+        expect(
+          _details(response),
+          containsPair('type', 'PatchbaySnapshotPayloadViolation'),
+        );
+        expect(jsonEncode(response), isNot(contains('secret')));
       },
     );
 

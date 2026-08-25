@@ -40,25 +40,35 @@ final class PatchbayFrozenSnapshotPayload {
 }
 
 final class PatchbaySnapshotPayloadViolation implements Exception {
-  const PatchbaySnapshotPayloadViolation(this.details);
+  PatchbaySnapshotPayloadViolation._(this._token, Map<String, Object?> details)
+    : details = Map<String, Object?>.unmodifiable(details);
 
-  factory PatchbaySnapshotPayloadViolation.invalid({
+  final Object _token;
+  final Map<String, Object?> details;
+
+  bool belongsTo(Object token) => identical(_token, token);
+}
+
+final class _SnapshotPayloadFault implements Exception {
+  const _SnapshotPayloadFault._(this.details);
+
+  factory _SnapshotPayloadFault.invalid({
     required String failure,
     required String path,
     String? type,
-  }) => PatchbaySnapshotPayloadViolation(<String, Object?>{
+  }) => _SnapshotPayloadFault._(<String, Object?>{
     'reason': 'snapshotPayloadInvalid',
     'failure': failure,
     'path': path,
     if (type != null) 'type': type,
   });
 
-  factory PatchbaySnapshotPayloadViolation.tooLarge({
+  factory _SnapshotPayloadFault.tooLarge({
     required String path,
     required String limitKind,
     required int limit,
     required int observed,
-  }) => PatchbaySnapshotPayloadViolation(<String, Object?>{
+  }) => _SnapshotPayloadFault._(<String, Object?>{
     'reason': 'snapshotPayloadInvalid',
     'failure': 'payloadTooLarge',
     'path': path,
@@ -66,13 +76,6 @@ final class PatchbaySnapshotPayloadViolation implements Exception {
     'limit': limit,
     'observed': observed,
   });
-
-  factory PatchbaySnapshotPayloadViolation.internal(Object error) =>
-      PatchbaySnapshotPayloadViolation.invalid(
-        failure: 'unsupportedType',
-        path: r'$',
-        type: error.runtimeType.toString(),
-      );
 
   final Map<String, Object?> details;
 }
@@ -86,12 +89,16 @@ final class PatchbaySnapshotPayloadFreezer {
   final PatchbaySnapshotPayloadLimits limits;
   final void Function(PatchbaySnapshotPayloadStage stage)? testStageHook;
 
-  PatchbayFrozenSnapshotPayload freeze(Object? source) {
+  PatchbayFrozenSnapshotPayload freeze(
+    Object? source, {
+    Object? violationToken,
+  }) {
+    final Object token = violationToken ?? Object();
     try {
       testStageHook?.call(PatchbaySnapshotPayloadStage.beforeFreeze);
       final Object? frozen = _SnapshotFreezingTraversal(limits).freeze(source);
       if (frozen is! Map<String, Object?>) {
-        throw PatchbaySnapshotPayloadViolation.invalid(
+        throw _SnapshotPayloadFault.invalid(
           failure: 'unsupportedType',
           path: r'$',
           type: frozen.runtimeType.toString(),
@@ -104,10 +111,15 @@ final class PatchbaySnapshotPayloadFreezer {
           limits.maxCanonicalBytes,
         ).encode(frozen),
       );
-    } on PatchbaySnapshotPayloadViolation {
-      rethrow;
+    } on _SnapshotPayloadFault catch (error) {
+      throw PatchbaySnapshotPayloadViolation._(token, error.details);
     } on Object catch (error) {
-      throw PatchbaySnapshotPayloadViolation.internal(error);
+      throw PatchbaySnapshotPayloadViolation._(token, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'unsupportedType',
+        'path': r'$',
+        'type': error.runtimeType.toString(),
+      });
     }
   }
 }
@@ -173,16 +185,13 @@ final class _SnapshotFreezingTraversal {
     required bool isMap,
   }) {
     if (depth > limits.maxContainerDepth) {
-      throw PatchbaySnapshotPayloadViolation.invalid(
+      throw _SnapshotPayloadFault.invalid(
         failure: 'nestingTooDeep',
         path: path,
       );
     }
     if (!_ancestry.add(source)) {
-      throw PatchbaySnapshotPayloadViolation.invalid(
-        failure: 'cycleDetected',
-        path: path,
-      );
+      throw _SnapshotPayloadFault.invalid(failure: 'cycleDetected', path: path);
     }
     _bytes.currentPath = path;
     _bytes.add(isMap ? _openMap : _openList);
@@ -196,13 +205,13 @@ final class _SnapshotFreezingTraversal {
 
   void _writeScalar(Object? value, String path) {
     if (value is double && !value.isFinite) {
-      throw PatchbaySnapshotPayloadViolation.invalid(
+      throw _SnapshotPayloadFault.invalid(
         failure: 'nonFiniteNumber',
         path: path,
       );
     }
     if (value != null && value is! bool && value is! num && value is! String) {
-      throw PatchbaySnapshotPayloadViolation.invalid(
+      throw _SnapshotPayloadFault.invalid(
         failure: 'unsupportedType',
         path: path,
         type: value.runtimeType.toString(),
@@ -228,7 +237,7 @@ final class _SnapshotFreezingTraversal {
   }
 
   Never nonStringKey(String parentPath, Object? key) {
-    throw PatchbaySnapshotPayloadViolation.invalid(
+    throw _SnapshotPayloadFault.invalid(
       failure: 'nonStringKey',
       path: parentPath,
       type: key.runtimeType.toString(),
@@ -238,7 +247,7 @@ final class _SnapshotFreezingTraversal {
   void _countOccurrence(String path) {
     final int observed = _expandedOccurrences + 1;
     if (observed > limits.maxExpandedOccurrences) {
-      throw PatchbaySnapshotPayloadViolation.tooLarge(
+      throw _SnapshotPayloadFault.tooLarge(
         path: path,
         limitKind: 'expandedNodes',
         limit: limits.maxExpandedOccurrences,
@@ -437,7 +446,7 @@ final class _BoundedByteSink extends ByteConversionSinkBase {
   void addSlice(List<int> chunk, int start, int end, bool isLast) {
     final int count = end - start;
     if (_length + count > maxBytes) {
-      throw PatchbaySnapshotPayloadViolation.tooLarge(
+      throw _SnapshotPayloadFault.tooLarge(
         path: currentPath,
         limitKind: 'canonicalBytes',
         limit: maxBytes,
