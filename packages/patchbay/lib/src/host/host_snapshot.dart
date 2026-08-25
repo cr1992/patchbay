@@ -170,7 +170,12 @@ final class HostSnapshotHandler {
     PatchbaySnapshotRevision revision;
     if (_snapshotRevisions.isNotEmpty &&
         _snapshotRevisions.last.canonical == canonical) {
-      revision = _snapshotRevisions.last;
+      revision = PatchbaySnapshotRevision(
+        revision: _snapshotRevisions.last.revision,
+        canonical: canonical,
+        body: frozen.body,
+      );
+      _snapshotRevisions[_snapshotRevisions.length - 1] = revision;
     } else {
       revision = PatchbaySnapshotRevision(
         revision: ++_nextSnapshotRevision,
@@ -190,8 +195,8 @@ final class HostSnapshotHandler {
       'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
     };
     return PatchbaySnapshotRead.valid(
-      <String, Object?>{...frozen.body, 'schemaVersion': 1, ...metadata},
-      frozen.body,
+      <String, Object?>{...revision.body, 'schemaVersion': 1, ...metadata},
+      revision.body,
       metadata,
     );
   }

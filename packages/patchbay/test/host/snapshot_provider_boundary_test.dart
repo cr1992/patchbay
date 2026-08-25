@@ -361,6 +361,43 @@ void main() {
     );
 
     test(
+      'refreshes the retained frozen view when canonical equality ignores order',
+      () async {
+        Map<String, Object?> current = <String, Object?>{
+          'nested': <String, Object?>{'a': 1, 'b': 2},
+        };
+        final HostSnapshotHandler handler = HostSnapshotHandler(
+          snapshotSource: () async => current,
+        );
+
+        final Map<String, Object?> first = await handler.dispatchSnapshot();
+        current = <String, Object?>{
+          'nested': <String, Object?>{'b': 2, 'a': 1},
+        };
+        final Map<String, Object?> reordered = await handler.dispatchSnapshot();
+        current = <String, Object?>{'nested': 3};
+        final Map<String, Object?> diff = await handler.dispatchSnapshot(
+          <String, Object?>{'fromRevision': 1},
+        );
+
+        expect(first['snapshotRevision'], 1);
+        expect(reordered['snapshotRevision'], 1);
+        expect((reordered['nested']! as Map<String, Object?>).keys, <String>[
+          'b',
+          'a',
+        ]);
+        final Map<String, Object?> change =
+            (diff['changed']! as List<Object?>).single as Map<String, Object?>;
+        expect(change['path'], '/nested');
+        expect((change['before']! as Map<String, Object?>).keys, <String>[
+          'b',
+          'a',
+        ]);
+        expect(change['after'], 3);
+      },
+    );
+
+    test(
       'projects freezer failures without leaking messages or payloads',
       () async {
         for (final PatchbaySnapshotPayloadStage stage
