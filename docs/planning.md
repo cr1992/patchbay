@@ -12,6 +12,7 @@
 | [Proposal](proposals/README.md) | API / wire、状态机、边界、兼容策略、资源预算、验证方案和设计裁决 | 排期优先级、实施进度、发布结果 |
 | [design.md](design.md) | 已接受且跨版本长期有效的设计立场 | 尚未裁决的方案和单版本排期 |
 | 根 README、[guide](guide.md)、全部包与 example README | 当前稳定版的安装、入口、能力与限制 | 已淘汰安装方式、旧版状态和实施过程 |
+| `skills/*/SKILL.md` / `INSTALL.md` | Agent 发现与任务路由、安全边界、Skill 安装及渐进式披露入口 | 手写复制 live catalog、descriptor、完整命令表或 guide 正文 |
 | `docs/assets/*.svg` | 当前架构与首页能力摘要 | 已删除组件、接入方业务词和旧版命令示例 |
 | `changelog.d/<version>/` / `CHANGELOG.md` | 已实现的用户可见变化 | 待办、设计备选和实施过程 |
 | `releases/`、`proposals/`、CHANGELOG、版本化兼容语料 | 对应版本的计划、裁决与发布证据 | 当前版安装入口 |
@@ -130,5 +131,8 @@ CI 会检查：
 - 标记 `待裁决` 的条目必须同时引用 Proposal 和 design-gate。
 - `release_prep` 另行检查当前文档的版本锚点、hosted 安装口径、中性示例与架构 SVG；历史区不参与
   当前版本漂移判定。
+
+`packages/patchbay_cli/tool/command_docs.dart --check` 另行验证 Skill frontmatter、配套 `INSTALL.md` 与
+只读起步命令生成块；Skill 只路由到 live catalog / describe / help，不维护第二份可变命令事实。
 
 检查脚本只验证结构关系，不替代对方案内容和验收质量的评审。
