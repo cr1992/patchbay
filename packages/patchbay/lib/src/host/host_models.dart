@@ -186,11 +186,14 @@ final class PatchbayExternalInvocationRecord {
   bool settled = false;
 }
 
-/// The catalog-declared argument policy the host enforces before dispatch.
+/// The catalog-declared argument and gate policy the host enforces before
+/// dispatch.
 final class PatchbayCommandPolicy {
   const PatchbayCommandPolicy({
     required this.sensitiveParameters,
     required this.retainsStdinProvenance,
+    required this.declaredGates,
+    required this.writesSideEffect,
   });
 
   factory PatchbayCommandPolicy.forCommand(
@@ -221,15 +224,57 @@ final class PatchbayCommandPolicy {
       }),
       retainsStdinProvenance:
           command['plane'] == PatchbayPlaneWire.flutterUi.name,
+      declaredGates: _declaredGates(command['gates']),
+      // Fail-closed: only a row that *says* `none` is treated as read-only.
+      // A missing key or a word outside the closed vocabulary can only come
+      // from a hand-written catalog row — `toJson()` always writes the field —
+      // and a host that cannot prove a command is read-only must not skip the
+      // admission gate for it.
+      writesSideEffect:
+          command['sideEffect'] != PatchbaySideEffectWire.none.name,
     );
   }
 
   const PatchbayCommandPolicy.undeclared()
     : sensitiveParameters = const <String>{},
-      retainsStdinProvenance = false;
+      retainsStdinProvenance = false,
+      declaredGates = const <String>{},
+      // "Not in the catalog" is not the same as "will not execute": the
+      // consumer adapter still sees the command, so it is admitted as a write.
+      writesSideEffect = true;
 
   final Set<String> sensitiveParameters;
   final bool retainsStdinProvenance;
+
+  /// The consumer gate IDs this catalog row declares, handed to the evaluator
+  /// unchanged. An absent or malformed declaration reads as the empty set,
+  /// which means "base gate only" — the same meaning it already has on the UI
+  /// plane.
+  final Set<String> declaredGates;
+
+  /// Whether this row must cross the admission gate before dispatch.
+  final bool writesSideEffect;
+
+  /// Whether [other] describes the same admission decision as this policy.
+  ///
+  /// A consumer gate may `await`, and a dynamic catalog provider can advance
+  /// its revision while it does. Only the two facts the gate decision was
+  /// taken from are compared: everything else about a row may change under a
+  /// call without making the authorization it already obtained wrong.
+  bool sameGatePolicy(PatchbayCommandPolicy other) =>
+      writesSideEffect == other.writesSideEffect &&
+      declaredGates.length == other.declaredGates.length &&
+      declaredGates.containsAll(other.declaredGates);
+
+  static Set<String> _declaredGates(Object? gates) {
+    if (gates is! List<Object?>) return const <String>{};
+    final Set<String> declared = <String>{};
+    for (final Object? gate in gates) {
+      if (gate is! String) return const <String>{};
+      declared.add(gate);
+    }
+    return Set<String>.unmodifiable(declared);
+  }
 
   List<String> sensitiveViolations(Map<String, Object?> arguments) {
     if (sensitiveParameters.isEmpty) return const <String>[];

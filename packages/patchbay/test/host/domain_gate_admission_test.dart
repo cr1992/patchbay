@@ -83,7 +83,7 @@ void main() {
       );
 
       expect(response['admission'], 'rejected');
-      expect(response['payload'], isNull);
+      expect(response['payload'], isEmpty);
       expect(response['notice'], 'The example transport is not attached yet.');
       expect(_code(response), 'dependenciesNotReady');
       expect(_details(response), <String, Object?>{'gateId': 'patchbay.base'});
@@ -216,10 +216,9 @@ void main() {
   });
 
   group('sideEffect projection is fail-closed', () {
-    Future<Map<String, Object?>> reply(Map<String, Object?> row) async =>
-        _host(
-          commands: <Map<String, Object?>>[row],
-        ).dispatchInvoke('device.write', const <String, Object?>{}, 'req-fc');
+    Future<Map<String, Object?>> reply(Map<String, Object?> row) async => _host(
+      commands: <Map<String, Object?>>[row],
+    ).dispatchInvoke('device.write', const <String, Object?>{}, 'req-fc');
 
     test('a missing sideEffect key counts as a write', () async {
       final Map<String, Object?> row = _row(
@@ -363,10 +362,7 @@ void main() {
         commands: <Map<String, Object?>>[
           <String, Object?>{
             ..._row('device.write', gates: <String>['write']),
-            'retryPolicy': <String, Object?>{
-              'maxAttempts': 3,
-              'backoffMs': 10,
-            },
+            'retryPolicy': <String, Object?>{'maxAttempts': 3, 'backoffMs': 10},
           },
         ],
         domainGates: PatchbayGateEvaluator(
@@ -402,27 +398,30 @@ void main() {
       expect(executed, <String>['device.write']);
     });
 
-    test('a first-time gate rejection does not claim a prior request', () async {
-      final PatchbayServiceHost host = _host(
-        commands: <Map<String, Object?>>[
-          _row('device.write', gates: <String>['write']),
-        ],
-        domainGates: _RecordingGates(
-          rejectedGateIds: const <String>{'write'},
-        ).evaluator,
-      );
+    test(
+      'a first-time gate rejection does not claim a prior request',
+      () async {
+        final PatchbayServiceHost host = _host(
+          commands: <Map<String, Object?>>[
+            _row('device.write', gates: <String>['write']),
+          ],
+          domainGates: _RecordingGates(
+            rejectedGateIds: const <String>{'write'},
+          ).evaluator,
+        );
 
-      expect(
-        _details(
-          await host.dispatchInvoke(
-            'device.write',
-            const <String, Object?>{},
-            'req-first',
+        expect(
+          _details(
+            await host.dispatchInvoke(
+              'device.write',
+              const <String, Object?>{},
+              'req-first',
+            ),
           ),
-        ),
-        <String, Object?>{'gateId': 'write'},
-      );
-    });
+          <String, Object?>{'gateId': 'write'},
+        );
+      },
+    );
 
     test('a parked gate does not consume external ledger capacity', () async {
       final Completer<void> release = Completer<void>();
@@ -505,158 +504,175 @@ void main() {
       expect(evaluations, 1, reason: 'drift must not re-evaluate the gate');
     });
 
-    test('rejects a write that turned read-only while the gate awaited', () async {
-      final _MutableProvider provider = _MutableProvider(
-        commands: <Object?>[
-          _row('device.write', gates: <String>['write']),
-        ],
-      );
-      final List<String> executed = <String>[];
-      final PatchbayServiceHost host = _providerHost(
-        provider: provider,
-        executed: executed,
-        domainGates: PatchbayGateEvaluator(
-          baseGate: () => const PatchbayGateDecision.allow(),
-          consumerGate: (String _) async {
-            provider
-              ..revision += 1
-              ..commands = <Object?>[
-                _row(
-                  'device.write',
-                  sideEffect: 'none',
-                  gates: <String>['write'],
-                ),
-              ];
-            return const PatchbayGateDecision.allow();
-          },
-        ),
-      );
-
-      expect(
-        _details(
-          await host.dispatchInvoke(
-            'device.write',
-            const <String, Object?>{},
-            'req-became-read',
+    test(
+      'rejects a write that turned read-only while the gate awaited',
+      () async {
+        final _MutableProvider provider = _MutableProvider(
+          commands: <Object?>[
+            _row('device.write', gates: <String>['write']),
+          ],
+        );
+        final List<String> executed = <String>[];
+        final PatchbayServiceHost host = _providerHost(
+          provider: provider,
+          executed: executed,
+          domainGates: PatchbayGateEvaluator(
+            baseGate: () => const PatchbayGateDecision.allow(),
+            consumerGate: (String _) async {
+              provider
+                ..revision += 1
+                ..commands = <Object?>[
+                  _row(
+                    'device.write',
+                    sideEffect: 'none',
+                    gates: <String>['write'],
+                  ),
+                ];
+              return const PatchbayGateDecision.allow();
+            },
           ),
-        )['reason'],
-        'catalogGateDrift',
-      );
-      expect(executed, isEmpty);
-    });
+        );
 
-    test('a read-only row that later became a write is still dispatched', () async {
-      // The admission decision is taken from the catalog read that admitted
-      // this call. A read-only row never opens a gate window, so there is no
-      // recheck to fail — the next call sees the new declaration instead.
-      final _MutableProvider provider = _MutableProvider(
-        commands: <Object?>[
-          _row('device.probe', sideEffect: 'none', gates: <String>['write']),
-        ],
-      );
-      final List<String> executed = <String>[];
-      final PatchbayServiceHost host = _providerHost(
-        provider: provider,
-        executed: executed,
-        domainGates: PatchbayGateEvaluator(
-          baseGate: () => const PatchbayGateDecision.allow(),
-          consumerGate: (String _) => const PatchbayGateDecision.reject(
-            code: 'writeGateClosed',
+        expect(
+          _details(
+            await host.dispatchInvoke(
+              'device.write',
+              const <String, Object?>{},
+              'req-became-read',
+            ),
+          )['reason'],
+          'catalogGateDrift',
+        );
+        expect(executed, isEmpty);
+      },
+    );
+
+    test(
+      'a read-only row that later became a write is still dispatched',
+      () async {
+        // The admission decision is taken from the catalog read that admitted
+        // this call. A read-only row never opens a gate window, so there is no
+        // recheck to fail — the next call sees the new declaration instead.
+        final _MutableProvider provider = _MutableProvider(
+          commands: <Object?>[
+            _row('device.probe', sideEffect: 'none', gates: <String>['write']),
+          ],
+        );
+        final List<String> executed = <String>[];
+        final PatchbayServiceHost host = _providerHost(
+          provider: provider,
+          executed: executed,
+          domainGates: PatchbayGateEvaluator(
+            baseGate: () => const PatchbayGateDecision.allow(),
+            consumerGate: (String _) =>
+                const PatchbayGateDecision.reject(code: 'writeGateClosed'),
           ),
-        ),
-      );
+        );
 
-      expect(
-        (await host.dispatchInvoke(
-          'device.probe',
-          const <String, Object?>{},
-          'req-probe',
-        ))['admission'],
-        'accepted',
-      );
-      provider
-        ..revision += 1
-        ..commands = <Object?>[
-          _row('device.probe', gates: <String>['write']),
-        ];
-      expect(
-        _code(
-          await host.dispatchInvoke(
+        expect(
+          (await host.dispatchInvoke(
             'device.probe',
             const <String, Object?>{},
-            'req-probe-2',
+            'req-probe',
+          ))['admission'],
+          'accepted',
+        );
+        provider
+          ..revision += 1
+          ..commands = <Object?>[
+            _row('device.probe', gates: <String>['write']),
+          ];
+        expect(
+          _code(
+            await host.dispatchInvoke(
+              'device.probe',
+              const <String, Object?>{},
+              'req-probe-2',
+            ),
           ),
-        ),
-        'writeGateClosed',
-      );
-      expect(executed, <String>['device.probe']);
-    });
+          'writeGateClosed',
+        );
+        expect(executed, <String>['device.probe']);
+      },
+    );
 
-    test('reports a catalog that went invalid while the gate awaited', () async {
-      final _MutableProvider provider = _MutableProvider(
-        commands: <Object?>[
-          _row('device.write', gates: <String>['write']),
-        ],
-      );
-      final PatchbayServiceHost host = _providerHost(
-        provider: provider,
-        domainGates: PatchbayGateEvaluator(
-          baseGate: () => const PatchbayGateDecision.allow(),
-          consumerGate: (String _) async {
-            provider
-              ..revision += 1
-              ..commands = <Object?>[
-                <String, Object?>{'name': 'device.invalid-name'},
-              ];
-            return const PatchbayGateDecision.allow();
-          },
-        ),
-      );
+    test(
+      'reports a catalog that went invalid while the gate awaited',
+      () async {
+        final _MutableProvider provider = _MutableProvider(
+          commands: <Object?>[
+            _row('device.write', gates: <String>['write']),
+          ],
+        );
+        final PatchbayServiceHost host = _providerHost(
+          provider: provider,
+          domainGates: PatchbayGateEvaluator(
+            baseGate: () => const PatchbayGateDecision.allow(),
+            consumerGate: (String _) async {
+              provider
+                ..revision += 1
+                ..commands = <Object?>[
+                  <String, Object?>{'name': 'device.invalid-name'},
+                ];
+              return const PatchbayGateDecision.allow();
+            },
+          ),
+        );
 
-      final Map<String, Object?> response = await host.dispatchInvoke(
-        'device.write',
-        const <String, Object?>{},
-        'req-invalid',
-      );
-
-      expect(_code(response), 'providerProtocolViolation');
-      expect(_details(response)['reason'], 'invalidCatalogCommands');
-    });
-
-    test('dispatches when the projection survives an unrelated revision', () async {
-      final _MutableProvider provider = _MutableProvider(
-        commands: <Object?>[
-          _row('device.write', gates: <String>['write']),
-        ],
-      );
-      final List<String> executed = <String>[];
-      final PatchbayServiceHost host = _providerHost(
-        provider: provider,
-        executed: executed,
-        domainGates: PatchbayGateEvaluator(
-          baseGate: () => const PatchbayGateDecision.allow(),
-          consumerGate: (String _) async {
-            provider
-              ..revision += 1
-              ..commands = <Object?>[
-                _row('device.write', gates: <String>['write']),
-                _row('device.added', sideEffect: 'none'),
-              ];
-            return const PatchbayGateDecision.allow();
-          },
-        ),
-      );
-
-      expect(
-        (await host.dispatchInvoke(
+        final Map<String, Object?> response = await host.dispatchInvoke(
           'device.write',
           const <String, Object?>{},
-          'req-stable',
-        ))['admission'],
-        'accepted',
-      );
-      expect(executed, <String>['device.write']);
-    });
+          'req-invalid',
+        );
+
+        expect(_code(response), 'providerProtocolViolation');
+        // Same shape the pre-gate catalog read already produces: the outer
+        // reason names the stage, the nested `catalog` carries the violation.
+        expect(_details(response)['reason'], 'catalogUnavailable');
+        expect(
+          (_details(response)['catalog']! as Map<Object?, Object?>)['reason'],
+          'invalidCatalogCommands',
+        );
+      },
+    );
+
+    test(
+      'dispatches when the projection survives an unrelated revision',
+      () async {
+        final _MutableProvider provider = _MutableProvider(
+          commands: <Object?>[
+            _row('device.write', gates: <String>['write']),
+          ],
+        );
+        final List<String> executed = <String>[];
+        final PatchbayServiceHost host = _providerHost(
+          provider: provider,
+          executed: executed,
+          domainGates: PatchbayGateEvaluator(
+            baseGate: () => const PatchbayGateDecision.allow(),
+            consumerGate: (String _) async {
+              provider
+                ..revision += 1
+                ..commands = <Object?>[
+                  _row('device.write', gates: <String>['write']),
+                  _row('device.added', sideEffect: 'none'),
+                ];
+              return const PatchbayGateDecision.allow();
+            },
+          ),
+        );
+
+        expect(
+          (await host.dispatchInvoke(
+            'device.write',
+            const <String, Object?>{},
+            'req-stable',
+          ))['admission'],
+          'accepted',
+        );
+        expect(executed, <String>['device.write']);
+      },
+    );
   });
 
   group('audit', () {
@@ -705,10 +721,7 @@ void main() {
         commands: <Map<String, Object?>>[
           <String, Object?>{
             ..._row('device.write', gates: <String>['write']),
-            'retryPolicy': <String, Object?>{
-              'maxAttempts': 2,
-              'backoffMs': 10,
-            },
+            'retryPolicy': <String, Object?>{'maxAttempts': 2, 'backoffMs': 10},
           },
         ],
         domainGates: _RecordingGates().evaluator,
@@ -734,19 +747,18 @@ void main() {
     test('both transports reply with the same envelope and audit', () async {
       final Map<String, ServiceExtensionHandler> handlers =
           <String, ServiceExtensionHandler>{};
-      PatchbayServiceHost build([
-        PatchbayExtensionRegistrar? registrar,
-      ]) => _host(
-        commands: <Map<String, Object?>>[
-          _row('device.write', gates: <String>['write']),
-        ],
-        domainGates: _RecordingGates(
-          rejectedGateIds: const <String>{'write'},
-          consumerCode: 'writeGateClosedByDefault',
-          consumerNotice: 'closed by default',
-        ).evaluator,
-        registrar: registrar,
-      );
+      PatchbayServiceHost build([PatchbayExtensionRegistrar? registrar]) =>
+          _host(
+            commands: <Map<String, Object?>>[
+              _row('device.write', gates: <String>['write']),
+            ],
+            domainGates: _RecordingGates(
+              rejectedGateIds: const <String>{'write'},
+              consumerCode: 'writeGateClosedByDefault',
+              consumerNotice: 'closed by default',
+            ).evaluator,
+            registrar: registrar,
+          );
 
       final PatchbayServiceHost directHost = build();
       final PatchbayServiceHost vmHost = build((
@@ -894,9 +906,9 @@ final class _RecordingGates {
 }
 
 final class _MutableProvider implements PatchbayCatalogProvider {
-  _MutableProvider({this.revision = 0, required this.commands});
+  _MutableProvider({required this.commands});
 
-  int revision;
+  int revision = 0;
   List<Object?> commands;
 
   @override
