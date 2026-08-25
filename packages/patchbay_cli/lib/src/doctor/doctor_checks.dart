@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
 
@@ -24,8 +26,13 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
     options.option('session-dir'),
   );
   final List<PatchbaySessionListing> listings;
+  final List<String> quarantined;
   try {
     listings = PatchbaySessionResolver(store: store).inventory();
+    quarantined = store
+        .quarantinedFiles()
+        .map((File file) => file.path)
+        .toList(growable: false);
   } on Object catch (failure) {
     return patchbayFailureFinding(PatchbayDoctorCheck.session, failure);
   }
@@ -35,6 +42,7 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
     listings: listings,
     explicitSession: explicitSession,
     pinnedSessionId: pinned,
+    quarantinedFiles: quarantined,
   );
 }
 
@@ -43,6 +51,7 @@ PatchbayDoctorFinding patchbaySessionFinding({
   required List<PatchbaySessionListing> listings,
   required String? explicitSession,
   String? pinnedSessionId,
+  List<String> quarantinedFiles = const <String>[],
 }) {
   Map<String, Object?> counts() => <String, Object?>{
     'records': listings.length,
@@ -50,6 +59,10 @@ PatchbayDoctorFinding patchbaySessionFinding({
       status.name: listings
           .where((PatchbaySessionListing listing) => listing.status == status)
           .length,
+    if (quarantinedFiles.isNotEmpty) ...<String, Object?>{
+      'quarantined': quarantinedFiles.length,
+      'quarantinedFiles': quarantinedFiles,
+    },
   };
 
   if (listings.isEmpty) {
@@ -166,6 +179,7 @@ PatchbayDoctorFinding statusFinding(
     ...counts,
     'sessionId': listing.record.sessionId,
     'status': listing.status.name,
+    if (listing.identityUnverified) 'identityUnverified': true,
   };
   return switch (listing.status) {
     PatchbaySessionStatus.live => PatchbayDoctorFinding(
