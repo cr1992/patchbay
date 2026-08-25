@@ -244,6 +244,21 @@ sequenceDiagram
 “共用 emit 点”的结论因 host/CLI 进程边界无法成立，已于 2026-08-18 明示重新接受为：四包不为此新增
 跨进程 audit event-stream；host audit 与 CLI trace 共享纯脱敏/分类投影，是否传输仍由显式协议决定。
 
+host audit sink 的投递边界以 ledger sequence 为序：单消费者只有在前一个 sink Future settle 后才启动
+下一项，业务 invocation 永不等待 sink。dispatcher 的 capacity 同时计算 active 与 waiting，默认 256；满时
+保留已接收前缀并丢最新，以精确 sequence burst 通过既有 error observer 报告，不驱逐旧项伪造连续后缀。
+drain 是有预算的 terminal 操作，默认 2 秒；timeout 返回结构化结果并明确 abandoned 数量，不能把迟到
+settle 冒充 cooperative cancellation。完整状态机与隐私边界见已接受的
+[Audit sink 顺序投递与有界背压](proposals/0.5.0/audit-delivery.md)。
+
+invocation 的等待与停止同样不混：deadline 或 caller disconnect 只证明调用方不再等待；只有完整 pipeline
+settle，或 context-aware consumer 明确确认底层已停止且不会再产生副作用，才能释放 host execution slot。
+registry/external 共用默认 8 路的 host admission，direct 的 transport processing 门另行计数并可跨 response
+关闭继续保留；显式 cancel 走独立 protocol-owned method/endpoint，不伪装成 consumer command，并以专用有界
+control slot 保证普通 processing 满载时仍可达。host dispose 先关闭 invocation 受理并形成有预算
+终态，再 drain audit，确保取消/放弃事实先进入 ledger。完整 wire、容量、降级与竞速规则见已接受的
+[Invocation cooperative cancellation、deadline 与统一受理预算](proposals/0.5.0/invocation-cancellation.md)。
+
 ### 6. 慢事实用 job 表达
 
 批处理、同步这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实
