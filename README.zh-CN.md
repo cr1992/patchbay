@@ -90,11 +90,24 @@ import 'package:patchbay_flutter/patchbay_flutter.dart';
 void main() {
   if (!kReleaseMode) {
     final gates = PatchbayGateEvaluator(
+      // 没有任何参数会传进这个门，对任何命令都一样，所以它天生分不清读和
+      // 写——这正是它必须保持放行的原因。这份最小接入暴露的只读命令
+      // （catalog、snapshot、ui.wait、Semantics 观察）也只经过这一道门。
       baseGate: () => const PatchbayGateDecision.allow(),
+      // 只有写类操作才会声明 consumer gate ID；对未显式放行的 ID 一律拒绝，
+      // 写操作就有了"开箱默认关闭"的出厂安全默认。
       consumerGate: (id) => PatchbayGateDecision.reject(
         code: 'unknownConsumerGate',
-        notice: 'No consumer gate named $id.',
+        notice: '没有叫 "$id" 的 consumer gate——这是出厂安全默认：写操作'
+            '在这里被显式放行之前一律保持关闭。',
       ),
+      // 需要为可信的驱动放行某个写门时，把上面的函数体换成类似这样：
+      //   consumerGate: (id) => id == 'app.write'
+      //       ? const PatchbayGateDecision.allow()
+      //       : PatchbayGateDecision.reject(
+      //           code: 'unknownConsumerGate',
+      //           notice: '没有叫 "$id" 的 consumer gate。',
+      //         ),
     );
 
     PatchbayFlutterServiceHost(
@@ -107,8 +120,9 @@ void main() {
 }
 ```
 
-这段最小接入已能提供 identity、catalog、空 snapshot、Semantics 只读观察和 `ui.wait`。
-Semantics action 默认拒绝；领域命令、截图、日志和导航都需要 App 显式注入对应能力。
+最短接入默认先开放只读诊断，写操作必须显式声明并通过门。这段最小接入已能提供 identity、
+catalog、空 snapshot、Semantics 只读观察和 `ui.wait`。Semantics action 默认拒绝；领域命令、
+截图、日志和导航都需要 App 显式注入对应能力。
 
 需要稳定文本目标时，用 `PatchbayKey` 替换现有 Key。它是 `GlobalKey`，必须像普通
 `GlobalKey` 一样缓存，不能在 `build()` 中每次重新构造：

@@ -181,14 +181,29 @@ catalog 是这条策略的唯一真源。host 读不到**可用**的 catalog 时
 
 ```dart
 final gates = PatchbayGateEvaluator(
+  // 没有任何参数会传进这个门，所以它保持放行——只读命令因此不需要任何
+  // 额外接线。
   baseGate: () => const PatchbayGateDecision.allow(),
-  consumerGate: (id) => evaluateConsumerGate(id),
+  // 每声明一个 gate ID 就会跑一次。出厂安全默认是：没有被显式放行的一律
+  // 拒绝：
+  consumerGate: (id) => PatchbayGateDecision.reject(
+    code: 'unknownConsumerGate',
+    notice: '没有叫 "$id" 的 consumer gate——这是出厂安全默认：写操作在'
+        '这里被显式放行之前一律保持关闭。',
+  ),
+  // 需要为可信的驱动放行某个写门时，把上面的函数体换成类似这样：
+  //   consumerGate: (id) => id == 'app.write'
+  //       ? const PatchbayGateDecision.allow()
+  //       : PatchbayGateDecision.reject(
+  //           code: 'unknownConsumerGate',
+  //           notice: '没有叫 "$id" 的 consumer gate。',
+  //         ),
 );
 ```
 
-基础门不会替 App 猜测登录、隐私同意、依赖就绪或设备状态。会触发网络、文件、权限或外部设备动作的
-命令，必须显式声明相应门禁。service extension 没有对称注销能力，所以状态撤回后 handler 仍需逐次
-fail-closed。
+最短接入默认先开放只读诊断，写操作必须显式声明并通过门。基础门不会替 App 猜测登录、隐私同意、
+依赖就绪或设备状态。会触发网络、文件、权限或外部设备动作的命令，必须显式声明相应门禁。
+service extension 没有对称注销能力，所以状态撤回后 handler 仍需逐次 fail-closed。
 
 ## 长任务
 
