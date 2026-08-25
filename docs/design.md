@@ -251,6 +251,14 @@ drain 是有预算的 terminal 操作，默认 2 秒；timeout 返回结构化�
 settle 冒充 cooperative cancellation。完整状态机与隐私边界见已接受的
 [Audit sink 顺序投递与有界背压](proposals/0.5.0/audit-delivery.md)。
 
+invocation 的等待与停止同样不混：deadline 或 caller disconnect 只证明调用方不再等待；只有完整 pipeline
+settle，或 context-aware consumer 明确确认底层已停止且不会再产生副作用，才能释放 host execution slot。
+registry/external 共用默认 8 路的 host admission，direct 的 transport processing 门另行计数并可跨 response
+关闭继续保留；显式 cancel 走独立 protocol-owned method/endpoint，不伪装成 consumer command，并以专用有界
+control slot 保证普通 processing 满载时仍可达。host dispose 先关闭 invocation 受理并形成有预算
+终态，再 drain audit，确保取消/放弃事实先进入 ledger。完整 wire、容量、降级与竞速规则见已接受的
+[Invocation cooperative cancellation、deadline 与统一受理预算](proposals/0.5.0/invocation-cancellation.md)。
+
 ### 6. 慢事实用 job 表达
 
 批处理、同步这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实
