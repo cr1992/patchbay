@@ -53,16 +53,16 @@ const _ProjectionRule _noticeRule = _ProjectionRule(
   leafKey: 'notice',
 );
 
-/// Section 5.2: `catalog`. `name`/`plane`/`mode`/`sideEffect`/`factSources`/
-/// `gates` and `uiTargets`/`catalogDigest` are untouched — they are the
-/// minimal facts "should I call this" needs.
+/// Section 5.2: `catalog`. `name`/`plane`/`mode`/`sideEffect`/`summary`/
+/// `factSources`/`gates` and `uiTargets`/`catalogDigest` are untouched — they
+/// are the minimal facts "should I call this" needs.
+///
+/// `summary` is deliberately **not** in this table: the 2026-08-25 ruling on
+/// brief-view.md's open question 3 kept it, because it is the only clue an
+/// agent has about what a command does before it spends a `describe` round
+/// trip. Deleting it would save bytes by removing the one field that makes
+/// the rest of a brief catalog actionable.
 const List<_ProjectionRule> _catalogRules = <_ProjectionRule>[
-  _ProjectionRule(
-    pattern: r'$.commands[].summary',
-    containerPath: <String>['commands'],
-    leafKey: 'summary',
-    arrayContainer: true,
-  ),
   _ProjectionRule(
     pattern: r'$.commands[].parameters',
     containerPath: <String>['commands'],
@@ -155,11 +155,30 @@ _Family _familyFor(PatchbayFriendlyCommandSpec? spec) {
   return _unmatchedFamily;
 }
 
+/// Whether [value] carries nothing a caller could have wanted expanded.
+///
+/// Section 5.4 names the case this exists for: outside a debug build the
+/// three Flutter diagnostic trees answer with exit 0 and an **empty `data`**
+/// rather than a refusal, and `localView.omitted` is the *only* way to tell
+/// "the App had nothing to show" apart from "brief deleted it". Deleting an
+/// empty member would collapse those two into the same document while saving
+/// no bytes worth having, so the table skips it and reports no deletion.
+///
+/// A JSON `null` counts, and so does an empty string, list or map — an empty
+/// tree arrives as `null`, `''`, `[]` or `{}` depending on which SDK
+/// extension answered, and none of those is worth hiding.
+bool _isEmptyMember(Object? value) =>
+    value == null ||
+    (value is String && value.isEmpty) ||
+    (value is Iterable && value.isEmpty) ||
+    (value is Map && value.isEmpty);
+
 /// Applies one rule to [root], returning the (possibly unchanged) response
 /// and whether it actually removed something. A rule that does not resolve
 /// — a missing container, a container of the wrong shape, an absent leaf
-/// key — is a no-op rather than an error: invariant 4 in the proposal is
-/// that projection is a total function that never guesses.
+/// key, a leaf that is empty — is a no-op rather than an error: invariant 4
+/// in the proposal is that projection is a total function that never
+/// guesses.
 (Map<String, Object?>, bool) _applyRule(
   Map<String, Object?> root,
   _ProjectionRule rule,
@@ -177,7 +196,9 @@ _Family _familyFor(PatchbayFriendlyCommandSpec? spec) {
     var removed = false;
     final List<Object?> updated = <Object?>[
       for (final Object? item in cursor)
-        if (item is Map<String, Object?> && item.containsKey(rule.leafKey))
+        if (item is Map<String, Object?> &&
+            item.containsKey(rule.leafKey) &&
+            !_isEmptyMember(item[rule.leafKey]))
           _withoutKey(item, rule.leafKey, onRemoved: () => removed = true)
         else
           item,
@@ -185,7 +206,9 @@ _Family _familyFor(PatchbayFriendlyCommandSpec? spec) {
     if (!removed) return (root, false);
     return (_withReplacedContainer(root, rule.containerPath, updated), true);
   }
-  if (cursor is! Map<String, Object?> || !cursor.containsKey(rule.leafKey)) {
+  if (cursor is! Map<String, Object?> ||
+      !cursor.containsKey(rule.leafKey) ||
+      _isEmptyMember(cursor[rule.leafKey])) {
     return (root, false);
   }
   final Map<String, Object?> updated = <String, Object?>{...cursor}

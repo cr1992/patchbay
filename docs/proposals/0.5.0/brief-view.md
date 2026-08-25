@@ -161,16 +161,19 @@ brief 文档在**顶层末尾**追加一个 CLI 自有对象，键集合恒定�
 
 | 路径 | 操作 |
 |---|---|
-| `$.commands[].summary` | prune |
 | `$.commands[].parameters` | prune |
 | `$.commands[].responseSchema` | prune |
 | `$.commands[].executionContract` | prune |
 | `$.commands[].retryPolicy` | prune |
 
-保留 `name` / `plane` / `mode` / `sideEffect` / `factSources` / `gates`：这六项回答"这条命令存在吗、
-是不是写操作、要不要 `--wait`、过不过得了门"，正是"要不要调"这一步的最小事实。参数与响应 schema
-的展开入口是既有的 `describe <service-command>`（PB-050-09 已保证它在 REPL 内也可用），不需要
-brief 再复制一份。
+保留 `name` / `plane` / `mode` / `sideEffect` / `summary` / `factSources` / `gates`：这七项回答
+"这条命令存在吗、它是干什么的、是不是写操作、要不要 `--wait`、过不过得了门"，正是"要不要调"这一步
+的最小事实。参数与响应 schema 的展开入口是既有的 `describe <service-command>`（PB-050-09 已保证它
+在 REPL 内也可用），不需要 brief 再复制一份。
+
+`$.commands[].summary` **不投影**：本文初稿把它列为 prune，「待裁决」第 3 条问的正是要不要保留；
+2026-08-25 的裁决结论选择保留——它是 Agent 在 `describe` 之前判断"这条命令是干什么的"的唯一线索，
+删掉它省下的字节买不回这个。上表已按该结论去掉这一行。
 
 `$.uiTargets[]` **不投影**：单行小，且 `generation` / `mounted` / `ambiguous` / `operationGates` /
 `sensitivePolicy` 每一项都是写操作的前置事实，删任何一项都会让调用方少一次围栏。

@@ -505,6 +505,68 @@ void main() {
       expect(identical(result.response['localArtifact'], inPlace), isTrue);
     });
 
+    group('an empty member is never spilled on the automatic path', () {
+      // Outside a debug build the three Flutter diagnostic trees answer exit
+      // 0 with an empty `data` rather than a refusal
+      // (`tree-artifact-output.md`'s profile note). Spilling that would put a
+      // "verified artifact" receipt in front of a file holding `null`, and
+      // would hide the one fact the caller needed: there was nothing there.
+      for (final MapEntry<String, Object?> shape in <String, Object?>{
+        'a null member': null,
+        'an empty list': const <Object?>[],
+        'an empty map': const <String, Object?>{},
+        'an empty string': '',
+      }.entries) {
+        test('${shape.key} renders inline and writes no file', () async {
+          final Map<String, Object?> response = <String, Object?>{
+            'source': 'uiObserved',
+            'plane': 'flutterDiagnostic',
+            'data': shape.value,
+          };
+          final PatchbayRenderedMemberSpillResult result =
+              await maybeSpillRenderedMember(
+                writer: writer,
+                spec: const _FakeSpec(spilledMember: 'data'),
+                response: response,
+                exitCode: PatchbayExitCode.accepted,
+                explicitOutputPath: null,
+                force: false,
+                // A ceiling of 1 byte would spill anything spillable, so
+                // nothing but the emptiness of the member can be keeping
+                // this inline.
+                maxInlineBytes: 1,
+                renderDocument: _prettyJson,
+                environment: environment,
+              );
+          expect(identical(result.response, response), isTrue);
+          expect(result.artifact, isNull);
+          expect(result.response.containsKey('data'), isTrue);
+          expect(result.response.containsKey('localArtifact'), isFalse);
+          expect(directory.listSync(), isEmpty);
+        });
+      }
+
+      test('an explicit --output still writes an empty member: the operator '
+          'named a file and the proposal freezes that path as '
+          'unconditional', () async {
+        final File output = File('${directory.path}/empty.json');
+        final PatchbayRenderedMemberSpillResult result =
+            await maybeSpillRenderedMember(
+              writer: writer,
+              spec: const _FakeSpec(spilledMember: 'data'),
+              response: <String, Object?>{'data': const <Object?>[]},
+              exitCode: PatchbayExitCode.accepted,
+              explicitOutputPath: output.path,
+              force: false,
+              maxInlineBytes: patchbayDefaultMaxInlineBytes,
+              renderDocument: _prettyJson,
+              environment: environment,
+            );
+        expect(result.artifact!.path, output.path);
+        expect(output.readAsStringSync(), '[]');
+      });
+    });
+
     test(
       'an explicit --output always spills, even under the inline ceiling',
       () async {

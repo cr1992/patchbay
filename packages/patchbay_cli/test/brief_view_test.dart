@@ -106,6 +106,165 @@ void main() {
     });
   });
 
+  group('catalog keeps commands[].summary (2026-08-25 ruling)', () {
+    test('summary survives the projection and is not reported as omitted', () {
+      final Map<String, Object?> brief = projectPatchbayBriefView(
+        spec: PatchbayFriendlyCommandRegistry.specFor(<String>['catalog']),
+        response: _readGolden('catalog.full'),
+        exitCode: PatchbayExitCode.accepted,
+      );
+      final List<Object?> commands = brief['commands']! as List<Object?>;
+      for (final Object? command in commands) {
+        expect(
+          (command! as Map<String, Object?>)['summary'],
+          isA<String>(),
+          reason:
+              'summary is the only clue an agent has about what a command '
+              'does before it spends a `describe` round trip',
+        );
+      }
+      expect(
+        (brief['localView']! as Map<String, Object?>)['omitted'],
+        isNot(contains(r'$.commands[].summary')),
+      );
+    });
+
+    test('the frozen table declares no rule that touches summary', () {
+      expect(
+        patchbayBriefViewRulePatternsForTesting()['catalog'],
+        isNot(contains(r'$.commands[].summary')),
+      );
+    });
+  });
+
+  group(
+    'an empty member is never deleted (section 5.4 distinguishability)',
+    () {
+      // Outside a debug build the three Flutter diagnostic trees answer exit 0
+      // with an empty `data` rather than a refusal. `localView.omitted` is the
+      // only way to tell that apart from "brief deleted it", so brief must
+      // leave an empty member in place and report no deletion.
+      Map<String, Object?> diagnosticBrief(Object? data) =>
+          projectPatchbayBriefView(
+            spec: PatchbayFriendlyCommandRegistry.specFor(<String>[
+              'ui',
+              'widget-tree',
+            ]),
+            response: <String, Object?>{
+              'source': 'uiObserved',
+              'plane': 'flutterDiagnostic',
+              'schema': 'flutterSdkPassthrough',
+              'extension': 'ext.flutter.inspector.getRootWidgetTree',
+              'format': 'flutterInspectorJson',
+              'data': data,
+              'warnings': const <String>['may change with the Flutter SDK'],
+            },
+            exitCode: PatchbayExitCode.accepted,
+          );
+
+      test(
+        'a null data stays in the document and is not listed as omitted',
+        () {
+          final Map<String, Object?> brief = diagnosticBrief(null);
+          expect(brief.containsKey('data'), isTrue);
+          expect(brief['data'], isNull);
+          expect(
+            (brief['localView']! as Map<String, Object?>)['omitted'],
+            isEmpty,
+          );
+        },
+      );
+
+      for (final MapEntry<String, Object?> shape in <String, Object?>{
+        'an empty map': const <String, Object?>{},
+        'an empty list': const <Object?>[],
+        'an empty string': '',
+      }.entries) {
+        test('${shape.key} data stays and is not listed as omitted', () {
+          final Map<String, Object?> brief = diagnosticBrief(shape.value);
+          expect(brief.containsKey('data'), isTrue);
+          expect(brief['data'], shape.value);
+          expect(
+            (brief['localView']! as Map<String, Object?>)['omitted'],
+            isEmpty,
+          );
+        });
+      }
+
+      test(
+        'a non-empty data is still elided, so the two are distinguishable',
+        () {
+          final Map<String, Object?> brief = diagnosticBrief(
+            const <String, Object?>{'widget': 'MaterialApp'},
+          );
+          expect(brief.containsKey('data'), isFalse);
+          expect(
+            (brief['localView']! as Map<String, Object?>)['omitted'],
+            contains(r'$.data'),
+          );
+        },
+      );
+
+      test('an empty payload.nodes survives the semantics-tree rule', () {
+        final Map<String, Object?> brief = projectPatchbayBriefView(
+          spec: PatchbayFriendlyCommandRegistry.specFor(<String>[
+            'ui',
+            'semantics',
+            'tree',
+          ]),
+          response: <String, Object?>{
+            'admission': 'accepted',
+            'payload': <String, Object?>{
+              'outcome': 'observed',
+              'nodeCount': 0,
+              'nodes': const <Object?>[],
+            },
+          },
+          exitCode: PatchbayExitCode.accepted,
+        );
+        final Map<String, Object?> payload =
+            brief['payload']! as Map<String, Object?>;
+        expect(payload['nodes'], isEmpty);
+        expect(
+          (brief['localView']! as Map<String, Object?>)['omitted'],
+          isEmpty,
+        );
+      });
+
+      test('an array rule skips the empty members and prunes the rest', () {
+        final Map<String, Object?> brief = projectPatchbayBriefView(
+          spec: PatchbayFriendlyCommandRegistry.specFor(<String>['catalog']),
+          response: <String, Object?>{
+            'commands': const <Object?>[
+              <String, Object?>{'name': 'a.empty', 'parameters': <Object?>[]},
+              <String, Object?>{
+                'name': 'b.present',
+                'parameters': <Object?>[
+                  <String, Object?>{'name': 'value'},
+                ],
+              },
+            ],
+          },
+          exitCode: PatchbayExitCode.accepted,
+        );
+        final List<Object?> commands = brief['commands']! as List<Object?>;
+        expect(
+          (commands.first! as Map<String, Object?>)['parameters'],
+          isEmpty,
+          reason: 'an empty parameter list saves nothing and hides the fact',
+        );
+        expect(
+          (commands.last! as Map<String, Object?>).containsKey('parameters'),
+          isFalse,
+        );
+        expect(
+          (brief['localView']! as Map<String, Object?>)['omitted'],
+          contains(r'$.commands[].parameters'),
+        );
+      });
+    },
+  );
+
   group('table self-assertions', () {
     test('no rule touches a redaction or admission-identity key', () {
       final Map<String, List<String>> table =
@@ -218,7 +377,9 @@ void main() {
         'admission': 'accepted',
         'payload': <String, Object?>{
           'outcome': 'observed',
-          'nodes': const <Object?>[],
+          'nodes': const <Object?>[
+            <String, Object?>{'nodeId': 1},
+          ],
           'consumerExtra': <String, Object?>{'anything': true},
         },
         'futureProtocolField': 'kept',

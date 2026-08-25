@@ -5,6 +5,8 @@
       "plane": "ui",
       "mode": "query",
       "sideEffect": "none",
+      "summary": "Read the Patchbay semantics tree.",
+      "parameters": [],
       "factSources": ["uiObserved"],
       "gates": []
     },
@@ -13,6 +15,7 @@
       "plane": "ui",
       "mode": "mutate",
       "sideEffect": "gesture",
+      "summary": "Resolve a semantics identifier and tap it in one request.",
       "factSources": ["uiObserved"],
       "gates": ["requiresMounted"]
     }
@@ -25,7 +28,6 @@
     "view": "brief",
     "projection": "catalog",
     "omitted": [
-      "$.commands[].summary",
       "$.commands[].parameters",
       "$.commands[].responseSchema",
       "$.commands[].executionContract",

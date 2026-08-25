@@ -226,8 +226,21 @@ final class PatchbayLocalArtifactWriter {
 }
 
 /// Sentinel distinguishing "the dot path does not resolve" from "it resolves
-/// to a JSON `null`" — only the former means "render inline, unchanged".
+/// to a JSON `null`" — the two are indistinguishable to a caller reading the
+/// document, but only the former means the command declared a member it does
+/// not actually publish.
 const Object _missingDotPathMember = Object();
+
+/// Whether the declared member carries nothing worth moving to a file.
+///
+/// Mirrors `brief_view.dart`'s rule of the same name deliberately: the two
+/// layers must agree on what "there was nothing there" looks like, or a
+/// response could be spilled by one and reported as present by the other.
+bool _isEmptyMember(Object? value) =>
+    value == null ||
+    (value is String && value.isEmpty) ||
+    (value is Iterable && value.isEmpty) ||
+    (value is Map && value.isEmpty);
 
 Object? _getAtDotPath(Map<String, Object?> root, List<String> segments) {
   Object? current = root;
@@ -327,6 +340,21 @@ Future<PatchbayRenderedMemberSpillResult> maybeSpillRenderedMember({
       explicitOutputPath != null && explicitOutputPath.isNotEmpty;
   if (!explicitOutput) {
     if (maxInlineBytes <= 0) {
+      return PatchbayRenderedMemberSpillResult(response: response);
+    }
+    // An empty member is never spilled on the automatic path. Outside a debug
+    // build the three Flutter diagnostic trees answer with exit 0 and an
+    // empty `data` rather than a refusal (`tree-artifact-output.md`'s
+    // profile note), and a receipt pointing at a file containing `null` would
+    // claim a verified artifact of a tree that was never observed — while
+    // also hiding the one fact the caller needed, that there was nothing
+    // there. It also keeps `brief_view.dart`'s section-5.4 distinction
+    // intact: an empty member stays visible in the document either way.
+    //
+    // An explicit `--output` is deliberately still unconditional: the
+    // proposal freezes that path as "write the member to that path, whatever
+    // its size", and the operator naming a file has asked for one.
+    if (_isEmptyMember(member)) {
       return PatchbayRenderedMemberSpillResult(response: response);
     }
     final int documentBytes = utf8.encode(renderDocument(response)).length;
