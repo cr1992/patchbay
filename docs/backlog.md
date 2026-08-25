@@ -71,7 +71,7 @@
 | PB-050-13 | CLI 公共 API surface 收口 | 0.4.1 的 canonical CLI library 暴露 203 个符号，包内 47 个文件通过根 barrel 访问实现与测试 seam，API golden 只能冻结漂移，不能证明 launcher/trace/session/doctor 等实现应成为 SDK | 0.5.0 | 待裁决 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)；DG-050-07；根入口保留 2 个、8 个迁入 opt-in client，其余 193 个彻底退出公共面，本版完成不延期 |
 | PB-050-15 | 锚定式合成 tap（`ui.gesture.tap`） | 手势家族只有 pressHold/drag/fling，最常用的点按缺位；`ui.semantics.tap` 走 performAction 派发，不经指针管线 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-08；[锚定式合成 tap](proposals/0.5.0/anchored-tap.md) |
 | PB-050-16 | 点性 semantics 派发的遮挡准入 | `areUserActionsBlocked` 仅在 BlockSemantics 下为真，非模态覆盖层下 performAction 会穿透激活被盖目标，违背防误击立场（`packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart` 的 423-428 段） | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-09；[遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；repro 已合入 |
-| PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；[Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md) |
+| PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；Proposal v1 经仓主评审退回（补资源预算、持续授权、多容器状态模型），重设计中 |
 | PB-050-18 | 会话存活判定加进程启动身份 | 存活判据是裸 `kill -0`/`tasklist` 按 PID（`packages/patchbay_cli/lib/src/platform/process_utils.dart` 的 53-76 段），PID 复用会把死会话判成活的 | 0.5.0 | 已排期 | PID+启动时间三元比对；会话记录 additive 字段并冻结兼容语料；老记录行为不变、诊断标注 `identityUnverified` |
 | PB-050-19 | 会话记录解析失败改隔离 | `readAll` 解析失败即删文件，自愈同时销毁现场证据，操作者拿不到「这里曾有会话」的痕迹 | 0.5.0 | 已排期 | 移入 `.quarantine` 并由 doctor 报告；临时文件与并发写入语义不变 |
 | PB-050-20 | 树类大载荷落 artifact | `ui semantics tree` 等全量进 stdout，大树即数千行；agent 消费方直接吃满上下文 | 0.5.0 | 已排期 | 超阈值落 artifact、stdout 回校验路径；复用既有 `--output`/blob 形状不新增别名；阈值内输出逐字节不变；落地前补 Proposal |
@@ -107,7 +107,7 @@
 | DG-050-07 | CLI 公共 API 收口：canonical 入口保留 2 个、8 个迁入 opt-in client、其余 193 个彻底退出公共面，且不提供 legacy/testing 过渡入口 | 0.5.0 | 待裁决 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md) |
 | DG-050-08 | 锚定式合成 tap 的命令形状、指针注入语义与 `ui.semantics.tap` 并存边界 | 0.5.0 | 已裁决 | [锚定式合成 tap](proposals/0.5.0/anchored-tap.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
 | DG-050-09 | 点性 semantics 派发的遮挡准入范围、拒绝码与不提供 bypass 的边界 | 0.5.0 | 已裁决 | [遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
-| DG-050-10 | scroll-to-reveal 的写操作定性、Semantics 域实现边界与成功判据 | 0.5.0 | 已裁决 | [Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
+| DG-050-10 | scroll-to-reveal 的写操作定性、Semantics 域实现边界与成功判据 | 0.5.0 | 已裁决 | 裁决记录见 [0.5.0 版本计划](releases/0.5.0.md)；Proposal v1 退回重设计 |
 
 ## 维护规则
 

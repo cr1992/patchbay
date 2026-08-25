@@ -63,7 +63,7 @@ PB-050-15 会在旁边并列一条指针路径。先补闸再扩面，才不会�
 | `setText` | 否 | IME/辅助输入，无位置对应物；敏感输入另有 stdin 门 |
 | `dismiss` / `increase` / `decrease` / `expand` / `collapse` | 否 | 纯辅助功能语义，无单点对应物 |
 
-给 `PatchbaySemanticsAction` 增加包内 `bool get isPointLike`，用**穷尽 switch、无 `default` 分支**实现：
+以**库私有 extension getter `_isPointLike`**（实现文件内 `extension on PatchbaySemanticsAction`，下划线私有，不构成公共 API 成员）承载分类，用**穷尽 switch、无 `default` 分支**实现：
 enum 新增值时编译期就必须显式分类，而不是靠后来的记忆。另加一条封闭集合测试，断言点性集合恰为
 `{tap, longPress}`（与 PB-050-23 的封闭注册表同一风格）。
 
@@ -99,12 +99,13 @@ CLI 侧不需要码表改动：`patchbayExitCodeFor` 按 `admission` 分类，�
 
 与 gesture 逐点管线的两处差异必须写死：
 
-**差异一：探针点由 App 决定，判定取 ANY-pass。** gesture 探的是调用方给出的每一个点，要求**全部**通过；
+**差异一：探针点由 App 决定，判定是「固定采样准入」。** gesture 探的是调用方给出的每一个点，要求**全部**通过；
 semantics 没有坐标入参（也不打算有），因此探针点是内部固定集合，按目标 rect 归一化取
 `(0.5,0.5)`、`(0.25,0.25)`、`(0.75,0.25)`、`(0.25,0.75)`、`(0.75,0.75)` 五点，**任一点通过即通过，五点全被挡
-才拒绝**。理由是本闸要回答的问题是「真实用户还能不能碰到这个目标」：只要还有一块露着，答案就是能。
-裁决冻结的场景是「被覆盖」，ANY-pass 恰好把全覆盖判死、把部分遮挡放行，同时把无 bypass 情况下的误拒面
-压到最小。
+才拒绝**。必须诚实命名：这是**固定采样**，不是可达性证明——目标只在五个采样点之外露出窄缝时，采样会
+全部被挡而误拒（fail-closed，与本闸方向一致）。文档与 help 只承诺「固定采样全部被挡即拒绝」，不得声称
+本闸精确回答「用户能否触达」。裁决冻结的场景是「被覆盖」，固定采样把全覆盖判死、把大面积露出放行，
+并把无 bypass 情况下的误拒面压在已声明的采样边界内。
 
 **差异二：判定结果是三态而不是布尔。** 对每个探针点得出：
 
@@ -131,7 +132,7 @@ Proposal 改判定，**不以放宽遮挡语义换取合入**。
 
 ### 与相邻条目的接缝
 
-- 闸放在 `_dispatch` 内、按 `action.isPointLike` 分支，因此 `invoke`（nodeId）、`tapIdentifier` 与
+- 闸放在 `_dispatch` 内、按 `action._isPointLike` 分支，因此 `invoke`（nodeId）、`tapIdentifier` 与
   PB-050-10 的 `invokeIdentifier` 三条入口按构造同时继承，不逐命令重写，也不会出现某条入口漏挂。
 - PB-050-10 的 [identifier action Proposal](semantics-identifier-action.md) 冻结了一条七步状态序列与一份稳定
   code 列表；本闸在点性 action 上给它加一步（第 6 步之后、派发之前），并在 `action: tap` 时给它加
@@ -198,7 +199,7 @@ action 的开销为零（分支不进入）。若 PB-050-07 统一 identifier �
 ### 实施顺序与回退
 
 1. 前置：MR !124 的 repro 先合，保持红/断言现状。
-2. 实现 MR 内顺序：抽出两族共用的判定基元 → 加 `isPointLike` 分类与封闭集合测试 → 在 `_dispatch` 接闸 →
+2. 实现 MR 内顺序：抽出两族共用的判定基元 → 加 `_isPointLike` 分类与封闭集合测试 → 在 `_dispatch` 接闸 →
    翻转 repro 断言并补齐遮挡矩阵。抽基元时不得改动 gesture 现有拒绝语义与 `uiGestureTargetObscured` 的
    details 形状，`gesture_visibility_spike_test.dart` 必须原样全绿。
 3. 若 PB-050-23 的封闭错误码注册表先合，`uiSemanticsTargetObscured` 必须先进注册表再合闸。
@@ -214,12 +215,12 @@ action 的开销为零（分支不进入）。若 PB-050-07 统一 identifier �
 - 不回显 label、value、hint、tooltip 与 render 类名；`nodeId`、`generation`、`identifier` 是既有公开身份域。
 - 闸只收紧不放宽：不提供 bypass、force、`ignoreOcclusion` 参数或环境变量；穿透覆盖层的合法业务需求走
   domain command，由接入方自己的 policy 与 gate 负责。
-- `isPointLike` 与判定基元都是包内实现，不进公共 API golden，不改变 PB-050-13 的公共面清单。
+- `_isPointLike` 与判定基元都是包内实现，不进公共 API golden，不改变 PB-050-13 的公共面清单。
 - 拒绝本身不泄露超出调用方已知信息的内容：identifier 由调用方给出，遮挡结论不附带覆盖层的业务标识。
 
 ## 验证
 
-- **单元/协议测试**：`isPointLike` 穷尽分类与封闭集合断言；`uiSemanticsTargetObscured` 的 details
+- **单元/协议测试**：`_isPointLike` 穷尽分类与封闭集合断言；`uiSemanticsTargetObscured` 的 details
   presence/absence golden（四种 `reason` 各一条）；断言 payload、日志与 trace 中不出现坐标/rect 字段。
 - **repro 翻转**：MR !124 的 (a) 组由 `dispatched` + `taps == 1` 翻成 `rejected` +
   `uiSemanticsTargetObscured` + `taps == 0`；(b) 组的真实指针断言保持不变。
@@ -256,10 +257,11 @@ action 的开销为零（分支不进入）。若 PB-050-07 统一 identifier �
 
 ### 裁决结论（2026-08-25，仓主授权代理裁决，记录于范围扩充流程）
 
-- `details` **附带 `occluderIdentifier`**（仅覆盖层最近语义节点声明 identifier 时出现）：诊断价值高，
-  隐私尺度与 `mountedIdentifiers` 一致；presence/absence 两分支都上 golden。
-- 探针点集 **五点 ANY-pass**：只探中心会把「中心被悬浮控件压住、大片露出」判死，违背防误击但不误拒
-  的平衡；与 gesture 逐点管线共享基元。
+- `details` **不附带 `occluderIdentifier`**（2026-08-25 仓主复核改判，推翻此前代理裁决）：稳定错误面不
+  顺带泄露另一节点身份，以正文 details 表与安全章节的口径为准；「谁盖住了我」由调用方用 capture 或
+  semantics tree 另行诊断。
+- 探针点集 **五点固定采样、任一命中即通过**（仓主复核补充定性）：只探中心会误杀部分遮挡；同时明确本闸
+  是固定采样准入而非可达性证明，窄缝露出的误拒作为 fail-closed 代价写入文档。
 - 「无占位目标叠在无关不透明兄弟之上」的保守误拒 **接受**：fail-closed 优先，实现 MR 负举证义务；
   真实用例出现时回本 Proposal 引入绘制顺序比较，不放宽语义换合入。
 - `longPress` **不借本条进入公开 allowlist**：只做分类不扩面，扩 allowlist 是独立条目。
