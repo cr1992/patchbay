@@ -474,6 +474,16 @@ MR 颗粒度：第 2–4 步是同一条契约的两端，拆开后任一半不�
    P0 里塞进一条新的硬 breaking。若仓主希望与"整份目录 fail-closed"完全对齐，应作为 PB-050-03 语义的
    独立扩展另行裁决。
 
+### 裁决结论（2026-08-25，仓主授权代理裁决）
+
+1. **A 采纳**：空 `gates` 写命令只跑基础门，与 UI 面空集判例一致，不造第二种空集语义；补偿三件套
+   （catalog/describe 可见、example 写命令声明门的机检 ratchet、接入规范文档）升级为本条验收义务。
+2. 复用 `consumerGateRejected` + `details.reason: gateEvaluatorUnavailable`，零新增稳定码。
+3. **门先于 ledger lookup/replay**：授权是当下事实，不因历史写已发生而豁免；`priorRequestObserved`
+   防误读。PB-050-06 重排受理次序时必须保持门在 lookup 之前（写入其接缝义务）。
+4. consumer 门异常传播维持现状；改动属 `gates.dart` 全域语义，另立条目。
+5. 非法 `sideEffect` 按写处理即 fail-closed，不升级为整份目录违规；目录级扩展归 PB-050-03 语义域另裁。
+
 ## 被否决方案
 
 - **在 `domainInvoke` adapter 里由接入方自己按命令名求值门**：这正是今天的现状（且没有接入方在做）。它把

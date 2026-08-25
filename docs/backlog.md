@@ -80,7 +80,7 @@
 | PB-050-22 | gate 出厂默认策略 | `PatchbayGateEvaluator` 生产代码零构造，quick-start 与 example 的基础门是 `allow()`，最短接入路径没有形成“只读默认、写入显式开放”的安全起点 | 0.5.0 | 已排期 | 提供写拒绝带解释 code 的预设门；example 与双语 README 同步 |
 | PB-050-23 | error code 注册表 ratchet 测试 | 稳定 code 集合目前靠自觉维护，无全树扫描锁定，新增散装码不会被机检拦截 | 0.5.0 | 已验证 | 全树扫描断言 code 字面量属于封闭注册表；纯测试 MR |
 | PB-050-24 | 消费者侧 Skill、INSTALL 与渐进式披露接入漏斗 | 接入与使用路径主要依赖大型 guide，agent 宿主没有从发现、安装、只读起步到按需展开的短漏斗；手写命令示例又会随 CLI 漂移 | 0.5.0 | 实现中 | `skills/use-patchbay/SKILL.md` + `INSTALL.md`；Skill 随 Patchbay tag 版本化，命令示例由 CLI registry 生成或对拍；干净 consumer/Agent 验收 `INSTALL -> SKILL -> identity/catalog/snapshot`，不以预载完整 guide 替代 |
-| PB-050-25 | domain-plane 写命令的 gate 强制执行 | PB-050-22 实现中实证：`host_invoker.dart` 的 `_dispatchExternal` 直调 domainInvoke，descriptor `gates` 对 plane:domain 是 catalog-only 装饰，双层门安全叙事存在实质缺口 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-11；落地前补 Proposal |
+| PB-050-25 | domain-plane 写命令的 gate 强制执行 | PB-050-22 实现中实证：`host_invoker.dart` 的 `_dispatchExternal` 直调 domainInvoke，descriptor `gates` 对 plane:domain 是 catalog-only 装饰，双层门安全叙事存在实质缺口 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-11；[domain gate 强制执行](proposals/0.5.0/domain-gate-enforcement.md) |
 
 ## 文档债（快赢，可随任意批次走）
 
@@ -110,7 +110,7 @@
 | DG-050-08 | 锚定式合成 tap 的命令形状、指针注入语义与 `ui.semantics.tap` 并存边界 | 0.5.0 | 已裁决 | [锚定式合成 tap](proposals/0.5.0/anchored-tap.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
 | DG-050-09 | 点性 semantics 派发的遮挡准入范围、拒绝码与不提供 bypass 的边界 | 0.5.0 | 已裁决 | [遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
 | DG-050-10 | scroll-to-reveal 的写操作定性、Semantics 域实现边界与成功判据 | 0.5.0 | 已裁决 | [Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
-| DG-050-11 | domain 写命令过声明门的强制执行边界、受影响面与老 consumer 兼容语义 | 0.5.0 | 已裁决 | 裁决记录见 [0.5.0 版本计划](releases/0.5.0.md)；Proposal 落地前补 |
+| DG-050-11 | domain 写命令过声明门的强制执行边界、受影响面与老 consumer 兼容语义 | 0.5.0 | 已裁决 | [domain gate 强制执行](proposals/0.5.0/domain-gate-enforcement.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
 
 ## 维护规则
 
