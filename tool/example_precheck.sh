@@ -134,6 +134,38 @@ wait_next_frame() {
     --timeout-ms 5000 >"$OUT" 2>&1
 }
 
+# `navigation go` 在新 route 入栈后立即答复，旧 route 要到动画结束才释放。
+# 同一个 PatchbayKey 不能在旧 Home 尚未释放时交给新 Home；按 catalog 的 mounted
+# 状态逐帧等待真实释放，不把逻辑 destination 当成 widget 生命周期证据。
+check_catalog_target_unmounted() {
+  local name="$1" target_id="$2"
+  local attempt=1 max_attempts=30 actual=0 target_state=''
+  while [ "$attempt" -le "$max_attempts" ]; do
+    actual=0
+    example_session_cli --json catalog >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then
+      target_state='catalogFailed'; break
+    fi
+    target_state="$(read_json "next(('mounted' if t.get('mounted') else 'unmounted' for t in doc['uiTargets'] if t['id'] == '$target_id'), 'notFound')")"
+    if [ "$target_state" = unmounted ]; then
+      printf '  ✓ %-42s attempts=%s\n' "$name" "$attempt"
+      PASS=$((PASS + 1)); return 0
+    fi
+    if [ "$target_state" != mounted ] || [ "$attempt" = "$max_attempts" ]; then
+      break
+    fi
+    wait_next_frame
+    actual=$?
+    if [ "$actual" != 0 ]; then
+      target_state='uiWaitFrameFailed'; break
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf '  ✗ %-42s state=%s（%s 次尝试）\n' \
+    "$name" "${target_state:-unknown}" "$attempt"
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+}
+
 # capture 自己会跨一帧后二次解析 target。页面恰好处于 route 过渡时，第一次
 # catalog 可能读到即将卸载的 generation；bridge 必须 fail-closed，我们则推进
 # 一帧、重读 catalog 后有界重试。只放行这三种动态失效，其他拒绝立即失败。
@@ -354,6 +386,8 @@ check 'ui wait destination' 0 "" --json ui wait destination example.details
 check 'navigation back' 0 "" --json navigation back
 check 'navigation go details' 0 "" --json navigation go example.details
 check 'ui wait destination details' 0 "" --json ui wait destination example.details
+check_catalog_target_unmounted 'catalog capture target released' \
+  example.card.capture
 check 'navigation go home' 0 "" --json navigation go example.home
 check 'ui wait destination home' 0 "" --json ui wait destination example.home
 

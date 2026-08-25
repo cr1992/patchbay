@@ -62,6 +62,34 @@ void main() {
     );
     expect(source, isNot(contains('CARD_CAPTURE_GEN=')));
   });
+
+  test('navigation waits for the capture key to be released before home', () {
+    final String source = _examplePrecheck().readAsStringSync();
+    const String detailsStep = "check 'ui wait destination details'";
+    const String releaseStep =
+        "check_catalog_target_unmounted 'catalog capture target released'";
+    const String homeStep = "check 'navigation go home'";
+    final int details = source.indexOf(detailsStep);
+    final int release = source.indexOf(releaseStep);
+    final int home = source.indexOf(homeStep);
+    final int helper = source.indexOf('check_catalog_target_unmounted()');
+    final int helperCatalog = source.indexOf(
+      'example_session_cli --json catalog',
+      helper,
+    );
+    final int helperFrameWait = source.indexOf('wait_next_frame', helper);
+
+    expect(details, isNonNegative);
+    expect(release, greaterThan(details));
+    expect(home, greaterThan(release));
+    expect(helper, isNonNegative);
+    expect(helperCatalog, greaterThan(helper));
+    expect(helperFrameWait, greaterThan(helperCatalog));
+    expect(
+      source,
+      contains('local attempt=1 max_attempts=30 actual=0 target_state='),
+    );
+  });
 }
 
 File _examplePrecheck() {
