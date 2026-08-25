@@ -23,6 +23,8 @@
     "PatchbayCaptureWarningWire",
     "PatchbayCatalogDigest",
     "PatchbayCatalogDigestWire",
+    "PatchbayCatalogProvider",
+    "PatchbayCatalogSample",
     "PatchbayCatalogSource",
     "PatchbayCliArtifactDisposition",
     "PatchbayCliEqualsCondition",

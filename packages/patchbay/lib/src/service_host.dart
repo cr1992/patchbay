@@ -12,6 +12,8 @@ import 'host/host_vm_service.dart';
 
 export 'host/host_models.dart'
     show
+        PatchbayCatalogProvider,
+        PatchbayCatalogSample,
         PatchbayCatalogSource,
         PatchbaySnapshotSource,
         PatchbayInvocationSource,
@@ -19,9 +21,58 @@ export 'host/host_models.dart'
 
 /// Generic VM Service extension host. It has no Flutter or consumer imports.
 final class PatchbayServiceHost {
-  PatchbayServiceHost({
-    required this.applicationId,
+  factory PatchbayServiceHost({
+    required String applicationId,
     required PatchbayCatalogSource catalog,
+    required PatchbaySnapshotSource snapshot,
+    required PatchbayInvocationSource invoke,
+    PatchbayCommandRegistry? registry,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+  }) => PatchbayServiceHost._(
+    applicationId: applicationId,
+    catalogSource: catalog,
+    snapshot: snapshot,
+    invoke: invoke,
+    registry: registry,
+    appInstanceId: appInstanceId,
+    registrar: registrar,
+    features: features,
+    auditSink: auditSink,
+    onAuditSinkError: onAuditSinkError,
+  );
+
+  factory PatchbayServiceHost.withCatalogProvider({
+    required String applicationId,
+    required PatchbayCatalogProvider catalogProvider,
+    required PatchbaySnapshotSource snapshot,
+    required PatchbayInvocationSource invoke,
+    PatchbayCommandRegistry? registry,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+  }) => PatchbayServiceHost._(
+    applicationId: applicationId,
+    catalogProvider: catalogProvider,
+    snapshot: snapshot,
+    invoke: invoke,
+    registry: registry,
+    appInstanceId: appInstanceId,
+    registrar: registrar,
+    features: features,
+    auditSink: auditSink,
+    onAuditSinkError: onAuditSinkError,
+  );
+
+  PatchbayServiceHost._({
+    required this.applicationId,
+    PatchbayCatalogSource? catalogSource,
+    PatchbayCatalogProvider? catalogProvider,
     required PatchbaySnapshotSource snapshot,
     required PatchbayInvocationSource invoke,
     PatchbayCommandRegistry? registry,
@@ -30,11 +81,13 @@ final class PatchbayServiceHost {
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
     this.auditSink,
     this.onAuditSinkError,
-  }) : appInstanceId = appInstanceId ?? patchbayGenerateNonce(),
+  }) : assert((catalogSource == null) != (catalogProvider == null)),
+       appInstanceId = appInstanceId ?? patchbayGenerateNonce(),
        _registry = registry ?? PatchbayCommandRegistry(const []),
        _declaredFeatures = features {
     _catalogHandler = HostCatalogHandler(
-      catalogSource: catalog,
+      catalogSource: catalogSource,
+      catalogProvider: catalogProvider,
       registry: _registry,
     );
     _snapshotHandler = HostSnapshotHandler(snapshotSource: snapshot);
