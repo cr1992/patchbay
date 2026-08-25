@@ -49,6 +49,78 @@ void main() {
     }
   });
 
+  test(
+    'Skill starter commands come from the registry and remain read-only',
+    () {
+      final String rendered = docs.renderSkillStarterCommands();
+
+      expect(rendered, contains('`patchbay doctor`'));
+      expect(rendered, contains('`patchbay identity`'));
+      expect(rendered, contains('`patchbay catalog`'));
+      expect(rendered, contains('`patchbay snapshot [--path <dot.path>]`'));
+      expect(rendered, contains('`patchbay describe <service-command>`'));
+      expect(rendered, isNot(contains('`patchbay exec')));
+      expect(rendered, isNot(contains('`patchbay ui')));
+    },
+  );
+
+  test('Skill frontmatter validation accepts the checked-in shape', () {
+    expect(
+      () => docs.validateSkillDocument('''---
+name: use-patchbay
+description: Inspect a running App through Patchbay.
+---
+
+Instructions.
+''', expectedName: 'use-patchbay'),
+      returnsNormally,
+    );
+  });
+
+  test('Skill frontmatter validation fails closed', () {
+    for (final String invalid in <String>[
+      'instructions only',
+      '''---
+name: Use_Patchbay
+description: Invalid name.
+---
+''',
+      '''---
+name: use-patchbay
+description: Valid description.
+unexpected: true
+---
+''',
+      '''---
+name: use-patchbay
+description: Valid description.
+---
+
+[TODO: finish]
+''',
+    ]) {
+      expect(
+        () => docs.validateSkillDocument(invalid, expectedName: 'use-patchbay'),
+        throwsFormatException,
+        reason: invalid,
+      );
+    }
+  });
+
+  test('managed Skill frontmatter rejects a different valid name', () {
+    const String document = '''---
+name: another-valid-skill
+description: Valid description with a different name.
+---
+''';
+
+    expect(() => docs.validateSkillDocument(document), returnsNormally);
+    expect(
+      () => docs.validateSkillDocument(document, expectedName: 'use-patchbay'),
+      throwsFormatException,
+    );
+  });
+
   test('managed replacement is idempotent and preserves prose', () {
     const String original =
         '''before
@@ -99,7 +171,7 @@ after
     });
   }
 
-  test('checked-in README blocks have no generation drift', () async {
+  test('checked-in command documents have no generation drift', () async {
     final ProcessResult result = await Process.run(
       Platform.resolvedExecutable,
       <String>['run', 'tool/command_docs.dart', '--check'],
@@ -156,7 +228,7 @@ after
     );
   });
 
-  test('write rejects a missing marker before changing any README', () {
+  test('write rejects a missing marker before changing any document', () {
     final _Fixture fixture = _Fixture.create();
     addTearDown(fixture.dispose);
     fixture.files.last.writeAsStringSync('marker missing\n');
@@ -189,15 +261,28 @@ final class _Fixture {
       File('${root.path}/README.zh-CN.md'),
       File('${packageDirectory.path}/README.md'),
       File('${packageDirectory.path}/README.zh-CN.md'),
+      File('${root.path}/skills/use-patchbay/SKILL.md'),
     ];
     for (final File file in files) {
-      file.writeAsStringSync('''handwritten before
+      file.parent.createSync(recursive: true);
+      final String frontmatter = file.path.endsWith('/SKILL.md')
+          ? '''---
+name: use-patchbay
+description: Inspect a running App through Patchbay.
+---
+
+'''
+          : '';
+      file.writeAsStringSync('''${frontmatter}handwritten before
 ${docs.commandReferenceStart}
 old generated block
 ${docs.commandReferenceEnd}
 handwritten after
 ''');
     }
+    File('${root.path}/skills/use-patchbay/INSTALL.md')
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('# Install\n');
     return _Fixture(root, packageDirectory, files);
   }
 

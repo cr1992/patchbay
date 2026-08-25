@@ -75,11 +75,11 @@
 | PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；落地前补 Proposal |
 | PB-050-18 | 会话存活判定加进程启动身份 | 存活判据是裸 `kill -0`/`tasklist` 按 PID（`packages/patchbay_cli/lib/src/platform/process_utils.dart` 的 53-76 段），PID 复用会把死会话判成活的 | 0.5.0 | 已排期 | PID+启动时间三元比对；会话记录 additive 字段并冻结兼容语料；老记录行为不变、诊断标注 `identityUnverified` |
 | PB-050-19 | 会话记录解析失败改隔离 | `readAll` 解析失败即删文件，自愈同时销毁现场证据，操作者拿不到「这里曾有会话」的痕迹 | 0.5.0 | 已排期 | 移入 `.quarantine` 并由 doctor 报告；临时文件与并发写入语义不变 |
-| PB-050-20 | 树类大载荷落 artifact | `ui semantics tree` 等全量进 stdout，大树即数千行；agent 消费方直接吃满上下文 | 0.5.0 | 已排期 | 超阈值落 artifact、stdout 回校验路径；复用既有 `--output`/blob 形状不新增别名；阈值内输出逐字节不变；落地前补 Proposal |
-| PB-050-21 | `--view brief` 瘦 JSON 视图 | `--json` 无分层，机器消费方每次吃全量信封 | 0.5.0 | 已排期 | opt-in，默认输出逐字节不变；瘦身字段清单由 Proposal 冻结并 golden 锁定；排 PB-050-08/09 之后 |
-| PB-050-22 | gate 出厂默认策略 | `PatchbayGateEvaluator` 生产代码零构造，quick-start 与 example 的基础门是 `allow()`，双层门出厂即空壳 | 0.5.0 | 已排期 | 提供写拒绝带解释 code 的预设门；example 与双语 README 同步 |
+| PB-050-20 | 树类大载荷落 artifact | `ui semantics tree` 等全量进 stdout，大树即数千行；agent 消费方直接吃满上下文，破坏按需展开的信息层级 | 0.5.0 | 已排期 | 超阈值落 artifact、stdout 回校验路径；复用既有 `--output`/blob 形状不新增别名；阈值内输出逐字节不变；落地前补 Proposal |
+| PB-050-21 | `--view brief` 瘦 JSON 视图 | `--json` 无分层，机器消费方每次吃全量信封，无法先读决策所需最小事实再选择是否展开 | 0.5.0 | 已排期 | opt-in，默认输出逐字节不变；瘦身字段清单由 Proposal 冻结并 golden 锁定；排 PB-050-08/09 之后 |
+| PB-050-22 | gate 出厂默认策略 | `PatchbayGateEvaluator` 生产代码零构造，quick-start 与 example 的基础门是 `allow()`，最短接入路径没有形成“只读默认、写入显式开放”的安全起点 | 0.5.0 | 已排期 | 提供写拒绝带解释 code 的预设门；example 与双语 README 同步 |
 | PB-050-23 | error code 注册表 ratchet 测试 | 稳定 code 集合目前靠自觉维护，无全树扫描锁定，新增散装码不会被机检拦截 | 0.5.0 | 已排期 | 全树扫描断言 code 字面量属于封闭注册表；纯测试 MR |
-| PB-050-24 | 消费者侧 skill 与 INSTALL 分发 | 接入与使用路径目前只有 70K guide，agent 宿主无自装漏斗；命令示例无机检会随 CLI 漂移 | 0.5.0 | 已排期 | SKILL.md（联调姿势的消费者版）+ INSTALL.md；命令示例与 descriptor 注册表 CI 对拍；排 PB-050-09 之后 |
+| PB-050-24 | 消费者侧 Skill、INSTALL 与渐进式披露接入漏斗 | 接入与使用路径主要依赖大型 guide，agent 宿主没有从发现、安装、只读起步到按需展开的短漏斗；手写命令示例又会随 CLI 漂移 | 0.5.0 | 实现中 | `skills/use-patchbay/SKILL.md` + `INSTALL.md`；Skill 随 Patchbay tag 版本化，命令示例由 CLI registry 生成或对拍；干净 consumer/Agent 验收 `INSTALL -> SKILL -> identity/catalog/snapshot`，不以预载完整 guide 替代 |
 
 ## 文档债（快赢，可随任意批次走）
 
