@@ -106,6 +106,21 @@ sequenceDiagram
 键，并在 `details.violations` 里一次列全所有违规项。跳过坏行会让接入方以为自己只是少注册了几条
 命令，而不是目录本身坏了。
 
+目录 policy 缓存也不能绕过这条边界。registry 命中只负责 O(1) 取得 descriptor policy，命令真正受理前
+仍须持有整份 commands 已验证的 `CatalogValidity`；validity 与按 name 投影的 policy index 来自同一次
+完整验证。legacy 动态 source 没有失效事实，只允许并发调用共享一个 in-flight read，settle 后下一次调用
+仍重新读取；不得用 TTL 或“最近没变化”推断安全复用。空参数也不构成旁路，registry/external invocation
+都先取得 validity，再做路由或参数 policy。
+
+需要跨 invocation 复用时，接入方显式提供 additive catalog provider：廉价 `commandsRevision` getter 只
+报告失效信号，完整 sample 原子绑定 revision 与 catalog。相同 revision 承诺规范化 commands 不变，倒退或
+在既有完整读取中观察到同 revision 内容漂移均按 provider 违规拒绝。commands revision 不覆盖动态
+`uiTargets`；显式 catalog 仍读取当时的 UI target，invocation cache 不保留挂载态。VM Service 与 direct
+共用同一 validity/index，不在 transport 层各建一份缓存。
+
+完整状态机、失败分类与兼容矩阵见已接受的
+[Invocation catalog policy 缓存与失效协议](proposals/0.5.0/catalog-policy-cache.md)。
+
 ### Provider JSON 先冻结，再进入协议
 
 consumer provider 返回的 snapshot 等结构必须是严格 JSON：`null`、bool、有限 number、String、
