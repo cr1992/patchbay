@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "legacy-worktree",
+  "applicationId": "dev.patchbay.fixture",
+  "appInstanceId": "instance-legacy",
+  "isolateId": "isolates/legacy",
+  "processId": 4242,
+  "wsUri": "ws://127.0.0.1:1234/legacy-token/ws",
+  "buildMode": "debug",
+  "createdAt": "2026-01-10T00:00:00.000Z",
+  "workspacePath": "/repo/legacy-worktree",
+  "deviceId": "legacy-device",
+  "state": "live",
+  "ownerPid": 4200,
+  "launchId": "launch-legacy",
+  "observedAtMs": 1767398400000,
+  "expiresAtMs": 1767399000000
+}

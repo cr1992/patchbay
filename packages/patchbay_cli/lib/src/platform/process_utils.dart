@@ -75,6 +75,47 @@ abstract final class PlatformProcessUtils {
     }
   }
 
+  /// Captures [processId]'s OS-reported launch time as an opaque signature.
+  ///
+  /// This is deliberately *not* parsed into a [DateTime]: the two platforms
+  /// format it differently (locale-dependent on POSIX, ISO-8601 on Windows
+  /// via the explicit `"o"` format below), and reassembling a portable
+  /// timestamp buys nothing when every caller only ever needs "is this still
+  /// the same launch" — raw string equality answers that exactly as well,
+  /// without a parse step that could quietly misread across locales.
+  ///
+  /// On POSIX, runs `ps -o lstart= -p <pid>`. On Windows, runs PowerShell
+  /// `(Get-Process -Id <pid>).StartTime.ToString("o")`.
+  ///
+  /// Returns `null` when the OS declines to answer: the tool is missing,
+  /// exits non-zero, prints nothing, or the process exited between the
+  /// caller's liveness check and this call. Callers must treat `null` as
+  /// "cannot verify", never as "this is a different process" — that
+  /// distinction is what keeps a missing `ps`/PowerShell from fail-closed
+  /// killing a live session.
+  static String? processStartTimeSignature(
+    int processId, {
+    ProcessRunner runner = defaultRunner,
+    bool? isWindows,
+  }) {
+    final windows = isWindows ?? Platform.isWindows;
+    try {
+      final ProcessResult result = windows
+          ? runner.runSync('powershell', [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              '(Get-Process -Id $processId).StartTime.ToString("o")',
+            ])
+          : runner.runSync('ps', ['-o', 'lstart=', '-p', '$processId']);
+      if (result.exitCode != 0) return null;
+      final String signature = result.stdout.toString().trim();
+      return signature.isEmpty ? null : signature;
+    } on ProcessException {
+      return null;
+    }
+  }
+
   /// Creates [path] empty and owner-only (`0600` on POSIX) **before** any content is written.
   static File createRestrictedFileSync(
     String path, {

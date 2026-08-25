@@ -121,6 +121,114 @@ void main() {
     );
   });
 
+  group('PlatformProcessUtils.processStartTimeSignature', () {
+    test('POSIX: uses ps -o lstart= -p and returns trimmed stdout', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) =>
+            ProcessResult(123, 0, 'Mon Aug 25 09:00:00 2026\n', ''),
+      );
+      final signature = PlatformProcessUtils.processStartTimeSignature(
+        4242,
+        runner: fake,
+        isWindows: false,
+      );
+      expect(signature, 'Mon Aug 25 09:00:00 2026');
+      expect(fake.executedSync, hasLength(1));
+      expect(fake.executedSync.single.executable, 'ps');
+      expect(fake.executedSync.single.arguments, [
+        '-o',
+        'lstart=',
+        '-p',
+        '4242',
+      ]);
+    });
+
+    test('POSIX: returns null on non-zero exit code', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) =>
+            ProcessResult(123, 1, '', 'No such process'),
+      );
+      final signature = PlatformProcessUtils.processStartTimeSignature(
+        9999,
+        runner: fake,
+        isWindows: false,
+      );
+      expect(signature, isNull);
+    });
+
+    test('POSIX: returns null on empty stdout', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) => ProcessResult(123, 0, '   \n', ''),
+      );
+      final signature = PlatformProcessUtils.processStartTimeSignature(
+        4242,
+        runner: fake,
+        isWindows: false,
+      );
+      expect(signature, isNull);
+    });
+
+    test('POSIX: returns null on ProcessException', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) => throw const ProcessException('ps', []),
+      );
+      final signature = PlatformProcessUtils.processStartTimeSignature(
+        4242,
+        runner: fake,
+        isWindows: false,
+      );
+      expect(signature, isNull);
+    });
+
+    test('Windows: uses PowerShell Get-Process StartTime', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) =>
+            ProcessResult(123, 0, '2026-08-25T09:00:00.0000000-07:00\n', ''),
+      );
+      final signature = PlatformProcessUtils.processStartTimeSignature(
+        4242,
+        runner: fake,
+        isWindows: true,
+      );
+      expect(signature, '2026-08-25T09:00:00.0000000-07:00');
+      expect(fake.executedSync, hasLength(1));
+      expect(fake.executedSync.single.executable, 'powershell');
+      expect(
+        fake.executedSync.single.arguments,
+        containsAll(<String>['-NoProfile', '-NonInteractive', '-Command']),
+      );
+      expect(
+        fake.executedSync.single.arguments.last,
+        contains('Get-Process -Id 4242'),
+      );
+    });
+
+    test('Windows: returns null on non-zero exit code', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) => ProcessResult(123, 1, '', 'not found'),
+      );
+      final signature = PlatformProcessUtils.processStartTimeSignature(
+        4242,
+        runner: fake,
+        isWindows: true,
+      );
+      expect(signature, isNull);
+    });
+
+    test('Windows: returns null on ProcessException', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) =>
+            throw const ProcessException('powershell', []),
+      );
+      final signature = PlatformProcessUtils.processStartTimeSignature(
+        4242,
+        runner: fake,
+        isWindows: true,
+      );
+      expect(signature, isNull);
+    });
+  });
+
   group('PlatformProcessUtils restricted permissions', () {
     late Directory tempDir;
 

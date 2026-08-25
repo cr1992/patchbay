@@ -10,15 +10,18 @@ final class PatchbaySessionResolver {
     PatchbaySessionStore? store,
     PatchbayIdentityProbe? identityProbe,
     PatchbayPidProbe? pidProbe,
+    PatchbayProcessStartTimeProbe? processStartTimeProbe,
     PatchbaySessionClock? clock,
   }) : store = store ?? PatchbaySessionStore(),
        _identityProbe = identityProbe ?? _probeIdentity,
        _pidProbe = pidProbe ?? _isProcessAlive,
+       _processStartTimeProbe = processStartTimeProbe ?? _probeProcessStartTime,
        _clock = clock ?? DateTime.now;
 
   final PatchbaySessionStore store;
   final PatchbayIdentityProbe _identityProbe;
   final PatchbayPidProbe _pidProbe;
+  final PatchbayProcessStartTimeProbe _processStartTimeProbe;
   final PatchbaySessionClock _clock;
 
   /// The pinned session id, or `null` when nothing is pinned.
@@ -27,14 +30,19 @@ final class PatchbaySessionResolver {
   /// Every record, with the local judgement of what state it is in.
   List<PatchbaySessionListing> inventory() {
     final String? selected = store.readSelection();
-    return <PatchbaySessionListing>[
-      for (final PatchbaySessionRecord record in store.readAll())
+    final List<PatchbaySessionListing> listings = <PatchbaySessionListing>[];
+    for (final PatchbaySessionRecord record in store.readAll()) {
+      final _ProcessIdentityCheck check = _checkProcessIdentity(record);
+      listings.add(
         PatchbaySessionListing(
           record: record,
-          status: statusOf(record),
+          status: _statusFor(record, check),
           selected: record.sessionId == selected,
+          identityUnverified: check.identityUnverified,
         ),
-    ];
+      );
+    }
+    return listings;
   }
 
   /// Removes records whose process is gone, without dialling anything.
@@ -70,7 +78,8 @@ final class PatchbaySessionResolver {
         ],
       );
     }
-    final PatchbaySessionStatus status = statusOf(record);
+    final _ProcessIdentityCheck check = _checkProcessIdentity(record);
+    final PatchbaySessionStatus status = _statusFor(record, check);
     if (status == PatchbaySessionStatus.stale) {
       store.remove(sessionId);
       throw const PatchbaySessionException(
@@ -85,13 +94,25 @@ final class PatchbaySessionResolver {
       record: record,
       status: status,
       selected: true,
+      identityUnverified: check.identityUnverified,
     );
   }
 
   void clearSelection() => store.clearSelection();
 
-  PatchbaySessionStatus statusOf(PatchbaySessionRecord record) {
-    if (!_pidProbe(record.processId)) return PatchbaySessionStatus.stale;
+  PatchbaySessionStatus statusOf(PatchbaySessionRecord record) =>
+      _statusFor(record, _checkProcessIdentity(record));
+
+  /// The wsUri/TTL half of status classification, given an already-computed
+  /// process-identity verdict. Split out so [inventory], [select] and
+  /// [statusOf] all derive status from exactly one probe round-trip per
+  /// record instead of three call sites each dialling `ps`/`tasklist` (and,
+  /// now, the start-time probe) on their own.
+  PatchbaySessionStatus _statusFor(
+    PatchbaySessionRecord record,
+    _ProcessIdentityCheck check,
+  ) {
+    if (!check.alive) return PatchbaySessionStatus.stale;
     final int? expiresAtMs = record.expiresAtMs;
     if (record.wsUri == null &&
         expiresAtMs != null &&
@@ -101,6 +122,38 @@ final class PatchbaySessionResolver {
     return record.wsUri == null
         ? PatchbaySessionStatus.pending
         : PatchbaySessionStatus.live;
+  }
+
+  /// Checks whether [record]'s process is still alive and, when the record
+  /// captured a launch-time signature (PB-050-18), still the same process.
+  ///
+  /// A record with no captured signature (written before PB-050-18) is
+  /// judged on the PID alone, exactly as before this change, and flagged
+  /// [_ProcessIdentityCheck.identityUnverified] for diagnostics only. The
+  /// same degrade applies when the OS declines to answer the current probe:
+  /// this never fails closed and kills a session it merely could not verify.
+  _ProcessIdentityCheck _checkProcessIdentity(PatchbaySessionRecord record) {
+    if (!_pidProbe(record.processId)) {
+      return const _ProcessIdentityCheck(
+        alive: false,
+        identityUnverified: false,
+      );
+    }
+    final String? expected = record.processStartTime;
+    if (expected == null) {
+      return const _ProcessIdentityCheck(alive: true, identityUnverified: true);
+    }
+    final String? current = _processStartTimeProbe(record.processId);
+    if (current == null) {
+      return const _ProcessIdentityCheck(alive: true, identityUnverified: true);
+    }
+    // A live PID whose current launch signature no longer matches what this
+    // record captured is not this record's process any more -- the OS has
+    // recycled the PID for something else, and the original App is gone.
+    return _ProcessIdentityCheck(
+      alive: current == expected,
+      identityUnverified: false,
+    );
   }
 
   /// Selects one session: explicit id first, then the pin, then uniqueness.
@@ -132,7 +185,7 @@ final class PatchbaySessionResolver {
     final pending = <PatchbaySessionRecord>[];
     String? lastStaleCode;
     for (final record in candidates) {
-      if (!_pidProbe(record.processId)) {
+      if (!_checkProcessIdentity(record).alive) {
         store.remove(record.sessionId);
         lastStaleCode = 'sessionStaleProcess';
         continue;
@@ -214,4 +267,25 @@ final class PatchbaySessionResolver {
 
   static bool _isProcessAlive(int processId) =>
       PlatformProcessUtils.isProcessAlive(processId);
+
+  static String? _probeProcessStartTime(int processId) =>
+      PlatformProcessUtils.processStartTimeSignature(processId);
+}
+
+/// One record's process-liveness verdict, split from the wsUri/TTL logic in
+/// [PatchbaySessionResolver._statusFor] so every caller pays for exactly one
+/// PID probe (and, when applicable, one start-time probe) per record.
+final class _ProcessIdentityCheck {
+  const _ProcessIdentityCheck({
+    required this.alive,
+    required this.identityUnverified,
+  });
+
+  /// `false` means this record's process is gone -- either the PID has no
+  /// running process, or a live PID's current launch signature no longer
+  /// matches what the record captured (a PID-reuse collision).
+  final bool alive;
+
+  /// See [PatchbaySessionListing.identityUnverified].
+  final bool identityUnverified;
 }
