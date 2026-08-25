@@ -1,0 +1,14 @@
+{
+  "source": "uiObserved",
+  "plane": "flutterDiagnostic",
+  "schema": "flutterSdkPassthrough",
+  "extension": "ext.flutter.inspector.getRootWidgetTree",
+  "format": "flutterInspectorJson",
+  "warnings": ["Flutter diagnostic fields may change with the Flutter SDK."],
+  "localView": {
+    "view": "brief",
+    "projection": "ui.diagnosticTree",
+    "omitted": ["$.data"],
+    "expand": "--view full"
+  }
+}

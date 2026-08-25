@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "applicationId": "dev.patchbay.fake",
+  "appInstanceId": "fake-instance",
+  "isolateId": "isolates/1"
+}

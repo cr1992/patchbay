@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "requestId": "req-logs-1",
+  "admission": "accepted",
+  "payload": {
+    "outcome": "queried",
+    "source": "appRecorded",
+    "nextCursor": "c2",
+    "currentCursor": "c1",
+    "truncated": false,
+    "truncation": null,
+    "elapsedMs": 12
+  },
+  "localView": {
+    "view": "brief",
+    "projection": "logs.query",
+    "omitted": ["$.payload.records"],
+    "expand": "--view full"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "commands": [
+    {
+      "name": "ui.semantics.tree",
+      "plane": "ui",
+      "mode": "query",
+      "sideEffect": "none",
+      "factSources": ["uiObserved"],
+      "gates": []
+    },
+    {
+      "name": "ui.semantics.tap",
+      "plane": "ui",
+      "mode": "mutate",
+      "sideEffect": "gesture",
+      "factSources": ["uiObserved"],
+      "gates": ["requiresMounted"]
+    }
+  ],
+  "uiTargets": [
+    { "identifier": "login.submit", "mounted": true, "generation": 1 }
+  ],
+  "catalogDigest": "cat-digest-1",
+  "localView": {
+    "view": "brief",
+    "projection": "catalog",
+    "omitted": [
+      "$.commands[].summary",
+      "$.commands[].parameters",
+      "$.commands[].responseSchema",
+      "$.commands[].executionContract",
+      "$.commands[].retryPolicy"
+    ],
+    "expand": "--view full"
+  }
+}

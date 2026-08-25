@@ -29,6 +29,9 @@ final class FakePatchbayClient
     this.catalogExtras = const <String, Object?>{},
     this.profilePerformance,
     this.profileNetwork,
+    this.widgetTreeHandler,
+    this.renderTreeHandler,
+    this.focusTreeHandler,
   });
 
   /// What the identity handshake answers.
@@ -53,6 +56,13 @@ final class FakePatchbayClient
   )?
   profilePerformance;
   final Future<Map<String, Object?>> Function()? profileNetwork;
+
+  /// Overrides for the Flutter diagnostic passthroughs. `null` keeps the
+  /// default `flutterDiagnosticUnavailable` most tests expect; PB-050-20
+  /// tests supply one to exercise the local-artifact spill path.
+  final Future<Map<String, Object?>> Function()? widgetTreeHandler;
+  final Future<Map<String, Object?>> Function()? renderTreeHandler;
+  final Future<Map<String, Object?>> Function()? focusTreeHandler;
 
   /// Catalog rows exactly as an App would publish them.
   final List<Map<String, Object?>> commands;
@@ -145,15 +155,18 @@ final class FakePatchbayClient
 
   @override
   Future<Map<String, Object?>> widgetTree() =>
-      throw const PatchbayProtocolException('flutterDiagnosticUnavailable');
+      widgetTreeHandler?.call() ??
+      (throw const PatchbayProtocolException('flutterDiagnosticUnavailable'));
 
   @override
   Future<Map<String, Object?>> renderTree() =>
-      throw const PatchbayProtocolException('flutterDiagnosticUnavailable');
+      renderTreeHandler?.call() ??
+      (throw const PatchbayProtocolException('flutterDiagnosticUnavailable'));
 
   @override
   Future<Map<String, Object?>> focusTree() =>
-      throw const PatchbayProtocolException('flutterDiagnosticUnavailable');
+      focusTreeHandler?.call() ??
+      (throw const PatchbayProtocolException('flutterDiagnosticUnavailable'));
 
   @override
   Future<Map<String, Object?>> performanceProfile(
