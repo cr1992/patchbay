@@ -76,6 +76,7 @@ final class PatchbaySessionRecord {
     this.launchId,
     this.observedAtMs,
     this.expiresAtMs,
+    this.processStartTime,
   });
 
   factory PatchbaySessionRecord.fromJson(Map<String, Object?> json) {
@@ -97,6 +98,7 @@ final class PatchbaySessionRecord {
     final launchId = json['launchId'];
     final observedAtMs = json['observedAtMs'];
     final expiresAtMs = json['expiresAtMs'];
+    final processStartTime = json['processStartTime'];
     if (sessionId is! String ||
         sessionId.isEmpty ||
         applicationId is! String ||
@@ -122,7 +124,9 @@ final class PatchbaySessionRecord {
         (ownerPid != null && (ownerPid is! int || ownerPid <= 0)) ||
         (launchId != null && (launchId is! String || launchId.isEmpty)) ||
         (observedAtMs != null && (observedAtMs is! int || observedAtMs < 0)) ||
-        (expiresAtMs != null && (expiresAtMs is! int || expiresAtMs < 0))) {
+        (expiresAtMs != null && (expiresAtMs is! int || expiresAtMs < 0)) ||
+        (processStartTime != null &&
+            (processStartTime is! String || processStartTime.isEmpty))) {
       throw const PatchbaySessionException('sessionRecordInvalid');
     }
     return PatchbaySessionRecord(
@@ -143,6 +147,7 @@ final class PatchbaySessionRecord {
       launchId: launchId as String?,
       observedAtMs: observedAtMs as int?,
       expiresAtMs: expiresAtMs as int?,
+      processStartTime: processStartTime as String?,
     );
   }
 
@@ -161,6 +166,13 @@ final class PatchbaySessionRecord {
   final String? launchId;
   final int? observedAtMs;
   final int? expiresAtMs;
+
+  /// Opaque OS-reported launch-time signature for [processId], captured when
+  /// the record was created. `null` on records written before PB-050-18, or
+  /// when the platform declined to answer at capture time — both cases are
+  /// read identically by [PatchbaySessionRecord.fromJson] and only change
+  /// what a resolver can *verify*, never what it can parse.
+  final String? processStartTime;
 
   bool get isComplete =>
       appInstanceId != null && isolateId != null && wsUri != null;
@@ -206,6 +218,7 @@ final class PatchbaySessionRecord {
     launchId: launchId,
     observedAtMs: observedAtMs ?? this.observedAtMs,
     expiresAtMs: expiresAtMs,
+    processStartTime: processStartTime,
   );
 
   /// Adds the child-discovered transport while keeping writer state pending.
@@ -228,6 +241,7 @@ final class PatchbaySessionRecord {
     launchId: launchId,
     observedAtMs: observedAtMs,
     expiresAtMs: expiresAtMs,
+    processStartTime: processStartTime,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -247,6 +261,7 @@ final class PatchbaySessionRecord {
     if (launchId != null) 'launchId': launchId,
     if (observedAtMs != null) 'observedAtMs': observedAtMs,
     if (expiresAtMs != null) 'expiresAtMs': expiresAtMs,
+    if (processStartTime != null) 'processStartTime': processStartTime,
   };
 }
 
@@ -308,6 +323,8 @@ final class PatchbayLaunchContext {
     required String workspacePath,
     required String deviceId,
     Duration ttl = patchbayPendingDefaultTtl,
+    ProcessRunner processRunner = PlatformProcessUtils.defaultRunner,
+    bool? isWindows,
   }) {
     if (processId <= 0) {
       throw const PatchbaySessionException('sessionRecordInvalid');
@@ -316,6 +333,15 @@ final class PatchbayLaunchContext {
       throw const PatchbaySessionException('pendingTtlInvalid');
     }
     final int observed = createdAt.toUtc().millisecondsSinceEpoch;
+    // Captured once, at the moment this process declares itself: this is
+    // the one place that can cheaply ask "what is my own launch time",
+    // before any PID-reuse race has a chance to matter.
+    final String? processStartTime =
+        PlatformProcessUtils.processStartTimeSignature(
+          processId,
+          runner: processRunner,
+          isWindows: isWindows,
+        );
     return PatchbaySessionRecord(
       sessionId: sessionId,
       applicationId: applicationId,
@@ -332,6 +358,7 @@ final class PatchbayLaunchContext {
       launchId: launchId,
       observedAtMs: observed,
       expiresAtMs: observed + ttl.inMilliseconds,
+      processStartTime: processStartTime,
     );
   }
 
@@ -355,18 +382,28 @@ final class PatchbaySessionListing {
     required this.record,
     required this.status,
     required this.selected,
+    this.identityUnverified = false,
   });
 
   final PatchbaySessionRecord record;
   final PatchbaySessionStatus status;
   final bool selected;
 
+  /// `true` when [status] was decided on the PID alone: [record] predates
+  /// process-launch-identity capture (PB-050-18), or the OS declined to
+  /// answer the current start-time probe. Always `false` when the record's
+  /// process-launch identity was actually compared — including when that
+  /// comparison is what produced [PatchbaySessionStatus.stale] for a
+  /// PID-reuse collision, which is a definite answer, not an unverified one.
+  final bool identityUnverified;
+
   /// One printable line. URI-free by construction.
   String get label =>
       '${record.sessionId} ${status.name} app=${record.applicationId} '
       'device=${record.deviceId} mode=${record.buildMode} '
       'workspace=${record.workspaceName}'
-      '${record.maskedEndpoint == null ? '' : ' endpoint=${record.maskedEndpoint}'}';
+      '${record.maskedEndpoint == null ? '' : ' endpoint=${record.maskedEndpoint}'}'
+      '${identityUnverified ? ' identityUnverified' : ''}';
 
   Map<String, Object?> toJson() => <String, Object?>{
     'sessionId': record.sessionId,
@@ -378,6 +415,7 @@ final class PatchbaySessionListing {
     'status': status.name,
     'selected': selected,
     'createdAt': record.createdAt.toUtc().toIso8601String(),
+    'identityUnverified': identityUnverified,
   };
 }
 
@@ -399,6 +437,7 @@ final class PatchbaySessionPruneResult {
 typedef PatchbayIdentityProbe =
     Future<PatchbayRuntimeIdentity> Function(Uri uri);
 typedef PatchbayPidProbe = bool Function(int processId);
+
 typedef PatchbaySessionClock = DateTime Function();
 
 extension<T> on Iterable<T> {
