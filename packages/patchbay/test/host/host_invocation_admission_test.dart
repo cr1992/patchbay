@@ -187,17 +187,18 @@ void main() {
       expect(forwarded, isEmpty);
     });
 
-    test(
-      'an argument-free legacy command survives an unreadable catalog',
-      () async {
-        final Map<String, Object?> result = await hostWith(
-          () async => throw StateError('catalog source is broken'),
-        ).dispatchInvoke('device.ping', const <String, Object?>{}, 'req-9');
+    test('an argument-free command also fails closed', () async {
+      final Map<String, Object?> result = await hostWith(
+        () async => throw StateError('catalog source is broken'),
+      ).dispatchInvoke('device.ping', const <String, Object?>{}, 'req-9');
 
-        expect(result['admission'], 'accepted');
-        expect(forwarded.single, isEmpty);
-      },
-    );
+      expect(result['admission'], 'rejected');
+      expect(
+        (result['rejection']! as Map<String, Object?>)['code'],
+        'providerProtocolViolation',
+      );
+      expect(forwarded, isEmpty);
+    });
   });
 
   group('Patchbay invocation envelope', () {

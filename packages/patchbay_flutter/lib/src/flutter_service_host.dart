@@ -17,50 +17,115 @@ final class PatchbayFlutterServiceHost {
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
-  }) : _host = PatchbayServiceHost(
+  }) : _host = _buildHost(
          applicationId: applicationId,
+         bridge: bridge,
+         domainCatalog: domainCatalog,
+         snapshot: snapshot,
+         domainInvoke: domainInvoke,
          appInstanceId: appInstanceId,
          registrar: registrar,
          auditSink: auditSink,
          onAuditSinkError: onAuditSinkError,
-         registry: PatchbayCommandRegistry.combine(<PatchbayCommandRegistry>[
-           _uiCommandRegistry(bridge),
-           if (bridge.artifacts case final PatchbayArtifactService artifacts)
-             artifacts.registry,
-         ]),
-         catalog: () async {
-           final Map<String, Object?> domain =
-               await domainCatalog?.call() ?? const <String, Object?>{};
-           return <String, Object?>{
-             ...domain,
-             'uiTargets': bridge
-                 .catalog()
-                 .map((PatchbayUiTargetDescriptor target) => target.toJson())
-                 .toList(growable: false),
-           };
-         },
-         snapshot: snapshot ?? () async => const <String, Object?>{},
-         invoke:
-             domainInvoke ??
-             (command, arguments, requestId) async =>
-                 PatchbayInvocation.rejected(
-                   requestId: requestId,
-                   rejection: PatchbayRejection(
-                     code: 'commandNotRegistered',
-                     details: <String, Object?>{'command': command},
-                   ),
-                 ).toJson(),
-         // The lifecycle gate lives in this package, so this is the layer that
-         // can promise a `*LifecycleNotResumed` rejection carries the engine
-         // state separating "wake the screen" from "click the window". A pure
-         // Dart host has no such gate and declares nothing, which is what lets
-         // a client tell "this host does not report it" apart from "this App
-         // reported unknown".
-         features: <PatchbayFeature>{
-           PatchbayFeature.lifecycleState,
-           if (bridge.capture != null) PatchbayFeature.captureAfterFrames,
-         },
        );
+
+  PatchbayFlutterServiceHost.withDomainCatalogProvider({
+    required String applicationId,
+    required PatchbayFlutterBridge bridge,
+    required PatchbayCatalogProvider domainCatalogProvider,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayInvocationSource? domainInvoke,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+  }) : _host = _buildHost(
+         applicationId: applicationId,
+         bridge: bridge,
+         domainCatalogProvider: domainCatalogProvider,
+         snapshot: snapshot,
+         domainInvoke: domainInvoke,
+         appInstanceId: appInstanceId,
+         registrar: registrar,
+         auditSink: auditSink,
+         onAuditSinkError: onAuditSinkError,
+       );
+
+  static PatchbayServiceHost _buildHost({
+    required String applicationId,
+    required PatchbayFlutterBridge bridge,
+    PatchbayCatalogSource? domainCatalog,
+    PatchbayCatalogProvider? domainCatalogProvider,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayInvocationSource? domainInvoke,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+  }) {
+    assert((domainCatalog == null) || domainCatalogProvider == null);
+    final PatchbayCommandRegistry registry =
+        PatchbayCommandRegistry.combine(<PatchbayCommandRegistry>[
+          _uiCommandRegistry(bridge),
+          if (bridge.artifacts case final PatchbayArtifactService artifacts)
+            artifacts.registry,
+        ]);
+    final PatchbaySnapshotSource effectiveSnapshot =
+        snapshot ?? () async => const <String, Object?>{};
+    final PatchbayInvocationSource effectiveInvoke =
+        domainInvoke ??
+        (command, arguments, requestId) async => PatchbayInvocation.rejected(
+          requestId: requestId,
+          rejection: PatchbayRejection(
+            code: 'commandNotRegistered',
+            details: <String, Object?>{'command': command},
+          ),
+        ).toJson();
+    final Set<PatchbayFeature> features = <PatchbayFeature>{
+      PatchbayFeature.lifecycleState,
+      if (bridge.capture != null) PatchbayFeature.captureAfterFrames,
+    };
+    if (domainCatalogProvider case final PatchbayCatalogProvider provider) {
+      return PatchbayServiceHost.withCatalogProvider(
+        applicationId: applicationId,
+        appInstanceId: appInstanceId,
+        registrar: registrar,
+        auditSink: auditSink,
+        onAuditSinkError: onAuditSinkError,
+        registry: registry,
+        catalogProvider: _FlutterCatalogProvider(provider, bridge),
+        snapshot: effectiveSnapshot,
+        invoke: effectiveInvoke,
+        features: features,
+      );
+    }
+    return PatchbayServiceHost(
+      applicationId: applicationId,
+      appInstanceId: appInstanceId,
+      registrar: registrar,
+      auditSink: auditSink,
+      onAuditSinkError: onAuditSinkError,
+      registry: registry,
+      catalog: () async => _withUiTargets(
+        await domainCatalog?.call() ?? const <String, Object?>{},
+        bridge,
+      ),
+      snapshot: effectiveSnapshot,
+      invoke: effectiveInvoke,
+      features: features,
+    );
+  }
+
+  static Map<String, Object?> _withUiTargets(
+    Map<String, Object?> domain,
+    PatchbayFlutterBridge bridge,
+  ) => <String, Object?>{
+    ...domain,
+    'uiTargets': bridge
+        .catalog()
+        .map((PatchbayUiTargetDescriptor target) => target.toJson())
+        .toList(growable: false),
+  };
 
   final PatchbayServiceHost _host;
 
@@ -622,6 +687,28 @@ final class PatchbayFlutterServiceHost {
     patchbayNavigationPushCommandDescriptor,
     patchbayNavigationBackCommandDescriptor,
   ];
+}
+
+final class _FlutterCatalogProvider implements PatchbayCatalogProvider {
+  const _FlutterCatalogProvider(this.domain, this.bridge);
+
+  final PatchbayCatalogProvider domain;
+  final PatchbayFlutterBridge bridge;
+
+  @override
+  int get commandsRevision => domain.commandsRevision;
+
+  @override
+  Future<PatchbayCatalogSample> readCatalog() async {
+    final PatchbayCatalogSample sample = await domain.readCatalog();
+    return PatchbayCatalogSample(
+      commandsRevision: sample.commandsRevision,
+      catalog: PatchbayFlutterServiceHost._withUiTargets(
+        sample.catalog,
+        bridge,
+      ),
+    );
+  }
 }
 
 /// One command's declared parameters, reduced to what a rejection has to name.

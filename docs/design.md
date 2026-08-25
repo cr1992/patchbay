@@ -106,6 +106,21 @@ sequenceDiagram
 键，并在 `details.violations` 里一次列全所有违规项。跳过坏行会让接入方以为自己只是少注册了几条
 命令，而不是目录本身坏了。
 
+目录 policy 缓存也不能绕过这条边界。registry 命中只负责 O(1) 取得 descriptor policy，命令真正受理前
+仍须持有整份 commands 已验证的 `CatalogValidity`；validity 与按 name 投影的 policy index 来自同一次
+完整验证。legacy 动态 source 没有失效事实，只允许并发调用共享一个 in-flight read，settle 后下一次调用
+仍重新读取；不得用 TTL 或“最近没变化”推断安全复用。空参数也不构成旁路，registry/external invocation
+都先取得 validity，再做路由或参数 policy。
+
+需要跨 invocation 复用时，接入方显式提供 additive catalog provider：廉价 `commandsRevision` getter 只
+报告失效信号，完整 sample 原子绑定 revision 与 catalog。相同 revision 承诺规范化 commands 不变，倒退或
+在既有完整读取中观察到同 revision 内容漂移均按 provider 违规拒绝。commands revision 不覆盖动态
+`uiTargets`；显式 catalog 仍读取当时的 UI target，invocation cache 不保留挂载态。VM Service 与 direct
+共用同一 validity/index，不在 transport 层各建一份缓存。
+
+完整状态机、失败分类与兼容矩阵见已接受的
+[Invocation catalog policy 缓存与失效协议](proposals/0.5.0/catalog-policy-cache.md)。
+
 ### Provider JSON 先冻结，再进入协议
 
 consumer provider 返回的 snapshot 等结构必须是严格 JSON：`null`、bool、有限 number、String、
@@ -228,6 +243,21 @@ sequenceDiagram
 执行证据和 artifact，不把 App host 内部 audit sink 的事实自动升级为 CLI 已观察事实。M0 原先关于
 “共用 emit 点”的结论因 host/CLI 进程边界无法成立，已于 2026-08-18 明示重新接受为：四包不为此新增
 跨进程 audit event-stream；host audit 与 CLI trace 共享纯脱敏/分类投影，是否传输仍由显式协议决定。
+
+host audit sink 的投递边界以 ledger sequence 为序：单消费者只有在前一个 sink Future settle 后才启动
+下一项，业务 invocation 永不等待 sink。dispatcher 的 capacity 同时计算 active 与 waiting，默认 256；满时
+保留已接收前缀并丢最新，以精确 sequence burst 通过既有 error observer 报告，不驱逐旧项伪造连续后缀。
+drain 是有预算的 terminal 操作，默认 2 秒；timeout 返回结构化结果并明确 abandoned 数量，不能把迟到
+settle 冒充 cooperative cancellation。完整状态机与隐私边界见已接受的
+[Audit sink 顺序投递与有界背压](proposals/0.5.0/audit-delivery.md)。
+
+invocation 的等待与停止同样不混：deadline 或 caller disconnect 只证明调用方不再等待；只有完整 pipeline
+settle，或 context-aware consumer 明确确认底层已停止且不会再产生副作用，才能释放 host execution slot。
+registry/external 共用默认 8 路的 host admission，direct 的 transport processing 门另行计数并可跨 response
+关闭继续保留；显式 cancel 走独立 protocol-owned method/endpoint，不伪装成 consumer command，并以专用有界
+control slot 保证普通 processing 满载时仍可达。host dispose 先关闭 invocation 受理并形成有预算
+终态，再 drain audit，确保取消/放弃事实先进入 ledger。完整 wire、容量、降级与竞速规则见已接受的
+[Invocation cooperative cancellation、deadline 与统一受理预算](proposals/0.5.0/invocation-cancellation.md)。
 
 ### 6. 慢事实用 job 表达
 

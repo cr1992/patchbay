@@ -58,10 +58,10 @@
 | PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
 | PB-050-01 | snapshot provider JSON 边界与冻结读视图 | source 返回非 JSON、非字符串 key、循环引用或过深结构时，canonical 化可能越过 provider 违规边界直接抛错；有效结果又返回 consumer 活对象而非已冻结 revision body | 0.5.0 | 已验证 | [Snapshot provider 边界](proposals/0.5.0/snapshot-provider-boundary.md)；Proposal 接受前只允许失败注入与原型验证 |
 | PB-050-02 | snapshot 双预算、single-flight 与可选 source revision | revision 目前只按 32 份计数、没有字节上限；高频 wait 会重复拉取并全量 canonical 编码，consumer 又没有可选的内容 revision 快路径 | 0.5.0 | 待裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md)；DG-050-01 |
-| PB-050-03 | invocation catalog policy 热路径与失效协议 | 每次带参数调用都会重建完整 catalog、UI target 与 digest；直接绕过 catalog 又会破坏“任一非法条目使整份目录失效”的 fail-closed 契约 | 0.5.0 | 待裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md)；DG-050-02 |
+| PB-050-03 | invocation catalog policy 热路径与失效协议 | 每次带参数调用都会重建完整 catalog、UI target 与 digest；直接绕过 catalog 又会破坏“任一非法条目使整份目录失效”的 fail-closed 契约 | 0.5.0 | 已排期 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md)；DG-050-02 |
 | PB-050-04 | semantics probe 帧放大量测与决策证据 | 每次 probe 都可能主动 `scheduleFrame` 并等待 `endOfFrame`，`ui.wait` 随后还会再等一帧；先量化帧驱动与遍历各自占比，避免在没有事实时优化小头 | 0.5.0 | 已验证 | [量测报告](verification/0.5.0-semantics-probe-benchmark.md)；只交付 instrumentation、benchmark 与建议，不改变请帧、等待、缓存或 generation 行为 |
-| PB-050-05 | audit sink 顺序投递与有界背压 | 当前异步 sink 独立启动，完成/持久化顺序无保证，慢 sink 的 pending Future 数量也无上限；审计账本与外部投递缺少一致的丢失报告 | 0.5.0 | 待裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md)；DG-050-03 |
-| PB-050-06 | invocation cooperative cancellation、deadline 与统一受理预算 | direct timeout 后保留 slot 是防止卡死 handler 后继续堆积的刻意语义；registry 路径又未纳入 external 的 256 条账本，缺少可证明的取消确认与统一生命周期 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md)；DG-050-04；不改写既有 job cancellation 契约 |
+| PB-050-05 | audit sink 顺序投递与有界背压 | 当前异步 sink 独立启动，完成/持久化顺序无保证，慢 sink 的 pending Future 数量也无上限；审计账本与外部投递缺少一致的丢失报告 | 0.5.0 | 已排期 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md)；DG-050-03 |
+| PB-050-06 | invocation cooperative cancellation、deadline 与统一受理预算 | direct timeout 后保留 slot 是防止卡死 handler 后继续堆积的刻意语义；registry 路径又未纳入统一运行预算，缺少可证明的取消确认与统一生命周期 | 0.5.0 | 已排期 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md)；DG-050-04 已裁决；execution 默认 8、active-owner record 上限 256；不改写既有 job cancellation 契约 |
 | PB-050-07 | semantics probe 请帧策略与 identifier 索引 | 减少主动请帧或按 tree revision 缓存 identifier 都会改变 `ui.wait` 的观察时机、elapsed/frameRevision 与 generation 边界，不能作为“透明降载”越过默认行为门禁 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md)；DG-050-05；以 PB-050-04 量测为裁决输入 |
 | PB-050-08 | REPL 终止错误与单行流契约 | 正常 `--json repl` 已按行输出 compact JSON，但 transport / protocol / session failure 冒到 one-shot `_fail` 后会变成多行 pretty JSON；按行消费方无法把它识别为终止事实，FIFO 写端随后可能在 reader 已退出时挂死 | 0.5.0 | 已验证 | 复用既有 error envelope 与退出码，只修复已承诺的 JSONL 一致性；不在本条加入 reconnect |
 | PB-050-09 | CLI 诊断与命令语义可发现性 | 重度使用实证 `sessionDirectoryEmpty` 无恢复指引，已能自动分块落盘的 `capture ... --output` / `blob get ... --output` 未从 raw service 路径就地指向，`text.set` / `text.enter` 的 callback 差异虽已冻结但只在包文档可见，`id` / `identifier` 与 request `limit` / response `length` 的不同事实域也要靠试错辨认 | 0.5.0 | 已排期 | 只改 hint、人读成功摘要、help、文档与回归测试；复用 REPL `describe`，不新增别名/schema 命令，不改 JSON、text 行为或 wire 参数 |
@@ -70,9 +70,9 @@
 | PB-050-12 | 最低支持 SDK 组合与 CI 证据 | package 声明 Dart `>=3.11.0`、Flutter `>=3.38.0`，但合入 CI 只跑 Flutter 3.44.9 自带的 Dart；文档下限与两个约束的真实可安装交集尚未被机检证明 | 0.5.0 | 已排期 | 解析并记录最早可安装的 Dart/Flutter 组合，增加最低组合 CI lane；若现有声明无法形成文档承诺的组合，先如实纠正文档，任何提高公开下限的改动另走 Proposal |
 | PB-050-13 | CLI 公共 API surface 收口 | 0.4.1 的 canonical CLI library 暴露 203 个符号，包内 47 个文件通过根 barrel 访问实现与测试 seam，API golden 只能冻结漂移，不能证明 launcher/trace/session/doctor 等实现应成为 SDK | 0.5.0 | 待裁决 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)；DG-050-07；根入口保留 2 个、8 个迁入 opt-in client，其余 193 个彻底退出公共面，本版完成不延期 |
 | PB-050-14 | workspace / worktree 级会话亲和性 | session 记录虽保存 `workspacePath`，默认 resolver 仍从全局目录按显式 ID、全局 pin、唯一性选择；在多个 checkout 并行时，旧 pin 可把无 `--session` 的 Agent 命令带到另一工作区的 App | 0.5.0 | 已排期 | 实现前补 Proposal，冻结 canonical workspace/checkout identity、legacy session 迁移、显式跨工作区选择、per-workspace pin 与歧义 fail-closed 语义；不得引入常驻 daemon 或全局 latest |
-| PB-050-15 | 锚定式合成 tap（`ui.gesture.tap`） | 手势家族只有 pressHold/drag/fling，最常用的点按缺位；`ui.semantics.tap` 走 performAction 派发，不经指针管线 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-08；落地前补 Proposal，形状对齐锚定式手势判例 |
-| PB-050-16 | 点性 semantics 派发的遮挡准入 | `areUserActionsBlocked` 仅在 BlockSemantics 下为真，非模态覆盖层下 performAction 会穿透激活被盖目标，违背防误击立场（`packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart` 的 423-428 段） | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-09；repro 失败测试先行，落地前补 Proposal |
-| PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；落地前补 Proposal |
+| PB-050-15 | 锚定式合成 tap（`ui.gesture.tap`） | 手势家族只有 pressHold/drag/fling，最常用的点按缺位；`ui.semantics.tap` 走 performAction 派发，不经指针管线 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-08；[锚定式合成 tap](proposals/0.5.0/anchored-tap.md) |
+| PB-050-16 | 点性 semantics 派发的遮挡准入 | `areUserActionsBlocked` 仅在 BlockSemantics 下为真，非模态覆盖层下 performAction 会穿透激活被盖目标，违背防误击立场（`packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart` 的 423-428 段） | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-09；[遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；repro 已合入 |
+| PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；[Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md) |
 | PB-050-18 | 会话存活判定加进程启动身份 | 存活判据是裸 `kill -0`/`tasklist` 按 PID（`packages/patchbay_cli/lib/src/platform/process_utils.dart` 的 53-76 段），PID 复用会把死会话判成活的 | 0.5.0 | 已排期 | PID+启动时间三元比对；会话记录 additive 字段并冻结兼容语料；老记录行为不变、诊断标注 `identityUnverified` |
 | PB-050-19 | 会话记录解析失败改隔离 | `readAll` 解析失败即删文件，自愈同时销毁现场证据，操作者拿不到「这里曾有会话」的痕迹 | 0.5.0 | 已排期 | 移入 `.quarantine` 并由 doctor 报告；临时文件与并发写入语义不变 |
 | PB-050-20 | 树类大载荷落 artifact | `ui semantics tree` 等全量进 stdout，大树即数千行；agent 消费方直接吃满上下文，破坏按需展开的信息层级 | 0.5.0 | 已排期 | 超阈值落 artifact、stdout 回校验路径；复用既有 `--output`/blob 形状不新增别名；阈值内输出逐字节不变；落地前补 Proposal |
@@ -100,15 +100,15 @@
 | DG-040-07 | platform driver 的信任边界、`exercise allow` 确认模型、Android/iOS P0 权限集合与 HarmonyOS 验证基线 | 0.4.0 | 已裁决 | [平台权限](proposals/0.4.0/platform-permissions.md) |
 | DG-040-08 | 损坏轨迹的恢复与阻断语义，以及权限专用事件扩展写入侧封闭表的前置条件 | — | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
 | DG-050-01 | snapshot 单份/总保留字节默认值、与 4 MiB/occurrence 硬天花板的对齐、超限失败，以及 consumer revision 的事实来源与兼容形状 | 0.5.0 | 待裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md) |
-| DG-050-02 | catalog policy 缓存的失效信号，以及动态目录无 revision 时继续逐次校验还是禁止缓存 | 0.5.0 | 待裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md) |
-| DG-050-03 | audit 队列满时的保留/丢弃策略、丢失报告与 dispose drain 预算 | 0.5.0 | 待裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md) |
-| DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 待裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md) |
+| DG-050-02 | catalog policy 缓存的失效信号，以及动态目录无 revision 时继续逐次校验还是禁止缓存 | 0.5.0 | 已裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md) |
+| DG-050-03 | audit 队列满时的保留/丢弃策略、丢失报告与 dispose drain 预算 | 0.5.0 | 已裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md) |
+| DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 已裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md)；execution 默认 8，active-owner/control 面分别有界 |
 | DG-050-05 | semantics owner 已可用时是否仍主动请帧、`ui.wait` 的观察 cadence，以及 identifier cache 的失效与 generation 复核 | 0.5.0 | 待裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md) |
 | DG-050-06 | 通用 identifier action 的独立命令形状、CLI canonical path、`strictKeys` 与 unknown key 处置、可选 caller generation 与公开 action allowlist | 0.5.0 | 待裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md) |
 | DG-050-07 | CLI 公共 API 收口：canonical 入口保留 2 个、8 个迁入 opt-in client、其余 193 个彻底退出公共面，且不提供 legacy/testing 过渡入口 | 0.5.0 | 待裁决 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md) |
-| DG-050-08 | 锚定式合成 tap 的命令形状、指针注入语义与 `ui.semantics.tap` 并存边界 | 0.5.0 | 已裁决 | 裁决记录见 [0.5.0 版本计划](releases/0.5.0.md)；Proposal 落地前补 |
-| DG-050-09 | 点性 semantics 派发的遮挡准入范围、拒绝码与不提供 bypass 的边界 | 0.5.0 | 已裁决 | 裁决记录见 [0.5.0 版本计划](releases/0.5.0.md)；Proposal 落地前补 |
-| DG-050-10 | scroll-to-reveal 的写操作定性、Semantics 域实现边界与成功判据 | 0.5.0 | 已裁决 | 裁决记录见 [0.5.0 版本计划](releases/0.5.0.md)；Proposal 落地前补 |
+| DG-050-08 | 锚定式合成 tap 的命令形状、指针注入语义与 `ui.semantics.tap` 并存边界 | 0.5.0 | 已裁决 | [锚定式合成 tap](proposals/0.5.0/anchored-tap.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
+| DG-050-09 | 点性 semantics 派发的遮挡准入范围、拒绝码与不提供 bypass 的边界 | 0.5.0 | 已裁决 | [遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
+| DG-050-10 | scroll-to-reveal 的写操作定性、Semantics 域实现边界与成功判据 | 0.5.0 | 已裁决 | [Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
 
 ## 维护规则
 
