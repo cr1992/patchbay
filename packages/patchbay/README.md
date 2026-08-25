@@ -221,14 +221,32 @@ descriptor:
 
 ```dart
 final gates = PatchbayGateEvaluator(
+  // No argument reaches this gate, so it stays open — that is what lets
+  // read-only commands work with zero extra wiring.
   baseGate: () => const PatchbayGateDecision.allow(),
-  consumerGate: (id) => evaluateConsumerGate(id),
+  // Runs once per gate ID a command declares. The factory-safe default is
+  // to reject everything until it is explicitly authorized:
+  consumerGate: (id) => PatchbayGateDecision.reject(
+    code: 'unknownConsumerGate',
+    notice: 'No consumer gate named "$id" — this is a factory-safe '
+        'default: write commands stay closed until the host authorizes '
+        'them here.',
+  ),
+  // To open one write gate for a trusted driver, replace the body above
+  // with something like:
+  //   consumerGate: (id) => id == 'app.write'
+  //       ? const PatchbayGateDecision.allow()
+  //       : PatchbayGateDecision.reject(
+  //           code: 'unknownConsumerGate',
+  //           notice: 'No consumer gate named "$id".',
+  //         ),
 );
 ```
 
-The base gate does not guess login, privacy consent, dependency readiness, or device state on the
-app's behalf. Commands that trigger network, file, permission, or external device actions must
-declare the corresponding gates explicitly. Service extensions have no symmetric deregistration,
+The shortest possible integration opens read-only diagnostics by default; every write must be
+declared and pass through a gate explicitly. The base gate does not guess login, privacy consent,
+dependency readiness, or device state on the app's behalf. Commands that trigger network, file,
+permission, or external device actions must declare the corresponding gates explicitly. Service extensions have no symmetric deregistration,
 so handlers must still fail closed on every call once state has been revoked.
 
 ## Long-Running Work

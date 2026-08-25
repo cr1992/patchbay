@@ -233,6 +233,49 @@ void main() {
     }
   });
 
+  group('PB-050-22 factory-default write gate', () {
+    test(
+      'rejects an unauthorized write gate with the factory-default code',
+      () {
+        final PatchbayGateDecision decision = factoryDefaultWriteGateDecision(
+          exampleWriteGate,
+        );
+        expect(decision.allowed, isFalse);
+        expect(decision.code, 'writeGateClosedByDefault');
+        expect(decision.notice, contains('factory-safe default'));
+        expect(decision.notice, contains(exampleWriteGate));
+      },
+    );
+
+    test('a gate evaluator built on the factory default closes writes but '
+        'leaves declared-gate-free reads open', () async {
+      // This is the reference shape a real consumer keeps: unlike
+      // `PatchbayExampleHost`, which allows `exampleWriteGate` outright as
+      // a disclosed exception for `tool/example_precheck.sh` (see
+      // `_exampleConsumerGate`'s doc comment in lib/main.dart), a gate
+      // evaluator wired straight to [factoryDefaultWriteGateDecision]
+      // keeps every write gate closed until the host names it explicitly.
+      final PatchbayGateEvaluator gates = PatchbayGateEvaluator(
+        baseGate: () => const PatchbayGateDecision.allow(),
+        consumerGate: (String id) => factoryDefaultWriteGateDecision(id),
+      );
+
+      // A read-only command (ui.semantics.tree, ui.wait, ui.capture,
+      // logs.*, ...) declares no consumer gate IDs at all, so it only
+      // crosses the always-open base gate.
+      expect(await gates.evaluate(const <String>{}), isNull);
+
+      // Every write-classified command in this example declares
+      // `exampleWriteGate`. Under the factory default, that gate ID stays
+      // closed until a host authorizes it by name.
+      final PatchbayGateRejection? rejection = await gates.evaluate(
+        const <String>{exampleWriteGate},
+      );
+      expect(rejection, isNotNull);
+      expect(rejection!.code, 'writeGateClosedByDefault');
+    });
+  });
+
   test('permission request dispatches without inventing completion', () async {
     final _FakePermissionGateway permissions = _FakePermissionGateway();
     final ValueNotifier<int> counter = ValueNotifier<int>(0);

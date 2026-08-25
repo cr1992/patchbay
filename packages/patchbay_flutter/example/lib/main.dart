@@ -29,9 +29,25 @@ const String gestureNestedListSemanticsId = 'example.gesture.nested';
 const String homeDestinationId = 'example.home';
 const String detailsDestinationId = 'example.details';
 
-/// The single consumer gate this example declares. Everything the host may
-/// execute passes it, so an unknown gate ID stays a rejection rather than a
-/// silently allowed write.
+/// The single write gate this example declares.
+///
+/// `consumerGate` only ever receives a gate ID string (see
+/// `PatchbayConsumerGate` in `package:patchbay`); it cannot see a command's
+/// descriptor, its `sideEffect`, or which command is being invoked. So the
+/// read/write split this file demonstrates is not something the framework
+/// infers — it is entirely a choice this example makes about *which
+/// operations declare this gate ID at all*. Every call site below that
+/// attaches `exampleWriteGate` does so because
+/// `packages/patchbay/lib/src/ui_protocol_commands.dart` (and
+/// `protocol_commands.dart` for navigation) classifies that operation with
+/// `sideEffect: PatchbaySideEffect.appState` or `.external`: `ui.semantics.
+/// action`/`.tap`, `ui.gesture.*`, `navigation.go`/`push`/`back`,
+/// `ui.inspect.select`, `ui.keepAwake.set`, and `ui.text.set`/`.enter`.
+/// `ui.capture`/`.capture.diff` deliberately do **not** use it: the same
+/// descriptors classify them `sideEffect: none` / `mode: readOnly`, same as
+/// `logs.*`/`blob.*`, so they only ever pass the base gate below. See
+/// `_exampleConsumerGate` for the actual default (reject) and the one
+/// explicit exception this example ships with.
 const String exampleWriteGate = 'example.uiWrite';
 
 void main() {
@@ -41,11 +57,21 @@ void main() {
   final ExampleRouter router = ExampleRouter();
   final PatchbayKey noteKey = PatchbayKey.text(
     noteTargetId,
+    // `ui.text.set`/`.enter` are `sideEffect: appState` (see the doc comment
+    // on `exampleWriteGate`), so they get the same write gate as every other
+    // write path in this example.
+    operationGates: const <PatchbayUiOperation, Set<String>>{
+      PatchbayUiOperation.textSet: <String>{exampleWriteGate},
+      PatchbayUiOperation.textEnter: <String>{exampleWriteGate},
+    },
     registry: registry,
   );
   final PatchbayKey cardCaptureKey = PatchbayKey.capture(
     cardCaptureTargetId,
-    gates: const <String>{exampleWriteGate},
+    // No `gates:` here on purpose: `ui.capture`/`.capture.diff` are declared
+    // `sideEffect: none` / `mode: readOnly` by the shared protocol
+    // descriptors, so this target only passes the (always-open) base gate,
+    // same as `logs.*`/`blob.*`.
     registry: registry,
   );
 
@@ -152,7 +178,11 @@ final class PatchbayExampleHost {
            back: router.back,
            backGateIds: const <String>{exampleWriteGate},
          ),
-         captureGates: const <String>{exampleWriteGate},
+         // Empty on purpose: `ui.capture`/`.capture.diff` are declared
+         // `sideEffect: none` in the shared protocol descriptors (see the
+         // doc comment on `exampleWriteGate`), so this example treats them
+         // as read-only diagnostics, same as `logs.*`/`blob.*` below.
+         captureGates: const <String>{},
          rootController: PatchbayRootController.instance,
          artifacts: _artifacts(logs),
        ) {
@@ -192,7 +222,14 @@ final class PatchbayExampleHost {
           consumerGate: _exampleConsumerGate,
         ),
         logs: logs,
-        gateIds: const <String>{exampleWriteGate},
+        // Empty on purpose: `blob.metadata`, `blob.read`, `logs.query`,
+        // `logs.export` and `logs.tail` are all declared
+        // `mode: PatchbayCommandMode.readOnly` by `PatchbayArtifactService`
+        // itself — they read already-recorded facts, they do not write
+        // anything. Gating them behind `exampleWriteGate` would contradict
+        // this example's own "read-only diagnostics open by default" story,
+        // so `gateIds` stays empty and they only pass the base gate below.
+        gateIds: const <String>{},
       );
   late final PatchbayFlutterServiceHost _service;
 
@@ -491,18 +528,66 @@ final class _ExampleBenchmarkSample {
   final int frames;
 }
 
+/// `PatchbayBaseGate` is `FutureOr<PatchbayGateDecision> Function()` — no
+/// argument reaches it, for any command. It structurally cannot tell a read
+/// from a write; that split only exists in *which* operations declare a
+/// consumer gate at all (see `exampleWriteGate`'s doc comment). Keeping this
+/// `allow()` is what "shortest integration opens read-only diagnostics by
+/// default" means in practice: every read-only command this example exposes
+/// (`ui.semantics.tree`, `ui.wait`, `navigation.catalog`/`.current`,
+/// `ui.keepAwake.status`, `ui.inspect.status`, `ui.capture`/`.capture.diff`,
+/// `blob.*`, `logs.*`) declares zero consumer gates, so this base gate is the
+/// only check any of them goes through.
 FutureOr<PatchbayGateDecision> _allowBaseGate() =>
     const PatchbayGateDecision.allow();
 
-/// Only the one gate this example declares is allowed; anything else stays a
-/// typed rejection so a policy that names an unknown gate cannot write.
-FutureOr<PatchbayGateDecision> _exampleConsumerGate(String id) =>
-    id == exampleWriteGate
-    ? const PatchbayGateDecision.allow()
-    : PatchbayGateDecision.reject(
-        code: 'unknownConsumerGate',
-        notice: 'No consumer gate named $id.',
-      );
+/// Out-of-the-box behavior for this example's one write gate.
+///
+/// Every write path declares `exampleWriteGate` (see its doc comment), so in
+/// a fresh copy of this example this function is the entire write policy.
+/// The factory-safe shape is: reject with a code + notice a script can act
+/// on, and require the host to opt in by name — [factoryDefaultWriteGateDecision]
+/// is that reference implementation, unit-tested directly in
+/// `example_consumer_test.dart`.
+///
+/// This example does **not** call it for `exampleWriteGate`, though — it
+/// allows that one gate outright. That is a deliberate, disclosed exception,
+/// not the recommended default: `tool/example_precheck.sh` drives
+/// `ui.tap`/`ui.gesture.*`/`navigation.go|push|back`/`ui.inspect.select`/
+/// `ui.keepAwake.set`/`ui.text.set|enter` on a real device and asserts they
+/// succeed (AGENTS.md "验证分两段", stage one), and that precheck's pass/fail
+/// contract must not change under this task (PB-050-22). Delete the
+/// `exampleWriteGate` special case below and every one of those write paths
+/// goes back to the factory default (closed) immediately.
+FutureOr<PatchbayGateDecision> _exampleConsumerGate(String id) {
+  if (id != exampleWriteGate) {
+    return PatchbayGateDecision.reject(
+      code: 'unknownConsumerGate',
+      notice: 'No consumer gate named $id.',
+    );
+  }
+  // 预检需要：见上面的文档注释。真正的出厂默认是下面这行——删掉本函数里
+  // 对 exampleWriteGate 的特判，写路径就会立即回落到它：
+  //   return factoryDefaultWriteGateDecision(id);
+  return const PatchbayGateDecision.allow();
+}
+
+/// The factory-safe default for a write gate this example has not
+/// authorized: reject, with a code a script can branch on and a notice that
+/// says why and what to do about it.
+///
+/// `_exampleConsumerGate` above does not call this for `exampleWriteGate` —
+/// see its doc comment for why — so this function does not fire anywhere in
+/// the example as shipped. It is the reference shape a real consumer should
+/// keep, exercised directly by `example_consumer_test.dart` rather than
+/// through the running app.
+PatchbayGateDecision factoryDefaultWriteGateDecision(String gateId) =>
+    PatchbayGateDecision.reject(
+      code: 'writeGateClosedByDefault',
+      notice:
+          'This is a factory-safe default: "$gateId" is a write gate and '
+          'stays closed until the host authorizes it here.',
+    );
 
 /// Executable semantics actions are opt-in per target.
 ///

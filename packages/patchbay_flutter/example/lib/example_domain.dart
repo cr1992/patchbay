@@ -240,6 +240,21 @@ final class ExampleDomain {
   final Set<String> _appliedRequestIds = <String>{};
   int _touches = 0;
 
+  // None of these descriptors set `gates`. That field only feeds the
+  // published catalog (documentation) for a domain command — the dispatch
+  // path for `plane: domain` commands never reads it back out to run a
+  // `PatchbayGateEvaluator`, unlike registry-owned commands such as
+  // `ui.capture` or `blob.read`. So PB-050-22's default-write-gate demo in
+  // main.dart (`_exampleConsumerGate`/`factoryDefaultWriteGateDecision`)
+  // cannot reach `example.device.write`, `example.job.run`,
+  // `example.counter.increment` (this domain form), `example.idempotent.
+  // touch`, `example.permission.request`, or `example.job.cancel` — every one
+  // of them keeps executing unconditionally regardless of gate policy.
+  // Declaring `gates` here anyway would be misleading (declared but never
+  // enforced); actually enforcing it needs either a Proposal-level change to
+  // how `plane: domain` dispatch consults descriptor gates, or the
+  // `domainInvoke` adapter evaluating gates by hand per command. Neither is
+  // in scope for this task; treat it as a known limitation.
   List<PatchbayCommandDescriptor> get descriptors =>
       <PatchbayCommandDescriptor>[
         const PatchbayCommandDescriptor(

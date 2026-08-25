@@ -97,11 +97,29 @@ import 'package:patchbay_flutter/patchbay_flutter.dart';
 void main() {
   if (!kReleaseMode) {
     final gates = PatchbayGateEvaluator(
+      // No argument reaches this gate, for any command, so it cannot tell a
+      // read from a write by itself — that's why it stays open. Every
+      // read-only command this minimal setup exposes (catalog, snapshot,
+      // ui.wait, Semantics observation) only ever passes through this one
+      // gate.
       baseGate: () => const PatchbayGateDecision.allow(),
+      // Only write-classified operations declare a consumer gate ID at all,
+      // so rejecting anything that isn't explicitly authorized here is what
+      // keeps writes closed by factory default.
       consumerGate: (id) => PatchbayGateDecision.reject(
         code: 'unknownConsumerGate',
-        notice: 'No consumer gate named $id.',
+        notice: 'No consumer gate named "$id" — this is a factory-safe '
+            'default: write commands stay closed until the host '
+            'authorizes them here.',
       ),
+      // To open one write gate for a trusted driver, replace the function
+      // body above with something like:
+      //   consumerGate: (id) => id == 'app.write'
+      //       ? const PatchbayGateDecision.allow()
+      //       : PatchbayGateDecision.reject(
+      //           code: 'unknownConsumerGate',
+      //           notice: 'No consumer gate named "$id".',
+      //         ),
     );
 
     PatchbayFlutterServiceHost(
@@ -114,10 +132,11 @@ void main() {
 }
 ```
 
-This minimal integration already gives you identity, catalog, an empty snapshot, read-only
-Semantics observation, and `ui.wait`. Semantics actions are rejected by default; domain commands,
-capture, logs, and navigation each require the app to inject the corresponding capability
-explicitly.
+The shortest possible integration opens read-only diagnostics by default; every write must be
+declared and pass through a gate explicitly. This minimal integration already gives you identity,
+catalog, an empty snapshot, read-only Semantics observation, and `ui.wait`. Semantics actions are
+rejected by default; domain commands, capture, logs, and navigation each require the app to inject
+the corresponding capability explicitly.
 
 When you need a stable text target, replace the existing Key with a `PatchbayKey`. It is a
 `GlobalKey`, so it must be cached like any ordinary `GlobalKey` and never reconstructed on every
