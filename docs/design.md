@@ -244,6 +244,13 @@ sequenceDiagram
 “共用 emit 点”的结论因 host/CLI 进程边界无法成立，已于 2026-08-18 明示重新接受为：四包不为此新增
 跨进程 audit event-stream；host audit 与 CLI trace 共享纯脱敏/分类投影，是否传输仍由显式协议决定。
 
+host audit sink 的投递边界以 ledger sequence 为序：单消费者只有在前一个 sink Future settle 后才启动
+下一项，业务 invocation 永不等待 sink。dispatcher 的 capacity 同时计算 active 与 waiting，默认 256；满时
+保留已接收前缀并丢最新，以精确 sequence burst 通过既有 error observer 报告，不驱逐旧项伪造连续后缀。
+drain 是有预算的 terminal 操作，默认 2 秒；timeout 返回结构化结果并明确 abandoned 数量，不能把迟到
+settle 冒充 cooperative cancellation。完整状态机与隐私边界见已接受的
+[Audit sink 顺序投递与有界背压](proposals/0.5.0/audit-delivery.md)。
+
 ### 6. 慢事实用 job 表达
 
 批处理、同步这类长流程不伪装成即时命令：受理即返回 `jobId`，事件带单调序号与事实
