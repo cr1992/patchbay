@@ -74,24 +74,22 @@ final class HostInvokerHandler {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
     }
-    PatchbayCatalogRead? invocationCatalog;
+    final PatchbayCatalogValidity catalog = await _catalogHandler
+        .readInvocationCatalog();
+    if (catalog.violation case final Map<String, Object?> reason) {
+      return _invalidInvocationEnvelope(
+        requestId,
+        'catalogUnavailable',
+        <String, Object?>{'catalog': reason},
+      );
+    }
+    final PatchbayCommandPolicy policy =
+        catalog.commandPolicies[command] ??
+        const PatchbayCommandPolicy.undeclared();
     final Map<String, Object?> forwarded;
     if (arguments.isEmpty) {
       forwarded = arguments;
     } else {
-      final PatchbayCatalogRead catalog = invocationCatalog =
-          await _catalogHandler.readCatalog();
-      if (catalog.violation case final Map<String, Object?> reason) {
-        return _invalidInvocationEnvelope(
-          requestId,
-          'catalogUnavailable',
-          <String, Object?>{'catalog': reason},
-        );
-      }
-      final PatchbayCommandPolicy policy = PatchbayCommandPolicy.forCommand(
-        catalog.response,
-        command,
-      );
       final List<String> violations = policy.sensitiveViolations(arguments);
       if (violations.isNotEmpty) {
         return PatchbayInvocation.rejected(
@@ -117,28 +115,13 @@ final class HostInvokerHandler {
     if (registered != null) {
       result = registered;
     } else {
-      PatchbayCatalogRead? externalCatalog = invocationCatalog;
-      externalCatalog ??= await _catalogHandler.readCatalog();
-      if (externalCatalog.violation case final Map<String, Object?> violation
-          when _invalidRetryPolicyTargets(violation, command)) {
-        return _invalidInvocationEnvelope(
-          requestId,
-          'catalogUnavailable',
-          <String, Object?>{'catalog': violation},
-        );
-      }
       result = await _dispatchExternal(
         command,
         forwarded,
         requestId,
         onDisposition: onExternalDisposition,
-        retryPolicy: externalCatalog.violation == null
-            ? _retryPolicyFromCatalog(externalCatalog.response, command)
-            : null,
+        retryPolicy: catalog.retryPolicies[command],
       );
-      invocationCatalog ??= externalCatalog.violation == null
-          ? externalCatalog
-          : null;
     }
     final PatchbayInvocationWire wire;
     try {
@@ -156,44 +139,10 @@ final class HostInvokerHandler {
     if (semanticViolation != null) {
       return _invalidInvocationEnvelope(requestId, semanticViolation);
     }
-    PatchbayResponseSchema? responseSchema = _registry.responseSchemaFor(
-      command,
-    );
-    PatchbayExecutionContract? executionContract = _registry
-        .executionContractFor(command);
-    responseSchema ??= invocationCatalog == null
-        ? _catalogHandler.responseSchemas[command]
-        : HostCatalogHandler.responseSchemasFromCatalog(
-            invocationCatalog.response,
-          )[command];
-    executionContract ??= invocationCatalog == null
-        ? _catalogHandler.executionContracts[command]
-        : HostCatalogHandler.executionContractsFromCatalog(
-            invocationCatalog.response,
-          )[command];
-    if (responseSchema == null &&
-        invocationCatalog == null &&
-        !_registry.handles(command)) {
-      final PatchbayCatalogRead discovered = await _catalogHandler
-          .readCatalog();
-      if (discovered.violation == null) {
-        responseSchema = HostCatalogHandler.responseSchemasFromCatalog(
-          discovered.response,
-        )[command];
-        executionContract = HostCatalogHandler.executionContractsFromCatalog(
-          discovered.response,
-        )[command];
-      } else if (_invalidCommandContractTargets(
-        discovered.violation!,
-        command,
-      )) {
-        return _invalidInvocationEnvelope(
-          requestId,
-          'catalogUnavailable',
-          <String, Object?>{'catalog': discovered.violation!},
-        );
-      }
-    }
+    final PatchbayResponseSchema? responseSchema =
+        catalog.responseSchemas[command];
+    final PatchbayExecutionContract? executionContract =
+        catalog.executionContracts[command];
     PatchbayExecutionValidationResult executionValidation =
         const PatchbayExecutionValidationResult();
     if (wire.admission == PatchbayAdmissionWire.accepted) {
@@ -335,20 +284,6 @@ final class HostInvokerHandler {
     );
   }
 
-  static PatchbayRetryPolicy? _retryPolicyFromCatalog(
-    Map<String, Object?> catalog,
-    String command,
-  ) {
-    final Object? rows = catalog['commands'];
-    if (rows is! List<Object?>) return null;
-    for (final Object? row in rows) {
-      if (row is! Map<Object?, Object?> || row['name'] != command) continue;
-      if (!row.containsKey('retryPolicy')) return null;
-      return PatchbayRetryPolicy.fromJson(row['retryPolicy']);
-    }
-    return null;
-  }
-
   static Map<String, Object?> _invalidInvocationEnvelope(
     String requestId,
     String reason, [
@@ -394,35 +329,6 @@ final class HostInvokerHandler {
         'legacyDispatchedConflict': true,
       },
     };
-  }
-
-  static bool _invalidCommandContractTargets(
-    Map<String, Object?> violation,
-    String command,
-  ) {
-    final Object? rows = violation['violations'];
-    if (rows is! List<Object?>) return false;
-    return rows.any(
-      (Object? row) =>
-          row is Map<Object?, Object?> &&
-          row['name'] == command &&
-          (row['reason'] == 'invalidResponseSchema' ||
-              row['reason'] == 'invalidExecutionContract'),
-    );
-  }
-
-  static bool _invalidRetryPolicyTargets(
-    Map<String, Object?> violation,
-    String command,
-  ) {
-    final Object? rows = violation['violations'];
-    if (rows is! List<Object?>) return false;
-    return rows.any(
-      (Object? row) =>
-          row is Map<Object?, Object?> &&
-          row['name'] == command &&
-          row['reason'] == 'invalidRetryPolicy',
-    );
   }
 
   static String? _invocationSemanticViolation(PatchbayInvocationWire wire) {
