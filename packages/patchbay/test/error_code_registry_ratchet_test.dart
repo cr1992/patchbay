@@ -288,6 +288,15 @@ const Set<String> _frozenStableCodes = <String>{
   'uiGesturesDisabled',
   'uiLifecycleNotResumed',
   'uiOperationUnavailable',
+  // PB-050-17：reveal 的六个准入前稳定码。受理后的 `reason` 词表不在这里——
+  // 那一组落在 payload 的自由字段上，由 packages/patchbay_flutter 的
+  // `PatchbayRevealReason` 封闭集合与穷尽性测试锁定。
+  'uiRevealBudgetExceeded',
+  'uiRevealContainerAmbiguous',
+  'uiRevealDenied',
+  'uiRevealDisabled',
+  'uiRevealNoScrollableContainer',
+  'uiRevealPolicyChanged',
   'uiSemanticsActionBlocked',
   'uiSemanticsActionDenied',
   'uiSemanticsActionUnavailable',

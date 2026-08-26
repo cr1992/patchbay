@@ -632,6 +632,16 @@ lifecycle）因此可能出现在两边，分界线只有这一条。
 - example 补的懒加载屏与 reveal policy 是否与 PB-050-22 的写拒绝预设门一并调整，避免两个 MR 改同一个
   example 文件。
 
+### 实现期裁决补记（2026-08-26，仓主授权代理裁决）
+
+- **准入期 deadline 超时的码**：不新设码，复用 `uiRevealBudgetExceeded` 并以 `details.exceeded:
+  timeoutMs` 指名维度——timeout 本就是三层预算的一维，封闭码表克制优先。
+- **交给 policy 的容器身份**：`container.identifier` 取该容器最内层的锚点 identifier（沿 parent 上溯
+  取第一个非空、遇另一滚动节点即停）。滚动语义节点自身的 identifier 按惯例恒为空串，原样上交会让
+  policy 结构上无法辨认区域；此规则是确定规则，非启发式打分。
+- 审计事件的 reveal 富化（steps + 被驱动容器 nodeId 列表）涉及 `PatchbayAuditEvent` 公共形状与
+  host_invoker，越出本条授权面，另立 PB-050-26 追踪。
+
 ## 被否决方案
 
 ### 关于 `showOnScreen` 的三个层次（阻断点三的完整论证）

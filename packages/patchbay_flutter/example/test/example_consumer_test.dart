@@ -132,6 +132,9 @@ void main() {
           'ui.gesture.pressHold',
           'ui.gesture.drag',
           'ui.gesture.fling',
+          // PB-050-17：reveal 只在接入方注入了 revealPolicy 时才进 catalog，
+          // 所以这一行就是「example 的组合根真的写下了那份授权」的机检。
+          'ui.reveal',
           'ui.inspect.select',
           'ui.inspect.status',
           'ui.keepAwake.set',

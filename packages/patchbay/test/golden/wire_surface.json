@@ -681,6 +681,61 @@
         "leaseRemainingMs",
         "lastRelease"
       ]
+    },
+    "PatchbayRevealDirectionWire": {
+      "kind": "enum",
+      "values": [
+        "forward",
+        "backward",
+        "both"
+      ]
+    },
+    "PatchbayRevealReachabilityWire": {
+      "kind": "enum",
+      "values": [
+        "pointer",
+        "semanticsOnly"
+      ]
+    },
+    "PatchbayRevealRequestWire": {
+      "kind": "object",
+      "fields": [
+        "identifier",
+        "container",
+        "direction",
+        "maxSteps",
+        "timeoutMs"
+      ]
+    },
+    "PatchbayRevealContainerWire": {
+      "kind": "object",
+      "fields": [
+        "nodeId",
+        "generation",
+        "steps",
+        "direction",
+        "extentGrowthSteps"
+      ]
+    },
+    "PatchbayRevealResultWire": {
+      "kind": "object",
+      "fields": [
+        "outcome",
+        "source",
+        "identifier",
+        "steps",
+        "elapsedMs",
+        "containers",
+        "nodeId",
+        "generation",
+        "reachability",
+        "beforeTreeRevision",
+        "afterTreeRevision",
+        "reason",
+        "failureType",
+        "gateId",
+        "gateCode"
+      ]
     }
   }
 }

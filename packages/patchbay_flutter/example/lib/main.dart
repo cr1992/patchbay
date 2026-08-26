@@ -8,6 +8,7 @@ import 'package:patchbay_flutter/patchbay_flutter.dart';
 import 'example_direct_transport.dart';
 import 'example_domain.dart';
 import 'example_log_source.dart';
+import 'example_reveal_screen.dart';
 
 const String exampleApplicationId = 'dev.patchbay.example';
 const String counterSemanticsId = 'example.counter.value';
@@ -28,6 +29,30 @@ const String gestureNestedListSemanticsId = 'example.gesture.nested';
 /// Stable destination IDs the example router exposes to `navigation.*`.
 const String homeDestinationId = 'example.home';
 const String detailsDestinationId = 'example.details';
+
+/// PB-050-17: the lazy-paging screen `ui.reveal` is built for.
+///
+/// It sits on its own destination rather than on the home screen so the
+/// existing precheck steps keep driving exactly the surfaces they always did.
+const String revealDestinationId = 'example.reveal';
+
+/// Semantics identifier anchoring the reveal list's scroll container.
+///
+/// The anchor wraps the `ListView`, so the scroll semantics node is its
+/// descendant — that is the shape `--container` resolves, and the shape the
+/// reveal policy sees as `container.identifier`.
+const String revealListSemanticsId = 'example.reveal.list';
+
+/// A row several pages down: it is not mounted until reveal drives the list.
+const String revealTargetSemanticsId = 'example.reveal.row.far';
+
+/// A row with semantics but no pointer footprint, so a successful reveal
+/// reports `reachability: semanticsOnly` and the caller must use `ui tap`.
+const String revealSemanticsOnlyRowId = 'example.reveal.row.semanticsOnly';
+
+/// Pinned bottom bar. A row that stops under it stays `obstructed`, so reveal
+/// has to keep stepping instead of calling a covered row "revealed".
+const String revealOverlaySemanticsId = 'example.reveal.overlay';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -161,6 +186,7 @@ final class PatchbayExampleHost {
          isAppResumed: isAppResumed,
          semanticsActionPolicy: _semanticsActionPolicy,
          gesturePolicy: _gesturePolicy,
+         revealPolicy: exampleRevealPolicy,
          inspectPolicy: const PatchbayInspectPolicy(
            gates: <String>{exampleWriteGate},
            defaultLease: Duration(minutes: 2),
@@ -650,6 +676,41 @@ PatchbayGestureDecision _gesturePolicy(
   );
 }
 
+/// PB-050-17: driving a scroll container is authorized per container, and the
+/// authorization is re-asked before every single step.
+///
+/// Two things this example deliberately shows:
+///
+/// - **Only the reveal list is open.** `container.identifier` is the innermost
+///   anchor identifier of the container being driven, so any other scrollable
+///   on screen — including the gesture list on the home destination — is
+///   refused outright. `ui.reveal` is a write, so a fresh copy of this example
+///   opens nothing it did not name here.
+/// - **Budgets only ever tighten.** 60 steps / 20 s are well inside the host
+///   ceilings (200 / 120 s). A request asking for more is *rejected*, not
+///   silently clamped, because a clamped `stepBudgetExceeded` reads exactly
+///   like "the list really is that long".
+///
+/// The declared gate is the same `exampleWriteGate` every other write path
+/// crosses, and reveal re-evaluates it once per step. A consumer whose gate is
+/// interactive should read the note on that gate before wiring one here: a
+/// 40-step reveal would ask 41 times.
+PatchbayRevealDecision exampleRevealPolicy(
+  PatchbaySemanticsTarget container,
+  PatchbayRevealDirection direction,
+) {
+  if (container.identifier != revealListSemanticsId) {
+    return const PatchbayRevealDecision.reject(
+      rejectionNotice: 'This example only opens its reveal list.',
+    );
+  }
+  return const PatchbayRevealDecision.allow(
+    gateIds: <String>{exampleWriteGate},
+    maxSteps: 60,
+    maxDurationMs: 20000,
+  );
+}
+
 /// Records what the host asked the platform to do, without pretending the
 /// screen is actually awake.
 ///
@@ -699,6 +760,14 @@ final class ExampleRouter {
           gateIds: const <String>{exampleWriteGate},
           go: () => _go(detailsDestinationId),
           push: () => _push(detailsDestinationId),
+        ),
+        PatchbayNavigationDestination(
+          id: revealDestinationId,
+          summary:
+              'A lazy-paging list under a pinned bar, for scroll-to-reveal.',
+          gateIds: const <String>{exampleWriteGate},
+          go: () => _go(revealDestinationId),
+          push: () => _push(revealDestinationId),
         ),
       ];
 
@@ -778,6 +847,8 @@ final class _PatchbayExampleAppState extends State<PatchbayExampleApp> {
         ),
         detailsDestinationId: (BuildContext context) =>
             const _ExampleDetailsScreen(),
+        revealDestinationId: (BuildContext context) =>
+            const ExampleRevealScreen(),
       },
     ),
   );

@@ -642,6 +642,59 @@
         {"name": "leaseRemainingMs", "type": "int", "nullable": true},
         {"name": "lastRelease", "type": "PatchbayInspectReleaseWire", "nullable": true}
       ]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayRevealDirectionWire",
+      "values": ["forward", "backward", "both"]
+    },
+    {
+      "kind": "enum",
+      "name": "PatchbayRevealReachabilityWire",
+      "values": ["pointer", "semanticsOnly"]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayRevealRequestWire",
+      "fields": [
+        {"name": "identifier", "type": "String"},
+        {"name": "container", "type": "String", "nullable": true},
+        {"name": "direction", "type": "PatchbayRevealDirectionWire", "nullable": true},
+        {"name": "maxSteps", "type": "int", "nullable": true},
+        {"name": "timeoutMs", "type": "int", "nullable": true}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayRevealContainerWire",
+      "fields": [
+        {"name": "nodeId", "type": "int"},
+        {"name": "generation", "type": "int"},
+        {"name": "steps", "type": "int"},
+        {"name": "direction", "type": "PatchbayRevealDirectionWire"},
+        {"name": "extentGrowthSteps", "type": "int"}
+      ]
+    },
+    {
+      "kind": "object",
+      "name": "PatchbayRevealResultWire",
+      "fields": [
+        {"name": "outcome", "type": "String"},
+        {"name": "source", "type": "PatchbayFactSourceWire"},
+        {"name": "identifier", "type": "String"},
+        {"name": "steps", "type": "int"},
+        {"name": "elapsedMs", "type": "int"},
+        {"name": "containers", "type": "PatchbayRevealContainerWire", "list": true},
+        {"name": "nodeId", "type": "int", "nullable": true},
+        {"name": "generation", "type": "int", "nullable": true},
+        {"name": "reachability", "type": "PatchbayRevealReachabilityWire", "nullable": true},
+        {"name": "beforeTreeRevision", "type": "int"},
+        {"name": "afterTreeRevision", "type": "int"},
+        {"name": "reason", "type": "String", "nullable": true},
+        {"name": "failureType", "type": "String", "nullable": true},
+        {"name": "gateId", "type": "String", "nullable": true},
+        {"name": "gateCode", "type": "String", "nullable": true}
+      ]
     }
   ]
 }

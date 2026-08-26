@@ -3851,6 +3851,354 @@ final class PatchbayInspectStateWire {
   };
 }
 
+/// Strict wire representation of `PatchbayRevealDirectionWire`.
+enum PatchbayRevealDirectionWire {
+  /// The `forward` wire value.
+  forward,
+
+  /// The `backward` wire value.
+  backward,
+
+  /// The `both` wire value.
+  both;
+
+  /// Decodes a value at [path], rejecting unknown values.
+  static PatchbayRevealDirectionWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayRevealDirectionWire: $wire',
+    );
+  }
+
+  /// Encodes this value using its stable wire name.
+  String toJson() => name;
+}
+
+/// Strict wire representation of `PatchbayRevealReachabilityWire`.
+enum PatchbayRevealReachabilityWire {
+  /// The `pointer` wire value.
+  pointer,
+
+  /// The `semanticsOnly` wire value.
+  semanticsOnly;
+
+  /// Decodes a value at [path], rejecting unknown values.
+  static PatchbayRevealReachabilityWire fromJson(
+    Object? value, {
+    String path = r'$',
+  }) {
+    final wire = _wireString(value, path);
+    for (final candidate in values) {
+      if (candidate.name == wire) return candidate;
+    }
+    throw FormatException(
+      '$path has unknown PatchbayRevealReachabilityWire: $wire',
+    );
+  }
+
+  /// Encodes this value using its stable wire name.
+  String toJson() => name;
+}
+
+/// Strict wire representation of `PatchbayRevealRequestWire`.
+final class PatchbayRevealRequestWire {
+  /// Creates a fully validated wire value.
+  const PatchbayRevealRequestWire({
+    required this.identifier,
+    required this.container,
+    required this.direction,
+    required this.maxSteps,
+    required this.timeoutMs,
+  });
+
+  /// Value of the `identifier` wire field.
+  final String identifier;
+
+  /// Value of the `container` wire field.
+  final String? container;
+
+  /// Value of the `direction` wire field.
+  final PatchbayRevealDirectionWire? direction;
+
+  /// Value of the `maxSteps` wire field.
+  final int? maxSteps;
+
+  /// Value of the `timeoutMs` wire field.
+  final int? timeoutMs;
+
+  /// Decodes a strict JSON object at [path].
+  factory PatchbayRevealRequestWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'identifier',
+      'container',
+      'direction',
+      'maxSteps',
+      'timeoutMs',
+    }, path);
+    return PatchbayRevealRequestWire(
+      identifier: _wireString(json['identifier'], '$path.identifier'),
+      container: json['container'] == null
+          ? null
+          : _wireString(json['container'], '$path.container'),
+      direction: json['direction'] == null
+          ? null
+          : PatchbayRevealDirectionWire.fromJson(
+              json['direction'],
+              path: '$path.direction',
+            ),
+      maxSteps: json['maxSteps'] == null
+          ? null
+          : _wireInt(json['maxSteps'], '$path.maxSteps'),
+      timeoutMs: json['timeoutMs'] == null
+          ? null
+          : _wireInt(json['timeoutMs'], '$path.timeoutMs'),
+    );
+  }
+
+  /// Encodes this value as a JSON object.
+  Map<String, Object?> toJson() => <String, Object?>{
+    'identifier': identifier,
+    if (container != null) 'container': container!,
+    if (direction != null) 'direction': direction!.toJson(),
+    if (maxSteps != null) 'maxSteps': maxSteps!,
+    if (timeoutMs != null) 'timeoutMs': timeoutMs!,
+  };
+}
+
+/// Strict wire representation of `PatchbayRevealContainerWire`.
+final class PatchbayRevealContainerWire {
+  /// Creates a fully validated wire value.
+  const PatchbayRevealContainerWire({
+    required this.nodeId,
+    required this.generation,
+    required this.steps,
+    required this.direction,
+    required this.extentGrowthSteps,
+  });
+
+  /// Value of the `nodeId` wire field.
+  final int nodeId;
+
+  /// Value of the `generation` wire field.
+  final int generation;
+
+  /// Value of the `steps` wire field.
+  final int steps;
+
+  /// Value of the `direction` wire field.
+  final PatchbayRevealDirectionWire direction;
+
+  /// Value of the `extentGrowthSteps` wire field.
+  final int extentGrowthSteps;
+
+  /// Decodes a strict JSON object at [path].
+  factory PatchbayRevealContainerWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'nodeId',
+      'generation',
+      'steps',
+      'direction',
+      'extentGrowthSteps',
+    }, path);
+    return PatchbayRevealContainerWire(
+      nodeId: _wireInt(json['nodeId'], '$path.nodeId'),
+      generation: _wireInt(json['generation'], '$path.generation'),
+      steps: _wireInt(json['steps'], '$path.steps'),
+      direction: PatchbayRevealDirectionWire.fromJson(
+        json['direction'],
+        path: '$path.direction',
+      ),
+      extentGrowthSteps: _wireInt(
+        json['extentGrowthSteps'],
+        '$path.extentGrowthSteps',
+      ),
+    );
+  }
+
+  /// Encodes this value as a JSON object.
+  Map<String, Object?> toJson() => <String, Object?>{
+    'nodeId': nodeId,
+    'generation': generation,
+    'steps': steps,
+    'direction': direction.toJson(),
+    'extentGrowthSteps': extentGrowthSteps,
+  };
+}
+
+/// Strict wire representation of `PatchbayRevealResultWire`.
+final class PatchbayRevealResultWire {
+  /// Creates a fully validated wire value.
+  const PatchbayRevealResultWire({
+    required this.outcome,
+    required this.source,
+    required this.identifier,
+    required this.steps,
+    required this.elapsedMs,
+    required this.containers,
+    required this.nodeId,
+    required this.generation,
+    required this.reachability,
+    required this.beforeTreeRevision,
+    required this.afterTreeRevision,
+    required this.reason,
+    required this.failureType,
+    required this.gateId,
+    required this.gateCode,
+  });
+
+  /// Value of the `outcome` wire field.
+  final String outcome;
+
+  /// Value of the `source` wire field.
+  final PatchbayFactSourceWire source;
+
+  /// Value of the `identifier` wire field.
+  final String identifier;
+
+  /// Value of the `steps` wire field.
+  final int steps;
+
+  /// Value of the `elapsedMs` wire field.
+  final int elapsedMs;
+
+  /// Value of the `containers` wire field.
+  final List<PatchbayRevealContainerWire> containers;
+
+  /// Value of the `nodeId` wire field.
+  final int? nodeId;
+
+  /// Value of the `generation` wire field.
+  final int? generation;
+
+  /// Value of the `reachability` wire field.
+  final PatchbayRevealReachabilityWire? reachability;
+
+  /// Value of the `beforeTreeRevision` wire field.
+  final int beforeTreeRevision;
+
+  /// Value of the `afterTreeRevision` wire field.
+  final int afterTreeRevision;
+
+  /// Value of the `reason` wire field.
+  final String? reason;
+
+  /// Value of the `failureType` wire field.
+  final String? failureType;
+
+  /// Value of the `gateId` wire field.
+  final String? gateId;
+
+  /// Value of the `gateCode` wire field.
+  final String? gateCode;
+
+  /// Decodes a strict JSON object at [path].
+  factory PatchbayRevealResultWire.fromJson(
+    Map<String, Object?> json, {
+    String path = r'$',
+  }) {
+    _wireKeys(json, const <String>{
+      'outcome',
+      'source',
+      'identifier',
+      'steps',
+      'elapsedMs',
+      'containers',
+      'nodeId',
+      'generation',
+      'reachability',
+      'beforeTreeRevision',
+      'afterTreeRevision',
+      'reason',
+      'failureType',
+      'gateId',
+      'gateCode',
+    }, path);
+    return PatchbayRevealResultWire(
+      outcome: _wireString(json['outcome'], '$path.outcome'),
+      source: PatchbayFactSourceWire.fromJson(
+        json['source'],
+        path: '$path.source',
+      ),
+      identifier: _wireString(json['identifier'], '$path.identifier'),
+      steps: _wireInt(json['steps'], '$path.steps'),
+      elapsedMs: _wireInt(json['elapsedMs'], '$path.elapsedMs'),
+      containers: _wireList(json['containers'], '$path.containers')
+          .map(
+            (item) => PatchbayRevealContainerWire.fromJson(
+              _wireMap(item, '$path.containers[]'),
+              path: '$path.containers[]',
+            ),
+          )
+          .toList(growable: false),
+      nodeId: json['nodeId'] == null
+          ? null
+          : _wireInt(json['nodeId'], '$path.nodeId'),
+      generation: json['generation'] == null
+          ? null
+          : _wireInt(json['generation'], '$path.generation'),
+      reachability: json['reachability'] == null
+          ? null
+          : PatchbayRevealReachabilityWire.fromJson(
+              json['reachability'],
+              path: '$path.reachability',
+            ),
+      beforeTreeRevision: _wireInt(
+        json['beforeTreeRevision'],
+        '$path.beforeTreeRevision',
+      ),
+      afterTreeRevision: _wireInt(
+        json['afterTreeRevision'],
+        '$path.afterTreeRevision',
+      ),
+      reason: json['reason'] == null
+          ? null
+          : _wireString(json['reason'], '$path.reason'),
+      failureType: json['failureType'] == null
+          ? null
+          : _wireString(json['failureType'], '$path.failureType'),
+      gateId: json['gateId'] == null
+          ? null
+          : _wireString(json['gateId'], '$path.gateId'),
+      gateCode: json['gateCode'] == null
+          ? null
+          : _wireString(json['gateCode'], '$path.gateCode'),
+    );
+  }
+
+  /// Encodes this value as a JSON object.
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome,
+    'source': source.toJson(),
+    'identifier': identifier,
+    'steps': steps,
+    'elapsedMs': elapsedMs,
+    'containers': containers
+        .map((item) => item.toJson())
+        .toList(growable: false),
+    if (nodeId != null) 'nodeId': nodeId!,
+    if (generation != null) 'generation': generation!,
+    if (reachability != null) 'reachability': reachability!.toJson(),
+    'beforeTreeRevision': beforeTreeRevision,
+    'afterTreeRevision': afterTreeRevision,
+    if (reason != null) 'reason': reason!,
+    if (failureType != null) 'failureType': failureType!,
+    if (gateId != null) 'gateId': gateId!,
+    if (gateCode != null) 'gateCode': gateCode!,
+  };
+}
+
 Map<String, Object?> _wireMap(Object? value, String path) {
   if (value is! Map) throw FormatException('$path must be an object');
   try {

@@ -229,6 +229,7 @@ void main() {
             <String>['field.id', '3', 'hello'],
           _ when spec.name == 'uiSemanticsAction' => <String>['42', '7', 'tap'],
           _ when spec.name == 'uiTap' => <String>['login.submit'],
+          _ when spec.name == 'uiReveal' => <String>['row.42'],
           _
               when spec.name == 'uiGesturePressHold' ||
                   spec.name == 'uiGestureDrag' ||
