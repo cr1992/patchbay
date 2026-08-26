@@ -4,6 +4,7 @@ import 'command_dispatch_scope.dart';
 import 'command_descriptor.dart';
 import 'execution_evidence.dart';
 import 'invocation.dart';
+import 'invocation_cancellation.dart';
 import 'response_schema.dart';
 
 typedef PatchbayCommandDecoder<T> = T Function(Map<String, Object?> arguments);
@@ -37,6 +38,22 @@ final class PatchbayCommandRegistration<T> {
   }) : _decode = decode,
        _gate = gate,
        _handle = handle,
+       _handleWithContext = null,
+       _onDecodeFailure = onDecodeFailure,
+       _onExecutionFailure = onExecutionFailure;
+
+  const PatchbayCommandRegistration.contextAware({
+    required this.descriptor,
+    required PatchbayCommandDecoder<T> decode,
+    required PatchbayContextCommandHandler<T> handle,
+    PatchbayCommandGate<T>? gate,
+    PatchbayCommandFailureHandler? onDecodeFailure,
+    PatchbayCommandFailureHandler? onExecutionFailure,
+    this.available = true,
+  }) : _decode = decode,
+       _gate = gate,
+       _handle = null,
+       _handleWithContext = handle,
        _onDecodeFailure = onDecodeFailure,
        _onExecutionFailure = onExecutionFailure;
 
@@ -44,7 +61,8 @@ final class PatchbayCommandRegistration<T> {
   final bool available;
   final PatchbayCommandDecoder<T> _decode;
   final PatchbayCommandGate<T>? _gate;
-  final PatchbayCommandHandler<T> _handle;
+  final PatchbayCommandHandler<T>? _handle;
+  final PatchbayContextCommandHandler<T>? _handleWithContext;
   final PatchbayCommandFailureHandler? _onDecodeFailure;
   final PatchbayCommandFailureHandler? _onExecutionFailure;
 
@@ -52,6 +70,7 @@ final class PatchbayCommandRegistration<T> {
     Map<String, Object?> arguments,
     String requestId, {
     void Function(String result)? onGateResult,
+    PatchbayInvocationContext? context,
   }) async {
     if (!available) {
       onGateResult?.call('notEvaluated');
@@ -79,7 +98,15 @@ final class PatchbayCommandRegistration<T> {
     }
     onGateResult?.call(_gate == null ? 'notDeclared' : 'passed');
     try {
-      return await _handle(request, requestId);
+      final PatchbayContextCommandHandler<T>? contextHandler =
+          _handleWithContext;
+      if (contextHandler != null) {
+        if (context == null) {
+          throw StateError('context-aware registration requires a context');
+        }
+        return await contextHandler(request, requestId, context);
+      }
+      return await _handle!(request, requestId);
     } on Object catch (failure) {
       final PatchbayCommandFailureHandler? recover = _onExecutionFailure;
       if (recover == null) rethrow;
@@ -136,12 +163,16 @@ final class PatchbayCommandRegistry {
 
   bool handles(String command) => _registrations.containsKey(command);
 
+  bool isContextAware(String command) =>
+      _registrations[command]?._handleWithContext != null;
+
   /// Dispatches a registered command, or returns null for the external layer.
   Future<Map<String, Object?>?> tryDispatch(
     String command,
     Map<String, Object?> arguments,
     String requestId, {
     void Function(String result)? onGateResult,
+    PatchbayInvocationContext? context,
   }) async {
     final PatchbayCommandRegistration<Object?>? registration =
         _registrations[command];
@@ -153,6 +184,7 @@ final class PatchbayCommandRegistry {
         arguments,
         requestId,
         onGateResult: onGateResult,
+        context: context,
       ),
     );
   }
@@ -161,9 +193,10 @@ final class PatchbayCommandRegistry {
   Future<Map<String, Object?>> dispatch(
     String command,
     Map<String, Object?> arguments,
-    String requestId,
-  ) async =>
-      await tryDispatch(command, arguments, requestId) ??
+    String requestId, {
+    PatchbayInvocationContext? context,
+  }) async =>
+      await tryDispatch(command, arguments, requestId, context: context) ??
       PatchbayInvocation.rejected(
         requestId: requestId,
         rejection: PatchbayRejection(

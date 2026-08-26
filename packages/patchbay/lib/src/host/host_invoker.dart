@@ -9,24 +9,41 @@ import '../execution_evidence.dart';
 import '../gates.dart';
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
+import '../invocation_cancellation.dart';
 import '../response_schema.dart';
 import 'audit_dispatcher.dart';
 import 'host_catalog.dart';
 import 'host_models.dart';
+import 'invocation_coordinator.dart';
 
 final class HostInvokerHandler {
   HostInvokerHandler({
-    required PatchbayInvocationSource invokeSource,
+    PatchbayInvocationSource? invokeSource,
+    PatchbayContextInvocationSource? invokeWithContext,
     required PatchbayCommandRegistry registry,
     required HostCatalogHandler catalogHandler,
     PatchbayGateEvaluator? domainGates,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
     int auditQueueCapacity = 256,
+    int maxConcurrentInvocations = 8,
+    Duration cancellationConfirmationTimeout = const Duration(seconds: 2),
+    PatchbayMonotonicClock? monotonicClock,
   }) : _invoke = invokeSource,
+       _invokeWithContext = invokeWithContext,
        _registry = registry,
        _catalogHandler = catalogHandler,
-       _domainGates = domainGates {
+       _domainGates = domainGates,
+       _invocations = InvocationCoordinator(
+         maxConcurrentInvocations: maxConcurrentInvocations,
+         confirmationTimeout: cancellationConfirmationTimeout,
+         clock: monotonicClock,
+       ) {
+    if ((invokeSource == null) == (invokeWithContext == null)) {
+      throw ArgumentError(
+        'provide exactly one of invokeSource or invokeWithContext',
+      );
+    }
     validateAuditQueueCapacity(auditQueueCapacity);
     _auditDispatcher = auditSink == null
         ? null
@@ -37,7 +54,8 @@ final class HostInvokerHandler {
           );
   }
 
-  final PatchbayInvocationSource _invoke;
+  final PatchbayInvocationSource? _invoke;
+  final PatchbayContextInvocationSource? _invokeWithContext;
   final PatchbayCommandRegistry _registry;
   final HostCatalogHandler _catalogHandler;
 
@@ -49,6 +67,7 @@ final class HostInvokerHandler {
   final PatchbayGateEvaluator? _domainGates;
   late final AuditDispatcher? _auditDispatcher;
   Future<PatchbayAuditDrainResult>? _emptyAuditDrain;
+  final InvocationCoordinator _invocations;
 
   final List<PatchbayAuditEvent> _auditLedger = <PatchbayAuditEvent>[];
   var _nextAuditSequence = 1;
@@ -79,30 +98,187 @@ final class HostInvokerHandler {
   Future<Map<String, Object?>> dispatchInvoke(
     String command,
     Map<String, Object?> arguments,
-    String requestId,
-  ) async {
-    var gateResult = 'notEvaluated';
-    var recordAudit = true;
-    final Map<String, Object?> result = await _dispatchInvoke(
-      command,
-      arguments,
-      requestId,
-      onGateResult: (String value) => gateResult = value,
-      onExternalDisposition: (String value) {
-        if (value == 'replay') recordAudit = false;
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) => dispatchInvokeHandle(
+    command,
+    arguments,
+    requestId,
+    ownerToken: ownerToken,
+    deadline: deadline,
+  ).response;
+
+  PatchbayHostInvocationHandle dispatchInvokeHandle(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) {
+    final PatchbayHostInvocationHandle? externalReplay =
+        _preflightExternalInvocation(
+          command,
+          arguments,
+          requestId,
+          ownerToken: ownerToken,
+        );
+    if (externalReplay != null) return externalReplay;
+    final _InvocationAuditState auditState = _InvocationAuditState();
+    return _invocations.start(
+      command: command,
+      requestId: requestId,
+      ownerToken: ownerToken,
+      deadline: deadline,
+      contextAware:
+          _registry.isContextAware(command) || _invokeWithContext != null,
+      pipeline: (PatchbayInvocationContext context) => _dispatchAndAudit(
+        command,
+        arguments,
+        requestId,
+        context,
+        auditState: auditState,
+        ownerToken: ownerToken,
+      ),
+      onCancellationResponse: (Map<String, Object?> response) {
+        if (auditState.recorded) return;
+        auditState.recorded = true;
+        _recordAudit(
+          command: command,
+          requestId: requestId,
+          arguments: withoutStdinProvenance(arguments),
+          gateResult: auditState.gateResult,
+          response: response,
+        );
       },
     );
-    if (recordAudit) {
-      _recordAudit(
-        command: command,
-        requestId: requestId,
-        arguments: withoutStdinProvenance(arguments),
-        gateResult: gateResult,
-        response: result,
+  }
+
+  PatchbayHostInvocationHandle? _preflightExternalInvocation(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    required String? ownerToken,
+  }) {
+    if (_registry.handles(command)) return null;
+    final PatchbayExternalInvocationRecord? existing =
+        _externalInvocations[(command, requestId)];
+    if (existing == null) return null;
+    final String rawDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
+      arguments,
+    ]).value;
+    final String forwardedDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
+      withoutStdinProvenance(arguments),
+    ]).value;
+    final bool sameArguments =
+        existing.argumentDigest == rawDigest ||
+        existing.argumentDigest == forwardedDigest;
+    final bool sameOwner =
+        ownerToken == null || existing.ownerToken == ownerToken;
+    if (sameArguments && existing.idempotent && sameOwner) {
+      final Future<Map<String, Object?>> response =
+          existing.servedResponse.future;
+      return PatchbayHostInvocationHandle(
+        response: response,
+        lifecycle: response.then<void>(
+          (_) {},
+          onError: (Object _, StackTrace _) {},
+        ),
       );
     }
-    return result;
+    final Map<String, Object?> rejection = _externalDuplicateRejection(
+      requestId,
+      !sameArguments || !sameOwner ? 'requestIdConflict' : 'duplicateRequestId',
+    );
+    _recordAudit(
+      command: command,
+      requestId: requestId,
+      arguments: withoutStdinProvenance(arguments),
+      gateResult: 'notEvaluated',
+      response: rejection,
+    );
+    return PatchbayHostInvocationHandle(
+      response: Future<Map<String, Object?>>.value(rejection),
+      lifecycle: Future<void>.value(),
+    );
   }
+
+  Future<Map<String, Object?>> _dispatchAndAudit(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId,
+    PatchbayInvocationContext context, {
+    required _InvocationAuditState auditState,
+    required String? ownerToken,
+  }) async {
+    var recordAudit = true;
+    var externalDisposition = 'none';
+    try {
+      final Map<String, Object?> result = await _dispatchInvoke(
+        command,
+        arguments,
+        requestId,
+        context: context,
+        ownerToken: ownerToken,
+        onGateResult: (String value) => auditState.gateResult = value,
+        onExternalDisposition: (String value) {
+          externalDisposition = value;
+          if (value == 'replay') recordAudit = false;
+        },
+      );
+      final Map<String, Object?> served =
+          _invocations.frozenCancellationResponse(command, requestId) ?? result;
+      if (recordAudit && !auditState.recorded) {
+        auditState.recorded = true;
+        _recordAudit(
+          command: command,
+          requestId: requestId,
+          arguments: withoutStdinProvenance(arguments),
+          gateResult: auditState.gateResult,
+          response: served,
+        );
+      }
+      if (externalDisposition == 'owner') {
+        _externalInvocations[(command, requestId)]?.servedResponse.complete(
+          served,
+        );
+      }
+      return served;
+    } catch (error, stackTrace) {
+      final Map<String, Object?>? frozen = _invocations
+          .frozenCancellationResponse(command, requestId);
+      if (frozen != null) {
+        if (externalDisposition == 'owner') {
+          _externalInvocations[(command, requestId)]?.servedResponse.complete(
+            frozen,
+          );
+        }
+        return frozen;
+      }
+      if (externalDisposition == 'owner') {
+        _externalInvocations[(command, requestId)]?.servedResponse
+            .completeError(error, stackTrace);
+      }
+      rethrow;
+    }
+  }
+
+  Future<PatchbayInvocationCancellationResult> cancelInvocation({
+    required String command,
+    required String requestId,
+    required String ownerToken,
+    PatchbayInvocationCancellationReason reason =
+        PatchbayInvocationCancellationReason.explicitRequest,
+  }) => _invocations.cancel(
+    command: command,
+    requestId: requestId,
+    ownerToken: ownerToken,
+    reason: reason,
+  );
+
+  Future<PatchbayInvocationDrainResult> drainInvocations({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _invocations.drain(timeout);
 
   Future<Map<String, Object?>> _dispatchInvoke(
     String command,
@@ -110,12 +286,17 @@ final class HostInvokerHandler {
     String requestId, {
     required void Function(String result) onGateResult,
     required void Function(String disposition) onExternalDisposition,
+    required PatchbayInvocationContext context,
+    required String? ownerToken,
   }) async {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
     }
     final PatchbayCatalogValidity catalog = await _catalogHandler
         .readInvocationCatalog();
+    final Map<String, Object?>? cancelledAfterCatalog = _invocations
+        .frozenCancellationResponse(command, requestId);
+    if (cancelledAfterCatalog != null) return cancelledAfterCatalog;
     if (catalog.violation case final Map<String, Object?> reason) {
       return _invalidInvocationEnvelope(
         requestId,
@@ -154,11 +335,15 @@ final class HostInvokerHandler {
       );
       if (refusal != null) return refusal;
     }
+    final Map<String, Object?>? cancelledBeforeHandler = _invocations
+        .frozenCancellationResponse(command, requestId);
+    if (cancelledBeforeHandler != null) return cancelledBeforeHandler;
     final Map<String, Object?>? registered = await _registry.tryDispatch(
       command,
       forwarded,
       requestId,
       onGateResult: onGateResult,
+      context: context,
     );
     final Map<String, Object?> result;
     if (registered != null) {
@@ -168,10 +353,15 @@ final class HostInvokerHandler {
         command,
         forwarded,
         requestId,
+        context: context,
+        ownerToken: ownerToken,
         onDisposition: onExternalDisposition,
         retryPolicy: catalog.retryPolicies[command],
       );
     }
+    final Map<String, Object?>? cancelledAfterHandler = _invocations
+        .frozenCancellationResponse(command, requestId);
+    if (cancelledAfterHandler != null) return cancelledAfterHandler;
     final PatchbayInvocationWire wire;
     try {
       wire = PatchbayInvocationWire.fromJson(result);
@@ -338,6 +528,8 @@ final class HostInvokerHandler {
     String requestId, {
     required PatchbayRetryPolicy? retryPolicy,
     required void Function(String disposition) onDisposition,
+    required PatchbayInvocationContext context,
+    required String? ownerToken,
   }) async {
     final (String, String) key = (command, requestId);
     final String argumentDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
@@ -366,11 +558,18 @@ final class HostInvokerHandler {
         PatchbayExternalInvocationRecord(
           argumentDigest: argumentDigest,
           idempotent: retryPolicy != null,
+          ownerToken: ownerToken,
         );
     _externalInvocations[key] = record;
     record.response = () async {
       try {
-        return _freezeJsonMap(await _invoke(command, arguments, requestId));
+        final PatchbayContextInvocationSource? contextSource =
+            _invokeWithContext;
+        return _freezeJsonMap(
+          await (contextSource == null
+              ? _invoke!(command, arguments, requestId)
+              : contextSource(command, arguments, requestId, context)),
+        );
       } finally {
         record.settled = true;
       }
@@ -492,4 +691,9 @@ final class HostInvokerHandler {
   ) => arguments.containsKey('inputWasStdin')
       ? (Map<String, Object?>.of(arguments)..remove('inputWasStdin'))
       : arguments;
+}
+
+final class _InvocationAuditState {
+  String gateResult = 'notEvaluated';
+  bool recorded = false;
 }

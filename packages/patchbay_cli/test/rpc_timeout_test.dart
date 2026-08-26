@@ -14,7 +14,7 @@ import 'fixture/fake_client.dart';
 /// would keep the test isolate alive past the assertion it was written for,
 /// which is how a timeout test starts passing for the wrong reason. `identity`
 /// never answers, which is what makes it usable as the unresponsive handshake.
-final class _SlowClient implements PatchbayClient {
+class _SlowClient implements PatchbayClient {
   _SlowClient({
     required this.commands,
     this.invokeDelay = _neverAnswers,
@@ -81,6 +81,50 @@ final class _SlowClient implements PatchbayClient {
 
   @override
   Future<void> close() async {}
+}
+
+final class _CancelableSlowClient extends _SlowClient
+    implements PatchbayCancelableInvocationClient {
+  _CancelableSlowClient() : super(commands: const <Map<String, Object?>>[]);
+
+  int cancellations = 0;
+
+  @override
+  PatchbayClientInvocationHandle beginInvocation({
+    required String command,
+    required Map<String, Object?> arguments,
+    String? requestId,
+    Duration? deadline,
+  }) => PatchbayClientInvocationHandle(
+    response: Completer<Map<String, Object?>>().future,
+    requestCancellation: () async {
+      cancellations += 1;
+      return const <String, Object?>{'outcome': 'confirmed'};
+    },
+  );
+}
+
+final class _LegacyCancelableSlowClient extends _SlowClient
+    implements PatchbayCancelableInvocationClient {
+  _LegacyCancelableSlowClient()
+    : super(commands: const <Map<String, Object?>>[]);
+
+  int cancellations = 0;
+
+  @override
+  PatchbayClientInvocationHandle beginInvocation({
+    required String command,
+    required Map<String, Object?> arguments,
+    String? requestId,
+    Duration? deadline,
+  }) => PatchbayClientInvocationHandle(
+    response: Completer<Map<String, Object?>>().future,
+    cancellationSupported: () => false,
+    requestCancellation: () async {
+      cancellations += 1;
+      return const <String, Object?>{'outcome': 'unsupported'};
+    },
+  );
 }
 
 final class _Run {
@@ -156,6 +200,65 @@ void main() {
   });
 
   group('an App that stops answering', () {
+    test(
+      'requests explicit cancellation from a feature-aware client',
+      () async {
+        final _CancelableSlowClient inner = _CancelableSlowClient();
+        final PatchbayTimeoutClient client = PatchbayTimeoutClient(
+          inner,
+          rpcTimeout: const Duration(milliseconds: 20),
+        );
+
+        await expectLater(
+          client.invoke(
+            command: 'app.slow',
+            arguments: const <String, Object?>{},
+            requestId: 'slow-owner',
+          ),
+          throwsA(
+            isA<PatchbayTransportException>().having(
+              (PatchbayTransportException error) => error.code,
+              'code',
+              patchbayAppUnresponsiveCode,
+            ),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(inner.cancellations, 1);
+      },
+    );
+
+    test('does not send cancel to a legacy host and labels the mode', () async {
+      final _LegacyCancelableSlowClient inner = _LegacyCancelableSlowClient();
+      final PatchbayTimeoutClient client = PatchbayTimeoutClient(
+        inner,
+        rpcTimeout: const Duration(milliseconds: 20),
+      );
+
+      await expectLater(
+        client.invoke(
+          command: 'app.slow',
+          arguments: const <String, Object?>{},
+          requestId: 'legacy-owner',
+        ),
+        throwsA(
+          isA<PatchbayTransportException>()
+              .having(
+                (PatchbayTransportException error) => error.code,
+                'code',
+                patchbayAppUnresponsiveCode,
+              )
+              .having(
+                (PatchbayTransportException error) =>
+                    error.details['cancellationMode'],
+                'cancellationMode',
+                'legacyWaitOnly',
+              ),
+        ),
+      );
+      expect(inner.cancellations, 0);
+    });
+
     test('fails with a diagnosable code instead of hanging', () async {
       final _SlowClient client = _SlowClient(
         commands: <Map<String, Object?>>[
@@ -174,6 +277,7 @@ void main() {
       expect(result.exitCode, PatchbayExitCode.transport);
       expect(result.error['code'], patchbayAppUnresponsiveCode);
       expect(result.details['hint'], patchbayAppUnresponsiveHint);
+      expect(result.details['cancellationMode'], 'legacyWaitOnly');
       // The operator reads stderr; the sentence has to reach them there too.
       expect(result.err, contains(patchbayAppUnresponsiveCode));
       expect(result.err, contains('frozen by the system'));

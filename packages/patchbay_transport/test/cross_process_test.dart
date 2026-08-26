@@ -41,7 +41,10 @@ void main() {
         session: session,
       );
       try {
-        expect(await client.identity(), identityJson);
+        expect(await client.identity(), <String, Object?>{
+          ...identityJson,
+          'features': const <String>[],
+        });
         final Map<String, Object?> snapshot = await client.snapshot();
         expect(snapshot['source'], 'child-process');
         expect(snapshot['pid'], isA<int>());

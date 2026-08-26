@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_transport/patchbay_transport.dart';
 
@@ -12,7 +14,8 @@ final class PatchbayDirectConnection
     implements
         PatchbayClient,
         PatchbayProfilingClient,
-        PatchbaySnapshotDiffClient {
+        PatchbaySnapshotDiffClient,
+        PatchbayCancelableInvocationClient {
   static const String protocolPath = PatchbayDirectHost.protocolPathPrefix;
 
   PatchbayDirectConnection({
@@ -38,9 +41,26 @@ final class PatchbayDirectConnection
        );
 
   final PatchbayDirectClient _client;
+  Set<String>? _features;
+  bool _identityRead = false;
+  final Map<(String, String), _DirectOwnerTokenLease> _ownerTokens =
+      <(String, String), _DirectOwnerTokenLease>{};
 
   @override
-  Future<Map<String, Object?>> identity() => _translate(_client.identity);
+  Future<Map<String, Object?>> identity() async {
+    final Map<String, Object?> result = await _translate(_client.identity);
+    final Object? declared = result['features'];
+    if (declared is List<Object?> &&
+        declared.every((Object? value) => value is String)) {
+      _features = <String>{
+        for (final Object? value in declared) value! as String,
+      };
+    } else {
+      _features = null;
+    }
+    _identityRead = true;
+    return result;
+  }
 
   @override
   Future<Map<String, Object?>> catalog() => _translate(_client.catalog);
@@ -70,23 +90,119 @@ final class PatchbayDirectConnection
     required Map<String, Object?> arguments,
     String? requestId,
     Duration? deadline,
-  }) async {
-    if (requestId != null && requestId.isEmpty) {
-      throw const PatchbayProtocolException('requestIdValidationFailed');
-    }
+  }) async => beginInvocation(
+    command: command,
+    arguments: arguments,
+    requestId: requestId,
+    deadline: deadline,
+  ).response;
+
+  @override
+  PatchbayClientInvocationHandle beginInvocation({
+    required String command,
+    required Map<String, Object?> arguments,
+    String? requestId,
+    Duration? deadline,
+  }) {
     final String id = requestId ?? patchbayCliRequestId('direct');
-    final Map<String, Object?> result = await _translate(
-      () => _client.invoke(
-        command: command,
-        arguments: arguments,
-        requestId: id,
-        deadline: deadline,
-      ),
+    var cooperativeKnown = false;
+    final Completer<_DirectOwnerTokenLease?> ownerReady =
+        Completer<_DirectOwnerTokenLease?>();
+    final Future<Map<String, Object?>> response = () async {
+      _DirectOwnerTokenLease? lease;
+      try {
+        if (requestId != null && requestId.isEmpty) {
+          throw const PatchbayProtocolException('requestIdValidationFailed');
+        }
+        if (!_identityRead) await identity();
+        final bool cooperative =
+            _features?.contains(PatchbayFeature.invocationCancellation.name) ??
+            false;
+        lease = cooperative ? _acquireOwnerToken(command, id) : null;
+        cooperativeKnown = lease != null;
+        ownerReady.complete(lease);
+        var succeeded = false;
+        late final Map<String, Object?> result;
+        try {
+          result = await _translate(
+            () => _client.invoke(
+              command: command,
+              arguments: arguments,
+              requestId: id,
+              deadline: deadline,
+              ownerToken: lease?.token,
+            ),
+          );
+          succeeded = true;
+        } finally {
+          if (lease != null) {
+            _releaseOwnerToken(command, id, lease, succeeded);
+          }
+        }
+        if (result['requestId'] != id) {
+          throw const PatchbayProtocolException('requestIdMismatch');
+        }
+        return result;
+      } finally {
+        if (!ownerReady.isCompleted) ownerReady.complete(null);
+      }
+    }();
+    return PatchbayClientInvocationHandle(
+      response: response,
+      cancellationSupported: () => cooperativeKnown,
+      requestCancellation: () async {
+        final _DirectOwnerTokenLease? lease = await ownerReady.future;
+        if (lease == null) {
+          throw const PatchbayTransportException(
+            patchbayAppUnresponsiveCode,
+            details: <String, Object?>{'cancellationMode': 'legacyWaitOnly'},
+          );
+        }
+        return _translate(
+          () => _client.cancelInvocation(
+            command: command,
+            requestId: id,
+            ownerToken: lease.token,
+          ),
+        );
+      },
     );
-    if (result['requestId'] != id) {
-      throw const PatchbayProtocolException('requestIdMismatch');
+  }
+
+  _DirectOwnerTokenLease _acquireOwnerToken(String command, String requestId) {
+    final (String, String) key = (command, requestId);
+    final _DirectOwnerTokenLease? existing = _ownerTokens[key];
+    if (existing != null) {
+      existing.users += 1;
+      return existing;
     }
-    return result;
+    if (_ownerTokens.length >= 256) {
+      (String, String)? evicted;
+      for (final MapEntry<(String, String), _DirectOwnerTokenLease> entry
+          in _ownerTokens.entries) {
+        if (entry.value.users != 0) continue;
+        evicted = entry.key;
+        break;
+      }
+      if (evicted != null) _ownerTokens.remove(evicted);
+    }
+    final _DirectOwnerTokenLease created = _DirectOwnerTokenLease(
+      patchbayGenerateOwnerToken(),
+    );
+    _ownerTokens[key] = created;
+    return created;
+  }
+
+  void _releaseOwnerToken(
+    String command,
+    String requestId,
+    _DirectOwnerTokenLease lease,
+    bool succeeded,
+  ) {
+    lease.users -= 1;
+    if (succeeded && lease.users == 0) {
+      _ownerTokens.remove((command, requestId));
+    }
   }
 
   @override
@@ -141,4 +257,11 @@ final class PatchbayDirectConnection
       throw PatchbayTransportException(error.code);
     }
   }
+}
+
+final class _DirectOwnerTokenLease {
+  _DirectOwnerTokenLease(this.token);
+
+  final String token;
+  int users = 1;
 }

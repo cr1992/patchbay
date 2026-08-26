@@ -4,6 +4,7 @@ import 'dart:math';
 
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
+import '../invocation_cancellation.dart';
 import '../snapshot.dart';
 
 typedef PatchbayCatalogSource = Future<Map<String, Object?>> Function();
@@ -13,6 +14,13 @@ typedef PatchbayInvocationSource =
       String command,
       Map<String, Object?> arguments,
       String requestId,
+    );
+typedef PatchbayContextInvocationSource =
+    Future<Map<String, Object?>> Function(
+      String command,
+      Map<String, Object?> arguments,
+      String requestId,
+      PatchbayInvocationContext context,
     );
 typedef PatchbayExtensionRegistrar =
     void Function(String method, ServiceExtensionHandler handler);
@@ -178,10 +186,14 @@ final class PatchbayExternalInvocationRecord {
   PatchbayExternalInvocationRecord({
     required this.argumentDigest,
     required this.idempotent,
+    required this.ownerToken,
   });
 
   final String argumentDigest;
   final bool idempotent;
+  final String? ownerToken;
+  final Completer<Map<String, Object?>> servedResponse =
+      Completer<Map<String, Object?>>();
   late final Future<Map<String, Object?>> response;
   bool settled = false;
 }

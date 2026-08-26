@@ -355,7 +355,7 @@ void main() {
       expect(gates.baseCalls, 0);
     });
 
-    test('the gate runs before the requestId ledger replay', () async {
+    test('requestId ledger replay runs before new admission', () async {
       var open = true;
       final List<String> executed = <String>[];
       final PatchbayServiceHost host = _host(
@@ -389,12 +389,7 @@ void main() {
         'req-replay',
       );
 
-      expect(second['admission'], 'rejected');
-      expect(_code(second), 'writeGateClosed');
-      expect(_details(second), <String, Object?>{
-        'gateId': 'write',
-        'priorRequestObserved': true,
-      });
+      expect(second['admission'], 'accepted');
       expect(executed, <String>['device.write']);
     });
 
@@ -437,11 +432,12 @@ void main() {
             return const PatchbayGateDecision.allow();
           },
         ),
+        maxConcurrentInvocations: 256,
       );
 
       final List<Future<Map<String, Object?>>> parked =
           <Future<Map<String, Object?>>>[
-            for (var index = 0; index < 300; index += 1)
+            for (var index = 0; index < 255; index += 1)
               host.dispatchInvoke(
                 'device.slow',
                 const <String, Object?>{},
@@ -813,10 +809,12 @@ PatchbayServiceHost _host({
   PatchbayCommandRegistry? registry,
   List<String>? executed,
   PatchbayExtensionRegistrar? registrar,
+  int maxConcurrentInvocations = 8,
 }) => PatchbayServiceHost(
   applicationId: 'dev.patchbay.domain-gate-test',
   registrar: registrar ?? (_, _) {},
   registry: registry,
+  maxConcurrentInvocations: maxConcurrentInvocations,
   domainGates: domainGates,
   catalog: () async => <String, Object?>{'commands': commands},
   snapshot: () async => const <String, Object?>{},

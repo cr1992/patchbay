@@ -19,7 +19,15 @@ final class PatchbayDirectHost {
   }) : _handlers = handlers,
        config = config ?? PatchbayDirectHostConfig(),
        _clock = clock ?? _systemClock,
-       _expiryScheduler = expiryScheduler ?? _systemExpiryScheduler;
+       _expiryScheduler = expiryScheduler ?? _systemExpiryScheduler {
+    if ((handlers.invoke == null) == (handlers.invokeWithContext == null)) {
+      throw ArgumentError('provide exactly one of invoke or invokeWithContext');
+    }
+    if (handlers.invokeWithContext != null &&
+        handlers.cancelInvocation == null) {
+      throw ArgumentError('context-aware invoke requires cancelInvocation');
+    }
+  }
 
   static const String protocolPathPrefix = '/patchbay/direct/v1';
   static const int tokenBytes = 32;
@@ -45,6 +53,7 @@ final class PatchbayDirectHost {
   bool _starting = false;
   bool _expired = false;
   int _activeRequests = 0;
+  int _activeCancellationRequests = 0;
 
   bool get isRunning => _server != null && _closing == null;
   PatchbayDirectStopReason? stopReason;
@@ -167,7 +176,13 @@ final class PatchbayDirectHost {
       );
       return;
     }
-    if (_activeRequests >= config.maxConcurrentRequests) {
+    final bool cancellationRequest =
+        request.uri.path == '$protocolPathPrefix/cancel-invocation';
+    final bool busy = cancellationRequest
+        ? _activeCancellationRequests >=
+              config.maxConcurrentCancellationRequests
+        : _activeRequests >= config.maxConcurrentRequests;
+    if (busy) {
       await _sendError(
         request.response,
         HttpStatus.tooManyRequests,
@@ -175,7 +190,11 @@ final class PatchbayDirectHost {
       );
       return;
     }
-    _activeRequests += 1;
+    if (cancellationRequest) {
+      _activeCancellationRequests += 1;
+    } else {
+      _activeRequests += 1;
+    }
     final Future<void> processing = _processAuthorized(request);
     // The slot is released when the handler actually settles, not when this
     // request gives up waiting for it. A wedged handler therefore keeps
@@ -183,10 +202,20 @@ final class PatchbayDirectHost {
     unawaited(
       processing
           .then<void>((_) {}, onError: (Object _, StackTrace _) {})
-          .whenComplete(() => _activeRequests -= 1),
+          .whenComplete(() {
+            if (cancellationRequest) {
+              _activeCancellationRequests -= 1;
+            } else {
+              _activeRequests -= 1;
+            }
+          }),
     );
     try {
-      await processing.timeout(_deadlineFor(request));
+      if (_hasHostOwnedInvocationDeadline(request)) {
+        await processing;
+      } else {
+        await processing.timeout(_deadlineFor(request));
+      }
     } on TimeoutException {
       await _sendErrorIfOpen(
         request.response,
@@ -213,6 +242,23 @@ final class PatchbayDirectHost {
         ? config.maxRequestTimeout
         : requested;
   }
+
+  Duration? _declaredDeadlineFor(HttpRequest request) {
+    final String? raw = request.headers.value(deadlineHeader);
+    final int? milliseconds = raw == null ? null : int.tryParse(raw);
+    if (milliseconds == null || milliseconds < 1 || milliseconds > 300000) {
+      return null;
+    }
+    final Duration requested = Duration(milliseconds: milliseconds);
+    return requested > config.maxRequestTimeout
+        ? config.maxRequestTimeout
+        : requested;
+  }
+
+  bool _hasHostOwnedInvocationDeadline(HttpRequest request) =>
+      _handlers.invokeWithContext != null &&
+      request.uri.path == '$protocolPathPrefix/invoke' &&
+      _declaredDeadlineFor(request) != null;
 
   Future<void> _processAuthorized(HttpRequest request) async {
     if (request.method != 'POST' ||
@@ -274,7 +320,7 @@ final class PatchbayDirectHost {
     late final Map<String, Object?> result;
     if (path == '$protocolPathPrefix/identity' &&
         _hasOnlyFields(message, commonFields)) {
-      result = current.toJson();
+      result = current.toIdentityResultJson();
     } else if (path == '$protocolPathPrefix/catalog' &&
         _hasOnlyFields(message, commonFields)) {
       result = await _handlers.catalog();
@@ -294,20 +340,29 @@ final class PatchbayDirectHost {
       }
       result = await _handlers.snapshot(selector as Map<String, Object?>?);
     } else if (path == '$protocolPathPrefix/invoke' &&
-        _hasOnlyFields(message, <String>{
-          ...commonFields,
-          'command',
-          'arguments',
-          'requestId',
-        })) {
+        (_handlers.invokeWithContext == null
+            ? _hasOnlyFields(message, <String>{
+                ...commonFields,
+                'command',
+                'arguments',
+                'requestId',
+              })
+            : _hasFields(
+                message,
+                <String>{...commonFields, 'command', 'arguments', 'requestId'},
+                optional: const <String>{'ownerToken'},
+              ))) {
       final Object? command = message['command'];
       final Object? arguments = message['arguments'];
       final Object? requestId = message['requestId'];
+      final Object? ownerToken = message['ownerToken'];
       if (command is! String ||
           command.isEmpty ||
           arguments is! Map<String, Object?> ||
           requestId is! String ||
-          requestId.isEmpty) {
+          requestId.isEmpty ||
+          (ownerToken != null &&
+              (ownerToken is! String || !_ownerToken.hasMatch(ownerToken)))) {
         await _sendError(
           request.response,
           HttpStatus.badRequest,
@@ -315,7 +370,78 @@ final class PatchbayDirectHost {
         );
         return;
       }
-      result = await _handlers.invoke(command, arguments, requestId);
+      final PatchbayDirectContextInvocationSource? contextSource =
+          _handlers.invokeWithContext;
+      final PatchbayDirectInvocationHandle handle;
+      if (contextSource == null) {
+        handle = PatchbayDirectInvocationHandle.legacy(
+          _handlers.invoke!(command, arguments, requestId),
+        );
+      } else {
+        handle = contextSource(
+          command,
+          arguments,
+          requestId,
+          ownerToken: ownerToken as String?,
+          deadline: _declaredDeadlineFor(request),
+        );
+        if (ownerToken case final String token) {
+          unawaited(
+            request.response.done.then<void>(
+              (_) {},
+              onError: (Object _, StackTrace _) {
+                unawaited(
+                  _handlers
+                      .cancelInvocation!(
+                        command,
+                        requestId,
+                        token,
+                        reason: 'callerDisconnected',
+                      )
+                      .then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+                );
+              },
+            ),
+          );
+        }
+      }
+      try {
+        result = await handle.response;
+        await _sendSuccess(request.response, current, result);
+      } finally {
+        await handle.lifecycle;
+      }
+      return;
+    } else if (path == '$protocolPathPrefix/cancel-invocation' &&
+        _handlers.cancelInvocation != null &&
+        _hasOnlyFields(message, <String>{
+          ...commonFields,
+          'command',
+          'requestId',
+          'ownerToken',
+        })) {
+      final Object? command = message['command'];
+      final Object? requestId = message['requestId'];
+      final Object? ownerToken = message['ownerToken'];
+      if (command is! String ||
+          command.isEmpty ||
+          requestId is! String ||
+          requestId.isEmpty ||
+          ownerToken is! String ||
+          !_ownerToken.hasMatch(ownerToken)) {
+        await _sendError(
+          request.response,
+          HttpStatus.badRequest,
+          PatchbayDirectErrorCode.protocolError,
+        );
+        return;
+      }
+      result = await _handlers.cancelInvocation!(
+        command,
+        requestId,
+        ownerToken,
+        reason: 'explicitRequest',
+      );
     } else {
       await _sendError(
         request.response,
@@ -365,6 +491,7 @@ final class PatchbayDirectHost {
 
   /// Fields the snapshot message may carry beyond the common identity ones.
   static const Set<String> _snapshotFields = <String>{'request'};
+  static final RegExp _ownerToken = RegExp(r'^[A-Za-z0-9_-]{22}$');
 
   /// Every [required] field present, and nothing outside [required] plus
   /// [optional].

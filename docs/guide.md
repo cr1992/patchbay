@@ -227,6 +227,30 @@ App 拒绝、协议错误和 provider 已返回的结果都不重试。host 在�
 settled / overflow / abandoned 统计，`dispose()` 会执行同一有预算 drain。事件只含参数的递归类型、
 键结构和长度档位，不含标量值。
 
+#### 长调用采用 cooperative cancellation
+
+普通 `invoke` 仍兼容；它遇到 deadline、显式 cancel 或 host dispose 时会返回类型化拒绝，但因为无法证明
+底层已停止，容量要等原 handler settle 才释放。需要提前安全释放容量的 adapter 改用
+`invokeWithContext`，并在确实停止底层工作后完成一次 confirmation callback：
+
+```dart
+PatchbayServiceHost(
+  // catalog / snapshot 省略
+  invokeWithContext: (command, arguments, requestId, context) async {
+    context.registerCancellationConfirmation((reason) async {
+      await controller.stopAndConfirm();
+    });
+    return controller.invoke(command, arguments, requestId);
+  },
+  maxConcurrentInvocations: 8, // registry + external 共用，范围 1..256
+);
+```
+
+`context.cancellation.isRequested`、`reason`、`whenRequested` 与 monotonic `deadline.remaining` 只提供事实，不会强停 Dart
+`Future`。confirmation 成功只表示 consumer 证明底层不再产生副作用；callback 缺失、抛错或超时都不会
+提前释放 slot。每条 invocation 只能注册一次 callback。host 退出用 `dispose()`：它先关闭并 drain
+invocation，再 drain audit；这套生命周期与已受理 job 的 `PatchbayJobRegistry` cancel 契约彼此独立。
+
 #### 敏感参数由 host 强制，adapter 不用配合
 
 `sensitive: true` 写在 descriptor 里就够了。客户端会用 `inputWasStdin` 标记「这个值来自无回显

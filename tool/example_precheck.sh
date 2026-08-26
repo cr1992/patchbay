@@ -404,6 +404,15 @@ check 'exec device.write unchanged' 0 \
 check 'describe device.write' 0 "'responseSchema' in json.dumps(doc)" \
   --json describe example.device.write
 
+# PB-050-06：timeoutMs 同时是 CLI 声明等待预算与 host monotonic deadline。
+# handler 在 cancellation callback 中完成停止证明；随后一条普通命令成功，证明
+# execution slot 已释放，而不是仅仅让调用方停止等待。
+check 'invocation deadline 可确认停止' 5 \
+  "doc['rejection']['code'] == 'invocationDeadlineExceeded'" \
+  --json exec example.invocation.cooperativeWait --args '{"timeoutMs":30}'
+check '确认停止后 execution slot 已释放' 0 \
+  "doc['payload']['counter'] >= 1" --json exec example.counter.increment
+
 echo
 echo "== job =="
 check 'exec job.run' 0 "'jobId' in json.dumps(doc)" \

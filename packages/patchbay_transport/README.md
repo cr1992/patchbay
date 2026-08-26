@@ -27,7 +27,7 @@ the product assembly layer never has to duplicate the wire codec.
 - Every authenticated request must still carry `schemaVersion`, `applicationId`, and
   `appInstanceId` in a JSON object; before calling the business handler, the host re-reads identity
   and cross-checks it against both the startup identity and the request identity;
-- `/patchbay/direct/v1/{identity,catalog,snapshot,invoke}` is the entire reachable surface. Unknown
+- `/patchbay/direct/v1/{identity,catalog,snapshot,invoke,cancel-invocation}` is the entire reachable surface. Unknown
   fields, paths, methods, query strings, content types, or JSON shapes fail closed; there is no
   remote arbitrary-method reflection.
 
@@ -75,7 +75,18 @@ All requests are `POST`, `application/json`, with the bearer in a header. The ba
 }
 ```
 
-`invoke` adds only `command`, `arguments`, and `requestId`. Whether the command exists, its
+Legacy `invoke` adds only `command`, `arguments`, and `requestId`. A host that declares
+`invocationCancellation` may also accept `ownerToken`; its caller deadline remains solely in
+`x-patchbay-deadline-ms`. The identity operation returns a sorted `features` list, while request
+identity and response pinning stay restricted to the original three identity fields.
+
+Context-aware hosts expose `/cancel-invocation` with `command`, `requestId`, and `ownerToken`.
+Cancellation uses a dedicated concurrency slot, so a wedged ordinary request cannot make its own
+control path unreachable. `PatchbayDirectInvocationHandle.response` may close the HTTP response
+before `lifecycle` releases the ordinary processing slot; legacy handlers bind both to the same
+Future.
+
+Whether the command exists, its
 parameter schema, its gates, concurrency ownership, and fact strength all remain the injected
 handler's responsibility; the transport neither infers commands from strings nor upgrades
 `accepted` into successful execution. The direct client verifies that the handler result echoes

@@ -14,22 +14,30 @@ final class PatchbayFlutterServiceHost {
     PatchbayCatalogSource? domainCatalog,
     PatchbaySnapshotSource? snapshot,
     PatchbayInvocationSource? domainInvoke,
+    PatchbayContextInvocationSource? domainInvokeWithContext,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
     int auditQueueCapacity = 256,
+    int maxConcurrentInvocations = 8,
+    Duration cancellationConfirmationTimeout = const Duration(seconds: 2),
+    PatchbayMonotonicClock? monotonicClock,
   }) : _host = _buildHost(
          applicationId: applicationId,
          bridge: bridge,
          domainCatalog: domainCatalog,
          snapshot: snapshot,
          domainInvoke: domainInvoke,
+         domainInvokeWithContext: domainInvokeWithContext,
          appInstanceId: appInstanceId,
          registrar: registrar,
          auditSink: auditSink,
          onAuditSinkError: onAuditSinkError,
          auditQueueCapacity: auditQueueCapacity,
+         maxConcurrentInvocations: maxConcurrentInvocations,
+         cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+         monotonicClock: monotonicClock,
        );
 
   PatchbayFlutterServiceHost.withDomainCatalogProvider({
@@ -38,22 +46,30 @@ final class PatchbayFlutterServiceHost {
     required PatchbayCatalogProvider domainCatalogProvider,
     PatchbaySnapshotSource? snapshot,
     PatchbayInvocationSource? domainInvoke,
+    PatchbayContextInvocationSource? domainInvokeWithContext,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
     int auditQueueCapacity = 256,
+    int maxConcurrentInvocations = 8,
+    Duration cancellationConfirmationTimeout = const Duration(seconds: 2),
+    PatchbayMonotonicClock? monotonicClock,
   }) : _host = _buildHost(
          applicationId: applicationId,
          bridge: bridge,
          domainCatalogProvider: domainCatalogProvider,
          snapshot: snapshot,
          domainInvoke: domainInvoke,
+         domainInvokeWithContext: domainInvokeWithContext,
          appInstanceId: appInstanceId,
          registrar: registrar,
          auditSink: auditSink,
          onAuditSinkError: onAuditSinkError,
          auditQueueCapacity: auditQueueCapacity,
+         maxConcurrentInvocations: maxConcurrentInvocations,
+         cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+         monotonicClock: monotonicClock,
        );
 
   static PatchbayServiceHost _buildHost({
@@ -63,11 +79,15 @@ final class PatchbayFlutterServiceHost {
     PatchbayCatalogProvider? domainCatalogProvider,
     PatchbaySnapshotSource? snapshot,
     PatchbayInvocationSource? domainInvoke,
+    PatchbayContextInvocationSource? domainInvokeWithContext,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
     required int auditQueueCapacity,
+    required int maxConcurrentInvocations,
+    required Duration cancellationConfirmationTimeout,
+    PatchbayMonotonicClock? monotonicClock,
   }) {
     assert((domainCatalog == null) || domainCatalogProvider == null);
     final PatchbayCommandRegistry registry =
@@ -78,15 +98,16 @@ final class PatchbayFlutterServiceHost {
         ]);
     final PatchbaySnapshotSource effectiveSnapshot =
         snapshot ?? () async => const <String, Object?>{};
-    final PatchbayInvocationSource effectiveInvoke =
-        domainInvoke ??
-        (command, arguments, requestId) async => PatchbayInvocation.rejected(
-          requestId: requestId,
-          rejection: PatchbayRejection(
-            code: 'commandNotRegistered',
-            details: <String, Object?>{'command': command},
-          ),
-        ).toJson();
+    final PatchbayInvocationSource? effectiveInvoke =
+        domainInvoke == null && domainInvokeWithContext == null
+        ? (command, arguments, requestId) async => PatchbayInvocation.rejected(
+            requestId: requestId,
+            rejection: PatchbayRejection(
+              code: 'commandNotRegistered',
+              details: <String, Object?>{'command': command},
+            ),
+          ).toJson()
+        : domainInvoke;
     final Set<PatchbayFeature> features = <PatchbayFeature>{
       PatchbayFeature.lifecycleState,
       if (bridge.capture != null) PatchbayFeature.captureAfterFrames,
@@ -99,10 +120,14 @@ final class PatchbayFlutterServiceHost {
         auditSink: auditSink,
         onAuditSinkError: onAuditSinkError,
         auditQueueCapacity: auditQueueCapacity,
+        maxConcurrentInvocations: maxConcurrentInvocations,
+        cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+        monotonicClock: monotonicClock,
         registry: registry,
         catalogProvider: _FlutterCatalogProvider(provider, bridge),
         snapshot: effectiveSnapshot,
         invoke: effectiveInvoke,
+        invokeWithContext: domainInvokeWithContext,
         // The bridge's evaluator, not a second one: see `bridge.gates`.
         domainGates: bridge.gates,
         features: features,
@@ -115,6 +140,9 @@ final class PatchbayFlutterServiceHost {
       auditSink: auditSink,
       onAuditSinkError: onAuditSinkError,
       auditQueueCapacity: auditQueueCapacity,
+      maxConcurrentInvocations: maxConcurrentInvocations,
+      cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+      monotonicClock: monotonicClock,
       registry: registry,
       catalog: () async => _withUiTargets(
         await domainCatalog?.call() ?? const <String, Object?>{},
@@ -122,6 +150,7 @@ final class PatchbayFlutterServiceHost {
       ),
       snapshot: effectiveSnapshot,
       invoke: effectiveInvoke,
+      invokeWithContext: domainInvokeWithContext,
       // The bridge's evaluator, not a second one: see `bridge.gates`.
       domainGates: bridge.gates,
       features: features,
@@ -149,12 +178,19 @@ final class PatchbayFlutterServiceHost {
 
   List<PatchbayAuditEvent> get auditEvents => _host.auditEvents;
 
+  Set<PatchbayFeature> get features => _host.features;
+
   Future<PatchbayAuditDrainResult> drainAudit({
     Duration timeout = const Duration(seconds: 2),
   }) => _host.drainAudit(timeout: timeout);
 
-  Future<void> dispose({Duration auditTimeout = const Duration(seconds: 2)}) =>
-      _host.dispose(auditTimeout: auditTimeout);
+  Future<void> dispose({
+    Duration invocationTimeout = const Duration(seconds: 2),
+    Duration auditTimeout = const Duration(seconds: 2),
+  }) => _host.dispose(
+    invocationTimeout: invocationTimeout,
+    auditTimeout: auditTimeout,
+  );
 
   Future<Map<String, Object?>> dispatchCatalog() => _host.dispatchCatalog();
 
@@ -165,8 +201,47 @@ final class PatchbayFlutterServiceHost {
   Future<Map<String, Object?>> dispatchInvoke(
     String command,
     Map<String, Object?> arguments,
-    String requestId,
-  ) => _host.dispatchInvoke(command, arguments, requestId);
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) => _host.dispatchInvoke(
+    command,
+    arguments,
+    requestId,
+    ownerToken: ownerToken,
+    deadline: deadline,
+  );
+
+  PatchbayHostInvocationHandle dispatchInvokeHandle(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) => _host.dispatchInvokeHandle(
+    command,
+    arguments,
+    requestId,
+    ownerToken: ownerToken,
+    deadline: deadline,
+  );
+
+  Future<PatchbayInvocationCancellationResult> cancelInvocation({
+    required String command,
+    required String requestId,
+    required String ownerToken,
+    PatchbayInvocationCancellationReason reason =
+        PatchbayInvocationCancellationReason.explicitRequest,
+  }) => _host.cancelInvocation(
+    command: command,
+    requestId: requestId,
+    ownerToken: ownerToken,
+    reason: reason,
+  );
+
+  Future<PatchbayInvocationDrainResult> drainInvocations({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _host.drainInvocations(timeout: timeout);
 
   void register() => _host.register();
 
