@@ -73,7 +73,7 @@
 | PB-050-14 | workspace / worktree 级会话亲和性 | session 记录虽保存 `workspacePath`，默认 resolver 仍从全局目录按显式 ID、全局 pin、唯一性选择；在多个 checkout 并行时，旧 pin 可把无 `--session` 的 Agent 命令带到另一工作区的 App | 0.5.0 | 已排期 | 实现前补 Proposal，冻结 canonical workspace/checkout identity、legacy session 迁移、显式跨工作区选择、per-workspace pin 与歧义 fail-closed 语义；不得引入常驻 daemon 或全局 latest |
 | PB-050-15 | 锚定式合成 tap（`ui.gesture.tap`） | 手势家族只有 pressHold/drag/fling，最常用的点按缺位；`ui.semantics.tap` 走 performAction 派发，不经指针管线 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-08；[锚定式合成 tap](proposals/0.5.0/anchored-tap.md) |
 | PB-050-16 | 点性 semantics 派发的遮挡准入 | `areUserActionsBlocked` 仅在 BlockSemantics 下为真，非模态覆盖层下 performAction 会穿透激活被盖目标，违背防误击立场（`packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart` 的 423-428 段） | 0.5.0 | 实现中 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-09；[遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；repro 已合入 |
-| PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 已排期 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；[Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md) |
+| PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 实现中 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；[Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md)；仓内四包与 example 已全绿，`tool/example_precheck.sh` 的设备节点与接入方真机验收尚未做 |
 | PB-050-18 | 会话存活判定加进程启动身份 | 存活判据是裸 `kill -0`/`tasklist` 按 PID（`packages/patchbay_cli/lib/src/platform/process_utils.dart` 的 53-76 段），PID 复用会把死会话判成活的 | 0.5.0 | 已排期 | PID+启动时间三元比对；会话记录 additive 字段并冻结兼容语料；老记录行为不变、诊断标注 `identityUnverified` |
 | PB-050-19 | 会话记录解析失败改隔离 | `readAll` 解析失败即删文件，自愈同时销毁现场证据，操作者拿不到「这里曾有会话」的痕迹 | 0.5.0 | 已排期 | 移入 `.quarantine` 并由 doctor 报告；临时文件与并发写入语义不变 |
 | PB-050-20 | 树类大载荷落 artifact | `ui semantics tree` 等全量进 stdout，大树即数千行；agent 消费方直接吃满上下文，破坏按需展开的信息层级 | 0.5.0 | 实现中 | 超阈值落 artifact、stdout 回校验路径；复用既有 `--output`/blob 形状不新增别名；阈值内输出逐字节不变；[树落 artifact](proposals/0.5.0/tree-artifact-output.md) |
@@ -82,6 +82,7 @@
 | PB-050-23 | error code 注册表 ratchet 测试 | 稳定 code 集合目前靠自觉维护，无全树扫描锁定，新增散装码不会被机检拦截 | 0.5.0 | 已验证 | 全树扫描断言 code 字面量属于封闭注册表；纯测试 MR |
 | PB-050-24 | 消费者侧 Skill、INSTALL 与渐进式披露接入漏斗 | 接入与使用路径主要依赖大型 guide，agent 宿主没有从发现、安装、只读起步到按需展开的短漏斗；手写命令示例又会随 CLI 漂移 | 0.5.0 | 已验证 | `skills/use-patchbay/SKILL.md` + `INSTALL.md`；Skill 随 Patchbay tag 版本化，命令示例由 CLI registry 生成或对拍；干净 consumer/Agent 验收 `INSTALL -> SKILL -> identity/catalog/snapshot`，不以预载完整 guide 替代；只读闭环验收见 [验证报告](verification/0.5.0-onboarding-skill-acceptance.md) |
 | PB-050-25 | domain-plane 写命令的 gate 强制执行 | PB-050-22 实现中实证：`host_invoker.dart` 的 `_dispatchExternal` 直调 domainInvoke，descriptor `gates` 对 plane:domain 是 catalog-only 装饰，双层门安全叙事存在实质缺口 | 0.5.0 | 实现中 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-11；[domain gate 强制执行](proposals/0.5.0/domain-gate-enforcement.md) |
+| PB-050-26 | 审计事件的 reveal 富化 | `ui.reveal` 的审计事件缺 steps 与被驱动容器 nodeId 列表；补齐需改 `PatchbayAuditEvent` 公共形状与 host_invoker 记账，越出 PB-050-17 授权面 | — | 待排期 | 落地前补 Proposal（公共审计形状变更） |
 
 ## 文档债（快赢，可随任意批次走）
 
