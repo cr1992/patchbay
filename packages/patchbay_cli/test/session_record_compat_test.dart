@@ -61,6 +61,12 @@ void main() {
     final PatchbaySessionResolver resolver = PatchbaySessionResolver(
       store: store,
       pidProbe: (_) => true,
+      // PB-050-14: the corpus predates workspace identity, so it can only be
+      // selected implicitly by *proving* its recorded path recomputes to the
+      // checkout running the command.
+      workspaceProbe: () => _legacyWorkspace,
+      workspaceIdentityAt: (String path) =>
+          path == '/repo/legacy-worktree' ? _legacyWorkspace : null,
       // The probe answering at all must not matter: a legacy record has
       // no captured signature to compare it against.
       processStartTimeProbe: (_) => 'irrelevant-current-signature',
@@ -78,6 +84,30 @@ void main() {
 
     final PatchbayDiscoveredSession resolved = await resolver.resolve();
     expect(resolved.record.sessionId, 'legacy-worktree');
+    // The one-shot upgrade: proven membership is written back so the next
+    // command does not have to re-prove it from the filesystem.
+    expect(store.readAll().single.workspaceId, _legacyWorkspace.workspaceId);
+  });
+
+  test('a legacy record whose path moved is kept, not adopted or deleted', () {
+    directory.createSync(recursive: true);
+    File(
+      '${directory.path}${Platform.pathSeparator}legacy-worktree.json',
+    ).writeAsStringSync(File('$_corpus/record.json').readAsStringSync());
+
+    final PatchbaySessionListing listing = PatchbaySessionResolver(
+      store: store,
+      pidProbe: (_) => true,
+      workspaceProbe: () => _legacyWorkspace,
+      // The recorded directory no longer resolves anywhere.
+      workspaceIdentityAt: (_) => null,
+    ).inventory().single;
+
+    expect(
+      listing.workspaceAffinity,
+      PatchbayWorkspaceAffinity.legacyUnverified,
+    );
+    expect(store.readAll().single.workspaceId, isNull);
   });
 
   test(
@@ -92,6 +122,9 @@ void main() {
         () => PatchbaySessionResolver(
           store: store,
           pidProbe: (_) => false,
+          workspaceProbe: () => _legacyWorkspace,
+          workspaceIdentityAt: (String path) =>
+              path == '/repo/legacy-worktree' ? _legacyWorkspace : null,
         ).select('legacy-worktree'),
         throwsA(
           isA<PatchbaySessionException>().having(
@@ -117,17 +150,34 @@ void main() {
       workspacePath: '/repo/new-worktree',
       deviceId: 'device-1',
       processStartTime: 'Mon Aug 25 00:00:00 2026',
-    ).toJson();
+    ).withWorkspace(_newWorkspace).toJson();
 
     final Map<String, Object?>? legacy = _readTheOldWay(written);
 
     expect(legacy, isNotNull);
     expect(legacy!['sessionId'], 'new-worktree');
     expect(legacy['processId'], 4242);
-    // The old reader's vocabulary simply does not include this key.
+    // The old reader's vocabulary simply does not include these keys.
     expect(legacy.containsKey('processStartTime'), isFalse);
+    expect(legacy.containsKey('workspaceId'), isFalse);
+    expect(legacy.containsKey('workspaceKind'), isFalse);
+    expect(legacy.containsKey('workspaceIdentityVersion'), isFalse);
+    // PB-050-14 is additive: the record schema version does not move, so the
+    // old reader has no reason to reject the file in the first place.
+    expect(written['schemaVersion'], 1);
   });
 }
+
+/// The checkout the frozen legacy corpus was recorded in.
+final PatchbayWorkspaceIdentity _legacyWorkspace = PatchbayWorkspaceIdentity.of(
+  kind: PatchbayWorkspaceKind.gitWorktree,
+  canonicalRoot: '/repo/legacy-worktree',
+)!;
+
+final PatchbayWorkspaceIdentity _newWorkspace = PatchbayWorkspaceIdentity.of(
+  kind: PatchbayWorkspaceKind.gitWorktree,
+  canonicalRoot: '/repo/new-worktree',
+)!;
 
 /// The record reader as it existed before PB-050-18 added `processStartTime`.
 ///

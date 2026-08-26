@@ -188,6 +188,9 @@ final class _Run {
   ];
 }
 
+final PatchbayWorkspaceIdentity _workspace =
+    PatchbayWorkspaceIdentity.current()!;
+
 void main() {
   late Directory directory;
   late PatchbaySessionStore store;
@@ -223,9 +226,11 @@ void main() {
     wsUri: 'ws://127.0.0.1:1234/token=/ws',
     buildMode: 'debug',
     createdAt: DateTime.utc(2026, 8, 14),
-    workspacePath: '/repo/a',
+    // doctor 走真 CLI，会话归属按 CLI 自己的 workspace 探测判定（PB-050-14），
+    // 因此这条记录必须落在当前 checkout 内，否则本组测的是"选不出会话"而不是兼容性。
+    workspacePath: _workspace.canonicalRoot,
     deviceId: 'device-1',
-  );
+  ).withWorkspace(_workspace);
 
   group('新 CLI ↔ 老 host（冻结的 v0.2.0 语料）', () {
     FakePatchbayClient legacyClient() => FakePatchbayClient(

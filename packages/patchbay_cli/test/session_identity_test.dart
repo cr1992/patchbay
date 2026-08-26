@@ -35,6 +35,8 @@ void main() {
         await expectLater(
           PatchbaySessionResolver(
             store: store,
+            workspaceProbe: () => _workspace,
+            workspaceIdentityAt: (_) => null,
             pidProbe: (_) => true,
             // The PID answers "alive", but it belongs to a different
             // process now -- the OS recycled it after the original App
@@ -52,6 +54,8 @@ void main() {
 
       final resolver = PatchbaySessionResolver(
         store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
         processStartTimeProbe: (_) => 'launch-b',
       );
@@ -60,7 +64,7 @@ void main() {
         () => resolver.select('reused'),
         throwsA(_sessionError('sessionStaleProcess')),
       );
-      expect(store.readSelection(), isNull);
+      expect(store.readSelectionFor(_workspace), isNull);
       expect(store.readAll(), isEmpty);
     });
 
@@ -69,6 +73,8 @@ void main() {
 
       final PatchbaySessionListing listing = PatchbaySessionResolver(
         store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
         processStartTimeProbe: (_) => 'launch-b',
       ).inventory().single;
@@ -83,6 +89,8 @@ void main() {
 
       final resolved = await PatchbaySessionResolver(
         store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
         processStartTimeProbe: (_) => 'launch-a',
         identityProbe: (_) async => _identity(),
@@ -91,6 +99,8 @@ void main() {
       expect(resolved.record.sessionId, 'same');
       final PatchbaySessionListing listing = PatchbaySessionResolver(
         store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
         processStartTimeProbe: (_) => 'launch-a',
       ).inventory().single;
@@ -106,6 +116,8 @@ void main() {
 
         final resolved = await PatchbaySessionResolver(
           store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
           pidProbe: (_) => true,
           // The OS declined to answer (missing tool, sandboxed platform,
           // parse failure) -- this must never be treated as a mismatch.
@@ -124,6 +136,8 @@ void main() {
 
         final PatchbaySessionListing listing = PatchbaySessionResolver(
           store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
           pidProbe: (_) => true,
           processStartTimeProbe: (_) => null,
         ).inventory().single;
@@ -144,6 +158,8 @@ void main() {
 
         final resolved = await PatchbaySessionResolver(
           store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
           pidProbe: (_) => true,
           // Whatever the probe answers must not matter: there is nothing on
           // the record to compare it against.
@@ -154,6 +170,8 @@ void main() {
 
         final PatchbaySessionListing listing = PatchbaySessionResolver(
           store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
           pidProbe: (_) => true,
           processStartTimeProbe: (_) => 'anything-at-all',
         ).inventory().single;
@@ -168,6 +186,8 @@ void main() {
       expect(
         () => PatchbaySessionResolver(
           store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
           pidProbe: (_) => false,
         ).select('legacy-dead'),
         throwsA(_sessionError('sessionStaleProcess')),
@@ -183,6 +203,8 @@ void main() {
 
       final resolved = await PatchbaySessionResolver(
         store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
         processStartTimeProbe: (_) => 'launch-signature',
         identityProbe: (_) async => _identity(),
@@ -211,7 +233,7 @@ void main() {
         processId: 4321,
         buildMode: 'debug',
         createdAt: DateTime.utc(2026, 8, 25),
-        workspacePath: '/repo/worktree',
+        workspacePath: _workspace.canonicalRoot,
         deviceId: 'device-1',
         processRunner: runner,
         isWindows: false,
@@ -245,7 +267,7 @@ void main() {
           processId: 4321,
           buildMode: 'debug',
           createdAt: DateTime.utc(2026, 8, 25),
-          workspacePath: '/repo/worktree',
+          workspacePath: _workspace.canonicalRoot,
           deviceId: 'device-1',
           processRunner: runner,
           isWindows: false,
@@ -273,7 +295,7 @@ void main() {
           processId: 0,
           buildMode: 'debug',
           createdAt: DateTime.utc(2026, 8, 25),
-          workspacePath: '/repo/worktree',
+          workspacePath: _workspace.canonicalRoot,
           deviceId: 'device-1',
           processRunner: runner,
         ),
@@ -315,6 +337,14 @@ void main() {
 Matcher _sessionError(String code) =>
     isA<PatchbaySessionException>().having((error) => error.code, 'code', code);
 
+/// The checkout every record here belongs to: PB-050-18's liveness rules are
+/// orthogonal to PB-050-14's affinity rules, so this file keeps one workspace
+/// and lets the affinity suite own the cross-checkout matrix.
+final PatchbayWorkspaceIdentity _workspace = PatchbayWorkspaceIdentity.of(
+  kind: PatchbayWorkspaceKind.gitWorktree,
+  canonicalRoot: '/repo/worktree',
+)!;
+
 PatchbayRuntimeIdentity _identity() => const PatchbayRuntimeIdentity(
   schemaVersion: 1,
   applicationId: 'dev.patchbay.fixture',
@@ -335,10 +365,10 @@ PatchbaySessionRecord _record(
   wsUri: 'ws://127.0.0.1:1234/auth/ws',
   buildMode: 'debug',
   createdAt: DateTime.utc(2026, 8, 20),
-  workspacePath: '/repo/worktree',
+  workspacePath: _workspace.canonicalRoot,
   deviceId: 'device-1',
   processStartTime: processStartTime,
-);
+).withWorkspace(_workspace);
 
 final class _Invocation {
   const _Invocation(this.executable, this.arguments);

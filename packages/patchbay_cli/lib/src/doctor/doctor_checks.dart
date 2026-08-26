@@ -6,10 +6,15 @@ import 'package:patchbay/patchbay.dart';
 import '../client.dart';
 import '../rpc_timeout.dart';
 import '../session.dart';
+import '../session/workspace_selection.dart';
 import 'doctor_models.dart';
 
 /// Reads the local session directory and judges what a command would do next.
-PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
+PatchbayDoctorFinding patchbaySessionDirectoryFinding(
+  ArgResults options, {
+  PatchbayWorkspaceIdentityProbe? workspaceProbe,
+  PatchbayWorkspaceIdentityAt? workspaceIdentityAt,
+}) {
   final String? namedEndpoint = options.option('ws-uri') != null
       ? 'ws-uri'
       : options.option('direct-endpoint') != null
@@ -27,8 +32,15 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
   );
   final List<PatchbaySessionListing> listings;
   final List<String> quarantined;
+  final PatchbayWorkspaceScope scope;
   try {
-    listings = PatchbaySessionResolver(store: store).inventory();
+    final PatchbaySessionResolver resolver = PatchbaySessionResolver(
+      store: store,
+      workspaceProbe: workspaceProbe,
+      workspaceIdentityAt: workspaceIdentityAt,
+    );
+    listings = resolver.inventory();
+    scope = resolver.scope();
     quarantined = store
         .quarantinedFiles()
         .map((File file) => file.path)
@@ -36,12 +48,10 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
   } on Object catch (failure) {
     return patchbayFailureFinding(PatchbayDoctorCheck.session, failure);
   }
-  final String? explicitSession = options.option('session');
-  final String? pinned = explicitSession == null ? store.readSelection() : null;
   return patchbaySessionFinding(
     listings: listings,
-    explicitSession: explicitSession,
-    pinnedSessionId: pinned,
+    explicitSession: options.option('session'),
+    scope: scope,
     quarantinedFiles: quarantined,
   );
 }
@@ -50,15 +60,29 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(ArgResults options) {
 PatchbayDoctorFinding patchbaySessionFinding({
   required List<PatchbaySessionListing> listings,
   required String? explicitSession,
+  PatchbayWorkspaceScope? scope,
   String? pinnedSessionId,
   List<String> quarantinedFiles = const <String>[],
 }) {
+  // Workspace counts, never the workspace *path*: the canonical root is
+  // owner-only locating data and doctor output is something operators paste
+  // into issues.
   Map<String, Object?> counts() => <String, Object?>{
     'records': listings.length,
     for (final PatchbaySessionStatus status in PatchbaySessionStatus.values)
       status.name: listings
           .where((PatchbaySessionListing listing) => listing.status == status)
           .length,
+    for (final PatchbayWorkspaceAffinity affinity
+        in PatchbayWorkspaceAffinity.values)
+      affinity.name: listings
+          .where(
+            (PatchbaySessionListing listing) =>
+                listing.workspaceAffinity == affinity,
+          )
+          .length,
+    'workspaceKnown': scope?.identity != null,
+    'scopedPin': scope?.scopedSelection,
     if (quarantinedFiles.isNotEmpty) ...<String, Object?>{
       'quarantined': quarantinedFiles.length,
       'quarantinedFiles': quarantinedFiles,
@@ -76,7 +100,7 @@ PatchbayDoctorFinding patchbaySessionFinding({
       action:
           'start the App through the launcher, or connect explicitly with '
           '--ws-uri <vm-service-uri>',
-      details: counts(),
+      details: <String, Object?>{...counts(), 'code': 'sessionDirectoryEmpty'},
     );
   }
 
@@ -98,6 +122,32 @@ PatchbayDoctorFinding patchbaySessionFinding({
       );
     }
     return statusFinding(named, 'the record named by --session', counts());
+  }
+
+  // The same kernel the resolver, `sessions list` and trace consult, so
+  // doctor's verdict is the command's verdict rather than a second opinion.
+  if (scope != null) {
+    final PatchbayWorkspaceSelectionPlan plan =
+        PatchbayWorkspaceSelectionKernel.implicit(scope);
+    if (plan.refusal case final PatchbaySessionException refusal) {
+      return workspaceRefusalFinding(refusal, scope, counts());
+    }
+    final Set<String> allowed = <String>{
+      for (final PatchbaySessionRecord record in plan.records) record.sessionId,
+    };
+    return candidateFinding(
+      listings
+          .where(
+            (PatchbaySessionListing listing) =>
+                allowed.contains(listing.record.sessionId),
+          )
+          .toList(growable: false),
+      listings.length,
+      counts(),
+      subject: plan.fromScopedPin
+          ? 'the record pinned in this workspace'
+          : 'the only record in this workspace',
+    );
   }
 
   if (pinnedSessionId != null) {
@@ -135,22 +185,91 @@ PatchbayDoctorFinding patchbaySessionFinding({
     return statusFinding(pinned, 'the pinned record', counts());
   }
 
-  final List<PatchbaySessionListing> candidates = listings
+  return candidateFinding(
+    listings
+        .where(
+          (PatchbaySessionListing listing) =>
+              listing.status != PatchbaySessionStatus.stale,
+        )
+        .toList(growable: false),
+    listings.length,
+    counts(),
+    subject: 'the only live record',
+  );
+}
+
+/// One refusal from the workspace kernel, restated as a doctor finding.
+PatchbayDoctorFinding workspaceRefusalFinding(
+  PatchbaySessionException refusal,
+  PatchbayWorkspaceScope scope,
+  Map<String, Object?> counts,
+) {
+  final Map<String, Object?> details = <String, Object?>{
+    ...counts,
+    'code': refusal.code,
+    if (scope.scopedSelection != null) 'pinnedSessionId': scope.scopedSelection,
+  };
+  final (String observed, String cause) = switch (refusal.code) {
+    'sessionWorkspaceUnavailable' => (
+      'this command could not establish which checkout it is running in',
+      'the working directory was removed, could not be resolved, or the '
+          'read-only Git probe did not answer within its budget',
+    ),
+    'sessionWorkspaceEmpty' => (
+      'no session record belongs to this checkout '
+          '(${scope.countOf(PatchbayWorkspaceAffinity.foreign)} belong to '
+          'another one, '
+          '${scope.countOf(PatchbayWorkspaceAffinity.legacyUnverified)} '
+          'cannot prove where they belong)',
+      'commands without --session only consider sessions started from this '
+          'checkout; they never reach across to another one',
+    ),
+    'sessionSelectionStale' => (
+      'the session pinned in this checkout no longer resolves here',
+      'that App exited, was pruned, or the pin names a record belonging to '
+          'another checkout',
+    ),
+    _ => (
+      'the session directory cannot answer this command',
+      'see the reported code',
+    ),
+  };
+  return PatchbayDoctorFinding(
+    check: PatchbayDoctorCheck.session,
+    verdict: PatchbayCheckVerdict.failed,
+    observed: observed,
+    cause: cause,
+    action: refusal.hint,
+    details: details,
+  );
+}
+
+/// The verdict for the candidates an implicit selection is allowed to try.
+PatchbayDoctorFinding candidateFinding(
+  List<PatchbaySessionListing> selectable,
+  int totalRecords,
+  Map<String, Object?> counts, {
+  required String subject,
+}) {
+  final List<PatchbaySessionListing> candidates = selectable
       .where(
         (PatchbaySessionListing listing) =>
             listing.status != PatchbaySessionStatus.stale,
       )
       .toList(growable: false);
   if (candidates.isEmpty) {
+    if (selectable.length == 1) {
+      return statusFinding(selectable.single, subject, counts);
+    }
     return PatchbayDoctorFinding(
       check: PatchbayDoctorCheck.session,
       verdict: PatchbayCheckVerdict.failed,
       observed:
-          'every one of the ${listings.length} records belongs to a process '
+          'every one of the $totalRecords records belongs to a process '
           'that is gone',
       cause: 'those Apps exited; the launcher writes one record per run',
       action: 'run `patchbay sessions prune`, then start the App again',
-      details: counts(),
+      details: counts,
     );
   }
   if (candidates.length > 1) {
@@ -163,10 +282,10 @@ PatchbayDoctorFinding patchbaySessionFinding({
           'commands without --session refuse to choose between them '
           '(sessionAmbiguous)',
       action: patchbaySessionAmbiguousHint,
-      details: counts(),
+      details: <String, Object?>{...counts, 'code': 'sessionAmbiguous'},
     );
   }
-  return statusFinding(candidates.single, 'the only live record', counts());
+  return statusFinding(candidates.single, subject, counts);
 }
 
 /// Turns one record's local status into a verdict.

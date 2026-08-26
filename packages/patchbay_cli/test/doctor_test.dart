@@ -94,7 +94,7 @@ void main() {
     test('several selectable sessions warn instead of failing', () async {
       store
         ..write(_record('worktree-a'))
-        ..write(_record('worktree-b', workspacePath: '/repo/b'));
+        ..write(_record('worktree-b'));
 
       final _Run result = await run(<String>[
         '--json',
@@ -127,7 +127,7 @@ void main() {
       () async {
         store
           ..write(_record('worktree-a'))
-          ..writeSelection('worktree-deleted');
+          ..writeSelectionFor(_workspace, 'worktree-deleted');
 
         final _Run result = await run(<String>['--json', 'doctor']);
 
@@ -163,7 +163,7 @@ void main() {
     test('a printed record never carries the auth token', () async {
       store
         ..write(_record('worktree-a'))
-        ..write(_record('worktree-b', workspacePath: '/repo/b'));
+        ..write(_record('worktree-b'));
 
       final _Run text = await run(<String>[
         'doctor',
@@ -754,10 +754,14 @@ final class _RefusedCatalogClient implements PatchbayClient {
   Future<void> close() async {}
 }
 
+/// The checkout this test process is actually running in: doctor drives the
+/// real CLI, so its own workspace probe decides which records count as ours.
+final PatchbayWorkspaceIdentity _workspace =
+    PatchbayWorkspaceIdentity.current()!;
+
 PatchbaySessionRecord _record(
   String id, {
   int? processId,
-  String workspacePath = '/repo/a',
   String deviceId = 'device-1',
 }) => PatchbaySessionRecord(
   sessionId: id,
@@ -769,6 +773,6 @@ PatchbaySessionRecord _record(
   wsUri: 'ws://127.0.0.1:1234/$_token=/ws',
   buildMode: 'debug',
   createdAt: DateTime.utc(2026, 8, 14),
-  workspacePath: workspacePath,
+  workspacePath: _workspace.canonicalRoot,
   deviceId: deviceId,
-);
+).withWorkspace(_workspace);

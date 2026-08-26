@@ -572,6 +572,20 @@ $ patchbay sessions prune                 # 删掉进程已经没了的记录
 2. 已固定的会话 —— 有它就用它，即使目录里还有别的会话；
 3. 都没有 —— 唯一会话直接用，多个会话以 `sessionAmbiguous` 拒绝并列出候选。
 
+**第 2、3 级只在当前 checkout 内发生。** 会话记录带工作区身份（Git worktree 顶层，非
+Git 目录则是 cwd 本身；同一 checkout 的子目录算同一个，共享 common dir 的两个 worktree
+算不同），固定项也按 checkout 分开保存：在 A 目录 `session use` 不影响 B 目录，B 目录里
+不带 `--session` 的命令永远不会打到 A 的 App。当前 checkout 没有会话时以
+`sessionWorkspaceEmpty` 拒绝（不会去用别处那条），判不出自己在哪个 checkout 时以
+`sessionWorkspaceUnavailable` 拒绝，`session use` 固定别处的记录以
+`sessionWorkspaceMismatch` 拒绝。**跨区只有一个入口：对单条命令显式传 `--session <id>`**
+——它照常做完探活与 identity 握手，且不改写任何一边的固定项。`sessions list` 仍列出本机
+全部记录，每条多一个 `workspaceAffinity`（`current` / `foreign` / `legacyUnverified`）。
+
+升级说明：这条保证由 CLI 提供，**0.4.x 的旧 CLI 没有它**——旧二进制看不到新的按 checkout
+固定项，仍按全局规则选择。旧记录不会被删：能证明它记录的路径就是当前 checkout 时照常可
+用（并在握手后补写身份），证明不了时只能用显式 `--session` 选。
+
 **固定项失效不回退。** 被固定的会话记录不见了、进程已死、或连不上时，命令以自己的稳定 code
 失败（`sessionSelectionStale` / `sessionStaleProcess` / `sessionUnreachable`）并附一句处置提示，
 **不会改用目录里另一条会话**——在双设备台上那意味着命令打到了另一台设备。固定项也不会被 CLI

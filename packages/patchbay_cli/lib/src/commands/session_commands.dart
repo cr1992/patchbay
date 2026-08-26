@@ -119,7 +119,16 @@ abstract final class LocalSessionCommandHandler {
       for (final PatchbaySessionListing listing in listings)
         '${listing.selected ? '*' : ' '} ${listing.label}',
     ];
-    if (listings.length > 1 &&
+    // Only sessions in *this* checkout can be ambiguous, so only they can
+    // earn the "pin one" hint: two records that already belong to different
+    // checkouts are not a choice the operator has to make.
+    final int selectableHere = listings
+        .where(
+          (PatchbaySessionListing listing) =>
+              listing.workspaceAffinity == PatchbayWorkspaceAffinity.current,
+        )
+        .length;
+    if (selectableHere > 1 &&
         !listings.any((PatchbaySessionListing listing) => listing.selected)) {
       lines.add(patchbaySessionAmbiguousHint);
     }
