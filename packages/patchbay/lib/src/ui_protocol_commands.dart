@@ -265,6 +265,26 @@ final patchbayUiGestureFlingCommandDescriptor = _gesture(
       '[--duration-ms <ms>]',
 );
 
+/// tap 是家族里唯一没有 `durationMs` 的成员：down→up 间隔是实现内部常数，
+/// 不进 wire（DG-050-08 复核改判）。它的 `start` 也因此从"路径起点"退化为
+/// "唯一那个点"，可缺省到目标中心——默认值必须进 descriptor 而不是只写在
+/// 实现里，catalog 是调用方唯一读得到的声明面。两处形状开关都带默认值，
+/// 既有三条 descriptor 的字节因此一位不变。
+final patchbayUiGestureTapCommandDescriptor = _gesture(
+  'ui.gesture.tap',
+  'Tap inside a Semantics identifier target through the real pointer '
+      'pipeline.',
+  'uiGestureTap',
+  'tap',
+  'Tap an anchored target through the real pointer pipeline.',
+  extraParameters: const <PatchbayParameterDescriptor>[],
+  extraOptions: const <String, String>{},
+  usageSuffix: '<identifier> <generation> [--start <json>]',
+  startRequired: false,
+  startDefault: const <String, Object?>{'x': 0.5, 'y': 0.5},
+  positiveParameters: const <String>{},
+);
+
 PatchbayCommandDescriptor _gesture(
   String name,
   String summary,
@@ -274,13 +294,21 @@ PatchbayCommandDescriptor _gesture(
   required List<PatchbayParameterDescriptor> extraParameters,
   required Map<String, String> extraOptions,
   required String usageSuffix,
+  bool startRequired = true,
+  Object? startDefault,
+  Set<String> positiveParameters = const <String>{'durationMs'},
 }) => _ui(
   name,
   summary,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
-    _p('start', PatchbayParameterType.json, required: true),
+    _p(
+      'start',
+      PatchbayParameterType.json,
+      required: startRequired,
+      defaultValue: startDefault,
+    ),
     ...extraParameters,
   ],
   cliSyntax: <PatchbayCliSyntax>[
@@ -291,7 +319,7 @@ PatchbayCommandDescriptor _gesture(
       usageSuffix: usageSuffix,
       positionalParameters: const <String>['identifier', 'generation'],
       optionParameters: <String, String>{'start': 'start', ...extraOptions},
-      positiveParameters: const <String>{'durationMs'},
+      positiveParameters: positiveParameters,
       nonNegativeParameters: const <String>{'generation'},
     ),
   ],
@@ -674,6 +702,7 @@ final List<PatchbayCommandDescriptor> patchbayUiProtocolCliCommandDescriptors =
       patchbayUiGesturePressHoldCommandDescriptor,
       patchbayUiGestureDragCommandDescriptor,
       patchbayUiGestureFlingCommandDescriptor,
+      patchbayUiGestureTapCommandDescriptor,
       patchbayUiRevealCommandDescriptor,
       patchbayUiWaitCommandDescriptor,
       patchbayUiKeepAwakeSetCommandDescriptor,

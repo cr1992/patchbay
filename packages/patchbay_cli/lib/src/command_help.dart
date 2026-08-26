@@ -367,6 +367,29 @@ abstract final class PatchbayCommandHelp {
         );
       }
     }
+    // 两条 tap 在命令行上只差两个词，却是两条通道，证明的是不同的事实
+    //（DG-050-08）：按调用目的互相指路，不设默认优劣。
+    if (serviceCommand == 'ui.semantics.tap') {
+      output
+        ..writeln()
+        ..writeln(
+          'To prove a real pointer can reach and trigger the target, use '
+          '`ui gesture tap`: it goes through hit-testing, so an obscured '
+          'target is rejected instead of tapped.',
+        );
+    }
+    if (serviceCommand == 'ui.gesture.tap') {
+      output
+        ..writeln()
+        ..writeln(
+          'Proves a real pointer can reach and trigger the target: the '
+          'tap goes through hit-testing and the gesture arena. To drive a '
+          'target that declares a semantics tap action — including ones no '
+          'pointer can reach — use `ui tap` instead. The two paths prove '
+          'different facts; for avoiding mis-taps the pointer path is the '
+          'stronger fence.',
+        );
+    }
     if (path case <String>['repl']) {
       output
         ..writeln()

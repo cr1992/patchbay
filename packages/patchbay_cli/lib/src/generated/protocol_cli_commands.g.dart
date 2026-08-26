@@ -100,6 +100,13 @@ final GeneratedProtocolCommand _uiGestureFlingProtocolCommand =
       syntaxIndex: 0,
     );
 
+final GeneratedProtocolCommand _uiGestureTapProtocolCommand =
+    GeneratedProtocolCommand(
+      descriptor: patchbayUiGestureTapCommandDescriptor,
+      serviceName: 'ui.gesture.tap',
+      syntaxIndex: 0,
+    );
+
 final GeneratedProtocolCommand _uiRevealProtocolCommand =
     GeneratedProtocolCommand(
       descriptor: patchbayUiRevealCommandDescriptor,
@@ -224,6 +231,7 @@ final List<PatchbayFriendlyCommandSpec> _patchbayFriendlyCommands =
       _uiGesturePressHoldProtocolCommand,
       _uiGestureDragProtocolCommand,
       _uiGestureFlingProtocolCommand,
+      _uiGestureTapProtocolCommand,
       _uiRevealProtocolCommand,
       _uiWaitSemanticsMountedProtocolCommand,
       _uiWaitSemanticsUnmountedProtocolCommand,

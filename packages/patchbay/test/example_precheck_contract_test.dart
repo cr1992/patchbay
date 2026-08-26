@@ -16,7 +16,7 @@ void main() {
       source,
       contains(
         r'if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && '
-        r'[ -n "$NESTED_GEN" ]; then',
+        r'[ -n "$NESTED_GEN" ] && [ -n "$COVERED_GEN" ]; then',
       ),
     );
     expect(source, isNot(contains(r'if [ -n "$NESTED_GEN" ]; then')));

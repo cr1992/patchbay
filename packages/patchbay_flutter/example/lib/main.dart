@@ -24,6 +24,11 @@ const String gestureSurfaceSemanticsId = 'example.gesture.surface';
 /// Semantics identifier of the scrollable list used for fling / drag paths.
 const String gestureListSemanticsId = 'example.gesture.list';
 
+/// Semantics identifier of the deliberately covered tap probe: policy allows
+/// it, but an opaque non-modal decoration sits on top, so `ui.gesture.tap`
+/// must reject it with `uiGestureTargetObscured` instead of tapping through.
+const String gestureCoveredSemanticsId = 'example.gesture.covered';
+
 /// Semantics identifier of the nested horizontal scrollable list.
 const String gestureNestedListSemanticsId = 'example.gesture.nested';
 
@@ -663,6 +668,7 @@ PatchbayGestureDecision _gesturePolicy(
     gestureSurfaceSemanticsId,
     gestureListSemanticsId,
     gestureNestedListSemanticsId,
+    gestureCoveredSemanticsId,
   };
   if (!surfaces.contains(target.identifier)) {
     return const PatchbayGestureDecision.reject(
@@ -956,21 +962,53 @@ final class _ExampleGestureSurfaceState extends State<_ExampleGestureSurface> {
   String _observed = 'none';
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    identifier: gestureSurfaceSemanticsId,
-    label: 'Gesture surface',
-    value: _observed,
-    child: GestureDetector(
-      onLongPress: () => setState(() => _observed = 'longPress'),
-      onPanUpdate: (DragUpdateDetails details) =>
-          setState(() => _observed = 'pan'),
-      child: Container(
-        height: 96,
-        alignment: Alignment.center,
-        color: Theme.of(context).colorScheme.secondaryContainer,
-        child: Text('gesture surface: $_observed'),
+  Widget build(BuildContext context) => Stack(
+    children: <Widget>[
+      Semantics(
+        identifier: gestureSurfaceSemanticsId,
+        label: 'Gesture surface',
+        value: _observed,
+        child: GestureDetector(
+          onTap: () => setState(() => _observed = 'tap'),
+          onLongPress: () => setState(() => _observed = 'longPress'),
+          onPanUpdate: (DragUpdateDetails details) =>
+              setState(() => _observed = 'pan'),
+          child: Container(
+            height: 96,
+            alignment: Alignment.center,
+            color: Theme.of(context).colorScheme.secondaryContainer,
+            child: Text('gesture surface: $_observed'),
+          ),
+        ),
       ),
-    ),
+      // 被遮挡的 tap 探针：嵌在手势面右上角，不改变任何既有布局。上层是
+      // 不透明、非模态的装饰块（吸收 hit-test，但不用 BlockSemantics），
+      // 预检据此断言 `ui.gesture.tap` 对它如实拒绝而不是隔着装饰点下去。
+      Positioned(
+        right: 8,
+        top: 8,
+        width: 40,
+        height: 40,
+        child: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            Semantics(
+              identifier: gestureCoveredSemanticsId,
+              container: true,
+              label: 'Covered tap probe',
+              child: const Listener(
+                behavior: HitTestBehavior.opaque,
+                child: ColoredBox(color: Color(0xFF335577)),
+              ),
+            ),
+            const Listener(
+              behavior: HitTestBehavior.opaque,
+              child: ColoredBox(color: Color(0xFF222222)),
+            ),
+          ],
+        ),
+      ),
+    ],
   );
 }
 

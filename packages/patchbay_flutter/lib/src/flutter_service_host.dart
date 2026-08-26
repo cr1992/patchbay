@@ -440,6 +440,19 @@ final class PatchbayFlutterServiceHost {
         includeReason: true,
         available: bridge.gesture.enabled,
       ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        (arguments) => _decodeGesture(arguments, PatchbayGestureKind.tap),
+        (request, requestId) async => (await bridge.gesture.tap(
+          identifier: request['identifier']! as String,
+          generation: request['generation']! as int,
+          start: request['start'] as Map<String, Object?>?,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.gesture.enabled,
+      ),
       _uiRegistration<PatchbayRevealRequestWire>(
         next(),
         PatchbayRevealRequestWire.fromJson,
@@ -701,18 +714,24 @@ final class PatchbayFlutterServiceHost {
     Map<String, Object?> arguments,
     PatchbayGestureKind kind,
   ) {
+    // tap 没有 `durationMs`：间隔是 bridge 内部常数，wire 里出现该 key 即按
+    // unknown key 拒绝。它的 `start` 也是家族里唯一可缺省的（默认目标中心，
+    // 由 descriptor 声明、bridge 落地）。
+    final bool isTap = kind == PatchbayGestureKind.tap;
     final Set<String> keys = <String>{
       'identifier',
       'generation',
       'start',
-      'durationMs',
+      if (!isTap) 'durationMs',
       if (kind == PatchbayGestureKind.drag) 'path',
       if (kind == PatchbayGestureKind.fling) 'velocity',
     };
     _rejectUnexpected(arguments, keys);
     if (arguments['identifier'] is! String ||
         arguments['generation'] is! int ||
-        arguments['start'] is! Map ||
+        (isTap
+            ? arguments['start'] != null && arguments['start'] is! Map
+            : arguments['start'] is! Map) ||
         arguments['durationMs'] != null && arguments['durationMs'] is! int ||
         kind == PatchbayGestureKind.drag && arguments['path'] is! List ||
         kind == PatchbayGestureKind.fling && arguments['velocity'] is! Map) {
@@ -720,7 +739,8 @@ final class PatchbayFlutterServiceHost {
     }
     return <String, Object?>{
       ...arguments,
-      'start': (arguments['start']! as Map).cast<String, Object?>(),
+      if (arguments['start'] case final Map start)
+        'start': start.cast<String, Object?>(),
       if (arguments['path'] case final List<Object?> path) 'path': path,
       if (arguments['velocity'] case final Map velocity)
         'velocity': velocity.cast<String, Object?>(),
@@ -800,6 +820,7 @@ final class PatchbayFlutterServiceHost {
     patchbayUiGesturePressHoldCommandDescriptor,
     patchbayUiGestureDragCommandDescriptor,
     patchbayUiGestureFlingCommandDescriptor,
+    patchbayUiGestureTapCommandDescriptor,
     patchbayUiRevealCommandDescriptor,
     patchbayUiWaitCommandDescriptor,
     patchbayUiKeepAwakeSetCommandDescriptor.withRuntimeOverrides(

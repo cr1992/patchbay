@@ -318,6 +318,27 @@ Availability is still decided by the running App catalog.
     expect(enter, contains('calls `onChanged`'));
   });
 
+  test('the two tap paths cross-reference each other by calling purpose', () {
+    final ArgParser parser = patchbayCliParser();
+    final String semantics = PatchbayCommandHelp.render(parser, <String>[
+      'ui',
+      'tap',
+    ]);
+    expect(semantics, contains('ui gesture tap'));
+    expect(semantics, contains('hit-testing'));
+
+    final String pointer = PatchbayCommandHelp.render(parser, <String>[
+      'ui',
+      'gesture',
+      'tap',
+    ]);
+    expect(pointer, contains('Usage: patchbay ui gesture tap'));
+    expect(pointer, contains('`ui tap`'));
+    expect(pointer, contains('prove'));
+    // 按调用目的互相指路，不设默认优劣；tap 没有时长旋钮。
+    expect(pointer, isNot(contains('--duration-ms')));
+  });
+
   test('repl help shows live describe as an in-session example', () {
     expect(
       PatchbayCommandHelp.render(patchbayCliParser(), <String>['repl']),

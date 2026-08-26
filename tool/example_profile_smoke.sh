@@ -241,6 +241,23 @@ probe 'catalog' required --json catalog
 probe 'snapshot' required --json snapshot
 probe 'ui semantics tree' required --json ui semantics tree
 probe 'ui tap' required --json ui tap example.counter.increment
+# PB-050-15：gesture 面在非 release 构建可用，profile 下只验答复形态。
+# generation 从当前树读取——取不到按失败计，不许静默跳过。
+TAP_GEN="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
+import json, sys
+doc = json.load(sys.stdin)
+payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
+gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
+        if n.get('identifier') and n.get('generation') is not None}
+print(gens.get('example.gesture.surface', ''))
+")"
+if [ -n "$TAP_GEN" ]; then
+  probe 'ui gesture tap' required --json ui gesture tap \
+    example.gesture.surface "$TAP_GEN"
+else
+  printf '  ✗ %-34s %s\n' 'ui gesture tap' '未从 semantics 树取到手势面 generation'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('ui gesture tap')
+fi
 
 echo
 echo "== debug-only 的面（只验类型化降级，不写死期望）=="

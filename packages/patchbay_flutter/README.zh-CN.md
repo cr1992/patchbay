@@ -218,10 +218,13 @@ bridge 首次解析先核对，在 policy/gate await 期间 pin 住，派发前�
 expected/current generation），obscured 节点的 label 在 details 中脱敏——拒绝要可行动，但不能变成
 第二个绕过树上限的观察面。
 
-锚定式 `ui.gesture.pressHold|drag|fling` 是独立的合成指针面，不是 Semantics action。调用必须携带
+锚定式 `ui.gesture.tap|pressHold|drag|fling` 是独立的合成指针面，不是 Semantics action。调用必须携带
 identifier、调用方已观测的 Semantics generation 和目标内归一坐标，并由独立
 `PatchbayGesturePolicy` 放行；没有该 policy 就不发布命令。bridge 在门后重解析，先拒绝裁剪点和阻塞
-overlay，再做一次性坐标换算；换算后的全局坐标不会进入响应。
+overlay，再做一次性坐标换算；换算后的全局坐标不会进入响应。`tap` 是按下即抬起的最短固定序列：
+down→up 间隔是内部常数而不是 wire 参数，`start` 缺省为目标中心；它证明「真实指针可达并能触发」——
+要驱动「声明了语义 tap action 的目标」（含指针打不到的）用 `ui.semantics.tap`，两条路径证明不同的
+事实。
 
 详细协议、隐私边界和分批退出条件见
 [`doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。

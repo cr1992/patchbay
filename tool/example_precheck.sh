@@ -477,13 +477,14 @@ doc = json.load(sys.stdin)
 payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
 gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
         if n.get('identifier') and n.get('generation') is not None}
-print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''), gens.get('example.gesture.nested', ''))
+print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''), gens.get('example.gesture.nested', ''), gens.get('example.gesture.covered', ''))
 ")"
 SURFACE_GEN="$(echo "$GEN" | awk '{print $1}')"
 LIST_GEN="$(echo "$GEN" | awk '{print $2}')"
 NESTED_GEN="$(echo "$GEN" | awk '{print $3}')"
-if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ]; then
-  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN"
+COVERED_GEN="$(echo "$GEN" | awk '{print $4}')"
+if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ] && [ -n "$COVERED_GEN" ]; then
+  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN covered=$COVERED_GEN"
   check 'gesture press-hold' 0 "doc['payload']['outcome'] == 'dispatched'" \
     --json ui gesture press-hold \
     example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
@@ -521,9 +522,21 @@ if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ]; then
     --json ui gesture fling \
     example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
+  # PB-050-15 锚定 tap（可达 + 遮挡两例）。可达例不止看 dispatched：手势面的
+  # onTap 会把 Semantics value 置为 'tap'，用有界等待把「App 真的收到了这次
+  # 点按」也钉住——reachability 分流（tap 前先证指针可达）正是这两步合起来。
+  check 'gesture tap 可达按压面' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui gesture tap example.gesture.surface "$SURFACE_GEN"
+  check 'gesture tap 后 App 侧观察到点按' 0 "" \
+    --json ui wait semantics-value example.gesture.surface tap --timeout-ms 5000
+  # 遮挡例：covered 探针被不透明装饰块盖住，policy 放行但 hit-test 必须拒绝。
+  # 断言 code 而不只是退出码——uiGestureDenied / uiGenerationStale 也退 5。
+  check 'gesture tap 被遮挡目标如实拒绝' 5 \
+    "doc['rejection']['code'] == 'uiGestureTargetObscured'" \
+    --json ui gesture tap example.gesture.covered "$COVERED_GEN"
 else
   printf '  ✗ %-42s %s\n' 'gesture target generation' \
-    '未从 semantics 树解析到 surface / list / nested 三个目标的 generation'
+    '未从 semantics 树解析到 surface / list / nested / covered 四个目标的 generation'
   echo '      手势是 P0 能力，取不到目标按失败计——跳过会让"全过"不等于"全覆盖"。'
   FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture target generation')
 fi
