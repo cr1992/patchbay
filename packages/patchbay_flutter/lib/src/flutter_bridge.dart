@@ -314,6 +314,17 @@ final class PatchbayFlutterBridge {
   }
 
   final PatchbayGateEvaluator _gates;
+
+  /// The one evaluator every plane of this host shares.
+  ///
+  /// `PatchbayFlutterServiceHost` reads it to admit consumer-owned domain
+  /// writes through the same base and consumer gates the UI operators already
+  /// cross. It is exposed rather than injected a second time on purpose: one
+  /// gate ID must mean one thing, and a host that could enforce gates on the
+  /// UI plane while leaving the domain plane open would turn the gap this seam
+  /// closes into a configuration option.
+  PatchbayGateEvaluator get gates => _gates;
+
   final PatchbayArtifactService? artifacts;
   final PatchbayUiRegistry _registry;
   final String Function() _newRequestId;

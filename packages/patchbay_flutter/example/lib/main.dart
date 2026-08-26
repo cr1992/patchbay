@@ -29,27 +29,6 @@ const String gestureNestedListSemanticsId = 'example.gesture.nested';
 const String homeDestinationId = 'example.home';
 const String detailsDestinationId = 'example.details';
 
-/// The single write gate this example declares.
-///
-/// `consumerGate` only ever receives a gate ID string (see
-/// `PatchbayConsumerGate` in `package:patchbay`); it cannot see a command's
-/// descriptor, its `sideEffect`, or which command is being invoked. So the
-/// read/write split this file demonstrates is not something the framework
-/// infers — it is entirely a choice this example makes about *which
-/// operations declare this gate ID at all*. Every call site below that
-/// attaches `exampleWriteGate` does so because
-/// `packages/patchbay/lib/src/ui_protocol_commands.dart` (and
-/// `protocol_commands.dart` for navigation) classifies that operation with
-/// `sideEffect: PatchbaySideEffect.appState` or `.external`: `ui.semantics.
-/// action`/`.tap`, `ui.gesture.*`, `navigation.go`/`push`/`back`,
-/// `ui.inspect.select`, `ui.keepAwake.set`, and `ui.text.set`/`.enter`.
-/// `ui.capture`/`.capture.diff` deliberately do **not** use it: the same
-/// descriptors classify them `sideEffect: none` / `mode: readOnly`, same as
-/// `logs.*`/`blob.*`, so they only ever pass the base gate below. See
-/// `_exampleConsumerGate` for the actual default (reject) and the one
-/// explicit exception this example ships with.
-const String exampleWriteGate = 'example.uiWrite';
-
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final ExampleCounterModel model = ExampleCounterModel();
@@ -127,6 +106,13 @@ final class PatchbayExampleHost {
   /// Resolves the single log source before construction: the artifact service
   /// and [logs] must be the same instance, or records written by the app would
   /// never appear in `logs.*`.
+  ///
+  /// [consumerGate] and [permissions] exist for the same reason [registrar] and
+  /// [isAppResumed] do: the composition root is the only place these can be
+  /// substituted, and `example_domain_gate_test.dart` has to drive this exact
+  /// host with the write gate closed — the state a fresh copy of this example
+  /// is in before its author authorizes anything. They default to what the App
+  /// actually ships.
   factory PatchbayExampleHost({
     required ExampleCounterModel model,
     required PatchbayUiRegistry registry,
@@ -135,6 +121,8 @@ final class PatchbayExampleHost {
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     bool Function()? isAppResumed,
+    PatchbayConsumerGate? consumerGate,
+    ExamplePermissionGateway? permissions,
   }) => PatchbayExampleHost._(
     model: model,
     registry: registry,
@@ -143,6 +131,8 @@ final class PatchbayExampleHost {
     appInstanceId: appInstanceId,
     registrar: registrar,
     isAppResumed: isAppResumed,
+    consumerGate: consumerGate ?? _exampleConsumerGate,
+    permissions: permissions,
   );
 
   PatchbayExampleHost._({
@@ -150,16 +140,22 @@ final class PatchbayExampleHost {
     required PatchbayUiRegistry registry,
     required ExampleRouter router,
     required this.logs,
+    required PatchbayConsumerGate consumerGate,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     bool Function()? isAppResumed,
+    ExamplePermissionGateway? permissions,
   }) : _model = model,
        _router = router,
-       domain = ExampleDomain(counter: model, logs: logs),
+       domain = ExampleDomain(
+         counter: model,
+         logs: logs,
+         permissions: permissions,
+       ),
        bridge = PatchbayFlutterBridge(
-         gates: const PatchbayGateEvaluator(
+         gates: PatchbayGateEvaluator(
            baseGate: _allowBaseGate,
-           consumerGate: _exampleConsumerGate,
+           consumerGate: consumerGate,
          ),
          registry: registry,
          isAppResumed: isAppResumed,
@@ -184,7 +180,7 @@ final class PatchbayExampleHost {
          // as read-only diagnostics, same as `logs.*`/`blob.*` below.
          captureGates: const <String>{},
          rootController: PatchbayRootController.instance,
-         artifacts: _artifacts(logs),
+         artifacts: _artifacts(logs, consumerGate),
        ) {
     _service = PatchbayFlutterServiceHost(
       applicationId: exampleApplicationId,
@@ -214,23 +210,25 @@ final class PatchbayExampleHost {
   /// Blob store plus log/blob commands. Injecting it is what turns on
   /// `ui.capture`, `ui.capture.diff`, `blob.metadata` and the `logs.*` family;
   /// without it those commands stay absent from the catalog.
-  static PatchbayArtifactService _artifacts(ExampleLogSource logs) =>
-      PatchbayArtifactService(
-        blobs: PatchbayMemoryBlobStore(),
-        gates: const PatchbayGateEvaluator(
-          baseGate: _allowBaseGate,
-          consumerGate: _exampleConsumerGate,
-        ),
-        logs: logs,
-        // Empty on purpose: `blob.metadata`, `blob.read`, `logs.query`,
-        // `logs.export` and `logs.tail` are all declared
-        // `mode: PatchbayCommandMode.readOnly` by `PatchbayArtifactService`
-        // itself — they read already-recorded facts, they do not write
-        // anything. Gating them behind `exampleWriteGate` would contradict
-        // this example's own "read-only diagnostics open by default" story,
-        // so `gateIds` stays empty and they only pass the base gate below.
-        gateIds: const <String>{},
-      );
+  static PatchbayArtifactService _artifacts(
+    ExampleLogSource logs,
+    PatchbayConsumerGate consumerGate,
+  ) => PatchbayArtifactService(
+    blobs: PatchbayMemoryBlobStore(),
+    gates: PatchbayGateEvaluator(
+      baseGate: _allowBaseGate,
+      consumerGate: consumerGate,
+    ),
+    logs: logs,
+    // Empty on purpose: `blob.metadata`, `blob.read`, `logs.query`,
+    // `logs.export` and `logs.tail` are all declared
+    // `mode: PatchbayCommandMode.readOnly` by `PatchbayArtifactService`
+    // itself — they read already-recorded facts, they do not write
+    // anything. Gating them behind `exampleWriteGate` would contradict
+    // this example's own "read-only diagnostics open by default" story,
+    // so `gateIds` stays empty and they only pass the base gate below.
+    gateIds: const <String>{},
+  );
   late final PatchbayFlutterServiceHost _service;
 
   /// The one host both transports dispatch into.
@@ -536,29 +534,38 @@ final class _ExampleBenchmarkSample {
 /// default" means in practice: every read-only command this example exposes
 /// (`ui.semantics.tree`, `ui.wait`, `navigation.catalog`/`.current`,
 /// `ui.keepAwake.status`, `ui.inspect.status`, `ui.capture`/`.capture.diff`,
-/// `blob.*`, `logs.*`) declares zero consumer gates, so this base gate is the
-/// only check any of them goes through.
+/// `blob.*`, `logs.*`, `example.permission.status`, `patchbay.job.get`/
+/// `.wait`) declares zero consumer gates.
+///
+/// Note the asymmetry the host enforces since PB-050-25: read-only *domain*
+/// commands skip this gate entirely, while a domain **write** always crosses
+/// it — even one that declares no consumer gate of its own. A consumer whose
+/// base gate is conditional ("reject until the controller is attached") will
+/// therefore see domain writes refused inside those windows, which is the
+/// point: the base gate is not optional.
 FutureOr<PatchbayGateDecision> _allowBaseGate() =>
     const PatchbayGateDecision.allow();
 
 /// Out-of-the-box behavior for this example's one write gate.
 ///
-/// Every write path declares `exampleWriteGate` (see its doc comment), so in
-/// a fresh copy of this example this function is the entire write policy.
-/// The factory-safe shape is: reject with a code + notice a script can act
-/// on, and require the host to opt in by name — [factoryDefaultWriteGateDecision]
-/// is that reference implementation, unit-tested directly in
-/// `example_consumer_test.dart`.
+/// Every write path on both planes declares `exampleWriteGate` (see its doc
+/// comment in `example_domain.dart`), so in a fresh copy of this example this
+/// function is the entire write policy — UI operators and the six domain
+/// write commands alike. The factory-safe shape is: reject with a code +
+/// notice a script can act on, and require the host to opt in by name —
+/// [factoryDefaultWriteGateDecision] is that reference implementation,
+/// unit-tested directly in `example_consumer_test.dart`.
 ///
 /// This example does **not** call it for `exampleWriteGate`, though — it
 /// allows that one gate outright. That is a deliberate, disclosed exception,
 /// not the recommended default: `tool/example_precheck.sh` drives
 /// `ui.tap`/`ui.gesture.*`/`navigation.go|push|back`/`ui.inspect.select`/
-/// `ui.keepAwake.set`/`ui.text.set|enter` on a real device and asserts they
-/// succeed (AGENTS.md "验证分两段", stage one), and that precheck's pass/fail
-/// contract must not change under this task (PB-050-22). Delete the
-/// `exampleWriteGate` special case below and every one of those write paths
-/// goes back to the factory default (closed) immediately.
+/// `ui.keepAwake.set`/`ui.text.set|enter` plus the domain write chain on a
+/// real device and asserts they succeed (AGENTS.md "验证分两段", stage one),
+/// and that precheck's pass/fail contract must not change under this task
+/// (PB-050-22). Delete the `exampleWriteGate` special case below and every one
+/// of those write paths goes back to the factory default (closed) immediately;
+/// `example_domain_gate_test.dart` drives exactly that closed state.
 FutureOr<PatchbayGateDecision> _exampleConsumerGate(String id) {
   if (id != exampleWriteGate) {
     return PatchbayGateDecision.reject(

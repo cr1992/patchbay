@@ -162,6 +162,11 @@ PatchbayCommandDescriptor(
 ```
 
 规则：
+- **写命令（`sideEffect` 非 `none`）必须声明门**：`gates` 自 0.5.0 起在 host 受理段强制求值，
+  不再只是目录展示。host 侧的门评估器经 `PatchbayServiceHost(domainGates: ...)` 注入；
+  `PatchbayFlutterServiceHost` 自动复用你交给 bridge 的同一个 evaluator。声明了门但 host 没有
+  evaluator 时，该命令会以 `consumerGateRejected`（`reason: gateEvaluatorUnavailable`）稳定拒绝——
+  上面示例里的 `my.domain.ready` 要能通过，接入方的声明门里必须真的有这个 gateId；
 - 长流程用 `job` 模式——受理即返回 `jobId`，别让 CLI 干等；
 - 敏感参数标 `sensitive: true`——值只能走 `--stdin`（不回显），强制由 host 完成，见下一节；
 - handler 复用你既有的 controller / 并发约束，**不要**为 CLI 另建一套状态机。

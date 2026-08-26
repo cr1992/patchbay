@@ -4,6 +4,7 @@ import 'dart:developer';
 import 'audit.dart';
 import 'command_registry.dart';
 import 'features.dart';
+import 'gates.dart';
 import 'host/host_catalog.dart';
 import 'host/host_invoker.dart';
 import 'host/host_models.dart';
@@ -20,6 +21,14 @@ export 'host/host_models.dart'
         PatchbayExtensionRegistrar;
 
 /// Generic VM Service extension host. It has no Flutter or consumer imports.
+///
+/// `domainGates` is the evaluator consumer-owned write commands cross before
+/// they reach `invoke`. A command is admitted through it when the registry does
+/// not serve it and its catalog row does not declare `sideEffect: none`; the
+/// row's `gates` are handed to the evaluator unchanged, so an empty set still
+/// runs the non-optional base gate. Leaving it null keeps gate-free commands
+/// exactly as they were, but a row that declares gates no evaluator can run is
+/// then refused rather than silently admitted.
 final class PatchbayServiceHost {
   factory PatchbayServiceHost({
     required String applicationId,
@@ -30,6 +39,7 @@ final class PatchbayServiceHost {
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayGateEvaluator? domainGates,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
   }) => PatchbayServiceHost._(
@@ -41,6 +51,7 @@ final class PatchbayServiceHost {
     appInstanceId: appInstanceId,
     registrar: registrar,
     features: features,
+    domainGates: domainGates,
     auditSink: auditSink,
     onAuditSinkError: onAuditSinkError,
   );
@@ -54,6 +65,7 @@ final class PatchbayServiceHost {
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayGateEvaluator? domainGates,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
   }) => PatchbayServiceHost._(
@@ -65,6 +77,7 @@ final class PatchbayServiceHost {
     appInstanceId: appInstanceId,
     registrar: registrar,
     features: features,
+    domainGates: domainGates,
     auditSink: auditSink,
     onAuditSinkError: onAuditSinkError,
   );
@@ -79,6 +92,7 @@ final class PatchbayServiceHost {
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayGateEvaluator? domainGates,
     this.auditSink,
     this.onAuditSinkError,
   }) : assert((catalogSource == null) != (catalogProvider == null)),
@@ -95,6 +109,7 @@ final class PatchbayServiceHost {
       invokeSource: invoke,
       registry: _registry,
       catalogHandler: _catalogHandler,
+      domainGates: domainGates,
       auditSink: auditSink,
       onAuditSinkError: onAuditSinkError,
     );

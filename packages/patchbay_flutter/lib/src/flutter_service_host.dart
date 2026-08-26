@@ -96,6 +96,8 @@ final class PatchbayFlutterServiceHost {
         catalogProvider: _FlutterCatalogProvider(provider, bridge),
         snapshot: effectiveSnapshot,
         invoke: effectiveInvoke,
+        // The bridge's evaluator, not a second one: see `bridge.gates`.
+        domainGates: bridge.gates,
         features: features,
       );
     }
@@ -112,6 +114,8 @@ final class PatchbayFlutterServiceHost {
       ),
       snapshot: effectiveSnapshot,
       invoke: effectiveInvoke,
+      // The bridge's evaluator, not a second one: see `bridge.gates`.
+      domainGates: bridge.gates,
       features: features,
     );
   }

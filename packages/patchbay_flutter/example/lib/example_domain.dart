@@ -6,6 +6,36 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'example_log_source.dart';
 
+/// The single write gate this example declares, on both planes.
+///
+/// `consumerGate` only ever receives a gate ID string (see
+/// `PatchbayConsumerGate` in `package:patchbay`); it cannot see a command's
+/// descriptor, its `sideEffect`, or which command is being invoked. So the
+/// read/write split this example demonstrates is not something the framework
+/// infers — it is entirely a choice about *which operations declare this gate
+/// ID at all*.
+///
+/// On the UI plane every call site in `main.dart` that attaches this ID does
+/// so because `packages/patchbay/lib/src/ui_protocol_commands.dart` (and
+/// `protocol_commands.dart` for navigation) classifies that operation with
+/// `sideEffect: PatchbaySideEffect.appState` or `.external`: `ui.semantics.
+/// action`/`.tap`, `ui.gesture.*`, `navigation.go`/`push`/`back`,
+/// `ui.inspect.select`, `ui.keepAwake.set`, and `ui.text.set`/`.enter`.
+/// `ui.capture`/`.capture.diff` deliberately do **not** use it: the same
+/// descriptors classify them `sideEffect: none` / `mode: readOnly`, same as
+/// `logs.*`/`blob.*`, so they only ever pass the base gate.
+///
+/// The same rule now applies to the domain descriptors below, and the host
+/// enforces it: a `sideEffect != none` row crosses its declared gates before
+/// `domainInvoke` is called at all. `patchbay.job.cancel` shares this gate
+/// with `example.job.run` on purpose — whoever may start a job may stop it,
+/// and a cancel gated more strictly than its run would strand a running job
+/// behind a closed gate.
+///
+/// See `_exampleConsumerGate` in `main.dart` for the actual default (reject)
+/// and the one explicit exception this example ships with.
+const String exampleWriteGate = 'example.uiWrite';
+
 /// Domain command names the example exposes.
 const String incrementCommand = 'example.counter.increment';
 const String deviceWriteCommand = 'example.device.write';
@@ -240,21 +270,15 @@ final class ExampleDomain {
   final Set<String> _appliedRequestIds = <String>{};
   int _touches = 0;
 
-  // None of these descriptors set `gates`. That field only feeds the
-  // published catalog (documentation) for a domain command — the dispatch
-  // path for `plane: domain` commands never reads it back out to run a
-  // `PatchbayGateEvaluator`, unlike registry-owned commands such as
-  // `ui.capture` or `blob.read`. So PB-050-22's default-write-gate demo in
-  // main.dart (`_exampleConsumerGate`/`factoryDefaultWriteGateDecision`)
-  // cannot reach `example.device.write`, `example.job.run`,
-  // `example.counter.increment` (this domain form), `example.idempotent.
-  // touch`, `example.permission.request`, or `example.job.cancel` — every one
-  // of them keeps executing unconditionally regardless of gate policy.
-  // Declaring `gates` here anyway would be misleading (declared but never
-  // enforced); actually enforcing it needs either a Proposal-level change to
-  // how `plane: domain` dispatch consults descriptor gates, or the
-  // `domainInvoke` adapter evaluating gates by hand per command. Neither is
-  // in scope for this task; treat it as a known limitation.
+  // 每条 `sideEffect != none` 的行都声明 `exampleWriteGate`，只读行一条都不声明。
+  // 这不再只是目录上的说明文字：host 在受理段读回这里的 `gates`，写命令必须先过
+  // 基础门与声明门才会进入 `invoke`。因此 `_exampleConsumerGate` 一旦回落到
+  // `factoryDefaultWriteGateDecision`，下面六条写命令会立即一起关上，而
+  // `example.permission.status` / `patchbay.job.get` / `patchbay.job.wait` 逐字节
+  // 不变——「只读默认开放、写入显式开放」在 domain 面有了落点。
+  //
+  // 反过来也成立：声明一个 `consumerGate` 没接线的门 = 拒绝，不是放行，所以迁移
+  // 途中的半成品状态是 fail-closed 的。
   List<PatchbayCommandDescriptor> get descriptors =>
       <PatchbayCommandDescriptor>[
         const PatchbayCommandDescriptor(
@@ -264,6 +288,7 @@ final class ExampleDomain {
           mode: PatchbayCommandMode.immediate,
           sideEffect: PatchbaySideEffect.external,
           factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+          gates: <String>{exampleWriteGate},
           responseSchema: _permissionRequestSchema,
           parameters: <PatchbayParameterDescriptor>[
             PatchbayParameterDescriptor(
@@ -296,6 +321,7 @@ final class ExampleDomain {
           mode: PatchbayCommandMode.immediate,
           sideEffect: PatchbaySideEffect.appState,
           factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+          gates: <String>{exampleWriteGate},
         ),
         const PatchbayCommandDescriptor(
           name: deviceWriteCommand,
@@ -309,6 +335,7 @@ final class ExampleDomain {
             PatchbayFactSource.commandEcho,
             PatchbayFactSource.deviceReported,
           },
+          gates: <String>{exampleWriteGate},
           unchangedEvidenceMaxAgeMs: 60000,
           confirmationBudgetMs: 5000,
           responseSchema: _writeSchema,
@@ -332,6 +359,7 @@ final class ExampleDomain {
           mode: PatchbayCommandMode.job,
           sideEffect: PatchbaySideEffect.appState,
           factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+          gates: <String>{exampleWriteGate},
           responseSchema: _jobSchema,
           parameters: <PatchbayParameterDescriptor>[
             PatchbayParameterDescriptor(
@@ -352,6 +380,7 @@ final class ExampleDomain {
           // 声明在 appState 上会让 App 内副作用被当成可安全重放。
           sideEffect: PatchbaySideEffect.external,
           factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+          gates: <String>{exampleWriteGate},
           retryPolicy: PatchbayRetryPolicy(maxAttempts: 3, backoffMs: 200),
         ),
         const PatchbayCommandDescriptor(
@@ -377,6 +406,8 @@ final class ExampleDomain {
           mode: PatchbayCommandMode.immediate,
           sideEffect: PatchbaySideEffect.appState,
           factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+          // 与 example.job.run 共用同一个门：拿得到启动权限就拿得到停止权限。
+          gates: <String>{exampleWriteGate},
         ),
       ];
 

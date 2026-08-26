@@ -1,6 +1,6 @@
 # 0.5.0 domain-plane 写命令的 gate 强制执行
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-25
 >
@@ -367,7 +367,7 @@ example 当前的 10 条 domain 命令（`example_domain.dart` 9 条 + `main.dar
 
 | 场景 | 期望答复 |
 |---|---|
-| 目录中不存在的命令（`undeclared()`） | 按写加闸；门关时门拒绝先于 `commandNotRegistered` 出现 |
+| 目录中不存在的命令（`undeclared()`） | 按写加闸；其 `declaredGates` 为空集，按裁决①只跑基础门——基础门拒绝时门拒绝先于 `commandNotRegistered`，基础门放行时照常落 adapter 的 `commandNotRegistered`（2026-08-25 按裁决①修订本行） |
 | 写命令 + 非法参数（如 `example.device.write` 的 `value: "x"`） | 门关时返回门拒绝，而不是 `invalidArguments` |
 | 写命令 + sensitive 参数未走 stdin | 仍先返回 `sensitiveInputRequiresStdin`（sensitive 早于门） |
 

@@ -6,6 +6,7 @@ import '../catalog_digest.dart';
 import '../command_descriptor.dart';
 import '../command_registry.dart';
 import '../execution_evidence.dart';
+import '../gates.dart';
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
 import '../response_schema.dart';
@@ -17,15 +18,24 @@ final class HostInvokerHandler {
     required PatchbayInvocationSource invokeSource,
     required PatchbayCommandRegistry registry,
     required HostCatalogHandler catalogHandler,
+    PatchbayGateEvaluator? domainGates,
     this.auditSink,
     this.onAuditSinkError,
   }) : _invoke = invokeSource,
        _registry = registry,
-       _catalogHandler = catalogHandler;
+       _catalogHandler = catalogHandler,
+       _domainGates = domainGates;
 
   final PatchbayInvocationSource _invoke;
   final PatchbayCommandRegistry _registry;
   final HostCatalogHandler _catalogHandler;
+
+  /// The evaluator consumer-owned write commands cross before dispatch.
+  ///
+  /// Registry-owned commands are not routed through it: they already evaluate
+  /// their own declared gates inside their registration or bridge handler, and
+  /// running the same IDs twice would turn one authorization into two.
+  final PatchbayGateEvaluator? _domainGates;
   final PatchbayAuditSink? auditSink;
   final PatchbayAuditSinkErrorHandler? onAuditSinkError;
 
@@ -105,6 +115,15 @@ final class HostInvokerHandler {
           ? arguments
           : withoutStdinProvenance(arguments);
     }
+    if (!_registry.handles(command) && policy.writesSideEffect) {
+      final Map<String, Object?>? refusal = await _admitDomainWrite(
+        command,
+        requestId,
+        policy,
+        onGateResult: onGateResult,
+      );
+      if (refusal != null) return refusal;
+    }
     final Map<String, Object?>? registered = await _registry.tryDispatch(
       command,
       forwarded,
@@ -180,6 +199,108 @@ final class HostInvokerHandler {
       'schemaMode': responseSchema == null ? 'legacyUnvalidated' : 'validated',
     }, executionValidation);
   }
+
+  /// The admission gate for consumer-owned write commands.
+  ///
+  /// It sits after the sensitive-stdin check and before routing, and returns
+  /// the rejection envelope to serve, or null to continue dispatching.
+  ///
+  /// The gate is an authorization judgement, so it runs before the external
+  /// requestId ledger is consulted: every admission crosses it, including a
+  /// retry of a request that was already served. It also runs before a ledger
+  /// slot is reserved, so a slow gate cannot starve unrelated commands into
+  /// `requestLedgerFull`.
+  Future<Map<String, Object?>?> _admitDomainWrite(
+    String command,
+    String requestId,
+    PatchbayCommandPolicy policy, {
+    required void Function(String result) onGateResult,
+  }) async {
+    final PatchbayGateEvaluator? gates = _domainGates;
+    if (gates == null) {
+      // No declaration, no evaluator, nothing to enforce: byte-for-byte what
+      // the host did before this gate existed.
+      if (policy.declaredGates.isEmpty) return null;
+      // A declared gate on a host that has no evaluator is an unsatisfiable
+      // contract — the gate can never pass. Saying so is the only answer that
+      // keeps "declared but never enforced" from existing at all.
+      onGateResult('rejected');
+      return _domainGateRejection(
+        command: command,
+        requestId: requestId,
+        code: 'consumerGateRejected',
+        gateId: (policy.declaredGates.toList()..sort()).first,
+        reason: 'gateEvaluatorUnavailable',
+      );
+    }
+    final PatchbayGateRejection? rejection = await gates.evaluate(
+      policy.declaredGates,
+    );
+    if (rejection != null) {
+      onGateResult('rejected');
+      return _domainGateRejection(
+        command: command,
+        requestId: requestId,
+        code: rejection.code,
+        gateId: rejection.gateId,
+        notice: rejection.notice,
+      );
+    }
+    onGateResult('passed');
+    // A consumer gate may await, and a versioned provider can advance its
+    // revision meanwhile. Re-read and compare the two facts the decision was
+    // taken from; on a revision cache hit this costs one synchronous getter.
+    final PatchbayCatalogValidity recheck = await _catalogHandler
+        .readInvocationCatalog();
+    if (recheck.violation case final Map<String, Object?> reason) {
+      return _invalidInvocationEnvelope(
+        requestId,
+        'catalogUnavailable',
+        <String, Object?>{'catalog': reason},
+      );
+    }
+    final PatchbayCommandPolicy current =
+        recheck.commandPolicies[command] ??
+        const PatchbayCommandPolicy.undeclared();
+    if (policy.sameGatePolicy(current)) return null;
+    // Drift is reported as-is and the caller re-sends. Re-evaluating against
+    // the new declaration would make one call an unbounded gate loop and leave
+    // the caller unable to say which declaration it finally passed.
+    return _invalidInvocationEnvelope(
+      requestId,
+      'catalogGateDrift',
+      <String, Object?>{'command': command},
+    );
+  }
+
+  /// A gate rejection in the shape the UI plane already uses.
+  ///
+  /// `priorRequestObserved` is the one extra fact: because the gate runs
+  /// before ledger replay, a caller retrying an already-served requestId can
+  /// receive a rejection for work that *did* happen. Without this flag it
+  /// could read the rejection as "nothing happened", pick a fresh requestId
+  /// and cause a second effect. The flag says only that this requestId was
+  /// admitted before — never what it did, or with which arguments.
+  Map<String, Object?> _domainGateRejection({
+    required String command,
+    required String requestId,
+    required String code,
+    required String gateId,
+    String? notice,
+    String? reason,
+  }) => PatchbayInvocation.rejected(
+    requestId: requestId,
+    rejection: PatchbayRejection(
+      code: code,
+      notice: notice,
+      details: <String, Object?>{
+        'gateId': gateId,
+        if (reason != null) 'reason': reason,
+        if (_externalInvocations.containsKey((command, requestId)))
+          'priorRequestObserved': true,
+      },
+    ),
+  ).toJson();
 
   Future<Map<String, Object?>> _dispatchExternal(
     String command,
