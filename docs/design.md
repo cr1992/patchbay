@@ -137,6 +137,45 @@ UTF-8 分别受 128、2,097,152 和 4 MiB 的固定安全天花板约束；共�
 完整失败分类、预算优先级与兼容矩阵见已接受的
 [Snapshot provider JSON 边界与冻结读视图](proposals/0.5.0/snapshot-provider-boundary.md)。
 
+### snapshot retention 同时受份数与字节约束
+
+只数 revision 份数能限制「能回溯多远」，不能限制「占多少内存」：一份大 snapshot 可以在 App instance
+存活期内一直钉住几十 MB。因此 retention 由三个 host 内预算共同决定——保留份数、单份 canonical UTF-8
+字节、累计 retained canonical UTF-8 字节，默认 32 份 / 1 MiB / 8 MiB（DG-050-01）。
+
+单份预算是**运行预算**，与 PB-050-01 的 4 MiB 契约天花板是两件事：运行预算由接入方在
+64 KiB..4 MiB 内配置，越界返回稳定 code `snapshotPayloadTooLarge`，details 只有
+`encodedBytesAtLeast` 与 `maxSnapshotBytes`；天花板不可配置，越界仍是 `providerProtocolViolation`
+的 `snapshotPayloadInvalid/payloadTooLarge`。两类失败都在提交前发生，既不改写 latest，也不改动
+retention。字节计量走同一次有界遍历的增量 sink，超限即中止，不先生成完整 canonical 再量长度；
+occurrence backstop 按常量关系 `maxExpandedOccurrences >= maxCanonicalBytes ~/ 2` 固定在字节预算
+之后，1..4 MiB 的合法 payload 只由字节预算分类。
+
+累计预算淘汰最老 revision，最新一份永不被自己的提交淘汰。因任一预算淘汰掉 baseline 后，diff 继续
+返回既有 `snapshotRevisionUnavailable`，details 增加 `retainedByteLimit` 说明原因。返回 metadata 在
+既有松读面追加 `retainedByteLimit` 与 `snapshotBytes`，不向严格解码的 request/wire 加字段。
+
+### 并发读共享一次采样，不共享预算
+
+同一时刻的并发 snapshot 读共享一次 provider sampling，以及随之而来的冻结、canonical 编码和 revision
+提交；selection、diff、wait deadline 与响应组装仍逐调用者独立，慢调用者不能延长别人的 timeout。
+single-flight 只覆盖进行中的采样：owner Future settle 即清除，失败对本批共享、下一次调用可重试，
+owner 放弃等待也不会把这一批挂死。
+
+### 可选的 consumer 上报 revision
+
+`PatchbaySnapshotSource` 保持不变并继续返回 `revisionSource: hostObserved`；新增互斥的
+`PatchbayVersionedSnapshotSource`，返回 `PatchbaySnapshotSample(contentRevision, body)`，有效采样返回
+`revisionSource: consumerReported`。source 形态在 host 构造期确定，同一 appInstance 不允许运行中切换。
+`contentRevision` 是**内容事实**：同值表示 body JSON 内容不变，此时 host 不读取也不保留新 body 引用，
+直接复用上次冻结视图；revision 前进即使 canonical 相同也递增 host `snapshotRevision`，忠实于 provider
+的提交节奏。负数或倒退返回 `providerProtocolViolation` 的 `revisionRegressed`。host 从不把 consumer
+数值当作 `snapshotRevision`，仍维护自己的连续序号。逐响应的 `revisionSource` 就是信任边界，不另加
+capability。
+
+完整预算表、失败分类与兼容矩阵见已接受的
+[Snapshot 双预算、single-flight 与可选 source revision](proposals/0.5.0/snapshot-resources-revisions.md)。
+
 ### job 的异步分支
 
 长流程命令受理即返回 `admission: accepted` + 顶层 `jobId`，controller 在 App 侧继续跑。

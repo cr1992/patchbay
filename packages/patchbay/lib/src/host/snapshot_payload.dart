@@ -13,9 +13,16 @@ final class PatchbaySnapshotPayloadLimits {
     required this.maxContainerDepth,
     required this.maxExpandedOccurrences,
     required this.maxCanonicalBytes,
+    int? maxRunCanonicalBytes,
   }) : assert(maxContainerDepth >= 0),
        assert(maxExpandedOccurrences > 0),
-       assert(maxCanonicalBytes > 0);
+       assert(maxCanonicalBytes > 0),
+       assert(maxRunCanonicalBytes == null || maxRunCanonicalBytes > 0),
+       assert(
+         maxRunCanonicalBytes == null ||
+             maxRunCanonicalBytes <= maxCanonicalBytes,
+       ),
+       _maxRunCanonicalBytes = maxRunCanonicalBytes;
 
   static const PatchbaySnapshotPayloadLimits production =
       PatchbaySnapshotPayloadLimits(
@@ -26,31 +33,67 @@ final class PatchbaySnapshotPayloadLimits {
 
   final int maxContainerDepth;
   final int maxExpandedOccurrences;
+
+  /// The safety ceiling from PB-050-01. Crossing it is a provider contract
+  /// failure, not a budget the host operator chose.
   final int maxCanonicalBytes;
+
+  final int? _maxRunCanonicalBytes;
+
+  /// The configured per-snapshot budget from PB-050-02, never above
+  /// [maxCanonicalBytes]. Crossing it while it is strictly smaller is a
+  /// resource rejection the caller can retry against a smaller snapshot.
+  int get maxRunCanonicalBytes => _maxRunCanonicalBytes ?? maxCanonicalBytes;
+
+  PatchbaySnapshotPayloadLimits withRunCanonicalBytes(int bytes) =>
+      PatchbaySnapshotPayloadLimits(
+        maxContainerDepth: maxContainerDepth,
+        maxExpandedOccurrences: maxExpandedOccurrences,
+        maxCanonicalBytes: maxCanonicalBytes,
+        maxRunCanonicalBytes: bytes < maxCanonicalBytes
+            ? bytes
+            : maxCanonicalBytes,
+      );
 }
 
 final class PatchbayFrozenSnapshotPayload {
   const PatchbayFrozenSnapshotPayload({
     required this.body,
     required this.canonical,
+    required this.canonicalBytes,
   });
 
   final Map<String, Object?> body;
   final String canonical;
+
+  /// UTF-8 length of [canonical], counted by the bounded sink that produced
+  /// it rather than re-encoded afterwards.
+  final int canonicalBytes;
 }
 
+/// Which budget a payload violation belongs to.
+///
+/// The two are not interchangeable: [contract] means the App handed the host
+/// something it may never accept, while [runBudget] means the snapshot was
+/// well formed but larger than the budget this host was configured with.
+enum PatchbaySnapshotPayloadViolationKind { contract, runBudget }
+
 final class PatchbaySnapshotPayloadViolation implements Exception {
-  PatchbaySnapshotPayloadViolation._(this._token, Map<String, Object?> details)
-    : details = Map<String, Object?>.unmodifiable(details);
+  PatchbaySnapshotPayloadViolation._(
+    this._token,
+    Map<String, Object?> details, {
+    this.kind = PatchbaySnapshotPayloadViolationKind.contract,
+  }) : details = Map<String, Object?>.unmodifiable(details);
 
   final Object _token;
   final Map<String, Object?> details;
+  final PatchbaySnapshotPayloadViolationKind kind;
 
   bool belongsTo(Object token) => identical(_token, token);
 }
 
 final class _SnapshotPayloadFault implements Exception {
-  const _SnapshotPayloadFault._(this.details);
+  const _SnapshotPayloadFault._(this.details, this.kind);
 
   factory _SnapshotPayloadFault.invalid({
     required String failure,
@@ -61,7 +104,7 @@ final class _SnapshotPayloadFault implements Exception {
     'failure': failure,
     'path': path,
     if (type != null) 'type': type,
-  });
+  }, PatchbaySnapshotPayloadViolationKind.contract);
 
   factory _SnapshotPayloadFault.tooLarge({
     required String path,
@@ -75,9 +118,22 @@ final class _SnapshotPayloadFault implements Exception {
     'limitKind': limitKind,
     'limit': limit,
     'observed': observed,
-  });
+  }, PatchbaySnapshotPayloadViolationKind.contract);
+
+  /// The configured per-snapshot budget was crossed.
+  ///
+  /// Only the two counters travel: a path or a canonical excerpt would leak
+  /// snapshot content into a resource answer.
+  factory _SnapshotPayloadFault.runBudget({
+    required int limit,
+    required int observed,
+  }) => _SnapshotPayloadFault._(<String, Object?>{
+    'encodedBytesAtLeast': observed,
+    'maxSnapshotBytes': limit,
+  }, PatchbaySnapshotPayloadViolationKind.runBudget);
 
   final Map<String, Object?> details;
+  final PatchbaySnapshotPayloadViolationKind kind;
 }
 
 final class PatchbaySnapshotPayloadFreezer {
@@ -105,14 +161,18 @@ final class PatchbaySnapshotPayloadFreezer {
         );
       }
       testStageHook?.call(PatchbaySnapshotPayloadStage.beforeCanonical);
+      final Uint8List canonical = _CanonicalJsonWriter(limits).encode(frozen);
       return PatchbayFrozenSnapshotPayload(
         body: frozen,
-        canonical: _CanonicalJsonWriter(
-          limits.maxCanonicalBytes,
-        ).encode(frozen),
+        canonical: utf8.decode(canonical),
+        canonicalBytes: canonical.length,
       );
     } on _SnapshotPayloadFault catch (error) {
-      throw PatchbaySnapshotPayloadViolation._(token, error.details);
+      throw PatchbaySnapshotPayloadViolation._(
+        token,
+        error.details,
+        kind: error.kind,
+      );
     } on Object catch (error) {
       throw PatchbaySnapshotPayloadViolation._(token, <String, Object?>{
         'reason': 'snapshotPayloadInvalid',
@@ -125,8 +185,7 @@ final class PatchbaySnapshotPayloadFreezer {
 }
 
 final class _SnapshotFreezingTraversal {
-  _SnapshotFreezingTraversal(this.limits)
-    : _bytes = _BoundedByteSink(maxBytes: limits.maxCanonicalBytes);
+  _SnapshotFreezingTraversal(this.limits) : _bytes = _BoundedByteSink(limits);
 
   final PatchbaySnapshotPayloadLimits limits;
   final _BoundedByteSink _bytes;
@@ -340,12 +399,12 @@ final class _ListFreezeFrame extends _FreezeFrame {
 }
 
 final class _CanonicalJsonWriter {
-  _CanonicalJsonWriter(int maxBytes)
-    : _sink = _BoundedByteSink(maxBytes: maxBytes, retainBytes: true);
+  _CanonicalJsonWriter(PatchbaySnapshotPayloadLimits limits)
+    : _sink = _BoundedByteSink(limits, retainBytes: true);
 
   final _BoundedByteSink _sink;
 
-  String encode(Object? root) {
+  Uint8List encode(Object? root) {
     final List<_CanonicalFrame> frames = <_CanonicalFrame>[];
     Object? pending = root;
     var pendingPath = _SnapshotPath.root;
@@ -367,7 +426,7 @@ final class _CanonicalJsonWriter {
       }
 
       while (!hasPending) {
-        if (frames.isEmpty) return utf8.decode(_sink.takeBytes());
+        if (frames.isEmpty) return _sink.takeBytes();
         final _CanonicalFrame frame = frames.last;
         final _CanonicalNext? next = frame.next(_sink);
         if (next != null) {
@@ -435,10 +494,10 @@ final class _CanonicalListFrame extends _CanonicalFrame {
 }
 
 final class _BoundedByteSink extends ByteConversionSinkBase {
-  _BoundedByteSink({required this.maxBytes, bool retainBytes = false})
+  _BoundedByteSink(this._limits, {bool retainBytes = false})
     : _builder = retainBytes ? BytesBuilder(copy: false) : null;
 
-  final int maxBytes;
+  final PatchbaySnapshotPayloadLimits _limits;
   final BytesBuilder? _builder;
   var _length = 0;
   String currentPath = r'$';
@@ -452,12 +511,23 @@ final class _BoundedByteSink extends ByteConversionSinkBase {
   @override
   void addSlice(List<int> chunk, int start, int end, bool isLast) {
     final int count = end - start;
-    if (_length + count > maxBytes) {
-      throw _SnapshotPayloadFault.tooLarge(
-        path: currentPath,
-        limitKind: 'canonicalBytes',
-        limit: maxBytes,
-        observed: maxBytes + 1,
+    final int projected = _length + count;
+    final int runBytes = _limits.maxRunCanonicalBytes;
+    if (projected > runBytes) {
+      // The smaller budget always decides, so the answer does not depend on
+      // how the encoder happened to chunk this write. The PB-050-01 ceiling
+      // only speaks when it *is* the effective budget.
+      if (runBytes >= _limits.maxCanonicalBytes) {
+        throw _SnapshotPayloadFault.tooLarge(
+          path: currentPath,
+          limitKind: 'canonicalBytes',
+          limit: _limits.maxCanonicalBytes,
+          observed: _limits.maxCanonicalBytes + 1,
+        );
+      }
+      throw _SnapshotPayloadFault.runBudget(
+        limit: runBytes,
+        observed: projected,
       );
     }
     _length += count;

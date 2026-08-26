@@ -11,13 +11,16 @@ import 'host/host_models.dart';
 import 'host/host_snapshot.dart';
 import 'host/host_vm_service.dart';
 import 'invocation_cancellation.dart';
+import 'snapshot.dart';
 
 export 'host/host_models.dart'
     show
         PatchbayCatalogProvider,
         PatchbayCatalogSample,
         PatchbayCatalogSource,
+        PatchbaySnapshotSample,
         PatchbaySnapshotSource,
+        PatchbayVersionedSnapshotSource,
         PatchbayInvocationSource,
         PatchbayContextInvocationSource,
         PatchbayExtensionRegistrar;
@@ -35,7 +38,10 @@ final class PatchbayServiceHost {
   factory PatchbayServiceHost({
     required String applicationId,
     required PatchbayCatalogSource catalog,
-    required PatchbaySnapshotSource snapshot,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayVersionedSnapshotSource? versionedSnapshot,
+    PatchbaySnapshotRetentionLimits snapshotRetention =
+        PatchbaySnapshotRetentionLimits.production,
     PatchbayInvocationSource? invoke,
     PatchbayContextInvocationSource? invokeWithContext,
     PatchbayCommandRegistry? registry,
@@ -53,6 +59,8 @@ final class PatchbayServiceHost {
     applicationId: applicationId,
     catalogSource: catalog,
     snapshot: snapshot,
+    versionedSnapshot: versionedSnapshot,
+    snapshotRetention: snapshotRetention,
     invoke: invoke,
     invokeWithContext: invokeWithContext,
     registry: registry,
@@ -71,7 +79,10 @@ final class PatchbayServiceHost {
   factory PatchbayServiceHost.withCatalogProvider({
     required String applicationId,
     required PatchbayCatalogProvider catalogProvider,
-    required PatchbaySnapshotSource snapshot,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayVersionedSnapshotSource? versionedSnapshot,
+    PatchbaySnapshotRetentionLimits snapshotRetention =
+        PatchbaySnapshotRetentionLimits.production,
     PatchbayInvocationSource? invoke,
     PatchbayContextInvocationSource? invokeWithContext,
     PatchbayCommandRegistry? registry,
@@ -89,6 +100,8 @@ final class PatchbayServiceHost {
     applicationId: applicationId,
     catalogProvider: catalogProvider,
     snapshot: snapshot,
+    versionedSnapshot: versionedSnapshot,
+    snapshotRetention: snapshotRetention,
     invoke: invoke,
     invokeWithContext: invokeWithContext,
     registry: registry,
@@ -108,7 +121,10 @@ final class PatchbayServiceHost {
     required this.applicationId,
     PatchbayCatalogSource? catalogSource,
     PatchbayCatalogProvider? catalogProvider,
-    required PatchbaySnapshotSource snapshot,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayVersionedSnapshotSource? versionedSnapshot,
+    PatchbaySnapshotRetentionLimits snapshotRetention =
+        PatchbaySnapshotRetentionLimits.production,
     PatchbayInvocationSource? invoke,
     PatchbayContextInvocationSource? invokeWithContext,
     PatchbayCommandRegistry? registry,
@@ -131,7 +147,11 @@ final class PatchbayServiceHost {
       catalogProvider: catalogProvider,
       registry: _registry,
     );
-    _snapshotHandler = HostSnapshotHandler(snapshotSource: snapshot);
+    _snapshotHandler = HostSnapshotHandler(
+      snapshotSource: snapshot,
+      versionedSnapshotSource: versionedSnapshot,
+      retention: snapshotRetention,
+    );
     _invokerHandler = HostInvokerHandler(
       invokeSource: invoke,
       invokeWithContext: invokeWithContext,

@@ -9,6 +9,16 @@ import '../snapshot.dart';
 
 typedef PatchbayCatalogSource = Future<Map<String, Object?>> Function();
 typedef PatchbaySnapshotSource = Future<Map<String, Object?>> Function();
+
+/// A snapshot source with an explicit, cheap content invalidation signal.
+///
+/// Additive by construction: [PatchbaySnapshotSource] keeps working unchanged
+/// and keeps reporting `revisionSource: hostObserved`. A host binds one form or
+/// the other when it is built; the two are not interchangeable at runtime,
+/// because a reader that saw `consumerReported` once must not have the meaning
+/// of the field change under it inside one App instance.
+typedef PatchbayVersionedSnapshotSource =
+    Future<PatchbaySnapshotSample> Function();
 typedef PatchbayInvocationSource =
     Future<Map<String, Object?>> Function(
       String command,
@@ -34,6 +44,30 @@ final class PatchbayCatalogSample {
 
   final int commandsRevision;
   final Map<String, Object?> catalog;
+}
+
+/// One snapshot observation bound to the content revision the App reports.
+///
+/// [contentRevision] is a **content** fact, not a host sequence number: equal
+/// values promise the body's JSON content is unchanged, and any content change
+/// must advance it. Advancing it while the content happens to be identical is
+/// allowed and is treated as a real commit — the App said it committed, and a
+/// caller watching commit cadence would be lied to if the host swallowed it.
+///
+/// The host never publishes this number as `snapshotRevision`; it keeps its own
+/// contiguous sequence and only labels the answer `revisionSource:
+/// consumerReported`. If an App mutates the body without advancing the
+/// revision, the host cannot detect it without redoing the canonical encoding
+/// the revision exists to avoid: that is a provider contract violation, and the
+/// stale answer it produces is the App's doing.
+final class PatchbaySnapshotSample {
+  const PatchbaySnapshotSample({
+    required this.contentRevision,
+    required this.body,
+  });
+
+  final int contentRevision;
+  final Map<String, Object?> body;
 }
 
 /// A catalog source with an explicit, cheap commands invalidation signal.
@@ -116,11 +150,16 @@ final class PatchbaySnapshotRevision {
   const PatchbaySnapshotRevision({
     required this.revision,
     required this.canonical,
+    required this.canonicalBytes,
     required this.body,
   });
 
   final int revision;
   final String canonical;
+
+  /// Canonical UTF-8 length, counted while encoding rather than re-derived,
+  /// so the retained-byte total never disagrees with what was admitted.
+  final int canonicalBytes;
   final Map<String, Object?> body;
 }
 
