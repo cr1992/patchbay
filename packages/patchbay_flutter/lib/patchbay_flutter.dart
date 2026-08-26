@@ -10,5 +10,6 @@ export 'src/inspect_bridge.dart';
 export 'src/keep_awake_bridge.dart';
 export 'src/lifecycle.dart';
 export 'src/navigation_bridge.dart';
+export 'src/reveal_bridge.dart';
 export 'src/semantics_bridge.dart';
 export 'src/ui_wait_bridge.dart';

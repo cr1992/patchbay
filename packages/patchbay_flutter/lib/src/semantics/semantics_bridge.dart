@@ -85,6 +85,14 @@ final class PatchbaySemanticsBridge {
 
   bool get actionsEnabled => _actionPolicy != null;
 
+  /// 本桥发布的语义树版本号的**同步**读数。
+  ///
+  /// 与 `snapshot` 的 `treeRevision`、`observeIdentifier` 的
+  /// [PatchbaySemanticsIdentifierObservation.treeRevision] 是同一个计数器，只是
+  /// 不请帧：PB-050-17 的 reveal 要在受理与终止两端各取一次，而终止那一端可能
+  /// 正好落在 deadline 上，不能再为读一个计数器多等一帧。
+  int get treeRevision => _treeRevision;
+
   /// Resolves a stable Semantics identifier without using labels or paths.
   Future<PatchbaySemanticsIdentifierObservation?> observeIdentifier(
     String identifier,

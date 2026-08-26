@@ -3,6 +3,7 @@ import 'package:patchbay/patchbay.dart';
 import 'flutter_bridge.dart';
 import 'inspect_bridge.dart';
 import 'keep_awake_bridge.dart';
+import 'reveal_bridge.dart';
 import 'semantics_bridge.dart';
 
 /// Registers the Flutter UI catalog and operators on the generic host.
@@ -336,6 +337,23 @@ final class PatchbayFlutterServiceHost {
         includeReason: true,
         available: bridge.gesture.enabled,
       ),
+      _uiRegistration<PatchbayRevealRequestWire>(
+        next(),
+        PatchbayRevealRequestWire.fromJson,
+        (request, requestId) async => (await bridge.reveal.reveal(
+          identifier: request.identifier,
+          container: request.container,
+          direction: request.direction == null
+              ? PatchbayRevealDirection.both
+              : PatchbayRevealDirection.fromWire(request.direction!),
+          maxSteps: request.maxSteps ?? 40,
+          timeoutMs: request.timeoutMs ?? 5000,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.reveal.enabled,
+      ),
       _uiRegistration<PatchbayUiWaitRequest>(
         next(),
         (arguments) => PatchbayUiWaitRequest.fromWire(
@@ -644,6 +662,7 @@ final class PatchbayFlutterServiceHost {
     patchbayUiGesturePressHoldCommandDescriptor,
     patchbayUiGestureDragCommandDescriptor,
     patchbayUiGestureFlingCommandDescriptor,
+    patchbayUiRevealCommandDescriptor,
     patchbayUiWaitCommandDescriptor,
     patchbayUiKeepAwakeSetCommandDescriptor.withRuntimeOverrides(
       gates: keepAwakeGates,

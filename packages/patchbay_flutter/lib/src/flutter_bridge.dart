@@ -15,6 +15,7 @@ import 'inspect_bridge.dart';
 import 'keep_awake_bridge.dart';
 import 'lifecycle.dart';
 import 'navigation_bridge.dart';
+import 'reveal_bridge.dart';
 import 'semantics_bridge.dart';
 import 'ui_wait_bridge.dart';
 
@@ -224,6 +225,7 @@ final class PatchbayFlutterBridge {
     PatchbayGesturePolicy? gesturePolicy,
     PatchbayPointerEventDispatcher? gesturePointerDispatcher,
     PatchbayGestureDelay? gestureDelay,
+    PatchbayRevealPolicy? revealPolicy,
     PatchbayNavigationAdapter? navigationAdapter,
     PatchbayInspectPolicy? inspectPolicy,
     PatchbayInspectorSurface? inspectorSurface,
@@ -267,6 +269,15 @@ final class PatchbayFlutterBridge {
       policy: gesturePolicy,
       pointerDispatcher: gesturePointerDispatcher,
       delay: gestureDelay,
+      isAppResumed: _isAppResumed,
+      lifecycleState: _lifecycleState,
+      newRequestId: newRequestId,
+    );
+    reveal = PatchbayRevealBridge(
+      gates: gates,
+      semantics: semantics,
+      frames: _frames,
+      policy: revealPolicy,
       isAppResumed: _isAppResumed,
       lifecycleState: _lifecycleState,
       newRequestId: newRequestId,
@@ -333,6 +344,12 @@ final class PatchbayFlutterBridge {
   final PatchbayFrameObserver _frames;
   late final PatchbaySemanticsBridge semantics;
   late final PatchbayGestureBridge gesture;
+
+  /// PB-050-17：identifier 锚定的 scroll-to-reveal。
+  ///
+  /// 总是构造，但 `enabled` 只有在接入方注入了 `revealPolicy` 时才为真——命令
+  /// 的注册按 `enabled`，所以没写下授权的 App 连 catalog 里都看不到它。
+  late final PatchbayRevealBridge reveal;
   late final PatchbayNavigationBridge? navigation;
   late final PatchbayUiWaitBridge wait;
   late final PatchbayCaptureBridge? capture;

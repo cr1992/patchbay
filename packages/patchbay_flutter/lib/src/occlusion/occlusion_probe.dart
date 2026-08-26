@@ -260,7 +260,28 @@ Matrix4 patchbayTransformToRoot(SemanticsNode node) {
   return result;
 }
 
-/// 固定采样遮挡复核：返回拒绝 `reason`，null 表示通过。
+/// 一次固定采样复核的完整结论：通过时保留是哪一态通过的。
+///
+/// semantics 的准入闸只需要「过 / 不过」（[reason]），PB-050-17 的 reveal 还要
+/// 把通过的两态分流成 `reachability`：`reachable` ⇒ 指针通道，
+/// `noPointerFootprint` ⇒ 语义通道。两者是同一次采样的两个投影，不是两套判定。
+final class PatchbaySampledOcclusion {
+  const PatchbaySampledOcclusion.passed(this.state) : reason = null;
+
+  const PatchbaySampledOcclusion.refused(String this.reason)
+    : state = PatchbayOcclusionState.obstructed;
+
+  /// 通过时是**最好**的那一态（reachable 优先于 noPointerFootprint）；
+  /// 被拒时恒为 [PatchbayOcclusionState.obstructed]。
+  final PatchbayOcclusionState state;
+
+  /// 拒绝原因，null 表示通过。
+  final String? reason;
+
+  bool get passed => reason == null;
+}
+
+/// 固定采样遮挡复核。
 ///
 /// 五点固定采样、**任一点通过即通过**，五点全被挡才拒绝。通过的两态是
 /// [PatchbayOcclusionState.reachable] 与
@@ -268,24 +289,51 @@ Matrix4 patchbayTransformToRoot(SemanticsNode node) {
 /// 包一个不参与命中测试的子树是合法写法，照搬 gesture 的布尔规则会把这些目标
 /// 全判成遮挡。
 ///
+/// 采样点之间取**最好**的一态：任一点 `reachable` 即整体 `reachable`。在
+/// `reason` 这个投影上这与「命中第一个非 obstructed 就返回」完全等价（两者都
+/// 是「存在非 obstructed」），差别只在 reveal 需要的那一档分流上。
+///
 /// 诚实边界：这是固定采样准入，不是可达性证明。目标只在采样点之外露出窄缝时
 /// 会被误拒（fail-closed，与本闸方向一致）；它也只证明调用瞬间目标未被 App 内
 /// 可观测的层覆盖，不承诺 App 外部系统窗口，那一面由 `systemUiUnexpected` 表达。
 ///
 /// 全程同步：不请帧、不遍历语义树、不新增 timer，最多 5 次 `hitTestInView`。
-/// PB-050-17 的 reveal 判据与这里同源，直接复用本函数即可。
-String? patchbaySampledOcclusionReason({
+PatchbaySampledOcclusion patchbaySampledOcclusion({
   required SemanticsOwner owner,
   required SemanticsNode node,
 }) {
   final PatchbayOcclusionResolution resolution =
       patchbayResolveOcclusionGeometry(owner: owner, node: node);
   final PatchbayOcclusionGeometry? geometry = resolution.geometry;
-  if (geometry == null) return resolution.reason;
+  if (geometry == null) {
+    return PatchbaySampledOcclusion.refused(resolution.reason!);
+  }
+  var best = PatchbayOcclusionState.obstructed;
   for (final PatchbayOcclusionProbe probe in patchbaySemanticsProbeSamples) {
-    if (geometry.probe(probe.x, probe.y) != PatchbayOcclusionState.obstructed) {
-      return null;
+    final PatchbayOcclusionState state = geometry.probe(probe.x, probe.y);
+    if (state == PatchbayOcclusionState.reachable) {
+      return const PatchbaySampledOcclusion.passed(
+        PatchbayOcclusionState.reachable,
+      );
+    }
+    if (state == PatchbayOcclusionState.noPointerFootprint) {
+      best = PatchbayOcclusionState.noPointerFootprint;
     }
   }
-  return PatchbayOcclusionReason.hitTestOrClip;
+  return best == PatchbayOcclusionState.obstructed
+      ? const PatchbaySampledOcclusion.refused(
+          PatchbayOcclusionReason.hitTestOrClip,
+        )
+      : const PatchbaySampledOcclusion.passed(
+          PatchbayOcclusionState.noPointerFootprint,
+        );
 }
+
+/// 固定采样遮挡复核的布尔投影：返回拒绝 `reason`，null 表示通过。
+///
+/// PB-050-16 的 semantics 准入闸只需要这一投影。判定本身在
+/// [patchbaySampledOcclusion]，两族共用同一份。
+String? patchbaySampledOcclusionReason({
+  required SemanticsOwner owner,
+  required SemanticsNode node,
+}) => patchbaySampledOcclusion(owner: owner, node: node).reason;
