@@ -310,6 +310,52 @@ void main() {
     });
   });
 
+  group('F6: --max-inline-bytes is validated before any RPC (one-shot)', () {
+    test('a non-numeric --max-inline-bytes fails as usage before the App '
+        'is ever invoked', () async {
+      final Map<String, Object?> payload = bigSemanticsTreePayload();
+      final FakePatchbayClient client = semanticsTreeClient(payload);
+      final result = await run(<String>[
+        '--json',
+        'ui',
+        'semantics',
+        'tree',
+        '--max-inline-bytes',
+        'not-a-number',
+      ], client);
+
+      expect(result.exitCode, PatchbayExitCode.usage);
+      expect(
+        result.err,
+        contains('--max-inline-bytes must be a non-negative integer'),
+      );
+      // The whole point: a malformed ceiling must never reach the wire, not
+      // even to be told about after the fact.
+      expect(client.calls, isEmpty);
+    });
+
+    test('a negative --max-inline-bytes fails as usage before the App is '
+        'ever invoked', () async {
+      final Map<String, Object?> payload = bigSemanticsTreePayload();
+      final FakePatchbayClient client = semanticsTreeClient(payload);
+      final result = await run(<String>[
+        '--json',
+        'ui',
+        'semantics',
+        'tree',
+        '--max-inline-bytes',
+        '-1',
+      ], client);
+
+      expect(result.exitCode, PatchbayExitCode.usage);
+      expect(
+        result.err,
+        contains('--max-inline-bytes must be a non-negative integer'),
+      );
+      expect(client.calls, isEmpty);
+    });
+  });
+
   group('PB-050-20: the spilled artifact joins the active trace', () {
     late Directory traceSandbox;
 

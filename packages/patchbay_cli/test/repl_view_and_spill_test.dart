@@ -11,6 +11,11 @@ final class _TreeClient implements PatchbayClient {
   final List<Map<String, Object?>> semanticsTreePayloads =
       <Map<String, Object?>>[];
 
+  /// Counts every `invoke` call, so a test that must prove a line's RPC
+  /// never went out (F6) has something firmer to assert than "the response
+  /// looks empty".
+  int invokeCount = 0;
+
   @override
   Future<Map<String, Object?>> identity() async => <String, Object?>{
     'schemaVersion': 1,
@@ -39,6 +44,7 @@ final class _TreeClient implements PatchbayClient {
     String? requestId,
     Duration? deadline,
   }) async {
+    invokeCount += 1;
     final Map<String, Object?> payload = semanticsTreePayloads.isEmpty
         ? const <String, Object?>{'outcome': 'observed', 'nodes': <Object?>[]}
         : semanticsTreePayloads.removeAt(0);
@@ -265,6 +271,33 @@ void main() {
     });
 
     test(
+      'F6: a malformed per-line --max-inline-bytes fails as usage before '
+      'that line ever reaches the App, and the next line still runs',
+      () async {
+        final _TreeClient client = _TreeClient();
+        final _Session session = await repl(
+          <String>[
+            '--max-inline-bytes not-a-number ui semantics tree',
+            'ui semantics tree',
+          ],
+          arguments: <String>['--json', 'repl'],
+          client: client,
+        );
+
+        expect(session.exitCode, PatchbayExitCode.accepted);
+        expect(session.envelopes[0]['exitCode'], PatchbayExitCode.usage);
+        expect(
+          session.envelopes[0]['error'],
+          contains('--max-inline-bytes must be a non-negative integer'),
+        );
+        expect(session.envelopes[1]['exitCode'], PatchbayExitCode.accepted);
+        // Exactly one RPC went out — the one from the second, well-formed
+        // line. The first line's bad ceiling never reached the App.
+        expect(client.invokeCount, 1);
+      },
+    );
+
+    test(
       'human (non-json) repl prints the existing artifact summary line',
       () async {
         final _TreeClient client = _TreeClient()
@@ -281,6 +314,73 @@ void main() {
           matches(
             RegExp(r'^\[1\] exit=0 artifact=.+ length=\d+ verified=true\n$'),
           ),
+        );
+      },
+    );
+
+    test(
+      'F5: a local artifact write failure fails only that line — the '
+      'session keeps consuming lines after it instead of splitting',
+      () async {
+        // A plain file occupying the exact path the writer would need to
+        // create as a directory forces `Directory(...).createSync(recursive:
+        // true)` to fail deterministically — this simulates a permission
+        // failure or a full disk without depending on either.
+        final Directory blockerParent = Directory.systemTemp.createTempSync(
+          'patchbay-repl-unwritable-',
+        );
+        addTearDown(() => blockerParent.deleteSync(recursive: true));
+        final File blocker = File('${blockerParent.path}/blocked');
+        blocker.createSync();
+
+        // Only the first line's payload is over the spill threshold. The
+        // second line falls back to `_TreeClient`'s tiny default payload
+        // (empty `nodes`) once the queue is drained — small enough that it
+        // never attempts to spill at all, so its success proves the
+        // connection (and the RPC round trip) still works rather than
+        // merely proving a second write against the same broken directory
+        // happened to fail identically.
+        final _TreeClient client = _TreeClient()
+          ..semanticsTreePayloads.add(_bigTreePayload());
+        final StringBuffer out = StringBuffer();
+        final StringBuffer err = StringBuffer();
+        final int exitCode = await runPatchbayCli(
+          <String>['--json', 'repl'],
+          connect: (_) async => client,
+          replInput: Stream<String>.fromIterable(<String>[
+            'ui semantics tree',
+            'ui semantics tree',
+          ]),
+          output: out,
+          errorOutput: err,
+          environment: <String, String>{'PATCHBAY_OUTPUT_DIR': blocker.path},
+        );
+
+        final _Session session = _Session(
+          exitCode,
+          out.toString(),
+          err.toString(),
+        );
+        expect(session.exitCode, PatchbayExitCode.accepted);
+        expect(session.lines, hasLength(2));
+
+        final Map<String, Object?> failedLine = session.envelopes[0];
+        expect(failedLine['exitCode'], PatchbayExitCode.protocol);
+        expect(failedLine['error'], <String, Object?>{
+          'code': 'localArtifactWriteFailed',
+          'details': <String, Object?>{},
+        });
+
+        // The next line runs normally over the same connection: a disk
+        // failure says nothing about whether the connection is still good.
+        final Map<String, Object?> nextLine = session.envelopes[1];
+        expect(nextLine['exitCode'], PatchbayExitCode.accepted);
+        final Map<String, Object?> nextResponse =
+            nextLine['response']! as Map<String, Object?>;
+        expect(nextResponse.containsKey('localArtifact'), isFalse);
+        expect(
+          (nextResponse['payload']! as Map<String, Object?>)['nodes'],
+          isEmpty,
         );
       },
     );

@@ -401,10 +401,25 @@ abstract final class ArgumentDecoder {
     return build(tail);
   }
 
+  /// Reads `--$name` as a non-negative integer, or `null` when the option
+  /// was not passed.
+  ///
+  /// Every caller reaches this through an `options.option(name)` lookup, so
+  /// [name] is always a `--`-flag spelling here — unlike [parseNonNegative],
+  /// which a few call sites also use directly on a *positional* argument
+  /// name (`nodeId`, `generation`) where a `--` prefix would be wrong. This
+  /// method therefore builds its own message with the prefix rather than
+  /// delegating to [parseNonNegative], so it stays aligned with the sibling
+  /// `--$name must be positive` messages [positiveInt] and
+  /// [optionalPositiveInt] already produce for the same option.
   static int? optionalInt(ArgResults options, String name) {
     final String? value = options.option(name);
     if (value == null) return null;
-    return parseNonNegative(value, name);
+    final int? parsed = int.tryParse(value);
+    if (parsed == null || parsed < 0) {
+      throw FormatException('--$name must be a non-negative integer');
+    }
+    return parsed;
   }
 
   static int positiveInt(
