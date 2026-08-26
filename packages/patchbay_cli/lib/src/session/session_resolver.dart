@@ -4,6 +4,8 @@ import '../client.dart';
 import '../platform/process_utils.dart';
 import 'session_models.dart';
 import 'session_store.dart';
+import 'workspace_identity.dart';
+import 'workspace_selection.dart';
 
 final class PatchbaySessionResolver {
   PatchbaySessionResolver({
@@ -12,33 +14,82 @@ final class PatchbaySessionResolver {
     PatchbayPidProbe? pidProbe,
     String? Function(int processId)? processStartTimeProbe,
     PatchbaySessionClock? clock,
+    PatchbayWorkspaceIdentityProbe? workspaceProbe,
+    PatchbayWorkspaceIdentityAt? workspaceIdentityAt,
   }) : store = store ?? PatchbaySessionStore(),
        _identityProbe = identityProbe ?? _probeIdentity,
        _pidProbe = pidProbe ?? _isProcessAlive,
        _processStartTimeProbe = processStartTimeProbe ?? _probeProcessStartTime,
-       _clock = clock ?? DateTime.now;
+       _clock = clock ?? DateTime.now,
+       _workspaceProbe = workspaceProbe ?? PatchbayWorkspaceIdentity.current,
+       _workspaceIdentityAt =
+           workspaceIdentityAt ?? PatchbayWorkspaceIdentity.at;
 
   final PatchbaySessionStore store;
   final PatchbayIdentityProbe _identityProbe;
   final PatchbayPidProbe _pidProbe;
   final String? Function(int processId) _processStartTimeProbe;
   final PatchbaySessionClock _clock;
+  final PatchbayWorkspaceIdentityProbe _workspaceProbe;
+  final PatchbayWorkspaceIdentityAt _workspaceIdentityAt;
 
-  /// The pinned session id, or `null` when nothing is pinned.
-  String? get selection => store.readSelection();
+  PatchbayWorkspaceIdentity? _workspace;
+  bool _workspaceProbed = false;
+  bool _legacyPinMigrated = false;
+
+  /// The workspace this resolver speaks for, computed at most once.
+  ///
+  /// One probe per command: the Git call behind it is cheap but it is still a
+  /// subprocess, and re-deriving it mid-command would also let a command that
+  /// changes directory change which sessions it may see.
+  PatchbayWorkspaceIdentity? get workspace {
+    if (!_workspaceProbed) {
+      _workspaceProbed = true;
+      _workspace = _workspaceProbe();
+    }
+    return _workspace;
+  }
+
+  /// The scoped pin that applies here, or `null` when nothing is pinned.
+  ///
+  /// Never another workspace's pin, and never the retired global one.
+  String? get selection {
+    final PatchbayWorkspaceIdentity? identity = workspace;
+    if (identity == null) return null;
+    _migrateLegacyPinOnce(identity);
+    return store.readSelectionFor(identity);
+  }
+
+  /// The whole directory, classified once for this workspace.
+  ///
+  /// This is the shared kernel input every surface uses -- resolver, local
+  /// session commands, doctor and trace -- so none of them re-derives
+  /// "who counts as ours" on its own.
+  PatchbayWorkspaceScope scope() => PatchbayWorkspaceSelectionKernel.scope(
+    records: store.readAll(),
+    identity: workspace,
+    scopedSelection: selection,
+    identityAt: _workspaceIdentityAt,
+  );
 
   /// Every record, with the local judgement of what state it is in.
   List<PatchbaySessionListing> inventory() {
-    final String? selected = store.readSelection();
+    final PatchbayWorkspaceScope scope = this.scope();
+    final String? selected = scope.scopedSelection;
     final List<PatchbaySessionListing> listings = <PatchbaySessionListing>[];
-    for (final PatchbaySessionRecord record in store.readAll()) {
+    for (final PatchbayWorkspaceCandidate candidate in scope.candidates) {
+      final PatchbaySessionRecord record = candidate.record;
       final _ProcessIdentityCheck check = _checkProcessIdentity(record);
       listings.add(
         PatchbaySessionListing(
           record: record,
           status: _statusFor(record, check),
-          selected: record.sessionId == selected,
+          // A pin only marks the record it names *in this workspace*: a
+          // foreign record with the same id is still not what a command here
+          // would use.
+          selected: record.sessionId == selected && candidate.isCurrent,
           identityUnverified: check.identityUnverified,
+          workspaceAffinity: candidate.affinity,
         ),
       );
     }
@@ -47,15 +98,17 @@ final class PatchbaySessionResolver {
 
   /// Removes records whose process is gone, without dialling anything.
   PatchbaySessionPruneResult prune() {
+    final String? pinnedHere = selection;
     final List<String> removed = <String>[];
     for (final PatchbaySessionListing listing in inventory()) {
       if (listing.status != PatchbaySessionStatus.stale) continue;
       store.remove(listing.record.sessionId);
       removed.add(listing.record.sessionId);
     }
-    final String? selected = store.readSelection();
-    final bool cleared = selected != null && removed.contains(selected);
-    if (cleared) store.clearSelection();
+    // Pins are cleaned by record existence, machine-wide: a checkout whose
+    // App died does not have to run `prune` itself to stop pointing at it.
+    store.pruneScopedSelections();
+    final bool cleared = pinnedHere != null && removed.contains(pinnedHere);
     return PatchbaySessionPruneResult(
       removed: removed,
       remaining: inventory(),
@@ -65,19 +118,13 @@ final class PatchbaySessionResolver {
 
   /// Pins [sessionId] for later commands that pass no `--session`.
   PatchbaySessionListing select(String sessionId) {
-    final List<PatchbaySessionRecord> all = store.readAll();
-    final PatchbaySessionRecord? record = all
-        .where((PatchbaySessionRecord record) => record.sessionId == sessionId)
-        .firstOrNull;
-    if (record == null) {
-      throw PatchbaySessionException(
-        'sessionNotFound',
-        choices: <String>[
-          for (final PatchbaySessionRecord candidate in all)
-            candidate.choiceLabel,
-        ],
-      );
+    final PatchbayWorkspaceScope scope = this.scope();
+    final PatchbayWorkspaceSelectionPlan plan =
+        PatchbayWorkspaceSelectionKernel.pin(scope, sessionId);
+    if (plan.refusal case final PatchbaySessionException refusal) {
+      throw refusal;
     }
+    final PatchbaySessionRecord record = plan.records.single;
     final _ProcessIdentityCheck check = _checkProcessIdentity(record);
     final PatchbaySessionStatus status = _statusFor(record, check);
     if (status == PatchbaySessionStatus.stale) {
@@ -89,16 +136,51 @@ final class PatchbaySessionResolver {
             '`patchbay sessions list` and select from what is left',
       );
     }
-    store.writeSelection(sessionId);
+    store.writeSelectionFor(scope.identity!, sessionId);
     return PatchbaySessionListing(
       record: record,
       status: status,
       selected: true,
       identityUnverified: check.identityUnverified,
+      workspaceAffinity: PatchbayWorkspaceAffinity.current,
     );
   }
 
-  void clearSelection() => store.clearSelection();
+  void clearSelection() {
+    final PatchbayWorkspaceIdentity? identity = workspace;
+    if (identity == null) return;
+    store.clearSelectionFor(identity);
+  }
+
+  /// Retires the pre-PB-050-14 global pin, once per process.
+  ///
+  /// Conservative on purpose: the old file only becomes this workspace's
+  /// scoped pin when the record it names can be *proven* to live here.
+  /// Everything else -- foreign, missing, or an unprovable legacy path --
+  /// simply loses the pin. That costs one `session use`; the alternative
+  /// costs a write command sent to another checkout's device.
+  void _migrateLegacyPinOnce(PatchbayWorkspaceIdentity identity) {
+    if (_legacyPinMigrated) return;
+    _legacyPinMigrated = true;
+    store.migrateLegacyGlobalSelection(
+      identity,
+      adoptable: (String sessionId) {
+        final PatchbaySessionRecord? record = store
+            .readAll()
+            .where(
+              (PatchbaySessionRecord record) => record.sessionId == sessionId,
+            )
+            .firstOrNull;
+        if (record == null) return false;
+        return PatchbayWorkspaceSelectionKernel.classify(
+              record,
+              identity,
+              identityAt: _workspaceIdentityAt,
+            ) ==
+            PatchbayWorkspaceAffinity.current;
+      },
+    );
+  }
 
   PatchbaySessionStatus statusOf(PatchbaySessionRecord record) =>
       _statusFor(record, _checkProcessIdentity(record));
@@ -156,29 +238,43 @@ final class PatchbaySessionResolver {
     );
   }
 
-  /// Selects one session: explicit id first, then the pin, then uniqueness.
+  /// Selects one session.
+  ///
+  /// Two shapes, and only two. An explicit [sessionId] is the single sanctioned
+  /// way to reach across checkouts: it matches on the global inventory, still
+  /// completes every liveness and runtime-identity check, and writes no pin.
+  /// Everything else goes through the workspace kernel, which will refuse
+  /// before it will guess.
   Future<PatchbayDiscoveredSession> resolve({String? sessionId}) async {
-    final all = store.readAll();
-    if (all.isEmpty) {
-      throw const PatchbaySessionException(
-        'sessionDirectoryEmpty',
-        hint:
-            'start the App under `patchbay launch -- <consumer command>` '
-            'or connect explicitly with `--ws-uri <uri>`',
-      );
-    }
-    final String? pinned = sessionId == null ? store.readSelection() : null;
-    final String? wanted = sessionId ?? pinned;
-    final candidates = wanted == null
-        ? all
-        : all.where((record) => record.sessionId == wanted).toList();
-    if (candidates.isEmpty) {
-      throw pinned == null
-          ? const PatchbaySessionException('sessionNotFound')
-          : const PatchbaySessionException(
-              'sessionSelectionStale',
-              hint: patchbaySessionSelectionStaleHint,
-            );
+    final List<PatchbaySessionRecord> candidates;
+    final bool pinned;
+    if (sessionId != null) {
+      final List<PatchbaySessionRecord> all = store.readAll();
+      if (all.isEmpty) {
+        throw const PatchbaySessionException(
+          'sessionDirectoryEmpty',
+          hint:
+              'start the App under `patchbay launch -- <consumer command>` '
+              'or connect explicitly with `--ws-uri <uri>`',
+        );
+      }
+      candidates = all
+          .where(
+            (PatchbaySessionRecord record) => record.sessionId == sessionId,
+          )
+          .toList();
+      if (candidates.isEmpty) {
+        throw const PatchbaySessionException('sessionNotFound');
+      }
+      pinned = false;
+    } else {
+      final PatchbayWorkspaceSelectionPlan plan =
+          PatchbayWorkspaceSelectionKernel.implicit(scope());
+      if (plan.refusal case final PatchbaySessionException refusal) {
+        throw refusal;
+      }
+      candidates = plan.records;
+      pinned = plan.fromScopedPin;
     }
 
     final valid = <PatchbayDiscoveredSession>[];
@@ -229,7 +325,7 @@ final class PatchbaySessionResolver {
               identity.isolateId != record.isolateId)) {
         lastStaleCode = 'sessionRuntimeRestarted';
       }
-      final completed = record.completedWith(identity);
+      final completed = _upgradedWorkspace(record.completedWith(identity));
       store.write(completed);
       valid.add(
         PatchbayDiscoveredSession(record: completed, identity: identity),
@@ -252,8 +348,29 @@ final class PatchbaySessionResolver {
     }
     throw PatchbaySessionException(
       lastStaleCode ?? 'sessionNotFound',
-      hint: pinned == null ? null : patchbaySessionSelectionStaleHint,
+      hint: pinned ? patchbaySessionSelectionStaleHint : null,
     );
+  }
+
+  /// Backfills the workspace triple onto a legacy record that just proved,
+  /// through a completed handshake, that it belongs here.
+  ///
+  /// Only ever an upgrade, never a re-assignment: a record that already names
+  /// a workspace keeps it, and one whose membership is unproven is left
+  /// exactly as it was for an explicit `--session` to reach.
+  PatchbaySessionRecord _upgradedWorkspace(PatchbaySessionRecord record) {
+    if (record.hasWorkspaceIdentity) return record;
+    final PatchbayWorkspaceIdentity? identity = workspace;
+    if (identity == null) return record;
+    if (PatchbayWorkspaceSelectionKernel.classify(
+          record,
+          identity,
+          identityAt: _workspaceIdentityAt,
+        ) !=
+        PatchbayWorkspaceAffinity.current) {
+      return record;
+    }
+    return record.withWorkspace(identity);
   }
 
   static Future<PatchbayRuntimeIdentity> _probeIdentity(Uri uri) async {

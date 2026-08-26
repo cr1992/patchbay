@@ -545,7 +545,8 @@ Future<int> _runPatchbayCliWithTrace(
       spec.path.join(' '),
       transport: _traceTransport(parsed),
     );
-    if (_traceSessionRef(parsed) case final Map<String, Object?> sessionRef) {
+    if (patchbayTraceSessionRef(parsed)
+        case final Map<String, Object?> sessionRef) {
       recorder.sessionObserved(sessionRef);
     }
     final int exitCode = await runZoned(
@@ -705,41 +706,6 @@ bool _confirmLegacyPayload(ArgResults parsed) =>
 String _traceTransport(ArgResults parsed) {
   if (parsed.option('direct-endpoint') != null) return 'direct';
   return 'vmService';
-}
-
-Map<String, Object?>? _traceSessionRef(ArgResults parsed) {
-  if (parsed.option('direct-endpoint') != null) {
-    return <String, Object?>{
-      'mode': 'direct',
-      'applicationId': parsed.option('direct-application-id'),
-      'appInstanceId': parsed.option('direct-app-instance-id'),
-    };
-  }
-  if (parsed.option('session') case final String sessionId) {
-    return <String, Object?>{'mode': 'launcher', 'sessionId': sessionId};
-  }
-  if (parsed.option('ws-uri') != null) {
-    return const <String, Object?>{'mode': 'explicitVmService'};
-  }
-  final PatchbaySessionStore sessions = PatchbaySessionStore(
-    parsed.option('session-dir'),
-  );
-  final List<PatchbaySessionRecord> records = sessions.readAll();
-  final String? selected = sessions.readSelection();
-  PatchbaySessionRecord? record;
-  for (final PatchbaySessionRecord candidate in records) {
-    if (candidate.sessionId == selected) record = candidate;
-  }
-  record ??= records.length == 1 ? records.single : null;
-  if (record == null) return null;
-  return <String, Object?>{
-    'mode': 'launcher',
-    'sessionId': record.sessionId,
-    'applicationId': record.applicationId,
-    'appInstanceId': record.appInstanceId,
-    'deviceId': record.deviceId,
-    'buildMode': record.buildMode,
-  };
 }
 
 ArgResults? _tryParseForTrace(List<String> arguments) {

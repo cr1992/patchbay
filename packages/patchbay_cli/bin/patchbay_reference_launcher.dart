@@ -96,6 +96,10 @@ Future<int> main(List<String> arguments) async {
   // 先声明一条 pending 记录，再去等 URI。顺序不能颠倒：`patchbay launch` 有自己的
   // 声明窗口，等 App 起来再声明会让它在子进程还在构建时就判 `sessionNotDeclared` 失败。
   // 显式 pending 状态就是为这段"还没有传输"的时间存在的——不用空 URI 去暗示启动中。
+  // workspace 归属由 `patchbay launch` 在启动本进程前算好，经 launch context 注入；
+  // 本程序不自己推断，也不用 `--project` 覆盖它——子进程改 cwd 不该改变会话归属。
+  // 老 launcher（不注入 workspace）下 context.workspace 为 null，这里照旧写 legacy
+  // 记录，不伪造身份。
   final PatchbaySessionRecord pending = PatchbaySessionRecord(
     sessionId: sessionId,
     applicationId: applicationId,
@@ -107,7 +111,7 @@ Future<int> main(List<String> arguments) async {
     wsUri: null,
     buildMode: buildMode,
     createdAt: DateTime.now().toUtc(),
-    workspacePath: project.path,
+    workspacePath: context.workspace?.canonicalRoot ?? project.path,
     deviceId: device,
     state: PatchbaySessionStatus.pending,
     ownerPid: context.ownerPid,
@@ -115,6 +119,11 @@ Future<int> main(List<String> arguments) async {
     observedAtMs: DateTime.now().millisecondsSinceEpoch,
     // 启动身份在记录创建时采集一次；采集不到保持 null（老记录语义，纯 PID 判定）。
     processStartTime: PlatformProcessUtils.processStartTimeSignature(app.pid),
+    workspaceIdentityVersion: context.workspace == null
+        ? null
+        : patchbayWorkspaceIdentityVersion,
+    workspaceKind: context.workspace?.kind,
+    workspaceId: context.workspace?.workspaceId,
   );
   store.write(pending);
   declared = true;

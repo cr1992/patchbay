@@ -240,11 +240,17 @@ const Set<String> _frozenStableCodes = <String>{
   'sessionRecordInvalid',
   'sessionRuntimeRestarted',
   'sessionSchemaMismatch',
+  // PB-050-14：workspace 亲和性的四个新码。前三个是"当前 checkout 归属"三种
+  // 判不出/判否的形态，最后一个是 scoped pin 的资源上限；本稿之外不再新增。
+  'sessionSelectionCapacityExceeded',
   'sessionSelectionInvalid',
   'sessionSelectionStale',
   'sessionStaleProcess',
   'sessionStaleTransport',
   'sessionUnreachable',
+  'sessionWorkspaceEmpty',
+  'sessionWorkspaceMismatch',
+  'sessionWorkspaceUnavailable',
   'snapshotDiffClientUnavailable',
   'snapshotDiffLimitExceeded',
   'snapshotRevisionUnavailable',

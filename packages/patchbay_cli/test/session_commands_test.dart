@@ -62,9 +62,7 @@ void main() {
 
   test('a listing shows the records and masks the token', () async {
     store.write(_record('worktree-a', deviceId: 'emulator-5554'));
-    store.write(
-      _record('worktree-b', deviceId: 'ios-device', workspacePath: '/repo/b'),
-    );
+    store.write(_record('worktree-b', deviceId: 'ios-device'));
 
     final _Run text = await run(<String>['sessions', 'list']);
     final _Run json = await run(<String>['--json', 'sessions', 'list']);
@@ -84,9 +82,41 @@ void main() {
     expect((json.document['sessions']! as List<Object?>).length, 2);
   });
 
+  test('a foreign record is listed but never offered as a choice', () async {
+    store.write(_record('worktree-a'));
+    store.write(
+      _record('elsewhere', deviceId: 'ios-device').withWorkspace(_elsewhere),
+    );
+
+    final _Run text = await run(<String>['sessions', 'list']);
+    final _Run json = await run(<String>['--json', 'sessions', 'list']);
+
+    // The inventory stays machine-wide -- that is what makes an explicit
+    // cross-checkout --session usable -- but only one of these is selectable
+    // here, so the "pin one of them" hint must not appear.
+    expect(text.out, contains('elsewhere'));
+    expect(text.out, isNot(contains('session use')));
+    expect(text.out, contains('affinity=current'));
+    expect(text.out, contains('affinity=foreign'));
+    expect(json.document['selected'], isNull);
+
+    // And pinning it is refused with the code that names the way across.
+    final _Run pinned = await run(<String>[
+      '--json',
+      'session',
+      'use',
+      'elsewhere',
+    ]);
+    expect(
+      (pinned.document['error']! as Map<String, Object?>)['code'],
+      'sessionWorkspaceMismatch',
+    );
+    expect(store.readSelectionFor(_workspace), isNull);
+  });
+
   test('use pins a session and the listing marks it', () async {
     store.write(_record('worktree-a'));
-    store.write(_record('worktree-b', workspacePath: '/repo/b'));
+    store.write(_record('worktree-b'));
 
     final _Run pinned = await run(<String>['session', 'use', 'worktree-b']);
     expect(pinned.exitCode, PatchbayExitCode.accepted);
@@ -108,7 +138,7 @@ void main() {
     final _Run cleared = await run(<String>['session', 'use', '--clear']);
     expect(cleared.exitCode, PatchbayExitCode.accepted);
     expect(cleared.out, contains('worktree-a'));
-    expect(store.readSelection(), isNull);
+    expect(store.readSelectionFor(_workspace), isNull);
 
     final _Run again = await run(<String>['session', 'use', '--clear']);
     expect(again.out.trim(), 'no session was pinned');
@@ -130,12 +160,12 @@ void main() {
       'sessionNotFound',
     );
     expect(result.err, contains('sessionNotFound'));
-    expect(store.readSelection(), isNull);
+    expect(store.readSelectionFor(_workspace), isNull);
   });
 
   test('prune reports what it removed', () async {
     store.write(_record('alive', processId: pid));
-    store.write(_record('dead', processId: 4243, workspacePath: '/repo/b'));
+    store.write(_record('dead', processId: 4243));
 
     final _Run result = await run(<String>['--json', 'sessions', 'prune']);
 
@@ -169,7 +199,7 @@ void main() {
       final _Run result = await run(arguments);
       expect(result.exitCode, PatchbayExitCode.usage, reason: '$arguments');
     }
-    expect(store.readSelection(), isNull);
+    expect(store.readSelectionFor(_workspace), isNull);
   });
 
   test('--clear belongs to session use alone', () {
@@ -223,10 +253,23 @@ void main() {
   });
 }
 
+/// The checkout this test process is actually running in.
+///
+/// These tests drive the real CLI, so the records have to belong to the
+/// workspace the CLI's own identity probe will report -- that *is* the
+/// contract under test on the `sessions`/`session use` side.
+final PatchbayWorkspaceIdentity _workspace =
+    PatchbayWorkspaceIdentity.current()!;
+
+/// Some other checkout on the same machine.
+final PatchbayWorkspaceIdentity _elsewhere = PatchbayWorkspaceIdentity.of(
+  kind: PatchbayWorkspaceKind.gitWorktree,
+  canonicalRoot: '${_workspace.canonicalRoot}-elsewhere',
+)!;
+
 PatchbaySessionRecord _record(
   String id, {
   int? processId,
-  String workspacePath = '/repo/a',
   String deviceId = 'device-1',
 }) => PatchbaySessionRecord(
   sessionId: id,
@@ -238,6 +281,6 @@ PatchbaySessionRecord _record(
   wsUri: 'ws://127.0.0.1:1234/$_token=/ws',
   buildMode: 'debug',
   createdAt: DateTime.utc(2026, 8, 14),
-  workspacePath: workspacePath,
+  workspacePath: _workspace.canonicalRoot,
   deviceId: deviceId,
-);
+).withWorkspace(_workspace);

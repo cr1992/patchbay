@@ -67,6 +67,10 @@ void main() {
     store: store,
     budget: budget,
     clock: () => now,
+    // PB-050-14: the launcher computes the workspace once, before the child
+    // starts, and injects it. Pinned here so the fixture does not depend on
+    // where the test process happens to be checked out.
+    workspaceProbe: () => _workspace,
     random: () => 0,
     sleep: sleep,
     deadlineFactory: deadlineFactory,
@@ -687,9 +691,19 @@ PatchbaySessionRecord _pending(PatchbayLaunchContext context, DateTime at) =>
       processId: context.ownerPid + 1000,
       buildMode: 'debug',
       createdAt: at,
-      workspacePath: '/workspace/test',
+      // A workspace-bearing context is the authority and a child reporting a
+      // different path would now be refused; a context without one (an older
+      // launcher) still has to be told where it ran.
+      workspacePath: context.workspace == null
+          ? _workspace.canonicalRoot
+          : null,
       deviceId: 'device-1',
     );
+
+final PatchbayWorkspaceIdentity _workspace = PatchbayWorkspaceIdentity.of(
+  kind: PatchbayWorkspaceKind.gitWorktree,
+  canonicalRoot: '/workspace/test',
+)!;
 
 PatchbayRuntimeIdentity _identity(String instance) => PatchbayRuntimeIdentity(
   schemaVersion: 1,
