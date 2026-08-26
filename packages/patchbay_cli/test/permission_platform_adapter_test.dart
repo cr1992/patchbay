@@ -9,6 +9,7 @@ PatchbayPermissionDriverRequest _request(
   PatchbayPermissionOperation operation, {
   String permission = 'camera',
   PatchbayPermissionDecision? decision,
+  PatchbayPermissionState? state,
   String deviceId = 'device-1',
 }) => PatchbayPermissionDriverRequest(
   requestId: 'adapter-test',
@@ -22,6 +23,7 @@ PatchbayPermissionDriverRequest _request(
   },
   permission: permission,
   decision: decision,
+  state: state,
   timeoutMs: 1000,
 );
 
@@ -92,6 +94,73 @@ void main() {
       ),
       hasLength(2),
     );
+  });
+
+  // BUG-20260826-02 的真正根因：`, flags=[...]` 是可选小节，Android 在这个权限
+  // 当前没有任何标记时（典型形态——刚 `pm grant` 出来，还没被打上 USER_SET /
+  // USER_FIXED / ONE_TIME / REVOKE_WHEN_REQUESTED 里的任何一个）会整段省略它，
+  // 不打印成 `flags=[]`。真机实测录制：`dumpsys package` 里刚授予的
+  // `android.permission.CAMERA: granted=true` 后面什么都没有。旧正则把逗号+
+  // flags 写成必需，于是这行永远匹配不上，落进"没有条目"分支——之前被误诊断
+  // 为写后立即复核撞上设备最终一致性窗口，实际上重试多少次都读到同一段解析
+  // 失败的文本，不会因为等待而变好。
+  test('a freshly granted permission with no flags at all (Android omits the '
+      'flags clause, not an empty one) still parses as granted', () async {
+    Future<PatchbayPlatformCommandResult> command(
+      String executable,
+      List<String> arguments,
+      Duration timeout,
+    ) async {
+      if (arguments case ['version']) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'Android Debug Bridge version 1.0.41',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('devices')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'List of devices attached\ndevice-1\tdevice\n',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('path')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'package:/data/app/consumer/base.apk',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('pidof')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '4321',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('dumpsys')) {
+        // 录制自真机：没有 `, flags=[...]` 后缀，不是 `flags=[]`。
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'android.permission.CAMERA: granted=true\n',
+          stderr: '',
+        );
+      }
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      );
+    }
+
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayAndroidPermissionAdapter(
+          runCommand: command,
+        ).handle(_request(PatchbayPermissionOperation.status));
+    expect(response.accepted, isTrue, reason: response.code ?? '');
+    expect(response.after?.state, PatchbayPermissionState.granted);
+    expect(response.after?.platformState, 'granted');
   });
 
   // 撤销一个已授予的运行时权限会让 Android 终止应用进程——确定性的系统行为，因此
@@ -180,6 +249,239 @@ void main() {
       );
     },
   );
+
+  // BUG-20260826-02：写后立即复核可能撞上设备侧的最终一致性窗口（`pm grant` /
+  // `pm revoke` 退出后立即查询 `dumpsys package`，某些 OEM / Android 版本组合上
+  // 有一定概率仍读到写入前的旧状态，稍后再查会显示已生效）。controller 已裁决
+  // 允许对写后复核的"读"做有界重试来吸收这条窗口，不重发 mutation，窗口耗尽仍
+  // 照旧报 `permissionStateMismatch`。
+  //
+  // 本仓这条缺陷最初排查到的真机复现，事后定位到真正根因其实是 `_status` 里
+  // `flags=[...]` 小节可选未处理的解析缺陷（已在 `_status` 修好，见其注释）——
+  // 重试再多次也读不到一段永远解析失败的文本。这里的重试逻辑仍然按 controller
+  // 裁决保留，作为对真实存在、只是更少见的设备最终一致性窗口的防御。
+  group('BUG-20260826-02 post-mutation retry', () {
+    // 假 shell：dumpsys 的 CAMERA 运行时行从第几次查询开始"翻新"可配置，
+    // 用来模拟"前 N 次读旧值、之后读新值"的最终一致窗口。null 表示永远读旧值
+    // （模拟窗口耗尽都等不到的形态）。
+    Future<PatchbayPlatformCommandResult> Function(
+      String,
+      List<String>,
+      Duration,
+    )
+    android({required int? freshFromCall}) {
+      var dumpsysCalls = 0;
+      return (
+        String executable,
+        List<String> arguments,
+        Duration timeout,
+      ) async {
+        if (arguments case ['version']) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'Android Debug Bridge version 1.0.41',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('devices')) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'List of devices attached\ndevice-1\tdevice\n',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('path')) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'package:/data/app/consumer/base.apk',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('pidof')) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: '4321',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('dumpsys')) {
+          dumpsysCalls++;
+          final bool granted =
+              freshFromCall != null && dumpsysCalls >= freshFromCall;
+          return PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout:
+                'android.permission.CAMERA: granted=$granted, '
+                'flags=[${granted ? ' USER_SET' : ''}]\n',
+            stderr: '',
+          );
+        }
+        // pm grant / pm revoke / clear-permission-flags：不重发 mutation，
+        // 每条只应该被调用一次，用调用计数在下方复核。
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        );
+      };
+    }
+
+    test('normalize granted retries the post-mutation read until it observes '
+        'the granted state, and does not resend the grant', () async {
+      final List<Duration> delays = <Duration>[];
+      var grantCalls = 0;
+      final Future<PatchbayPlatformCommandResult> Function(
+        String,
+        List<String>,
+        Duration,
+      )
+      base = android(freshFromCall: 3);
+      Future<PatchbayPlatformCommandResult> command(
+        String executable,
+        List<String> arguments,
+        Duration timeout,
+      ) {
+        if (arguments.contains('grant')) grantCalls++;
+        return base(executable, arguments, timeout);
+      }
+
+      final PatchbayPermissionDriverResponse response =
+          await PatchbayAndroidPermissionAdapter(
+            runCommand: command,
+            delay: (Duration duration) async {
+              delays.add(duration);
+            },
+          ).handle(
+            _request(
+              PatchbayPermissionOperation.normalize,
+              state: PatchbayPermissionState.granted,
+            ),
+          );
+
+      expect(response.accepted, isTrue, reason: response.code ?? '');
+      expect(response.after?.state, PatchbayPermissionState.granted);
+      // 第 1 次 dumpsys 是写前 before，第 2 次是写后第一次复核（仍是旧值），
+      // 第 3 次才翻新——所以只应该看到恰好一次退避等待。
+      expect(delays, equals(<Duration>[const Duration(milliseconds: 100)]));
+      expect(grantCalls, 1, reason: '重试只重发"读"，mutation 本身只应该发生一次');
+    });
+
+    test('normalize granted gives up after the bounded retry window and '
+        'reports the still-stale state as-is, not a fabricated one', () async {
+      final List<Duration> delays = <Duration>[];
+      final PatchbayPermissionDriverResponse response =
+          await PatchbayAndroidPermissionAdapter(
+            runCommand: android(freshFromCall: null),
+            delay: (Duration duration) async {
+              delays.add(duration);
+            },
+          ).handle(
+            _request(
+              PatchbayPermissionOperation.normalize,
+              state: PatchbayPermissionState.granted,
+            ),
+          );
+
+      expect(response.accepted, isTrue, reason: response.code ?? '');
+      // 窗口耗尽仍然如实报最后一次观测到的状态，不伪造成功；由调用方
+      // （PatchbayPermissionDriverRunner）据此判 permissionStateMismatch，
+      // 这里不新增字段、不改信封形状。
+      expect(response.after?.state, PatchbayPermissionState.notDetermined);
+      // 指数退避总和恰好等于 5 秒的有界窗口，不多不少：
+      // 100+200+400+800+1600=3100，最后一段被剩余预算裁到 1900。
+      expect(
+        delays,
+        equals(const <Duration>[
+          Duration(milliseconds: 100),
+          Duration(milliseconds: 200),
+          Duration(milliseconds: 400),
+          Duration(milliseconds: 800),
+          Duration(milliseconds: 1600),
+          Duration(milliseconds: 1900),
+        ]),
+      );
+      expect(
+        delays.fold<Duration>(
+          Duration.zero,
+          (Duration sum, Duration each) => sum + each,
+        ),
+        const Duration(seconds: 5),
+      );
+    });
+
+    // reset 复核同一条最终一致性窗口，判定目标从 granted 换成 notDetermined。
+    test('reset retries the post-mutation read the same way, targeting '
+        'notDetermined', () async {
+      final List<Duration> delays = <Duration>[];
+      // reset 的起点是"已授予"（reset 之前先读 before，再 revoke），revoke
+      // 之后前几次复核仍读到旧的 granted=true，第 3 次才翻新为 false。
+      var dumpsysCalls = 0;
+      Future<PatchbayPlatformCommandResult> command(
+        String executable,
+        List<String> arguments,
+        Duration timeout,
+      ) async {
+        if (arguments case ['version']) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'Android Debug Bridge version 1.0.41',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('devices')) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'List of devices attached\ndevice-1\tdevice\n',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('path')) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: 'package:/data/app/consumer/base.apk',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('pidof')) {
+          return const PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout: '4321',
+            stderr: '',
+          );
+        }
+        if (arguments.contains('dumpsys')) {
+          dumpsysCalls++;
+          // 第 1 次（before）读旧值 granted=true；写后复核第 2 次仍是旧值；
+          // 第 3 次才翻新为 notDetermined。
+          final bool stillGranted = dumpsysCalls < 3;
+          return PatchbayPlatformCommandResult(
+            exitCode: 0,
+            stdout:
+                'android.permission.CAMERA: granted=$stillGranted, '
+                'flags=[${stillGranted ? ' USER_SET' : ''}]\n',
+            stderr: '',
+          );
+        }
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        );
+      }
+
+      final PatchbayPermissionDriverResponse response =
+          await PatchbayAndroidPermissionAdapter(
+            runCommand: command,
+            delay: (Duration duration) async {
+              delays.add(duration);
+            },
+          ).handle(_request(PatchbayPermissionOperation.reset));
+
+      expect(response.accepted, isTrue, reason: response.code ?? '');
+      expect(response.after?.state, PatchbayPermissionState.notDetermined);
+      expect(delays, equals(<Duration>[const Duration(milliseconds: 100)]));
+    });
+  });
 
   // 假 shell：可配置"应用声明了哪些权限"、"哪些声明过的权限还没有 runtime 记录"
   // 与"设备上有没有注册 runner"。

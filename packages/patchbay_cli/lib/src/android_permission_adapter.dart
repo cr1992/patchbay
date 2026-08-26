@@ -11,17 +11,53 @@ const Map<String, String> patchbayAndroidP0Permissions = <String, String>{
   'notifications': 'android.permission.POST_NOTIFICATIONS',
 };
 
+// 不额外声明一个具名 typedef：`permission_recovery.dart` 已经导出过同结构的
+// `PatchbayPermissionDelay`（同一个包的公共 API 面），两边都叫这个名字会在
+// `patchbay_cli.dart` 的 barrel export 上产生重复导出冲突。函数类型在 Dart 里
+// 按结构等价，不需要靠共享 typedef 才能互操作，这里就地用匿名函数类型。
+Future<void> _realPermissionDelay(Duration duration) =>
+    Future<void>.delayed(duration);
+
 final class PatchbayAndroidPermissionAdapter
     implements PatchbayPermissionPlatformAdapter {
   PatchbayAndroidPermissionAdapter({
     this.adbExecutable = 'adb',
     this.instrumentationRunner,
     PatchbayPlatformCommandRunner? runCommand,
-  }) : _run = runCommand ?? runPatchbayPlatformCommand;
+    Future<void> Function(Duration duration)? delay,
+  }) : _run = runCommand ?? runPatchbayPlatformCommand,
+       _delay = delay ?? _realPermissionDelay;
 
   final String adbExecutable;
   final String? instrumentationRunner;
   final PatchbayPlatformCommandRunner _run;
+  final Future<void> Function(Duration duration) _delay;
+
+  /// 写后立即复核的有界重试窗口与首个退避间隔。
+  ///
+  /// BUG-20260826-02 最初被诊断为 Android 运行时权限授予对 `dumpsys package`
+  /// 只是最终一致（`pm grant` 退出后立即查询偶发读到旧状态）。更细致的真机
+  /// 排查（见 `_status` 里 `flags=[...]` 小节可选的注释）证明真正根因是解析
+  /// 侧的正则缺陷：刚授予、还没被打任何标记的权限行会被 Android 整段省略
+  /// `flags=[...]` 小节，旧正则把它写成必需，于是永远匹配不上——重试多少次
+  /// 都在读同一段解析失败的文本，不会因为等待而变好；那条正则已经在 `_status`
+  /// 里修了。
+  ///
+  /// 这层重试仍然保留：controller 已经就"写后复核允许有界重试"这条方向下
+  /// 了裁决，而写后立即复核确实还可能撞上真实存在、只是没那么频繁触发的
+  /// 设备侧最终一致性窗口（不同 OEM / Android 版本的 `pm` 实现细节不保证一致）。
+  /// 重试只发生在 `_normalize`/`_reset` 已经把 mutation 发给设备**之后**，只
+  /// 重试"读"、不重发 grant/revoke；窗口耗尽就如实返回最后一次观测到的状态，
+  /// 调用方（`PatchbayPermissionDriverRunner`）该报 `permissionStateMismatch`
+  /// 时仍然照旧报——语义和信封形状都不因为加了重试而改变。
+  ///
+  /// 5 秒的窗口本身也计入调用方既有的单次写操作超时预算（30s / 写操作，
+  /// 120s / exercise），不新增独立的预算维度：5s ≪ 30s，正常情况下不会让
+  /// 重试把整条请求拖到超时。
+  static const Duration _statusRetryWindow = Duration(seconds: 5);
+  static const Duration _statusRetryInitialBackoff = Duration(
+    milliseconds: 100,
+  );
 
   @override
   Future<PatchbayPermissionDriverResponse> handle(
@@ -87,12 +123,18 @@ final class PatchbayAndroidPermissionAdapter
         permission,
         systemUiExpected: systemUiExpected,
       );
+      final PatchbayPermissionState expectedAfterState;
       if (request.operation == PatchbayPermissionOperation.reset ||
           request.operation == PatchbayPermissionOperation.normalize &&
               request.state == PatchbayPermissionState.notDetermined) {
         await _reset(request, device, applicationId, permission);
+        expectedAfterState = PatchbayPermissionState.notDetermined;
       } else if (request.operation == PatchbayPermissionOperation.normalize) {
         await _normalize(request, device, applicationId, permission);
+        // `_normalize` 只在 request.state == granted 时才走到这里（denied /
+        // permanentlyDenied 已在 `_normalize` 内部 fail-closed 拒绝，
+        // notDetermined 已经在上面分流到 reset），所以目标状态就是它。
+        expectedAfterState = request.state!;
       } else if (request.operation == PatchbayPermissionOperation.exercise) {
         return _exercise(request, device, applicationId, permission, before);
       } else {
@@ -101,11 +143,12 @@ final class PatchbayAndroidPermissionAdapter
       return acceptedPermissionDriverResponse(
         request,
         before: before,
-        after: await _status(
+        after: await _statusAfterMutation(
           request,
           device,
           applicationId,
           permission,
+          expectedState: expectedAfterState,
           systemUiExpected: systemUiExpected,
         ),
         evidence: <PatchbayPermissionEvidence>[
@@ -330,8 +373,19 @@ final class PatchbayAndroidPermissionAdapter
     if (result.exitCode != 0) {
       throw const _AdapterFailure('permissionUnsupported');
     }
+    // `, flags=[...]` 是可选小节，不是恒定后缀：Android 在这个权限当前没有任何
+    // 标记时（典型形态——刚 `pm grant` 出来、还没被系统打上 USER_SET /
+    // USER_FIXED / ONE_TIME / REVOKE_WHEN_REQUESTED 等任何标记）会整段省略它，
+    // 不会打印成 `flags=[]`。旧正则把这段写成必需，于是这种"刚授予、无标记"
+    // 的真实 granted=true 行永远匹配不上，落进下面的"没有条目"分支——真机
+    // 实测过：`pm grant` 已确认生效（dumpsys 里能看到 `granted=true`），
+    // 但因为正则死等一个不存在的 `flags=[...]`，被误判成 noRuntimeRecord，
+    // 报告永远追不上设备的真实状态（BUG-20260826-02 的真正根因；此前诊断为
+    // "写后立即复核撞上最终一致性窗口"是误判——重试多少次都读同一段一直
+    // 匹配不上的文本，不会因为等待而变好）。
     final RegExpMatch? match = RegExp(
-      '${RegExp.escape(platformPermission)}:\\s+granted=(true|false),\\s*flags=\\[([^\\]]*)\\]',
+      '${RegExp.escape(platformPermission)}:\\s+granted=(true|false)'
+      '(?:,\\s*flags=\\[([^\\]]*)\\])?',
     ).firstMatch(result.stdout);
     if (match == null) {
       // `runtime permissions:` 小节没有这个权限的条目,原因有两种,处置完全不同,
@@ -393,8 +447,9 @@ final class PatchbayAndroidPermissionAdapter
       );
     }
     final bool granted = match.group(1) == 'true';
-    final Set<String> flags = match
-        .group(2)!
+    // group(2) 在 `flags=[...]` 小节被省略时是 null（无标记，不是空字符串小节）；
+    // 两种输入在语义上一样——都是"没有任何标记"——用空串归一化，不当成解析失败。
+    final Set<String> flags = (match.group(2) ?? '')
         .split(RegExp(r'[|,\s]+'))
         .where((String value) => value.isNotEmpty)
         .toSet();
@@ -437,6 +492,48 @@ final class PatchbayAndroidPermissionAdapter
       requiresSettings: state == PatchbayPermissionState.permanentlyDenied,
       systemUiExpected: systemUiExpected,
     );
+  }
+
+  /// `_normalize`/`_reset` 成功发出 mutation 之后，用有界指数退避重试
+  /// `_status` 直到读到 `expectedState`，或者重试窗口耗尽。
+  ///
+  /// 只重试"读"：每次重试都是全新的 `_status` 调用（全新的 `dumpsys` 查询），
+  /// 不会重新触发 `pm grant`/`pm revoke`——mutation 本身只发生过一次，在调用方
+  /// 进入这个方法之前。窗口内看到期望状态就立即返回；窗口耗尽仍未看到，就把
+  /// 最后一次观测到的（可能仍是旧的）状态原样返回，不改写、不伪造——调用方该
+  /// 判 `permissionStateMismatch` 时照旧判。
+  ///
+  /// 预算用请求延迟的时长做纯算术累加，不绑定真实墙钟 `Stopwatch`：生产环境下
+  /// `_delay` 是真实 `Future.delayed`，两者等价；测试环境下注入一个立即完成的
+  /// `_delay`，同一套退避判定逻辑就能在毫秒级测试时间内跑完，不需要真等 5 秒。
+  Future<PatchbayPermissionStatus> _statusAfterMutation(
+    PatchbayPermissionDriverRequest request,
+    String device,
+    String applicationId,
+    String permission, {
+    required PatchbayPermissionState expectedState,
+    bool systemUiExpected = false,
+  }) async {
+    Duration remainingBudget = _statusRetryWindow;
+    Duration backoff = _statusRetryInitialBackoff;
+    while (true) {
+      final PatchbayPermissionStatus status = await _status(
+        request,
+        device,
+        applicationId,
+        permission,
+        systemUiExpected: systemUiExpected,
+      );
+      if (status.state == expectedState || remainingBudget <= Duration.zero) {
+        return status;
+      }
+      final Duration wait = backoff < remainingBudget
+          ? backoff
+          : remainingBudget;
+      await _delay(wait);
+      remainingBudget -= wait;
+      backoff *= 2;
+    }
   }
 
   /// 从 `dumpsys package` 的输出里读出 manifest 合并声明过的平台权限全名集合。
