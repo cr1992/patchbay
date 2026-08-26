@@ -158,8 +158,11 @@ direct HTTP 上都变不成回复，调用方只会看到挂起：
 为 `duplicateRequestId`。registry 命令不经过这条 external 去重边界，因此不能声明该策略。
 
 `PatchbayServiceHost` 可注入 `auditSink` 与 `onAuditSinkError`。host 先在 `auditEvents` 中保留最近 256 条
-脱敏 `PatchbayAuditEvent`，再 best-effort 投递 sink。参数形状只暴露递归 JSON 类型、对象键和粗粒度长度
-档位；标量值和内部参数摘要绝不离开 host。sink 失败不能改变调用结果。
+脱敏 `PatchbayAuditEvent`，再由一个 FIFO 消费者顺序投递 sink。投递队列把 active Future 与 waiting 事件
+一起计入 `auditQueueCapacity`（默认 256，范围 1–4096）；overflow 与关闸后的事件分别通过
+`PatchbayAuditDeliveryOverflow`、`PatchbayAuditDeliveryClosed` 交给 `onAuditSinkError`，均不改变调用结果。
+终止时可显式调用 `drainAudit()` 取得统计，或调用 `dispose()` 完成同一有界 drain。参数形状只暴露递归
+JSON 类型、对象键和粗粒度长度档位；标量值和内部参数摘要绝不离开 host。
 
 `sensitive: true` 的强制由 host 完成，不由接入方 handler 完成。客户端用 `inputWasStdin` 标记值来自
 无回显 stdin；host 在 dispatch 之前按 catalog 声明校验，并把这个元键从 arguments 中剥掉，因此

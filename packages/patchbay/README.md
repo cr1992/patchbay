@@ -188,10 +188,14 @@ rejected as `requestIdConflict`, and a duplicate ID on a command without the opt
 through that external de-duplication boundary.
 
 `PatchbayServiceHost` may receive an `auditSink` and `onAuditSinkError`. It first retains the newest
-256 redacted `PatchbayAuditEvent`s in `auditEvents`, then delivers each event to the sink on a
-best-effort basis. Parameter shapes expose only recursive JSON types, object keys, and coarse
-length buckets; scalar values and the internal argument digest never leave the host. Sink failures
-cannot change an invocation result.
+256 redacted `PatchbayAuditEvent`s in `auditEvents`, then delivers them to the sink through one FIFO
+consumer. The delivery queue counts the active Future plus waiting events and is bounded by
+`auditQueueCapacity` (default 256, range 1–4096). Overflow and delivery after close are reported to
+`onAuditSinkError` as `PatchbayAuditDeliveryOverflow` and `PatchbayAuditDeliveryClosed`; neither
+condition changes an invocation result. Call `drainAudit()` for terminal accounting, or `dispose()`
+to perform the same bounded drain while closing the host-owned delivery resource. Parameter shapes
+expose only recursive JSON types, object keys, and coarse length buckets; scalar values and the
+internal argument digest never leave the host.
 
 Enforcement of `sensitive: true` is done by the host, not by the consumer's handler. The client
 marks a value as coming from no-echo stdin with `inputWasStdin`; the host validates against the
