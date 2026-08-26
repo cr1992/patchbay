@@ -259,6 +259,9 @@ final class PatchbayFlutterBridge {
     semantics = PatchbaySemanticsBridge(
       gates: gates,
       actionPolicy: semanticsActionPolicy,
+      // PB-050-07：owner 恢复帧与 `ui.wait` / reveal / navigation 共用一个计数器，
+      // 所以「实际驱动的帧」与 `frameRevision` 报告的帧是同一个集合。
+      frames: _frames,
       isAppResumed: _isAppResumed,
       lifecycleState: _lifecycleState,
       newRequestId: newRequestId,

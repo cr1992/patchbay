@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
@@ -476,6 +477,20 @@ final class PatchbayGestureBridge {
     int generation,
     Rect beforeRect,
   ) async {
+    // 手势的**自身效果观察**：注入过程中被标脏的布局要先提交，终止比较才有意义。
+    //
+    // PB-050-07 之前这一帧是 `ensureOwner()` 的副产品；DG-050-05 结论 1 之后
+    // probe 不再请帧，于是把它显式化——语义与预算完全照旧（同样一帧、同样最多
+    // 等 2 秒、同样不计入 `frameRevision`），只是不再依赖别人的副作用。这与
+    // `ui.semantics.action` 派发后那一帧同类：它不是 probe，是写操作的观察。
+    try {
+      SchedulerBinding.instance.scheduleFrame();
+      await SchedulerBinding.instance.endOfFrame.timeout(
+        const Duration(seconds: 2),
+      );
+    } on TimeoutException {
+      // 等不到帧就按当前已提交的树比较：宁可少报一次布局变化，也不挂住答复。
+    }
     final GestureTargetResolution target = await _resolveTarget(
       identifier,
       expectedGeneration: generation,
