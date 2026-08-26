@@ -223,7 +223,15 @@ abstract final class CommandDispatcher {
               ? CatalogInvoker.withRevisionSource(response)
               : response,
           catalog: catalog,
-          artifact: friendly.spec.artifact == PatchbayArtifactDisposition.none
+          // `renderedMember` commands never go through `ArtifactRequest` /
+          // `PatchbayArtifactDownloader`: there is no host blob to fetch, the
+          // member is already in `response`. `_executeOnce` renders and
+          // spills it later, once the rendering mode (one-shot/repl,
+          // json/human) is known.
+          artifact:
+              friendly.spec.artifact == PatchbayArtifactDisposition.none ||
+                  friendly.spec.artifact ==
+                      PatchbayArtifactDisposition.renderedMember
               ? null
               : ArtifactRequest(
                   disposition: friendly.spec.artifact,

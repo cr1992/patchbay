@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/output/local_artifact.dart';
 import 'package:test/test.dart';
 
 /// The URI path segment a VM Service record carries as its auth token.
@@ -213,6 +214,7 @@ void main() {
       out: out,
       err: err,
       json: false,
+      outputWriter: PatchbayLocalArtifactWriter(),
     ).run(Stream<String>.fromIterable(<String>['sessions list']));
 
     expect(exitCode, PatchbayExitCode.accepted);

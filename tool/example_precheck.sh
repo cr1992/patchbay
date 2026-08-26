@@ -214,6 +214,137 @@ check_capture_target() {
   FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
 }
 
+# 独立算一份文件的 SHA-256。回执自报 verified=true 没有证明力，能被外部复核才有。
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    sha256sum "$1" | awk '{print $1}'
+  fi
+}
+
+# PB-050-20：跑一条覆盖清单里的命令，证明超阈值时无界成员真的落到了本地文件。
+#
+# 三条断言，缺一不可：
+#   1. stdout 确实变短——漏斗的全部意义就在这里；基准是同一条命令加
+#      `--max-inline-bytes 0`，也就是 0.4.1 的输出形态；
+#   2. 回执里的 path 指向一个存在的文件，且长度与回执自报的一致；
+#   3. `shasum -a 256` 独立算出的摘要等于回执自报的 sha256。
+#
+# 阈值用 `--max-inline-bytes` 显式压小，而不是指望这台设备今天的界面恰好大过
+# 64 KiB 默认值：要证明的是这条链路成立，不是某次界面有多大。默认阈值本身由
+# 单元测试的三点边界用例锁定，不需要真机再赌一次。
+#
+# 只打印字节数与摘要前缀，不打印路径：那是本机绝对路径，不进任何可留存的输出。
+check_spill() {
+  local name=""
+  name="$1"
+  shift
+  local actual=0
+  local inline_bytes=0
+  local spilled_bytes=0
+  local artifact_path=""
+  local artifact_sha=""
+  local artifact_len=""
+  local disk_sha=""
+  local disk_len=""
+
+  example_session_cli --json --max-inline-bytes 0 "$@" >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-42s 内联基准退出码 %s\n' "$name" "$actual"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -3 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  inline_bytes="$(wc -c <"$OUT" | tr -d ' ')"
+
+  actual=0
+  example_session_cli --json --max-inline-bytes 512 "$@" >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-42s 落盘退出码 %s\n' "$name" "$actual"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -3 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  spilled_bytes="$(wc -c <"$OUT" | tr -d ' ')"
+  artifact_path="$(read_json "doc['localArtifact']['path']" 2>/dev/null || true)"
+  artifact_sha="$(read_json "doc['localArtifact']['sha256']" 2>/dev/null || true)"
+  artifact_len="$(read_json "doc['localArtifact']['length']" 2>/dev/null || true)"
+
+  if [ -z "$artifact_path" ] || [ ! -f "$artifact_path" ]; then
+    printf '  ✗ %-42s 回执没有指向一个存在的文件\n' "$name"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  if [ "$spilled_bytes" -ge "$inline_bytes" ]; then
+    printf '  ✗ %-42s stdout 没有变短（%s → %s 字节）\n' \
+      "$name" "$inline_bytes" "$spilled_bytes"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  disk_sha="$(sha256_of "$artifact_path")"
+  disk_len="$(wc -c <"$artifact_path" | tr -d ' ')"
+  if [ "$disk_sha" != "$artifact_sha" ]; then
+    printf '  ✗ %-42s shasum 与回执对不上（磁盘 %s… vs 回执 %s…）\n' \
+      "$name" "${disk_sha:0:12}" "${artifact_sha:0:12}"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  if [ "$disk_len" != "$artifact_len" ]; then
+    printf '  ✗ %-42s 长度与回执对不上（磁盘 %s vs 回执 %s）\n' \
+      "$name" "$disk_len" "$artifact_len"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  printf '  ✓ %-42s stdout %s→%s 字节，artifact %s 字节 sha=%s…\n' \
+    "$name" "$inline_bytes" "$spilled_bytes" "$disk_len" "${disk_sha:0:12}"
+  PASS=$((PASS + 1))
+}
+
+# PB-050-21：brief 只是少打印几个键。同一会话内 brief 的 nodeCount / treeRevision
+# 必须与 full 逐字相同，nodes 必须不在文档里、且被登记在 localView.omitted。
+#
+# 树会随界面变化，所以用 treeRevision 判断两次读取是否可比：不可比就再读一次，
+# 有界重试。不用 sleep 猜时序，也不把"界面动了"读成"brief 撒谎"。
+check_brief_semantics_parity() {
+  local name=""
+  name="$1"
+  local attempt=1
+  local max_attempts=3
+  local actual=0
+  local full_revision=""
+  local full_count=""
+  local brief_revision=""
+  local verdict=""
+
+  while [ "$attempt" -le "$max_attempts" ]; do
+    actual=0
+    example_session_cli --json ui semantics tree >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then verdict='fullFailed'; break; fi
+    full_revision="$(read_json "(doc.get('payload') or doc)['treeRevision']")"
+    full_count="$(read_json "(doc.get('payload') or doc)['nodeCount']")"
+
+    actual=0
+    example_session_cli --json --view brief ui semantics tree >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then verdict='briefFailed'; break; fi
+    brief_revision="$(read_json "doc['payload']['treeRevision']")"
+    if [ "$brief_revision" != "$full_revision" ]; then
+      # 两次读取之间界面变了，这一轮不可比。
+      attempt=$((attempt + 1)); continue
+    fi
+    verdict="$(read_json "'ok' if (
+        doc['payload']['nodeCount'] == $full_count
+        and 'nodes' not in doc['payload']
+        and '\$.payload.nodes' in doc['localView']['omitted']
+        and doc['localView']['view'] == 'brief'
+        and doc['localView']['projection'] == 'ui.semantics.tree'
+    ) else 'mismatch'" 2>/dev/null || echo 'unreadable')"
+    if [ "$verdict" = ok ]; then
+      printf '  ✓ %-42s treeRevision=%s nodeCount=%s\n' \
+        "$name" "$full_revision" "$full_count"
+      PASS=$((PASS + 1)); return 0
+    fi
+    break
+  done
+  printf '  ✗ %-42s %s（%s 次尝试）\n' \
+    "$name" "${verdict:-treeRevisionUnstable}" "$attempt"
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+}
+
 echo "== 启动 example =="
 if ! example_session_start "${1:-}"; then
   echo "预检未开始：会话启动失败（原因见上方 [session] 行）" >&2
@@ -459,6 +590,29 @@ echo
 echo "== logs =="
 check 'logs query' 0 "'records' in json.dumps(doc)" --json logs query
 check 'logs export' 0 "" --output "$PRECHECK_TMP/logs.ndjson" logs export
+
+echo
+echo "== 输出漏斗（PB-050-20 落盘 / PB-050-21 brief）=="
+# 落盘产物进预检自己的临时目录：既让本步骤可以断言"文件确实在那儿"，也不去动
+# 运行者真正的 $HOME/.patchbay/outputs/v1。cleanup 会连它一起删。
+export PATCHBAY_OUTPUT_DIR="$PRECHECK_TMP/outputs"
+mkdir -p "$PATCHBAY_OUTPUT_DIR"
+# 一棵 semantics 树 + 一棵 SDK 诊断树：两种无界成员形态各一条（JSON 数组与
+# 透传 data），也是两条不同的事实来源（host 应答与 VM Service 透传）。
+check_spill 'ui semantics tree 落盘并可复核' ui semantics tree
+check_spill 'ui widget-tree 落盘并可复核' ui widget-tree
+check_brief_semantics_parity 'ui semantics tree --view brief 与 full 对账'
+# catalog 的 brief 必须仍然可读：summary 是 describe 之前判断"这条命令是干什么的"
+# 的唯一线索，2026-08-25 的裁决把它留在了投影表之外。
+check 'catalog --view brief 保留 summary' 0 \
+  "(doc['localView']['view'] == 'brief'
+    and doc['localView']['projection'] == 'catalog'
+    and all(c.get('summary') for c in doc['commands'])
+    and '\$.commands[].summary' not in doc['localView']['omitted']
+    and any(p in doc['localView']['omitted'] for p in (
+      '\$.commands[].parameters', '\$.commands[].responseSchema',
+      '\$.commands[].executionContract', '\$.commands[].retryPolicy')))" \
+  --json --view brief catalog
 
 echo
 echo "== manifest =="

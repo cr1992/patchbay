@@ -23,20 +23,32 @@ final class PatchbayDownloadedArtifact {
     required this.length,
     required this.sha256,
     required this.contentType,
+    required this.origin,
   });
 
   final String path;
-  final String blobId;
+
+  /// The host blob this was downloaded from; `null` for [origin]
+  /// `'cliRendered'`, where no host blob exists — the key is omitted from
+  /// [toJson] rather than fabricated as `null`.
+  final String? blobId;
   final int length;
   final String sha256;
   final String contentType;
 
+  /// `'hostBlob'` for the existing `capture`/`blob get`/`logs export`
+  /// download path, `'cliRendered'` for a CLI-rendered member spilled by
+  /// PB-050-20. Both shapes carry this discriminant so one reader has one
+  /// judgement, not two.
+  final String origin;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'path': path,
-    'blobId': blobId,
+    if (blobId != null) 'blobId': blobId,
     'length': length,
     'sha256': sha256,
     'contentType': contentType,
+    'origin': origin,
     'verified': true,
   };
 }
@@ -166,6 +178,7 @@ final class PatchbayArtifactDownloader {
         length: metadata.length,
         sha256: metadata.sha256,
         contentType: metadata.contentType,
+        origin: 'hostBlob',
       );
     } finally {
       if (fileSink != null) await fileSink.close();

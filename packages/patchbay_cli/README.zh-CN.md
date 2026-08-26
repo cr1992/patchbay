@@ -96,7 +96,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay trace show <trace-id>` | local 显式声明 | — |
 | `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — |
 | `patchbay trace stop [trace-id]` | local 显式声明 | — |
-| `patchbay ui focus-tree` | client 显式声明 | — |
+| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
 | `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` |
@@ -106,7 +106,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay ui keep-awake off` | 协议 descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake on [--lease-ms <ms>]` | 协议 descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree` | client 显式声明 | — |
+| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
 | `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` |
 | `patchbay ui semantics tree` | 协议 descriptor | `ui.semantics.tree` |
 | `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` |
@@ -120,7 +120,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay ui wait semantics-unmounted <identifier>` | 协议 descriptor | `ui.wait` |
 | `patchbay ui wait semantics-value <identifier> <value>` | 协议 descriptor | `ui.wait` |
 | `patchbay ui wait tree-revision <revision>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui widget-tree` | client 显式声明 | — |
+| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
 <!-- PATCHBAY_COMMAND_REFERENCE:END -->
 
 由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：

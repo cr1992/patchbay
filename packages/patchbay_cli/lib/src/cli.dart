@@ -18,9 +18,12 @@ import 'doctor.dart';
 import 'keep_awake_policy.dart';
 import 'launcher.dart';
 import 'legacy_payload_confirmation.dart';
+import 'output/brief_view.dart';
+import 'output/local_artifact.dart';
 import 'output/output_formatter.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
+import 'registry/argument_decoder.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -80,6 +83,9 @@ Future<int> runPatchbayCli(
 
   final bool json = parsed.flag('json');
   final bool repl = _isRepl(parsed);
+  final String sessionView = parsed.option('view') ?? patchbayViewFull;
+  final PatchbayLocalArtifactWriter outputWriter =
+      PatchbayLocalArtifactWriter();
   PatchbayKeepAwakePolicy? keepAwakePolicy;
   PatchbayKeepAwakePolicy resolveKeepAwakePolicy() =>
       keepAwakePolicy ??= PatchbayKeepAwakePolicy.resolve(
@@ -95,6 +101,11 @@ Future<int> runPatchbayCli(
       return PatchbayExitCode.accepted;
     }
     PatchbayConnector.validateGlobalShape(parsed);
+    if (sessionView == patchbayViewBrief && !json) {
+      // Human summaries are not brief's other rendering: silently ignoring
+      // this would let an operator believe they got the thinned view.
+      throw const FormatException('--view brief requires --json');
+    }
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
     }
@@ -216,6 +227,14 @@ Future<int> runPatchbayCli(
       rpcTimeout: rpcTimeout,
     );
     if (repl) {
+      // The run a line opened stays open until that line has been rendered:
+      // PB-050-20 spills at render time, so closing the run inside `execute`
+      // would put `command.finished` ahead of the line's own
+      // `artifact.attached`. The session calls `onLineRendered` once the line
+      // is genuinely done.
+      PatchbayTraceRecorder? lineTrace;
+      String? lineRunId;
+      var lineExitCode = PatchbayExitCode.accepted;
       return await PatchbayReplSession(
         parser: parser,
         execute: (ArgResults line) async {
@@ -235,12 +254,22 @@ Future<int> runPatchbayCli(
             await _executeOnce(connection, line),
             resolveKeepAwakePolicy(),
           );
-          if (runId != null) trace!.commandFinished(runId, outcome.exitCode);
+          lineTrace = trace;
+          lineRunId = runId;
+          lineExitCode = outcome.exitCode;
           return PatchbayReplOutcome(outcome.response, outcome.exitCode);
+        },
+        onLineRendered: () {
+          final String? runId = lineRunId;
+          lineRunId = null;
+          if (runId != null) lineTrace!.commandFinished(runId, lineExitCode);
         },
         out: out,
         err: error,
         json: json,
+        outputWriter: outputWriter,
+        sessionView: sessionView,
+        environment: environment,
       ).run(
         replInput ??
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
@@ -252,9 +281,25 @@ Future<int> runPatchbayCli(
       await _executeOnce(connection, parsed, manifest: manifest),
       resolveKeepAwakePolicy(),
     );
+    final Map<String, Object?> rendered = await _finishRendering(
+      writer: outputWriter,
+      spec: PatchbayFriendlyCommandRegistry.specFor(parsed.rest),
+      response: outcome.response,
+      exitCode: outcome.exitCode,
+      outputPath: parsed.option('output'),
+      force: parsed.flag('force'),
+      maxInlineBytes:
+          ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes') ??
+          patchbayDefaultMaxInlineBytes,
+      view: sessionView,
+      renderDocument: (Map<String, Object?> candidate) => json
+          ? const JsonEncoder.withIndent('  ').convert(candidate)
+          : (outcome.summary ?? patchbayResponseSummary(candidate)),
+      environment: environment,
+    );
     OutputFormatter.writeOutput(
       out,
-      outcome.response,
+      rendered,
       json: json,
       summary: outcome.summary,
     );
@@ -724,6 +769,46 @@ int _fail(
     );
   }
   return exitCode;
+}
+
+/// The shared PB-050-20 / PB-050-21 render-time seam: spill first, project
+/// second — the order both proposals' Proposals freeze.
+///
+/// [renderDocument] must render exactly the document this call's rendering
+/// mode would print, unspilled, so the PB-050-20 threshold measures what the
+/// operator would actually have seen (one-shot pretty JSON, one-shot human
+/// summary, repl compact line, or repl human line all measure differently).
+Future<Map<String, Object?>> _finishRendering({
+  required PatchbayLocalArtifactWriter writer,
+  required PatchbayFriendlyCommandSpec? spec,
+  required Map<String, Object?> response,
+  required int exitCode,
+  required String? outputPath,
+  required bool force,
+  required int maxInlineBytes,
+  required String view,
+  required String Function(Map<String, Object?> response) renderDocument,
+  required Map<String, String>? environment,
+}) async {
+  final PatchbayRenderedMemberSpillResult spilled =
+      await maybeSpillRenderedMember(
+        writer: writer,
+        spec: spec,
+        response: response,
+        exitCode: exitCode,
+        explicitOutputPath: outputPath,
+        force: force,
+        maxInlineBytes: maxInlineBytes,
+        renderDocument: renderDocument,
+        environment: environment,
+      );
+  attachSpilledArtifactToTrace(spilled.artifact);
+  if (view != patchbayViewBrief) return spilled.response;
+  return projectPatchbayBriefView(
+    spec: spec,
+    response: spilled.response,
+    exitCode: exitCode,
+  );
 }
 
 PatchbayErrorEnvelope _usageEnvelope(FormatException failure) =>

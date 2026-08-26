@@ -80,6 +80,12 @@ abstract final class OutputFormatter {
       PatchbayArtifactDisposition.responseBlob => payload,
       PatchbayArtifactDisposition.payloadBlob => payload['blob'],
       PatchbayArtifactDisposition.none => null,
+      // `renderedMember` never reaches `PatchbayArtifactDownloader`: there is
+      // no host blob to fetch, so it never calls this helper. Reached only
+      // if that invariant breaks.
+      PatchbayArtifactDisposition.renderedMember => throw StateError(
+        'renderedMember commands do not use artifactMetadata',
+      ),
     };
     if (metadata is! Map<String, Object?>) {
       throw const PatchbayArtifactDownloadException(

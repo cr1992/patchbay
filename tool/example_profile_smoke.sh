@@ -43,10 +43,15 @@ FAILED_STEPS=()
 WARNED_STEPS=()
 OUT="$(mktemp "${TMPDIR:-/tmp}/patchbay-profile-out.XXXXXX")"
 SHOT="$(mktemp "${TMPDIR:-/tmp}/patchbay-profile-shot.XXXXXX").png"
+# PB-050-20 的落盘目录指向本次冒烟自己的临时目录：既让「有没有落盘」可断言，也不去
+# 动运行者真正的 $HOME/.patchbay/outputs/v1。
+PROFILE_OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/patchbay-profile-out-dir.XXXXXX")"
+export PATCHBAY_OUTPUT_DIR="$PROFILE_OUTPUT_DIR"
 
 cleanup() {
   example_session_stop
   rm -f "$OUT" "$SHOT"
+  rm -rf "$PROFILE_OUTPUT_DIR"
 }
 trap cleanup EXIT
 
@@ -119,6 +124,102 @@ probe() {
   PASS=$((PASS + 1))
 }
 
+# PB-050-20：这条答复的 `data` 是不是空的，以及它有没有被落盘。
+#
+# 打印四种之一：`empty-inline`（空且没落盘，正确）、`empty-spilled`（空却落了盘，
+# 本步要抓的就是它）、`nonempty-spilled` / `nonempty-inline`（非空，两种都正常）。
+funnel_spill_shape() {
+  PATCHBAY_OUT="$OUT" python3 -c "
+import json, os
+try:
+    doc = json.load(open(os.environ['PATCHBAY_OUT'], encoding='utf-8'))
+except Exception:
+    print('unreadable'); raise SystemExit(0)
+data = doc.get('data')
+empty = data is None or (hasattr(data, '__len__') and len(data) == 0)
+spilled = isinstance(doc.get('localArtifact'), dict)
+print(('empty' if empty else 'nonempty') + ('-spilled' if spilled else '-inline'))
+" 2>/dev/null || echo 'unreadable'
+}
+
+# PB-050-21：brief 下空 `data` 与被 elide 的 `data` 是不是可分辨。
+#
+# 唯一的分辨手段是 `localView.omitted`：elide 时 `$.data` 在列表里，空 data 时不在。
+# 打印 `empty-kept`（空且未登记，正确）、`empty-omitted`（空却报成被删，错）、
+# `nonempty-omitted`（非空且被删，正确）、`nonempty-kept`（非空却没删，投影没生效）。
+funnel_brief_shape() {
+  PATCHBAY_OUT="$OUT" python3 -c "
+import json, os
+try:
+    doc = json.load(open(os.environ['PATCHBAY_OUT'], encoding='utf-8'))
+except Exception:
+    print('unreadable'); raise SystemExit(0)
+view = doc.get('localView') or {}
+omitted = view.get('omitted') or []
+present = 'data' in doc
+data = doc.get('data')
+empty = data is None or (hasattr(data, '__len__') and len(data) == 0)
+listed = '\$.data' in omitted
+if not present and not listed:
+    print('gone-unreported'); raise SystemExit(0)
+print(('empty' if empty and present else 'nonempty') + ('-omitted' if listed else '-kept'))
+" 2>/dev/null || echo 'unreadable'
+}
+
+# 一棵诊断树的输出漏斗形态。两条不变式：
+#   1. **空 data 不落盘**。否则回执会声称一份"已校验的 artifact"，而文件里只有
+#      空串或 null——把"这个构建没有这个能力"包装成"已经取到了"，正是本脚本存在
+#      的理由那一类的错。
+#   2. **brief 下空 data 与被 elide 的 data 可分辨**。`localView.omitted` 是唯一
+#      分辨手段，空 data 时它里面不含 `$.data`。
+#
+# 阈值压到很小，让"没落盘"只可能是因为成员为空，不是因为文档还不够大。brief 那一步
+# 反过来用 `--max-inline-bytes 0` 完全关掉落盘，好让 `omitted` 只反映 brief 自己的
+# 决定，不与 PB-050-20 的接缝混在一起。
+funnel_probe() {
+  local name=""
+  name="$1"
+  shift
+  local actual=0
+  local spill_shape=""
+  local brief_shape=""
+
+  example_session_cli --json --max-inline-bytes 256 "$@" >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-34s 退出 %s（本步只在退 0 时才有意义）\n' "$name" "$actual"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  spill_shape="$(funnel_spill_shape)"
+
+  actual=0
+  example_session_cli --json --view brief --max-inline-bytes 0 "$@" \
+    >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-34s --view brief 退出 %s\n' "$name" "$actual"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  brief_shape="$(funnel_brief_shape)"
+
+  case "$spill_shape" in
+    empty-spilled)
+      printf '  ✗ %-34s 空 data 却落了盘——回执在为一份空文件背书\n' "$name"
+      FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0 ;;
+    unreadable)
+      printf '  ✗ %-34s 落盘判定读不出答复形态\n' "$name"
+      FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0 ;;
+  esac
+  case "$brief_shape" in
+    empty-omitted)
+      printf '  ✗ %-34s 空 data 被报成 omitted——与被 elide 不可分辨\n' "$name"
+      FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0 ;;
+    nonempty-kept|gone-unreported|unreadable)
+      printf '  ✗ %-34s brief 形态异常：%s\n' "$name" "$brief_shape"
+      FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0 ;;
+  esac
+  printf '  ✓ %-34s spill=%s brief=%s\n' "$name" "$spill_shape" "$brief_shape"
+  PASS=$((PASS + 1))
+}
+
 echo "== 启动 example（profile）=="
 if ! example_session_start "${1:-}"; then
   echo "冒烟未开始：会话启动失败（原因见上方 [session] 行）" >&2
@@ -147,6 +248,18 @@ probe 'ui inspect on' degradable --json ui inspect on --ttl-ms 60000
 probe 'ui widget-tree' degradable --json ui widget-tree
 probe 'ui render-tree' degradable --json ui render-tree
 probe 'ui focus-tree' degradable --json ui focus-tree
+
+echo
+echo "== 输出漏斗在非 debug 下的形态（PB-050-20 / PB-050-21）=="
+# 三棵诊断树在 profile 下返回的是退 0 配空 data，不是拒绝——这正是上面 degradable
+# 那组观察到的形态。本组把它变成两条可判红的不变式，见 funnel_probe 的注释。
+funnel_probe 'ui widget-tree 漏斗形态' ui widget-tree
+funnel_probe 'ui render-tree 漏斗形态' ui render-tree
+funnel_probe 'ui focus-tree 漏斗形态' ui focus-tree
+if [ -n "$(ls -A "$PROFILE_OUTPUT_DIR" 2>/dev/null)" ]; then
+  printf '  · %-34s %s\n' '落盘目录非空' \
+    '有诊断树的 data 非空并按阈值落了盘——这是正确行为，仅记录'
+fi
 
 echo
 if [ -s "$SHOT" ]; then
