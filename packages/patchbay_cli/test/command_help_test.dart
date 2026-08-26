@@ -64,6 +64,33 @@ Availability is still decided by the running App catalog.
     },
   );
 
+  test('F8: ui semantics tree advertises the PB-050-20 spill options in its '
+      'usage line, matching its renderedMember siblings', () {
+    final ArgParser parser = patchbayCliParser();
+    const String expectedSuffix =
+        '[--output <path>] [--force] [--max-inline-bytes <n>]';
+    final String semanticsTreeHelp = PatchbayCommandHelp.render(
+      parser,
+      <String>['ui', 'semantics', 'tree'],
+    );
+    expect(
+      semanticsTreeHelp,
+      contains('Usage: patchbay ui semantics tree $expectedSuffix'),
+    );
+    // Exactly the same wording as the three plain renderedMember
+    // declarations — this is a CLI-only rendering decision mirrored onto
+    // the generated protocol command, not a new spelling of its own.
+    for (final List<String> path in <List<String>>[
+      <String>['ui', 'widget-tree'],
+      <String>['ui', 'render-tree'],
+      <String>['ui', 'focus-tree'],
+    ]) {
+      final PatchbayFriendlyCommandSpec spec =
+          PatchbayFriendlyCommandRegistry.specFor(path)!;
+      expect(spec.usageSuffix, expectedSuffix, reason: path.join(' '));
+    }
+  });
+
   test('every dispatch target is claimed by at least one declaration', () {
     // `runPatchbayCli` switches over `PatchbayCommandTarget` with no default
     // arm. Together with this test, a target can be neither unwired nor
