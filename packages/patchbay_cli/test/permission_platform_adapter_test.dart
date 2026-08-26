@@ -181,10 +181,17 @@ void main() {
     },
   );
 
-  // 假 shell：可配置"应用声明了哪些权限"与"设备上有没有注册 runner"。
+  // 假 shell：可配置"应用声明了哪些权限"、"哪些声明过的权限还没有 runtime 记录"
+  // 与"设备上有没有注册 runner"。
+  //
+  // dumpsys 输出录制自真机形态（见 BUG-20260826-01）：`requested permissions:`
+  // 小节列出 manifest 合并声明过的全部权限（不带 granted=），`runtime
+  // permissions:` 小节只列出已经被物化过的权限（带 granted=/flags=）——真机上
+  // 声明过但从未被请求过的权限只会出现在前者，不出现在后者。
   Future<PatchbayPlatformCommandResult> Function(String, List<String>, Duration)
   _android({
     Set<String> declared = const <String>{'android.permission.CAMERA'},
+    Set<String> withoutRuntimeRecord = const <String>{},
     String? installedRunner,
   }) => (String executable, List<String> arguments, Duration timeout) async {
     if (arguments case ['version']) {
@@ -225,11 +232,19 @@ void main() {
       );
     }
     if (arguments.contains('dumpsys')) {
+      final StringBuffer buffer = StringBuffer()
+        ..writeln('    requested permissions:');
+      for (final String name in declared) {
+        buffer.writeln('      $name');
+      }
+      buffer.writeln('    runtime permissions:');
+      for (final String name in declared) {
+        if (withoutRuntimeRecord.contains(name)) continue;
+        buffer.writeln('      $name: granted=false, flags=[]');
+      }
       return PatchbayPlatformCommandResult(
         exitCode: 0,
-        stdout: <String>[
-          for (final String name in declared) '$name: granted=false, flags=[]',
-        ].join('\n'),
+        stdout: buffer.toString(),
         stderr: '',
       );
     }
@@ -255,6 +270,63 @@ void main() {
       expect(response.after?.supportedActions, isEmpty);
     },
   );
+
+  // BUG-20260826-01：应用声明过的权限，Android 还没有为它物化 runtime 记录
+  // （真机实测形态——`dumpsys package` 的 `requested permissions:` 里有
+  // CAMERA/RECORD_AUDIO/ACCESS_FINE_LOCATION/POST_NOTIFICATIONS，`runtime
+  // permissions:` 却只物化了被请求过的 ACCESS_COARSE_LOCATION 一行）。这不是
+  // "没声明"，之前把它跟真未声明混在一起报 notDeclaredByApp，是这条缺陷的根因。
+  test('a declared permission without a materialized runtime record reports '
+      'noRuntimeRecord, not notDeclaredByApp', () async {
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayAndroidPermissionAdapter(
+          runCommand: _android(
+            declared: const <String>{'android.permission.CAMERA'},
+            withoutRuntimeRecord: const <String>{'android.permission.CAMERA'},
+          ),
+        ).handle(_request(PatchbayPermissionOperation.status));
+    expect(response.accepted, isTrue, reason: response.code ?? '');
+    expect(response.after?.state, PatchbayPermissionState.notDetermined);
+    expect(response.after?.platformState, 'noRuntimeRecord');
+    // 声明过就有完整动作集：grant/revoke/reset 都能作用于它（`pm grant` 会
+    // 促成物化），不该被收窄成只剩 status。
+    expect(
+      response.after?.supportedActions,
+      containsAll(<PatchbayPermissionAction>{
+        PatchbayPermissionAction.status,
+        PatchbayPermissionAction.grant,
+        PatchbayPermissionAction.revoke,
+        PatchbayPermissionAction.reset,
+      }),
+    );
+  });
+
+  // 同一个形态下，capabilities 的 preflight（`PatchbayPermissionDriverRunner.run`
+  // 在每次 normalize/reset 前都会先问一次 capabilities）不能把这个权限的 actions
+  // 收窄成只剩 status——否则 preflight 会在到达 `_normalize`/`_reset` 之前就把
+  // normalize/reset 拒掉（`permissionUnsupported`），这正是四步预检退 6 的直接原因。
+  test('capabilities preflight still grants normalize/reset actions when the '
+      'runtime record has not materialized yet', () async {
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayAndroidPermissionAdapter(
+          runCommand: _android(
+            declared: const <String>{'android.permission.CAMERA'},
+            withoutRuntimeRecord: const <String>{'android.permission.CAMERA'},
+          ),
+        ).handle(_request(PatchbayPermissionOperation.capabilities));
+    expect(response.accepted, isTrue, reason: response.code ?? '');
+    final PatchbayPermissionCapability capability =
+        response.capabilities!.permissions['camera']!;
+    expect(
+      capability.actions,
+      containsAll(<PatchbayPermissionAction>{
+        PatchbayPermissionAction.status,
+        PatchbayPermissionAction.grant,
+        PatchbayPermissionAction.revoke,
+        PatchbayPermissionAction.reset,
+      }),
+    );
+  });
 
   // capability 不能凭"配了 runner 路径"就宣布能处理弹窗：路径存在与 runner 真的装在这台
   // 设备上是两件事，声明比事实宽会让调用方按声明编排、到执行时才失败。
