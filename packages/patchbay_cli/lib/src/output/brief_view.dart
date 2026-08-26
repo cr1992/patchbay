@@ -296,6 +296,25 @@ Map<String, Object?> projectPatchbayBriefView({
   // Deleting it too would both destroy the one thing an artifact-consuming
   // caller needs and report an `omitted` entry for a deletion that never
   // happened, which brief-view.md's contract forbids outright.
+  //
+  // N3 (honesty correction): the check below is not scoped to the two
+  // spilling families. `alreadySpilled` is computed against the whole
+  // response, independent of `family`, so *every* family's rules — the
+  // `catalog` and `logs.query` ones included — are switched off the instant
+  // `localArtifact` is present, not only `ui.semantics.tree`'s and
+  // `diagnosticTree`'s. That is structurally correct only by coincidence:
+  // `localArtifact` is written exclusively by PB-050-20's spill path
+  // (`maybeSpillRenderedMember` in `local_artifact.dart`), which only ever
+  // runs for a `spec.artifact == PatchbayArtifactDisposition.renderedMember`
+  // command — and `catalog` / `logs.query` are never `renderedMember` (see
+  // `friendly_commands.dart` / `command_spec.dart`), so a `catalog` or
+  // `logs.query` response can never actually carry a top-level
+  // `localArtifact` key. The collateral shutoff therefore has no observable
+  // effect today, but it is a property of the *data*, not of this gate: a
+  // future family whose response could legitimately carry an unrelated
+  // top-level `localArtifact` would need this check narrowed to the two
+  // spilling families explicitly, not left widened by accident the way it
+  // is now.
   final bool alreadySpilled = current.containsKey('localArtifact');
   final Iterable<_ProjectionRule> effectiveRules = alreadySpilled
       ? const <_ProjectionRule>[]
