@@ -217,6 +217,18 @@ after
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
   });
 
+  test('root READMEs stay concise and route command discovery', () {
+    for (final String path in <String>[
+      '../../README.md',
+      '../../README.zh-CN.md',
+    ]) {
+      final String readme = File(path).readAsStringSync();
+      expect(readme, isNot(contains(docs.commandReferenceStart)));
+      expect(readme, contains('patchbay help <topic>'));
+      expect(readme, contains('packages/patchbay_cli/README'));
+    }
+  });
+
   test('write is idempotent and check detects managed-block drift', () {
     final _Fixture fixture = _Fixture.create();
     addTearDown(fixture.dispose);
@@ -293,8 +305,6 @@ final class _Fixture {
       '${root.path}/packages/patchbay_cli',
     )..createSync(recursive: true);
     final List<File> files = <File>[
-      File('${root.path}/README.md'),
-      File('${root.path}/README.zh-CN.md'),
       File('${packageDirectory.path}/README.md'),
       File('${packageDirectory.path}/README.zh-CN.md'),
       File('${root.path}/skills/use-patchbay/SKILL.md'),

@@ -60,16 +60,13 @@ dependencies:
 
 ### CLI
 
-CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什么形态直接决定手感。三种形态：
+CLI 每条命令起一个进程，启动开销**按条计费**，所以安装形态会直接影响交互手感：
 
-| 形态 | 任意目录可用 | 启动 + 一次 `catalog` 往返 | 适用 |
+| 形态 | 任意目录可用 | 运行时要求 | 适用 |
 |---|---|---|---|
-| Release 预编译二进制 | 是 | ~45 ms | 只用 CLI；机器上不必有 Dart SDK |
-| `dart pub global activate` app snapshot | 是 | ~160 ms | 需要 Dart SDK 的兼容形态 |
-| 仓内 `dart run bin/patchbay.dart` | 要写全路径 | ~540 ms | 改 CLI 本身 |
-
-> 数字是 macOS arm64 对同一个 example host 各连 8 次的中位数，同机同链路，只用于比较量级；
-> 真机跨 USB 时连接本身的耗时会盖过这段差距。
+| Release 预编译二进制 | 是 | 无需 Dart SDK | 日常使用与 CI，默认推荐 |
+| `dart pub global activate` app snapshot | 是 | 需要 Dart SDK | 兼容形态 |
+| 仓内 `dart run bin/patchbay.dart` | 要写全路径 | 需要 Dart SDK；每次重新编译 | 只用于修改 CLI 本身 |
 
 > **坑：在接入方仓目录里 `dart run patchbay_cli:patchbay` 解析到的是该仓 pin 的版本。**
 > `<包名>:<可执行文件>` 形式按**当前目录所属的包**解析，在接入方仓里那是它 pin 的 tag，不是你
@@ -123,11 +120,10 @@ Gatekeeper 隔离，`xattr -d com.apple.quarantine <文件>` 解除；用 `curl`
 $ cd packages/patchbay_cli && dart run bin/patchbay.dart --help
 ```
 
-嫌每条命令等半秒，就把当前工作树编成 AOT 可执行文件（约 1.6 秒编一次，产物 7 MiB）：
+需要连续复用当前工作树时，把 CLI 编成一次 AOT 可执行文件：
 
 ```console
 $ dart run packages/patchbay_cli/tool/build_cli.dart   # 仓根或包内调用均可
-Built …/packages/patchbay_cli/build/patchbay (7.3 MiB)
 ```
 
 产物落在 `packages/patchbay_cli/build/`（已 gitignore），放到 PATH 上即可任意目录直跑。它是
@@ -247,7 +243,7 @@ stdin」，而这个键是**协议元数据，不是命令参数**。host 在把
 catalog 是这条策略的唯一真源，host 读不到 catalog 时 fail-closed：带参数的调用以
 `providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，不会把未校验的参数交给 adapter。
 
-**从旧版本升级：两步，都要做。**
+**已有 adapter 迁移：两步，都要做。**
 
 1. 删掉 arguments 白名单里对 `inputWasStdin` 的豁免——host 不再传这个键，留着只是死代码
    （**不删无害**）；
@@ -269,8 +265,8 @@ final jobs = PatchbayJobRegistry(
 
 声明了 `responseSchema.terminal` 的 job 命令要把**同一份** `PatchbayCommandRegistry` 绑定到账本。
 handler 在 registry 的 dispatch scope 内调用 `start()` 时不用再传命令名：账本会捕获当前正在执行的
-exact registration identity，而不是相信 handler 提供的字符串。这是 0.4 新增的可选接入，旧 job 不改也
-继续走 `legacyUnvalidated`：
+exact registration identity，而不是相信 handler 提供的字符串。这条严格校验路径是可选接入；
+尚未迁移的 job 继续走 `legacyUnvalidated`：
 
 ```dart
 late final PatchbayJobRegistry jobs;
@@ -295,7 +291,7 @@ dispatch scope 跟随 async handler，嵌套或并发 dispatch 不会串用 desc
 `start(command: ...)` 在 dispatch 外会拒绝，避免一个裸字符串冒充来源。账本在启动时深冻结该 descriptor
 的终态 schema，不在任务完成时重新读取可变 catalog。终态 payload 若漏字段、类型错误、变体或额外字段
 违规，会在写 ledger **之前**被替换成不含原值的 `providerProtocolViolation`。未绑定
-`commandRegistry` 且不声明 command 的旧 job 继续保留 0.3 free-payload 行为。
+`commandRegistry` 且不声明 command 的兼容 job 继续保留 free-payload 行为。
 
 需要表达设备执行结果的命令还要在 payload 中使用统一的 `execution` 对象。descriptor 按实际能力声明
 `confirmationBudgetMs`（`1..120000`）、`unchangedEvidenceMaxAgeMs`（`1..300000`）以及默认关闭的
@@ -323,7 +319,7 @@ final payload = <String, Object?>{
 
 四种 classification 只有 `notSent`、`sentUnconfirmed`、`unchanged`、`deviceConfirmed`。job 终态中前两种
 默认只能落 `failed`，后两种只能落 `completed`；只有显式开启弱确认时 `sentUnconfirmed` 才能 completed。
-0.4 中 `deviceConfirmed` 的 factSource 只能是 `deviceReported`，`uiObserved` 不能升级成设备确认。
+`deviceConfirmed` 的 factSource 只能是 `deviceReported`，`uiObserved` 不能升级成设备确认。
 `reasonCode` 若非空，必须在 `responseSchema` 的 string `allowedValues` 中封闭声明。新 `execution` 与旧
 `dispatched` 冲突时以新证据为准，并在响应 `details.legacyDispatchedConflict` 留痕；退出码仍按 job 终态，
 不会把“已发送”当成“已完成”。
@@ -598,7 +594,7 @@ $ patchbay --json doctor | jq '.doctor.checks[] | select(.check=="connection").d
   "applicationId": "com.example.app",
   "appInstanceId": "a1b2c3",
   "schemaVersion": 1,
-  "serverVersion": "0.2.1",
+  "serverVersion": "<host-version>",
   "features": ["catalogDigest", "lifecycleState"]
 }
 ```
@@ -1140,9 +1136,9 @@ lifecycle `5`），只有 warning 时是 `0`。
   注册的 inspector 服务扩展。反过来，`perf profile` 在 debug 下的帧耗时与 jank 不代表真实表现
   （JIT + 断言开启），要可信数字必须用 `--profile` 跑。所以：**日常联调用 debug、测性能时才切 profile**，
   并在报告里写清模式——否则「这条命令不可用」和「这个数字不可信」会被读成同一类问题。
-- **CLI 建议用原生 AOT 可执行，而不是 `dart run`。** `dart run bin/patchbay.dart` 每次调用都重新编译，
-  脚本化场景里单步几秒；`dart compile exe` 一次即可复用，单步降到毫秒级，且与 GitHub Release 上的产物
-  同形态。注意 `dart pub global activate` 装的是 app snapshot 而非原生 AOT，不要用它测启动耗时。
+- **CLI 建议用原生 AOT 可执行，而不是 `dart run`。** `dart run bin/patchbay.dart` 每次调用都重新编译；
+  `dart compile exe` 一次即可复用，且与 GitHub Release 上的产物同形态。注意
+  `dart pub global activate` 装的是 app snapshot 而非原生 AOT，不要用它测原生 AOT 启动耗时。
   唯一要留意的是产物过期：改了 CLI 源码就要重编，否则会拿到一个不报错但过时的答案。
   不必担心"AOT 出问题不好查"：未捕获异常的栈在 AOT 下仍带函数名与行号（只少列号），而 `--json` 的
   `error.code` 与退出码在两种模式下完全一致——本 CLI 的诊断面是类型化答复，不是栈回溯。`assert` 在
@@ -1174,8 +1170,10 @@ lifecycle `5`），只有 warning 时是 `0`。
     （已实测）。`patchbay doctor` 的 lifecycle 解法里同时给这两条。
 - 截图只证明 Flutter 合成树；系统弹窗、PlatformView 可能缺失，结果附能力警告。
 - 系统权限弹窗不在 Flutter UI 树内。Patchbay 四个 package 不直接操作它；`permission exercise` 通过
-  显式配置的外部 driver 调用平台官方测试工具。Android 0.4.0 只承诺 adb 状态/规范化路径；iOS 随仓提供
-  XCUITest reference runner 源码，真机可处理 camera、microphone、locationWhenInUse 的预期弹窗：
+  显式配置的外部 driver 调用平台官方测试工具。Android 的基础面由 adb 提供
+  `status` / `normalize` / `reset` / `fail`，只有显式配置且目标设备发现 runner 时才开放 `exercise`；
+  iOS 随仓提供 XCUITest reference runner 源码，真机可处理 camera、microphone、
+  locationWhenInUse 的预期弹窗：
   App 先用自己的 debug/domain 命令发起权限请求，runner 再按 accessibility identity 与唯一 decision
   操作，之后 CLI 等待 resumed、重连并刷新 catalog。它不使用坐标或截图识别。
   iOS runner 需要本机 Xcode、设备授权与签名 `.xctestrun`；物理真机 `status/normalize`、notifications
