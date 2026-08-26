@@ -66,10 +66,18 @@ void main() {
       );
     }
 
+    // PB-050-07 / DG-050-05 之后的 cadence 事实（帧数是稳定断言，不是性能数）：
+    // ready owner 的 `ensureOwner` 与 identifier probe 都是**零额外帧**，一次未
+    // 满足的 semantics wait poll 因此从 2 帧降到 1 帧。
     expect(endOfFrame.map((sample) => sample.frames), everyElement(1));
-    expect(ensureOwner.map((sample) => sample.frames), everyElement(1));
-    expect(probes.map((sample) => sample.frames), everyElement(1));
+    expect(ensureOwner.map((sample) => sample.frames), everyElement(0));
+    expect(probes.map((sample) => sample.frames), everyElement(0));
     expect(waitFrames.map((sample) => sample.frames), everyElement(1));
+    expect(
+      _medianFrames(probes) + _medianFrames(waitFrames),
+      1,
+      reason: '一次未满足的 semantics wait poll = 1 帧',
+    );
 
     final Map<String, Object?> report = <String, Object?>{
       'schemaVersion': 1,
@@ -171,8 +179,12 @@ Future<_Measurement<T>> _measure<T>(
       onError: (Object _, StackTrace _) => completed = true,
     ),
   );
+  // PB-050-07：先排空微任务再决定是否 pump。零帧操作（ready owner 的 probe）如果
+  // 被脚手架无条件 pump 一次，测出来的「帧数」就是脚手架自己的，不是被测行为的。
+  await tester.idle();
   for (var pump = 0; pump < 10 && !completed; pump += 1) {
     await tester.pump();
+    await tester.idle();
   }
   if (!completed) {
     throw StateError('benchmark operation did not complete in 10 frames');
