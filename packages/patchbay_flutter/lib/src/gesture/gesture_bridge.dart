@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
 import '../lifecycle.dart';
+import '../occlusion/occlusion_probe.dart';
 import '../semantics/semantics_bridge.dart';
 import '../semantics/semantics_models.dart';
 import 'gesture_models.dart';
@@ -209,12 +210,14 @@ final class PatchbayGestureBridge {
       velocity: velocity,
       durationMs: durationMs,
     )) {
-      if (!resolution.visible(point, resolution.global(point))) {
+      if (!resolution.visible(point)) {
         return PatchbayInvocation.rejected(
           requestId: id,
           rejection: const PatchbayRejection(
             code: 'uiGestureTargetObscured',
-            details: <String, Object?>{'reason': 'hitTestOrClip'},
+            details: <String, Object?>{
+              'reason': PatchbayOcclusionReason.hitTestOrClip,
+            },
           ),
         );
       }
@@ -411,46 +414,17 @@ final class PatchbayGestureBridge {
     if (node.isInvisible || node.areUserActionsBlocked) {
       return const GestureResolution.rejected('uiGestureTargetObscured');
     }
-    final RenderView? view = RendererBinding.instance.renderViews
-        .cast<RenderView?>()
-        .firstWhere(
-          (RenderView? candidate) =>
-              identical(candidate?.owner?.semanticsOwner, target.owner),
-          orElse: () => null,
-        );
-    if (view == null) {
-      return const GestureResolution.rejected(
+    final PatchbayOcclusionResolution geometry =
+        patchbayResolveOcclusionGeometry(owner: target.owner!, node: node);
+    if (!geometry.resolved) {
+      return GestureResolution.rejected(
         'uiGestureTargetObscured',
-        details: <String, Object?>{'reason': 'viewUnavailable'},
-      );
-    }
-    final RenderObject? anchor = _semanticRenderObject(view, node);
-    if (anchor == null) {
-      return const GestureResolution.rejected(
-        'uiGestureTargetObscured',
-        details: <String, Object?>{'reason': 'renderAnchorUnavailable'},
-      );
-    }
-    final double devicePixelRatio = view.flutterView.devicePixelRatio;
-    final Matrix4 transform = Matrix4.diagonal3Values(
-      1 / devicePixelRatio,
-      1 / devicePixelRatio,
-      1,
-    )..multiply(_transformToRoot(node));
-    final Rect globalRect = MatrixUtils.transformRect(transform, node.rect);
-    if (globalRect.isEmpty || !globalRect.isFinite) {
-      return const GestureResolution.rejected(
-        'uiGestureTargetObscured',
-        details: <String, Object?>{'reason': 'emptyBounds'},
+        details: <String, Object?>{'reason': geometry.reason},
       );
     }
     return GestureResolution.resolved(
-      node: node,
+      geometry: geometry.geometry!,
       target: target.target!,
-      transform: transform,
-      globalRect: globalRect,
-      anchor: anchor,
-      viewId: view.flutterView.viewId,
     );
   }
 
@@ -466,45 +440,6 @@ final class PatchbayGestureBridge {
     if (!target.resolved) return true;
     final GestureResolution geometry = _resolveGeometry(target);
     return !geometry.resolved || geometry.globalRect != beforeRect;
-  }
-
-  static RenderObject? _semanticRenderObject(
-    RenderObject root,
-    SemanticsNode node,
-  ) {
-    for (
-      SemanticsNode? candidate = node;
-      candidate != null;
-      candidate = candidate.parent
-    ) {
-      RenderObject? match;
-      void visit(RenderObject renderObject) {
-        if (match != null) return;
-        if (identical(renderObject.debugSemantics, candidate)) {
-          match = renderObject;
-          return;
-        }
-        renderObject.visitChildren(visit);
-      }
-
-      visit(root);
-      if (match != null) return match;
-    }
-    return null;
-  }
-
-  static Matrix4 _transformToRoot(SemanticsNode node) {
-    var result = Matrix4.identity();
-    for (
-      SemanticsNode? current = node;
-      current != null;
-      current = current.parent
-    ) {
-      if (current.transform case final Matrix4 transform) {
-        result = Matrix4.copy(transform)..multiply(result);
-      }
-    }
-    return result;
   }
 
   PatchbayInvocation? _decisionRejection(

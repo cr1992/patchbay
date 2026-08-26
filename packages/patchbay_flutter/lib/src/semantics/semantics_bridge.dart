@@ -7,7 +7,40 @@ import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
 import '../lifecycle.dart';
+import '../occlusion/occlusion_probe.dart';
 import 'semantics_models.dart';
+
+/// PB-050-16 / DG-050-09：点性 action 的封闭分类。
+///
+/// 判据：真实用户对应物是一次落在目标边界内单点上的指针接触——有指针对应物、
+/// 对应物是单点而不是路径或方向、覆盖该点即改变真实用户的可达性，三条同时
+/// 成立才算点性。`tap` 与 `longPress` 是单点 down/(hold)/up；`focus` 与
+/// `setText` 没有位置对应物；`scroll*` 的对应物是拖动，部分覆盖也应可滚动；
+/// `showOnScreen` 按定义要在目标尚不可达时工作；其余是纯辅助功能语义。
+/// `longPress` 还不在 0.5.0 的公开 allowlist 内，提前分类只为它将来进
+/// allowlist 时按构造继承本闸。
+///
+/// 穷尽 switch、**无 `default` 分支**：`PatchbaySemanticsAction` 新增值时
+/// 编译期就必须显式分类，而不是靠后来的记忆。库私有 extension，不构成公共
+/// API 成员。
+extension on PatchbaySemanticsAction {
+  bool get _isPointLike => switch (this) {
+    PatchbaySemanticsAction.tap => true,
+    PatchbaySemanticsAction.longPress => true,
+    PatchbaySemanticsAction.focus => false,
+    PatchbaySemanticsAction.dismiss => false,
+    PatchbaySemanticsAction.showOnScreen => false,
+    PatchbaySemanticsAction.scrollUp => false,
+    PatchbaySemanticsAction.scrollDown => false,
+    PatchbaySemanticsAction.scrollLeft => false,
+    PatchbaySemanticsAction.scrollRight => false,
+    PatchbaySemanticsAction.increase => false,
+    PatchbaySemanticsAction.decrease => false,
+    PatchbaySemanticsAction.expand => false,
+    PatchbaySemanticsAction.collapse => false,
+    PatchbaySemanticsAction.setText => false,
+  };
+}
 
 /// Public-API Flutter Semantics observer and action dispatcher.
 ///
@@ -300,6 +333,33 @@ final class PatchbaySemanticsBridge {
     final SemanticsOwner owner = resolution.owner!;
     final int nodeId = resolution.target!.nodeId;
     final int generation = resolution.target!.generation;
+    // PB-050-16 / DG-050-09：点性 action 的固定采样遮挡准入。位置是冻结的
+    // ——门后二次 policy 与敏感输入复核之后、`performAction` 之前，全程只有
+    // 这一处（门前的判定不权威：声明 gate 的 await 恰恰是覆盖层出现的窗口）。
+    // **复核与派发之间不得存在任何 await/yield**：两者必须在同一微任务内，用
+    // 同一次 resolve 得到的 owner/节点。结论只对这一次派发有效，不缓存、不跨调
+    // 用复用，也不因为遮挡而重解析、等待或重试（写操作不重放）。
+    if (action._isPointLike) {
+      final String? obscuredReason = patchbaySampledOcclusionReason(
+        owner: owner,
+        node: resolution.node!,
+      );
+      if (obscuredReason != null) {
+        return PatchbayInvocation.rejected(
+          requestId: id,
+          rejection: PatchbayRejection(
+            code: 'uiSemanticsTargetObscured',
+            details: <String, Object?>{
+              'reason': obscuredReason,
+              'nodeId': nodeId,
+              'generation': generation,
+              'identifier': ?identifier,
+            },
+          ),
+        );
+      }
+    }
+
     final int beforeRevision = _treeRevision;
     try {
       owner.performAction(
@@ -438,6 +498,7 @@ final class PatchbaySemanticsBridge {
     return PatchbaySemanticsResolution.resolved(
       owner,
       _target(node, entry.generation, data),
+      node,
     );
   }
 
@@ -501,6 +562,7 @@ final class PatchbaySemanticsBridge {
     return PatchbaySemanticsResolution.resolved(
       owner,
       _target(node, entry.generation, data),
+      node,
     );
   }
 

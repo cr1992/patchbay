@@ -1,5 +1,6 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
+
+import '../occlusion/occlusion_probe.dart';
 
 /// Pointer gesture families supported by the anchored gesture bridge.
 enum PatchbayGestureKind { pressHold, drag, fling }
@@ -93,64 +94,34 @@ final class GestureTargetResolution {
 
 final class GestureResolution {
   const GestureResolution.resolved({
-    required this.node,
+    required PatchbayOcclusionGeometry this.geometry,
     required this.target,
-    required this.transform,
-    required this.globalRect,
-    required this.anchor,
-    required this.viewId,
   }) : code = null,
        details = const <String, Object?>{};
 
   const GestureResolution.rejected(
     this.code, {
     this.details = const <String, Object?>{},
-  }) : node = null,
-       target = null,
-       transform = null,
-       globalRect = Rect.zero,
-       anchor = null,
-       viewId = 0;
+  }) : geometry = null,
+       target = null;
 
-  final SemanticsNode? node;
+  /// 与 semantics 共用的判定几何（PB-050-16 抽出的基元）。
+  final PatchbayOcclusionGeometry? geometry;
   final PatchbayGestureTarget? target;
-  final Matrix4? transform;
-  final Rect globalRect;
-  final RenderObject? anchor;
-  final int viewId;
   final String? code;
   final Map<String, Object?> details;
 
   bool get resolved => target != null;
 
-  Offset global(GesturePoint point) {
-    final Offset local = Offset(
-      node!.rect.left + node!.rect.width * point.x,
-      node!.rect.top + node!.rect.height * point.y,
-    );
-    return MatrixUtils.transformPoint(transform!, local);
-  }
+  Rect get globalRect => geometry?.globalRect ?? Rect.zero;
 
-  bool visible(GesturePoint point, Offset globalPoint) {
-    final Offset local = Offset(
-      node!.rect.left + node!.rect.width * point.x,
-      node!.rect.top + node!.rect.height * point.y,
-    );
-    final Rect? clip = node!.parentPaintClipRect;
-    if (clip != null && !clip.contains(local)) return false;
-    final HitTestResult result = HitTestResult();
-    GestureBinding.instance.hitTestInView(result, globalPoint, viewId);
-    for (final HitTestEntry<HitTestTarget> entry in result.path) {
-      if (entry.target case final RenderObject candidate) {
-        for (
-          RenderObject? current = candidate;
-          current != null;
-          current = current.parent
-        ) {
-          if (identical(current, anchor)) return true;
-        }
-      }
-    }
-    return false;
-  }
+  int get viewId => geometry?.viewId ?? 0;
+
+  Offset global(GesturePoint point) => geometry!.globalOf(point.x, point.y);
+
+  /// gesture 的通过条件保持布尔且只认 [PatchbayOcclusionState.reachable]：
+  /// 逐点全过才派发。三态里另外两态在 gesture 侧都算不可见，与抽基元之前
+  /// 的判定逐条等价。
+  bool visible(GesturePoint point) =>
+      geometry!.probe(point.x, point.y) == PatchbayOcclusionState.reachable;
 }
