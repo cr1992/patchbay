@@ -1,6 +1,6 @@
 # 0.5.0 workspace / worktree 级会话亲和性
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-14
 >
@@ -168,6 +168,27 @@ session 目录、record、pin、lock 与临时文件继续 owner-only；所有�
 2. 接受 legacy record 的“路径可证明才懒迁移”与全局 pin 的一次性退役规则。
 3. 接受 `session use` 只能写 current scoped pin，显式 `--session` 为唯一跨 workspace 入口。
 4. 接受 256 份、每份 1 KiB 的 scoped pin 上限与“不驱逐仍有关联 record 的 pin”策略。
+
+### 裁决结论（DG-050-12，2026-08-26，仓主授权代理裁决）
+
+仓主在会话中授权代理裁决（授权与过程记录于本 MR）。四条待裁决全部接受，无修改：
+
+1. **接受 `gitWorktree | directory` identity 与 SHA-256 host-local key。** 版本计划已冻结「共享
+   Git common dir 的不同 worktree 必须区分」；`rev-parse --show-toplevel` 是唯一能区分 worktree 的
+   只读探测，common dir / 仓库名恰恰是会把 worktree 合并回同一作用域的候选，已在被否决方案列明。
+2. **接受「路径可证明才懒迁移」与全局 pin 一次性退役。** fail-closed 方向与版本计划「不允许退回
+   全局 latest」一致；两个 workspace 竞领旧文件只有一个成功的降级后果是「少一个 pin」而不是
+   「写命令跨区」，代价方向正确。
+3. **接受 `session use` 只写 current scoped pin、显式 `--session` 为唯一跨 workspace 入口。**
+   与版本计划 PB-050-14 行逐字一致（「显式 --session 是唯一允许的跨工作区选择……不得改写另一
+   工作区的 pin」）。
+4. **接受 256 份 × 1 KiB scoped pin 上限与不驱逐仍有 record 的 pin。** 上限远超真实 worktree
+   数量级，超限走稳定码 `sessionSelectionCapacityExceeded` 如实拒绝而非静默驱逐，与仓内资源
+   有界化惯例一致。
+
+连带说明：四个新增稳定错误码（`sessionWorkspaceUnavailable` / `sessionWorkspaceEmpty` /
+`sessionWorkspaceMismatch` / `sessionSelectionCapacityExceeded`）进入封闭注册表（PB-050-23
+ratchet），实现 MR 不得再新增本稿之外的码。
 
 ## 被否决方案
 

@@ -1,6 +1,6 @@
 # 0.5.0 Snapshot 双预算、single-flight 与可选 source revision
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-02
 >
@@ -121,6 +121,24 @@ versioned source 还需校验：负数或倒退返回 `providerProtocolViolation
 - `revisionSource: consumerReported` 是否足以表达信任边界，还是需要另加 capability 供 CLI 分支？
 - versioned source 的 revision 前进但 canonical 相同，是否递增 host snapshotRevision（本稿建议递增，忠实于
   provider 的内容提交事实）？
+
+### 裁决结论（DG-050-01，2026-08-26，仓主授权代理裁决）
+
+仓主在会话中授权代理裁决（授权与过程记录于本 MR）。四条待裁决结论：
+
+1. **接受推荐默认值：单份 1 MiB、总量 8 MiB、32 份。** 单份默认远低于 PB-050-01 的 4 MiB 硬
+   天花板，留足接入方在天花板内上调的空间；32 份维持既有计数语义不变，本裁决只是给它补上
+   字节维度。无基准证据表明需要偏离推荐值；若实现期基准另有发现，按范围变更流程回来改本节，
+   不得静默偏离。
+2. **确认所有可配置单份字节值不得超过 4 MiB 天花板，且以常量关系测试冻结
+   `maxExpandedOccurrences >= maxCanonicalBytes ~/ 2`。** 这本就是版本计划的退出条件：occurrence
+   backstop 不得先于字节预算触发，1..4 MiB 合法 payload 必须由运行/字节预算分类。
+3. **`revisionSource: consumerReported` 足以表达信任边界，不另加 capability。** 来源是逐响应
+   事实，读方拿到响应即可分支；静态 capability 声明只会引入与实际来源漂移的第二真源。与既有
+   `revisionSource: hostObserved` legacy 路径同构。
+4. **versioned source 的 revision 前进但 canonical 相同时，host snapshotRevision 递增。** 忠实于
+   provider 的内容提交事实；diff 为空但 revision 前进是诚实结果，去重式吞并会让轮询方观察不到
+   provider 的提交节奏。
 
 ## 被否决方案
 

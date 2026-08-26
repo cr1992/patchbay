@@ -1,6 +1,6 @@
 # 0.5.0 Semantics probe 请帧策略与 identifier 索引
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-07
 >
@@ -99,6 +99,26 @@ index 只持有 App 内 `SemanticsNode` 引用，不进入响应、日志或 aud
   冻结，避免实际已驱帧却隐瞒。
 - PB-050-04 达到什么阈值才实现 identifier index？建议至少证明树扫描占 probe 总耗时 20% 或单次 P95
   超过 2 ms，否则只改请帧策略。
+
+### 裁决结论（DG-050-05，2026-08-26，仓主授权代理裁决）
+
+仓主在会话中授权代理裁决（授权与过程记录于本 MR）。裁决输入为
+[PB-050-04 量测报告](../../verification/0.5.0-semantics-probe-benchmark.md)：Android 真机 profile 下
+`ensureOwner` 主动请帧占一次 probe 中位耗时的 8.465/8.598 ms（98.5%），扫描独占仅 0.133 ms；
+未命中的 semantics wait 每轮稳定 2 帧。三条待裁决结论：
+
+1. **ready owner 的 one-shot 采用零额外帧。** owner/root 已可用时直接 probe，不主动请帧——这是
+   每次必付且占比最大的成本，量测已证明其收益上界远高于任何扫描优化。首次启用、owner 替换或
+   root 缺失时保留本稿的有界恢复路径（最多三轮、单帧 timeout 2 秒不放宽）。连带口径：响应与
+   文档不得把 one-shot 说成「命令后下一帧的树」；观察语义即当前已 flush 的树。
+2. **`ui.wait.frameRevision` 计入所有实际驱动的帧**（含 owner 恢复帧），并以测试冻结。实际驱了
+   帧却不报告是隐瞒；调用方按 frameRevision 推断成本时必须拿到真值。
+3. **identifier index 本版不实现，接受阈值口径**：只有更大树规模的 profile 曲线（至少补 1k/10k
+   节点）证明树扫描占 probe 总耗时 ≥ 20% 或单次 P95 > 2 ms 时，才允许引入 index 及其缓存失效
+   与 node identity 风险。当前数据（35 节点 0.133 ms / 1.5%）远低于阈值，本版只改请帧策略。
+
+安全围栏不变：无论采用何种调度，owner/tree identity、node identity、generation 与门后二次复核
+一律保留（量测报告第 4 条决策输入原样生效）。
 
 ## 被否决方案
 
