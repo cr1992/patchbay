@@ -685,8 +685,10 @@ $ patchbay sessions list|prune               # 本地会话记录，不连 App
 $ patchbay session use <id>|--clear          # 固定 / 取消固定会话
 $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
-$ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
+$ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发（语义通道）
+$ patchbay ui gesture tap <identifier> <gen>  # 真指针点按：经 hit-test 与手势竞技场
 $ patchbay ui action <identifier> <gen> <action> [text] # 通用 identifier action，generation 必填
+$ patchbay ui reveal <identifier>             # 驱动滚动容器直到目标露出，返回 reachability
 $ patchbay ui verify-manifest <file>        # 声明 ↔ 运行时挂载对账
 $ patchbay ui inspect on|off|status         # 设备端 widget inspector 选择模式（带租约，自动还原）
 $ patchbay ui widget-tree|render-tree|focus-tree
@@ -700,6 +702,12 @@ $ patchbay help <topic>                     # 帮助由声明生成
 
 `<gen>` 是 catalog 返回的 UI target generation。控件重新挂载后 generation 会变化；写操作必须携带
 最近观察到的值，否则会以 `uiGenerationStale` 拒绝。
+
+`ui reveal` 是写操作，同写类命令一样过门，目标不必已挂载——挂载与露出都发生在这一次请求内，
+不要在它后面接 `ui wait semantics-mounted`。成功返回的 `reachability` 告诉你下一步走哪条通道：
+`pointer` 用 `ui gesture tap`（真指针，防误击首选），`semanticsOnly` 用 `ui tap`（语义派发）。
+多个滚动容器歧义时补 `--container <identifier>`；步数与时长有界，滚到底仍无目标或预算用尽都会
+以稳定码如实拒绝，不伪造成功。
 
 `patchbay help` 的 topic 除了 CLI 路径（`ui wait`），还接受 catalog 里的协议名——手上拿着
 `navigation.go` 或响应里的 `ui.semantics.tap` 就能直接查，不必先反推 CLI 路径。多个 CLI 命令共用
