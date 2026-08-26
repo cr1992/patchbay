@@ -120,9 +120,26 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
   ..addOption('cursor', help: 'Opaque structured-log cursor.')
   ..addOption(
+    'container',
+    help:
+        'ui reveal: Semantics identifier anchoring the scroll container to '
+        'drive. Name one whenever several candidate containers are mounted '
+        'and the target is not.',
+  )
+  ..addOption(
+    'max-steps',
+    help: 'ui reveal: scroll actions this call may dispatch (1..200).',
+  )
+  ..addOption(
     'direction',
-    allowed: const <String>['forward', 'backward'],
-    help: 'Structured-log traversal direction.',
+    // `both` 只属于 `ui reveal`。`logs query|export` 的 wire 枚举仍然只有
+    // forward/backward，传 both 会在请求解码时被类型化拒绝。
+    allowed: const <String>['forward', 'backward', 'both'],
+    help:
+        'logs query|export: structured-log traversal direction '
+        '(forward|backward). ui reveal: content order '
+        '(forward|backward|both) — forward moves toward maxScrollExtent, not '
+        'toward the bottom of the screen.',
   )
   ..addOption('limit', help: 'Maximum number of log records.')
   ..addOption('levels', help: 'Comma-separated log levels.')

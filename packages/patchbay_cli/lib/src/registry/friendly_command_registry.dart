@@ -438,6 +438,8 @@ abstract final class FriendlyCommandRegistryResolver {
       'duration-ms',
       'timeout-ms',
       'cursor',
+      'container',
+      'max-steps',
       'direction',
       'limit',
       'levels',
