@@ -134,7 +134,7 @@ void main() {
       },
     );
 
-    test('a wait that opens the wedged sampling keeps its own budget', () async {
+    test('the wait that opens the wedged sampling is left pending', () async {
       final ({
         Future<Map<String, Object?>> Function() source,
         List<int> calls,
@@ -145,22 +145,37 @@ void main() {
         snapshotSource: provider.source,
       );
 
-      // Nothing is in flight, so this caller opens the sampling itself. Opening
-      // it is not a reason to wait longer than the budget it declared: the two
-      // timings must answer alike or a caller's deadline depends on who else
-      // happened to be reading.
+      // The opener owns the provider call, and PB-040 keeps it waiting for that
+      // call to finish: the budget rules on whether the answer still counts, it
+      // does not cut the read short. A source that never answers therefore
+      // leaves this one caller suspended and the transport deadline is what
+      // ends it — the same fallback plain reads have always relied on. That
+      // residual is deliberate here; what must not happen is it spreading to
+      // everybody else.
       expect(handler.hasSamplingInFlight, isFalse);
+      var openerSettled = false;
+      final Future<Map<String, Object?>> opener = handler
+          .dispatchSnapshot(waitRequest(60))
+          .whenComplete(() => openerSettled = true);
+      expect(handler.hasSamplingInFlight, isTrue);
+      expect(provider.calls.length, 1);
 
-      final Stopwatch elapsed = Stopwatch()..start();
-      final Map<String, Object?> response = await handler
-          .dispatchSnapshot(waitRequest(200))
+      // Arriving second is the whole difference: this one joined, so it is
+      // answered on its own budget while the opener is still suspended.
+      final Map<String, Object?> joiner = await handler
+          .dispatchSnapshot(waitRequest(60))
           .timeout(const Duration(seconds: 5));
-      elapsed.stop();
+      expectSpentItsOwnBudget(joiner, timeoutMs: 60);
 
-      expectSpentItsOwnBudget(response, timeoutMs: 200);
-      expect(elapsed.elapsed, lessThan(const Duration(seconds: 2)));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(
+        openerSettled,
+        isFalse,
+        reason: 'the opener waits on its own provider call, budget or not',
+      );
       expect(provider.calls.length, 1);
       expect(handler.hasSamplingInFlight, isTrue);
+      unawaited(opener);
     });
 
     test('a VM Service wait that joins keeps its own budget', () async {
@@ -184,7 +199,7 @@ void main() {
       expect(provider.calls.length, 1);
     });
 
-    test('a VM Service wait that opens keeps its own budget', () async {
+    test('the VM Service wait that opens is left pending too', () async {
       final ({
         Future<Map<String, Object?>> Function() source,
         List<int> calls,
@@ -193,13 +208,23 @@ void main() {
       provider = wedged();
       final PatchbayServiceHost host = serviceHostServing(provider.source);
 
-      final Stopwatch elapsed = Stopwatch()..start();
-      final Map<String, Object?> response = await serviceWait(host, 200);
-      elapsed.stop();
-
-      expectSpentItsOwnBudget(response, timeoutMs: 200);
-      expect(elapsed.elapsed, lessThan(const Duration(seconds: 2)));
+      // Same split across the VM Service handler: whoever opened the wedged
+      // sampling stays suspended, everybody behind them is answered.
+      var openerSettled = false;
+      final Future<ServiceExtensionResponse> opener = host
+          .handleSnapshot(PatchbayServiceHost.snapshotMethod, <String, String>{
+            'isolateId': 'main',
+            PatchbayServiceHost.snapshotRequestKey: jsonEncode(waitRequest(60)),
+          })
+          .whenComplete(() => openerSettled = true);
       expect(provider.calls.length, 1);
+
+      expectSpentItsOwnBudget(await serviceWait(host, 60), timeoutMs: 60);
+
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(openerSettled, isFalse);
+      expect(provider.calls.length, 1);
+      unawaited(opener);
     });
 
     test(
@@ -215,9 +240,14 @@ void main() {
           snapshotSource: provider.source,
         );
 
-        // Polling a wedged App is what a script does. Every round must cost the
-        // App exactly nothing: one provider call, made once, shared by all of
-        // them. Reopening the sampling per round is the leak this asserts away.
+        // Somebody owns the wedged provider call and, under PB-040, waits on
+        // it. Polling a wedged App is what a script does next, and every round
+        // must cost the App exactly nothing: one provider call, made once,
+        // shared by all of them. Reopening the sampling per round — which is
+        // what releasing a timed-out waiter's flight causes — is the leak this
+        // asserts away.
+        unawaited(handler.dispatchSnapshot());
+        expect(provider.calls.length, 1);
         for (var round = 1; round <= 10; round += 1) {
           final Map<String, Object?> response = await handler
               .dispatchSnapshot(waitRequest(60))
@@ -249,6 +279,8 @@ void main() {
       provider = wedged();
       final PatchbayServiceHost host = serviceHostServing(provider.source);
 
+      unawaited(host.dispatchSnapshot());
+      expect(provider.calls.length, 1);
       for (var round = 1; round <= 5; round += 1) {
         final Map<String, Object?> response = await serviceWait(host, 60);
         expectSpentItsOwnBudget(response, timeoutMs: 60);
@@ -273,9 +305,13 @@ void main() {
           snapshotSource: provider.source,
         );
 
-        // A whole-snapshot read declares no budget, so it is still attached when
-        // the App finally answers — which is what makes the late settle
-        // observable here rather than merely asserted about.
+        // The opener declares a budget and still waits for its own provider
+        // call. A whole-snapshot read declares none and joins it, which is what
+        // makes the committed view observable here rather than merely asserted
+        // about.
+        final Future<Map<String, Object?>> opener = handler.dispatchSnapshot(
+          waitRequest(60),
+        );
         final Future<Map<String, Object?>> patient = handler.dispatchSnapshot();
         for (var round = 1; round <= 3; round += 1) {
           expectSpentItsOwnBudget(
@@ -290,9 +326,29 @@ void main() {
         provider.hang.complete(<String, Object?>{
           'call': <String, Object?>{'session': 'device-1'},
         });
+        final Map<String, Object?> late = await opener.timeout(
+          const Duration(seconds: 5),
+        );
         final Map<String, Object?> settled = await patient.timeout(
           const Duration(seconds: 5),
         );
+
+        // The opener is judged the way PB-040 has always judged a source slower
+        // than the budget: the read completed, so a poll counts and what it
+        // resolved travels, but the answer arrived long past the declared
+        // budget and is refused rather than handed back as a success.
+        expect(_rejection(late)['code'], 'snapshotWaitTimeout');
+        expect(_details(late)['polls'], 1);
+        expect(
+          _details(late)['elapsedMs']! as int,
+          greaterThan(120),
+          reason: 'a wedged source overruns its budget by more than a rounding',
+        );
+        expect(_details(late)['observed'], <String, Object?>{
+          'path': 'call.session',
+          'found': true,
+          'value': 'device-1',
+        });
 
         // One provider call, one commit, and the content is the App's own — the
         // waiters that walked away neither duplicated it nor reordered it.

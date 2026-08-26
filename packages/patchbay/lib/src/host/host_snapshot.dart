@@ -119,8 +119,8 @@ final class HostSnapshotHandler {
       final PatchbaySnapshotRead? read = await _readSnapshotWithin(
         timeout - elapsed.elapsed,
       );
-      // The budget ran out while the App was still being sampled. Nothing was
-      // observed, so nothing is reported as observed.
+      // The budget ran out inside a sampling this caller only joined. Nothing
+      // was observed, so nothing is reported as observed.
       if (read == null) break;
       if (read.violated) return read.response;
       polls += 1;
@@ -161,9 +161,9 @@ final class HostSnapshotHandler {
         'pollIntervalMs': patchbaySnapshotPollInterval.inMilliseconds,
         'polls': polls,
         // Present exactly when a poll resolved something. A wait whose budget
-        // was spent waiting on the sampling saw nothing, and reporting a miss it
-        // never looked for would read as "the field is absent" instead of "the
-        // App never answered".
+        // was spent inside a shared sampling saw nothing, and reporting a miss
+        // it never looked for would read as "the field is absent" instead of
+        // "the App never answered".
         if (last
             case final PatchbaySnapshotSelection resolved) ...<String, Object?>{
           'observed': resolved.toJson(),
@@ -208,16 +208,25 @@ final class HostSnapshotHandler {
 
   /// Reads the App snapshot for a caller that has [budget] left of its own.
   ///
-  /// Opening the sampling and joining one are the same wait here: whoever
-  /// declared a budget races it against the one sampling, and running out of it
-  /// answers `snapshotWaitTimeout` instead of waiting forever. Nothing is
-  /// cancelled and nothing is dropped — the sampling stays the sampling in
-  /// flight, so a wedged provider call is made once and never again.
+  /// Opening a sampling and joining one are not the same wait. A caller that
+  /// opens it owns the provider call and keeps the behaviour the budget has
+  /// always had: the read runs to completion and the budget then decides
+  /// whether that answer is still wanted, so a slow source still reports what
+  /// it saw rather than nothing. A caller that *joins* is waiting on somebody
+  /// else's provider call, and sharing the sampling must never mean sharing the
+  /// budget — so the join is capped by what this caller has left.
   ///
-  /// Returns null when the budget ran out before the sampling answered.
+  /// Returns null when the budget ran out before the shared sampling answered.
+  /// Nothing is dropped at that moment: the sampling stays the sampling in
+  /// flight, because one caller walking away says nothing about whether the
+  /// provider call it was watching is still running. Dropping it here is what
+  /// would let the next caller open a second provider call against an App that
+  /// is already being sampled, and let two samplings commit out of order.
   Future<PatchbaySnapshotRead?> _readSnapshotWithin(Duration budget) async {
+    final Future<PatchbaySnapshotRead>? joined = _sampling;
+    if (joined == null) return readSnapshot();
     try {
-      return await readSnapshot().timeout(budget);
+      return await joined.timeout(budget);
     } on TimeoutException {
       return null;
     }
