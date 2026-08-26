@@ -115,6 +115,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
 | `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` |
+| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | 协议 descriptor | `ui.gesture.tap` |
 | `patchbay ui inspect off` | 协议 descriptor | `ui.inspect.select` |
 | `patchbay ui inspect on [--ttl-ms <ms>]` | 协议 descriptor | `ui.inspect.select` |
 | `patchbay ui inspect status` | 协议 descriptor | `ui.inspect.status` |

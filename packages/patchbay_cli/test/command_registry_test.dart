@@ -238,7 +238,8 @@ void main() {
           _
               when spec.name == 'uiGesturePressHold' ||
                   spec.name == 'uiGestureDrag' ||
-                  spec.name == 'uiGestureFling' =>
+                  spec.name == 'uiGestureFling' ||
+                  spec.name == 'uiGestureTap' =>
             <String>['gesture.target', '1'],
           _
               when spec.name == 'uiWaitSemanticsMounted' ||
@@ -934,6 +935,62 @@ void main() {
       );
     },
   );
+
+  test('generated tap syntax decodes the declared centre default and an '
+      'explicit start offset', () {
+    final PatchbayFriendlyInvocation bare = _resolve(<String>[
+      'ui',
+      'gesture',
+      'tap',
+      'wheel',
+      '4',
+    ]);
+    expect(bare.serviceCommand, 'ui.gesture.tap');
+    // start 缺省时 CLI 落 descriptor 声明的目标中心默认；tap 的 wire 上
+    // 没有 durationMs——间隔是 host 侧内部常数。
+    expect(bare.arguments, <String, Object?>{
+      'identifier': 'wheel',
+      'generation': 4,
+      'start': <String, Object?>{'x': 0.5, 'y': 0.5},
+    });
+
+    final PatchbayFriendlyInvocation offset = _resolve(<String>[
+      '--start',
+      '{"x":0.2,"y":0.8}',
+      'ui',
+      'gesture',
+      'tap',
+      'wheel',
+      '4',
+    ]);
+    expect(offset.arguments['start'], <String, Object?>{'x': 0.2, 'y': 0.8});
+    expect(offset.arguments.containsKey('durationMs'), isFalse);
+  });
+
+  test('tap refuses the family duration option, a missing generation and a '
+      'negative generation', () {
+    expect(
+      () => _resolve(<String>[
+        '--duration-ms',
+        '50',
+        'ui',
+        'gesture',
+        'tap',
+        'wheel',
+        '4',
+      ]),
+      throwsA(isA<FormatException>()),
+    );
+    // 少一个位置参数是 usage 错误，不静默补齐。
+    expect(
+      () => _resolve(<String>['ui', 'gesture', 'tap', 'wheel']),
+      throwsA(isA<Exception>()),
+    );
+    expect(
+      () => _resolve(<String>['ui', 'gesture', 'tap', 'wheel', '-1']),
+      throwsA(isA<Exception>()),
+    );
+  });
 
   test('parser has no direct token argv option', () {
     expect(

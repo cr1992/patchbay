@@ -137,6 +137,29 @@ render anchor 均以 `uiGestureTargetObscured` fail-closed；custom paint、tran
 `outcome=dispatched` 仅证明 Flutter 收到了完整指针序列，业务完成仍需 snapshot、manifest 或 capture
 另行验证。
 
+### 锚定式 tap（指针通道上的点按）
+
+`ui.gesture.tap`（CLI：`ui gesture tap <identifier> <generation> [--start <json>]`）与家族共用同一条
+准入管线，只是点数为 1：真 `PointerDownEvent`/`PointerUpEvent` 注入，异常路径补 `PointerCancelEvent`。
+它与既有三条的差别恰好就是契约要表达的语义：
+
+- **没有 `durationMs`。** down→up 间隔是实现内部固定常数（远低于框架默认长按阈值），不进 wire、
+  CLI 与 payload。要按住就用 `pressHold`——「点按还是长按」写在命令名上，不藏在数值里。该常数仍受
+  policy `maxDurationMs` 预算约束，被收紧到常数以下即 `uiGestureBudgetExceeded` 整体拒绝。固定短间隔
+  只压住框架默认长按识别器；接入方注册了更短阈值的 recognizer 时，注入序列与真实手指按下同构，
+  该 recognizer 该怎么认还怎么认——命令按注入结果如实返回，不担保手势归属。
+- **`start` 可缺省，默认目标中心。** 默认值以 object 形式声明在 catalog descriptor 上，比例偏移仅在
+  锚定目标边界内合法。
+- **调用方 `generation` 必填，且在第一次解析就核对**（比既有三条更严）。内部 pin 只能防住命令开始
+  之后的换代；「上次观察之后、命令开始之前 identifier 被新节点复用」那个窗口只有调用方手里的
+  generation 能关上。防误击首选路径用最强的那道围栏。
+
+**与 `ui.semantics.tap` 按调用目的选，不设默认优劣**：要证明「真实指针可达并能触发」（经 hit-test 与
+手势竞技场，`GestureDetector`/`InkWell`/按压态按真实路径生效）用 `ui gesture tap`；要驱动「声明了语义
+tap action 的目标」（含指针打不到的：自定义无障碍 action、平台视图代理、测试专用节点）用 `ui tap`。
+两条路径证明不同的事实，遮挡拒绝码也各自独立（`uiGestureTargetObscured` / `uiSemanticsTargetObscured`），
+只在「防误击」这个目的下指针路径是首选（DG-050-08）。
+
 Semantics action 是“沿 Flutter 已公开辅助功能 action 分派了一次”，不是业务成功：
 
 - admission accepted 不等于 callback 产生的网络、文件或设备动作完成；

@@ -47,6 +47,14 @@ final class PatchbayGestureBridge {
   static const int maxDurationMs = 30000;
   static const int maxPathPoints = 64;
   static const double maxVelocity = 20;
+
+  /// tap 的 down→up 间隔。实现细节：不进 wire、CLI 与 payload，调用方与
+  /// 接入方都改不了它（DG-050-08 复核改判）。取值远低于框架默认
+  /// `kLongPressTimeout`（500 ms），把"被默认长按识别器认走"压到工程余量之下；
+  /// 但对接入方自定义的更短阈值 recognizer 不做任何担保——那是指针真实性的
+  /// 固有属性。它仍受 policy 的 `maxDurationMs` 预算约束，收紧到 50 以下即
+  /// 整体拒绝，不因常数不进 wire 就绕过 policy。
+  static const int _tapDownUpDelayMs = 50;
   static int _nextPointer = 1000;
 
   final PatchbayGateEvaluator _gates;
@@ -74,6 +82,30 @@ final class PatchbayGestureBridge {
         start: _point(start),
         durationMs: durationMs,
         kind: PatchbayGestureKind.pressHold,
+        requestId: requestId,
+      );
+    } on FormatException {
+      return Future<PatchbayInvocation>.value(
+        _rejected(requestId ?? _newRequestId(), 'invalidUiArguments'),
+      );
+    }
+  }
+
+  /// 按下即抬起的最短固定序列；要按住用 [pressHold]，语义写在命令名上而不是
+  /// 数值里。`start` 缺省即目标中心，与 descriptor 声明的默认一致。
+  Future<PatchbayInvocation> tap({
+    required String identifier,
+    required int generation,
+    Map<String, Object?>? start,
+    String? requestId,
+  }) {
+    try {
+      return _run(
+        identifier: identifier,
+        generation: generation,
+        start: _point(start ?? const <String, Object?>{'x': 0.5, 'y': 0.5}),
+        durationMs: _tapDownUpDelayMs,
+        kind: PatchbayGestureKind.tap,
         requestId: requestId,
       );
     } on FormatException {
@@ -166,7 +198,14 @@ final class PatchbayGestureBridge {
     final PatchbayGesturePolicy? policy = _policy;
     if (policy == null) return _rejected(id, 'uiGesturesDisabled');
     if (!_isAppResumed()) return _lifecycleRejected(id);
-    GestureTargetResolution target = await _resolveTarget(identifier);
+    // tap 在第一次 resolve 就核对调用方 generation（与 PB-050-10 对齐）：
+    // 内部 pin 防不住"调用方上次观察之后、本次命令开始之前 identifier 已被
+    // 新节点复用"那个窗口，只有调用方手里的 generation 能关上它。既有三条
+    // 维持只在门后核对，拒绝时机不动。
+    GestureTargetResolution target = await _resolveTarget(
+      identifier,
+      expectedGeneration: kind == PatchbayGestureKind.tap ? generation : null,
+    );
     if (!target.resolved) return _targetRejected(id, target);
     final PatchbayGateRejection? baseGate = await _gates.evaluate(
       const <String>{},
@@ -292,7 +331,11 @@ final class PatchbayGestureBridge {
       );
       downDispatched = true;
       switch (kind) {
+        // tap 与 pressHold 的序列同构（down → 延时 → up），差别只在延时来源：
+        // pressHold 是调用方参数，tap 是 `_tapDownUpDelayMs`（已在入口写进
+        // durationMs）。两者都不发 move：任何位移都会进 touch slop 判定。
         case PatchbayGestureKind.pressHold:
+        case PatchbayGestureKind.tap:
           await _delay(Duration(milliseconds: durationMs));
           break;
         case PatchbayGestureKind.drag:
@@ -590,7 +633,8 @@ final class PatchbayGestureBridge {
     required GesturePoint? velocity,
     required int durationMs,
   }) => switch (kind) {
-    PatchbayGestureKind.pressHold => <GesturePoint>[start],
+    PatchbayGestureKind.pressHold ||
+    PatchbayGestureKind.tap => <GesturePoint>[start],
     PatchbayGestureKind.drag => <GesturePoint>[
       start,
       for (final GesturePathPoint point in path) point.point,

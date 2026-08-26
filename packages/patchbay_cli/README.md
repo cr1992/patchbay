@@ -122,6 +122,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` |
 | `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.pressHold` |
+| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | protocol descriptor | `ui.gesture.tap` |
 | `patchbay ui inspect off` | protocol descriptor | `ui.inspect.select` |
 | `patchbay ui inspect on [--ttl-ms <ms>]` | protocol descriptor | `ui.inspect.select` |
 | `patchbay ui inspect status` | protocol descriptor | `ui.inspect.status` |

@@ -203,6 +203,7 @@
     "patchbayUiGestureDragCommandDescriptor",
     "patchbayUiGestureFlingCommandDescriptor",
     "patchbayUiGesturePressHoldCommandDescriptor",
+    "patchbayUiGestureTapCommandDescriptor",
     "patchbayUiInspectSelectCommandDescriptor",
     "patchbayUiInspectStatusCommandDescriptor",
     "patchbayUiKeepAwakeSetCommandDescriptor",

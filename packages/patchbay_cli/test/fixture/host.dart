@@ -50,6 +50,7 @@ void main() {
     'ui.gesture.pressHold',
     'ui.gesture.drag',
     'ui.gesture.fling',
+    'ui.gesture.tap',
     'ui.reveal',
     'ui.text.set',
     'ui.text.enter',
@@ -348,7 +349,8 @@ void main() {
               ).toJson(),
               'ui.gesture.pressHold' ||
               'ui.gesture.drag' ||
-              'ui.gesture.fling' => PatchbayInvocation.accepted(
+              'ui.gesture.fling' ||
+              'ui.gesture.tap' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: <String, Object?>{
                   'outcome': 'dispatched',

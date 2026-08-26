@@ -3,7 +3,10 @@ import 'package:flutter/rendering.dart';
 import '../occlusion/occlusion_probe.dart';
 
 /// Pointer gesture families supported by the anchored gesture bridge.
-enum PatchbayGestureKind { pressHold, drag, fling }
+///
+/// `tap` 追加在末尾：既有值的 index 不变，穷尽 switch 的接入方会拿到分析器
+/// 错误并在编译期对新 kind 做决定（DG-050-08 的 fail-closed 形态）。
+enum PatchbayGestureKind { pressHold, drag, fling, tap }
 
 /// Read-only target facts supplied to the independent gesture policy.
 final class PatchbayGestureTarget {
