@@ -508,6 +508,137 @@ void main() {
     });
   });
 
+  group('0.4.1 reader ↔ 含 ui.reveal 的新 catalog 与新 payload（PB-050-17）', () {
+    // reveal 是 0.5.0 才新增的顶层命令，0.4.1 的读法完全不认识它——这条锁的
+    // 正是「不认识」不等于「读不下去」：catalog 的命令表逐键读，多一行不影响
+    // 老读法认出既有命令；invocation 只逐键取 admission / payload 两个顶层
+    // 键，payload 内部再冒出 containers / reachability 这类新字段一样被忽略。
+    test('老读法从新 catalog 里也能读出 ui.reveal，既有命令不受影响', () async {
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'dev.patchbay.reveal-compat',
+        registrar: (_, _) {},
+        catalog: () async => <String, Object?>{
+          'commands': <Object?>[
+            <String, Object?>{'name': 'ui.semantics.tree', 'summary': 'tree'},
+            <String, Object?>{
+              'name': 'ui.reveal',
+              'summary': 'identifier 锚定的 scroll-to-reveal',
+            },
+          ],
+          'uiTargets': const <Object?>[],
+        },
+        snapshot: () async => const <String, Object?>{},
+        invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
+          requestId: requestId,
+          rejection: const PatchbayRejection(code: 'notRegistered'),
+        ).toJson(),
+      );
+
+      final Map<String, Object?> catalog = await host.dispatchCatalog();
+
+      expect(_readCommandsTheOldWay(catalog), <String>[
+        'ui.semantics.tree',
+        'ui.reveal',
+      ]);
+    });
+
+    Map<String, Object?> revealResponse(PatchbayRevealResultWire payload) =>
+        PatchbayInvocation.accepted(
+          requestId: 'reveal-compat',
+          payload: payload.toJson(),
+        ).toJson();
+
+    test('老读法读 revealed payload：拿到 admission/payload，多出来的 '
+        'containers/reachability 等新字段被忽略、不报错', () {
+      final Map<String, Object?> response = revealResponse(
+        const PatchbayRevealResultWire(
+          outcome: 'revealed',
+          source: PatchbayFactSourceWire.uiObserved,
+          identifier: 'row.42',
+          steps: 3,
+          elapsedMs: 120,
+          containers: <PatchbayRevealContainerWire>[
+            PatchbayRevealContainerWire(
+              nodeId: 7,
+              generation: 1,
+              steps: 3,
+              direction: PatchbayRevealDirectionWire.forward,
+              extentGrowthSteps: 0,
+            ),
+          ],
+          nodeId: 42,
+          generation: 2,
+          reachability: PatchbayRevealReachabilityWire.pointer,
+          beforeTreeRevision: 1,
+          afterTreeRevision: 2,
+          reason: null,
+          failureType: null,
+          gateId: null,
+          gateCode: null,
+        ),
+      );
+
+      final read = _readInvocationTheOldWay(response);
+      expect(read, isNotNull);
+      expect(read!.admission, 'accepted');
+      expect(read.payload['outcome'], 'revealed');
+      expect(read.payload['steps'], 3);
+      expect(
+        read.payload.containsKey('containers'),
+        isTrue,
+        reason: '老 reader 逐键取值时看得见这个键，只是不认识、用不上它',
+      );
+    });
+
+    test('老 CLI 对 reveal 的 outcome: failed 得 typedFailure 退出码', () {
+      final Map<String, Object?> response = revealResponse(
+        const PatchbayRevealResultWire(
+          outcome: 'failed',
+          source: PatchbayFactSourceWire.uiObserved,
+          identifier: 'row.42',
+          steps: 40,
+          elapsedMs: 900,
+          containers: <PatchbayRevealContainerWire>[
+            PatchbayRevealContainerWire(
+              nodeId: 7,
+              generation: 1,
+              steps: 40,
+              direction: PatchbayRevealDirectionWire.forward,
+              extentGrowthSteps: 0,
+            ),
+          ],
+          nodeId: null,
+          generation: null,
+          reachability: null,
+          beforeTreeRevision: 1,
+          afterTreeRevision: 3,
+          reason: 'scrollExhausted',
+          failureType: null,
+          gateId: null,
+          gateCode: null,
+        ),
+      );
+
+      // patchbayExitCodeFor 是通用分类器：它按字段名走，不认命令名，所以老
+      // CLI 未经任何改动就正确分类了一个它从未见过的命令的失败态。
+      expect(patchbayExitCodeFor(response), PatchbayExitCode.typedFailure);
+      expect(_readInvocationTheOldWay(response)?.payload['outcome'], 'failed');
+    });
+
+    test('rejected 的 reveal（如 uiRevealNoScrollableContainer）走既有 '
+        'rejected 分支，不落进 typedFailure', () {
+      final Map<String, Object?> response = PatchbayInvocation.rejected(
+        requestId: 'reveal-compat-rejected',
+        rejection: const PatchbayRejection(
+          code: 'uiRevealNoScrollableContainer',
+          details: <String, Object?>{'identifier': 'row.42'},
+        ),
+      ).toJson();
+
+      expect(patchbayExitCodeFor(response), PatchbayExitCode.rejected);
+    });
+  });
+
   group('0.4.1 reader ↔ 带 origin 的新 localArtifact 回执', () {
     // PB-050-20 给回执加了 `origin`，并且**对既有 blob 路径同样写入**——
     // `capture` / `blob get` / `logs export` 的回执从此多一个键。多加一个键

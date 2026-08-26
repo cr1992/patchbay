@@ -345,6 +345,54 @@ check_brief_semantics_parity() {
   FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
 }
 
+# PB-050-17：`ui reveal` 恰好派发一次，把它的 outcome/reachability 与紧接着
+# 该带的 generation 一起从**同一份**答复里取出来。
+#
+# reveal 是写命令，真的会滚动列表：像别处那样先 `check` 断言、再另起一次
+# `example_session_cli` 单独取字段，会让第二次调用从第一次滚完的位置起步，
+# 拿到的 generation 也就不再对应断言过的那次派发。这里只派发一次，成功时把
+# generation 存进 `REVEAL_GENERATION` 供调用方拼下一条 tap 命令，返回 0；
+# 失败时返回 1，调用方据此跳过后续依赖这次 reveal 的步骤。
+#
+# 是否有懒加载证据（`extentGrowthSteps > 0`）只在结果行里如实打印、不参与
+# PASS/FAIL：具体是哪一次 reveal（如果有）越过分页边界，取决于设备真实视口
+# 高度相对 `pageSize` 的比例——实测同一序列里可能两次都不越过（前一次已经把
+# 该越过的那段滚过去了）。这条机制已经由 `example_reveal_test.dart` 在固定
+# viewport 下钉死为硬断言；设备预检只需要证明 reveal → tap 这条链路在真机上
+# 确实通，不重复对一个视口相关的量做强断言。
+#
+# check_reveal <名称> <identifier> <期望 reachability> <reveal 的其余参数...>
+check_reveal() {
+  local name="$1" identifier="$2" expect_reachability="$3"
+  shift 3
+  local actual=0
+  REVEAL_GENERATION=""
+  example_session_cli --json ui reveal "$identifier" "$@" >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-42s 退出码 %s（期望 0）\n' "$name" "$actual"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -3 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 1
+  fi
+  if ! PATCHBAY_OUT="$OUT" python3 -c "
+import json, os, sys
+doc = json.load(open(os.environ['PATCHBAY_OUT'], encoding='utf-8'))
+payload = doc['payload']
+ok = (payload['outcome'] == 'revealed'
+      and payload['reachability'] == '$expect_reachability')
+sys.exit(0 if ok else 1)
+" 2>/dev/null; then
+    printf '  ✗ %-42s 断言不成立（outcome/reachability）\n' "$name"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -10 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 1
+  fi
+  REVEAL_GENERATION="$(read_json "doc['payload']['generation']")"
+  local grew
+  grew="$(read_json "'yes' if any(c.get('extentGrowthSteps', 0) > 0 for c in doc['payload']['containers']) else 'no'")"
+  printf '  ✓ %-42s generation=%s extentGrowth=%s\n' "$name" "$REVEAL_GENERATION" "$grew"
+  PASS=$((PASS + 1))
+  return 0
+}
+
 echo "== 启动 example =="
 if ! example_session_start "${1:-}"; then
   echo "预检未开始：会话启动失败（原因见上方 [session] 行）" >&2
@@ -541,6 +589,35 @@ check_catalog_target_unmounted 'catalog capture target released' \
   example.card.capture
 check 'navigation go home' 0 "" --json navigation go example.home
 check 'ui wait destination home' 0 "" --json ui wait destination example.home
+
+echo
+echo "== reveal（identifier 锚定的 scroll-to-reveal，PB-050-17）=="
+check 'navigation go reveal' 0 "" --json navigation go example.reveal
+check 'ui wait destination reveal' 0 "" --json ui wait destination example.reveal
+
+# 语义可达的目标：合法的无障碍写法（Semantics(onTap:) 包 SizedBox），没有指针
+# 占位。reachability 必须落到 semanticsOnly，落地的 tap 也必须走语义 action
+# 通道——pointer tap 在它身上没有对应物。generation 取自这**同一次**派发的
+# 答复：reveal 是写命令，会真的滚动列表，重复调用不是同一份 generation。
+if check_reveal 'ui reveal 语义可达的目标' example.reveal.row.semanticsOnly \
+  semanticsOnly --max-steps 60 --timeout-ms 20000
+then
+  check 'reveal 之后按 semanticsOnly 分流走 ui action tap' 0 \
+    "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui action example.reveal.row.semanticsOnly "$REVEAL_GENERATION" tap
+fi
+
+# 指针可达的目标挂在懒加载分页的更深处、还被一条固定底栏盖过：reveal 必须继续
+# 滚动直到底栏不再挡住它，reachability 落到 pointer，落地的 tap 走指针通道。
+if check_reveal 'ui reveal 指针可达的目标（懒加载 + 固定底栏）' example.reveal.row.far \
+  pointer --max-steps 60 --timeout-ms 20000
+then
+  check 'reveal 之后按 pointer 分流走 ui tap' 0 "" \
+    --json ui tap example.reveal.row.far --generation "$REVEAL_GENERATION"
+fi
+
+check 'navigation go home（reveal 收尾）' 0 "" --json navigation go example.home
+check 'ui wait destination home（reveal 收尾）' 0 "" --json ui wait destination example.home
 
 echo
 echo "== inspect / keep-awake =="

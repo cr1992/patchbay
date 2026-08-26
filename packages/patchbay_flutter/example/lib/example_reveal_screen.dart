@@ -35,7 +35,16 @@ final class ExampleRevealScreen extends StatefulWidget {
   static const int semanticsOnlyIndex = 24;
 
   /// Rows delivered per simulated page.
-  static const int pageSize = 12;
+  ///
+  /// Large enough that the initial page cannot possibly fill a single
+  /// viewport on its own — 12 fit entirely inside a tall real phone's body
+  /// height (confirmed on a real device precheck run: `12 * 56` logical
+  /// pixels of content did not exceed the body height), which made the list
+  /// non-scrollable on first frame and `ui.reveal` correctly (and
+  /// unhelpfully, for this screen's purpose) admission-reject with
+  /// `uiRevealNoScrollableContainer`. `flutter_test`'s default surface is
+  /// short enough that this never showed up in a widget test.
+  static const int pageSize = 30;
 
   /// Height of the pinned bottom bar, in logical pixels.
   static const double overlayExtent = 72;

@@ -96,11 +96,15 @@ Widget revealList({
   ScrollPhysics? physics,
   ScrollController? controller,
   bool semanticsOnlyTarget = false,
+  // 换一次 key 就换一个 ListView 子树，因而换一个滚动 SemanticsNode——测试用
+  // 它来制造「容器换代」而不需要动 lib/ 里的任何实现。
+  Key? listKey,
 }) => Semantics(
   identifier: containerId,
   container: true,
   child: ShowOnScreenRecorder(
     child: ListView.builder(
+      key: listKey,
       controller: controller,
       reverse: reverse,
       scrollDirection: axis,
