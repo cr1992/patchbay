@@ -76,6 +76,7 @@ const List<String> activePublicDocumentPaths = <String>[
   'docs/design.md',
   'docs/assets/patchbay-hero.svg',
   'docs/assets/patchbay-architecture.svg',
+  'docs/assets/patchbay-cli-workflows.svg',
 ];
 const String serviceHostPath = 'packages/patchbay/lib/src/service_host.dart';
 const String invocationPath = 'packages/patchbay/lib/src/invocation.dart';

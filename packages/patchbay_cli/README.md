@@ -32,23 +32,18 @@ form); after a global install, substitute `patchbay` for it.
 
 ## Process Model and Workflow Choice
 
-The Patchbay app host and the CLI have separate lifecycles. `flutter run` or the consumer's own
-tooling keeps the app alive. An ordinary CLI command only connects, makes one request, prints the
-result, and exits; it does not stop the app.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Lifecycle of Patchbay one-shot commands, repl, and launch">
+</p>
 
-| Entry point | Responsibility | Exit condition |
-|---|---|---|
-| Ordinary commands such as `identity` / `snapshot` | Complete one request against an already-running app | Immediately after output |
-| `repl` | Reuse one connection and execute Patchbay commands line by line | `exit` / `quit`, stdin closes, or a connection-class error |
-| `launch -- <consumer command>` | Start and supervise the consumer, maintaining discovery and hot-restart re-anchoring | The child exits, launch fails, or a termination signal arrives |
-| `logs tail` | Perform one bounded log long-poll and emit its result line by line | A result arrives or that wait ends; it is not an endless `tail -f` |
+The app and CLI have separate lifecycles: ordinary commands make one request and exit while the app
+keeps running; `repl` only reuses a connection; `launch` only starts, discovers, and supervises the
+app/session. `launch` and `repl` are complementary. `logs tail` is also a bounded long-poll, not an
+endless `tail -f`.
 
-`launch` and `repl` are not alternatives: the former owns app/session lifecycle, while the latter
-owns repeated commands. With automatic discovery, terminal A typically runs
-`patchbay launch -- flutter run ...`, while terminal B runs ordinary commands or `patchbay repl`.
-For a first run, no launcher wiring is required: keep `flutter run` alive and pass `--ws-uri` to
-one-shot commands. See [Choose a workflow](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流)
-in the usage guide for the full comparison.
+The exact choices, exit conditions, and two-terminal example have one source of truth:
+[Choose a workflow](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流).
+This package README deliberately does not duplicate that table.
 
 ## Command Reference
 

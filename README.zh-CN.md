@@ -159,16 +159,16 @@ VM Service URI 通常包含认证信息，不要把它写入脚本、日志或�
 
 #### 日常工作流怎么选
 
-- **先跑通、偶尔查一条：** 保持 `flutter run` 运行，像上面一样执行一次性命令。这是默认路径。
-- **连续执行很多条：** App 已经运行时，用 `patchbay --ws-uri '<VM Service URI>' repl` 建一次连接并
-  逐行执行；输入 `exit` / `quit` 或关闭 stdin 后退出。`repl` 不负责启动 App。
-- **自动发现、hot restart 与长会话：** 完成可选的 session 声明接入后，在终端 A 用
-  `patchbay launch -- flutter run ...` 启动并监督 App；终端 B 再执行普通命令或 `patchbay repl`。
-  `launch` 管 App 与 session 生命周期，`repl` 管连续发命令，两者可以配合，并非二选一。
-- **不知道卡在哪：** 先运行 `patchbay doctor`，按 session → connection → catalog → lifecycle 的
-  顺序查看第一处失败。
+<p align="center">
+  <img src="docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Patchbay CLI 三种工作流：普通命令一次执行后退出，repl 复用连接连续执行，launch 启动并监督 App 会话">
+</p>
 
-完整选择表和双终端示例见[使用指南的「先选工作流」](docs/guide.md#先选工作流)。
+- **默认：** 保持 `flutter run` 运行，偶尔查一条就用一次性命令。
+- **连续执行：** App 已经运行时进入 `repl`；它复用连接，不负责启动 App。
+- **自动发现：** 接好 session 声明后，终端 A 用 `launch` 监督 App，终端 B 跑普通命令或 `repl`。
+
+`launch` 与 `repl` 可以配合，并非二选一；连接异常先跑 `patchbay doctor`。完整退出条件和双终端示例
+只在[使用指南的「先选工作流」](docs/guide.md#先选工作流)维护。
 
 catalog 中的 UI target 会返回当前 `generation`。声明了调用方代际围栏的写操作（如文本输入）
 必须携带这个值，防止迟到的命令打到重挂载后的同名控件；`ui tap` 可以省略 generation，host 会在

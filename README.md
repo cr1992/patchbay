@@ -178,20 +178,19 @@ once, use `patchbay sessions list` to see the available sessions and `patchbay s
 
 #### Choose a day-to-day workflow
 
-- **First run or occasional lookup:** keep `flutter run` alive and use one-shot commands as shown
-  above. This is the default path.
-- **Many commands in sequence:** with the app already running, use
-  `patchbay --ws-uri '<VM Service URI>' repl` to connect once and execute lines until `exit`,
-  `quit`, or EOF. `repl` does not start the app.
-- **Automatic discovery, hot restart, and long sessions:** after the optional session declaration
-  is integrated, terminal A runs `patchbay launch -- flutter run ...` to start and supervise the
-  app; terminal B runs ordinary commands or `patchbay repl`. `launch` owns app/session lifecycle,
-  while `repl` sends repeated commands. They can be used together and are not alternatives.
-- **Not sure where it failed:** run `patchbay doctor` first. It checks session, connection,
-  catalog, and lifecycle in dependency order.
+<p align="center">
+  <img src="docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Three Patchbay CLI workflows: one-shot commands exit after one request, repl reuses a connection, and launch starts and supervises the app session">
+</p>
 
-See [Choose a workflow](docs/guide.md#先选工作流) in the usage guide for the full comparison and
-two-terminal example.
+- **Default:** keep `flutter run` alive and use one-shot commands for occasional lookups.
+- **Repeated commands:** enter `repl` after the app is running; it reuses a connection but does not
+  start the app.
+- **Automatic discovery:** after session declaration is wired, terminal A runs `launch`; terminal B
+  runs ordinary commands or `repl`.
+
+`launch` and `repl` are complementary; run `patchbay doctor` first when connection state is unclear.
+The exact exit conditions and two-terminal example live only in
+[Choose a workflow](docs/guide.md#先选工作流) in the usage guide.
 
 UI targets in the catalog come with their current `generation`. Write operations that declare a
 caller-side generation fence (text input, for example) must carry that value, so a late command

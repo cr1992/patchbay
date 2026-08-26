@@ -112,6 +112,10 @@ final RegExp _managedReadmeArtifactPattern = RegExp(
   r'(/releases/download/patchbay-v)([^/]+)(/patchbay-)([^/\s]+?)(-(?:linux|macos|windows)-)',
 );
 
+final RegExp _managedArtifactFilenamePattern = RegExp(
+  r'(patchbay-)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(-(?:linux|macos|windows)-[A-Za-z0-9._-]+)',
+);
+
 String _applyVersionPatterns(
   String document,
   String version,
@@ -146,10 +150,20 @@ String _applyArtifactVersion(String document, String version, String label) {
     throw FormatException('$label AOT 下载锚点应恰好出现一次，实际 ${artifacts.length} 个');
   }
   final RegExpMatch artifact = artifacts.single;
-  return document.replaceRange(
+  final String withDownload = document.replaceRange(
     artifact.start,
     artifact.end,
     '${artifact.group(1)}$version${artifact.group(3)}$version${artifact.group(5)}',
+  );
+  final List<RegExpMatch> filenames = _managedArtifactFilenamePattern
+      .allMatches(withDownload)
+      .toList(growable: false);
+  if (filenames.isEmpty) {
+    throw FormatException('$label AOT 文件名锚点缺失');
+  }
+  return withDownload.replaceAllMapped(
+    _managedArtifactFilenamePattern,
+    (Match match) => '${match.group(1)}$version${match.group(3)}',
   );
 }
 

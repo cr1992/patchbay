@@ -27,20 +27,17 @@ $ patchbay --help
 
 ## 进程模型与工作流选择
 
-Patchbay App host 与 CLI 进程是两个生命周期。App 由 `flutter run` 或接入方自己的工具保持运行；
-普通 CLI 命令只连接、请求、输出，然后按本次结果退出，不会顺手关闭 App。
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Patchbay CLI 的一次性命令、repl 与 launch 生命周期">
+</p>
 
-| 入口 | 负责什么 | 何时退出 |
-|---|---|---|
-| 普通命令，如 `identity` / `snapshot` | 对已经运行的 App 完成一次请求 | 输出结果后立即退出 |
-| `repl` | 复用一条连接，逐行执行多条 Patchbay 命令 | `exit` / `quit`、stdin 关闭或连接类错误 |
-| `launch -- <consumer command>` | 启动并监督 consumer，维护可发现 session 与 hot restart 重锚 | child 结束、失败或收到终止信号 |
-| `logs tail` | 在 App 声明的时间预算内做一次日志长轮询并逐行输出 | 收到结果或本次等待结束；不是无限 `tail -f` |
+App 与 CLI 是两个生命周期：普通命令请求一次后退出，App 继续运行；`repl` 只复用连接；`launch`
+只负责启动、发现和监督 App/session。`launch` 与 `repl` 可以配合，`logs tail` 也是有界长轮询，
+不是无限 `tail -f`。
 
-`launch` 与 `repl` 不互相替代：前者管 App/session，后者管连续命令。自动发现的典型形状是终端 A
-运行 `patchbay launch -- flutter run ...`，终端 B 运行普通命令或 `patchbay repl`。只想先跑通时无需
-接 launcher，直接让 `flutter run` 保持运行，并给一次性命令传 `--ws-uri` 即可。完整选择见
-[使用指南的「先选工作流」](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流)。
+选择、退出条件和双终端示例以
+[使用指南的「先选工作流」](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流)为唯一事实源；
+本包 README 不再复制一份容易漂移的表格。
 
 ## 命令速查
 

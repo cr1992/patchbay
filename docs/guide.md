@@ -11,6 +11,12 @@
 
 ## 先选工作流
 
+<!-- 本节是 launch / repl / one-shot 生命周期的唯一详细事实源；其他 README 只摘要并链接到这里。 -->
+
+<p align="center">
+  <img src="assets/patchbay-cli-workflows.svg" width="100%" alt="Patchbay CLI 三种工作流：一次性命令、repl 连续执行、launch 启动与监督">
+</p>
+
 先把 App 的生命周期和 CLI 的生命周期分开看：App 由 `flutter run` 或接入方自己的工具保持运行；
 普通 Patchbay 命令连接这个 App，完成一次请求后退出。退出 CLI 不会关闭 App，下一条命令会重新连接。
 

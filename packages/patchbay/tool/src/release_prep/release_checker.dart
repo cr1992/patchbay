@@ -202,10 +202,41 @@ ReleaseCheck _checkDocumentationCurrent(String version, ReleaseInputs inputs) {
     problems.add('首页 SVG 缺中性命令示例 `patchbay exec example.job.run`');
   }
 
+  const Map<String, String> workflowReferences = <String, String>{
+    'README.md': 'docs/assets/patchbay-cli-workflows.svg',
+    'README.zh-CN.md': 'docs/assets/patchbay-cli-workflows.svg',
+    'docs/guide.md': 'assets/patchbay-cli-workflows.svg',
+    'packages/patchbay_cli/README.md':
+        'https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg',
+    'packages/patchbay_cli/README.zh-CN.md':
+        'https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg',
+  };
+  for (final MapEntry<String, String> entry in workflowReferences.entries) {
+    final int count = RegExp(
+      RegExp.escape(entry.value),
+    ).allMatches(inputs.readmes[entry.key]!).length;
+    if (count != 1) {
+      problems.add('${entry.key} 工作流 SVG 引用应恰好一处，实际 $count 处');
+    }
+  }
+
+  final String workflows =
+      inputs.readmes['docs/assets/patchbay-cli-workflows.svg']!;
+  for (final String marker in <String>[
+    'ONE-SHOT',
+    'REPL',
+    'LAUNCH',
+    'APP KEEPS RUNNING',
+  ]) {
+    if (!workflows.contains(marker)) {
+      problems.add('工作流 SVG 缺稳定概念 `$marker`');
+    }
+  }
+
   if (problems.isEmpty) {
     return ReleaseCheck.ok(
       'documentation-current',
-      '当前文档无发布阶段假事实和旧安装口径，双语入口、架构 SVG 与中性示例已纳入门禁',
+      '当前文档无发布阶段假事实和旧安装口径，双语入口、架构/工作流 SVG 与中性示例已纳入门禁',
       hard: true,
     );
   }
