@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import '../generated/core_wire.g.dart';
@@ -8,17 +9,48 @@ import 'snapshot_payload.dart';
 
 final class HostSnapshotHandler {
   HostSnapshotHandler({
-    required PatchbaySnapshotSource snapshotSource,
-    PatchbaySnapshotPayloadFreezer snapshotFreezer =
-        const PatchbaySnapshotPayloadFreezer(),
-  }) : _snapshot = snapshotSource,
-       _snapshotFreezer = snapshotFreezer;
+    PatchbaySnapshotSource? snapshotSource,
+    PatchbayVersionedSnapshotSource? versionedSnapshotSource,
+    PatchbaySnapshotRetentionLimits retention =
+        PatchbaySnapshotRetentionLimits.production,
+    PatchbaySnapshotPayloadFreezer? snapshotFreezer,
+  }) : assert((snapshotSource == null) != (versionedSnapshotSource == null)),
+       _snapshot = snapshotSource,
+       _versionedSnapshot = versionedSnapshotSource,
+       _retention = retention,
+       _snapshotFreezer =
+           snapshotFreezer ??
+           PatchbaySnapshotPayloadFreezer(
+             limits: PatchbaySnapshotPayloadLimits.production
+                 .withRunCanonicalBytes(retention.effective),
+           );
 
-  final PatchbaySnapshotSource _snapshot;
+  final PatchbaySnapshotSource? _snapshot;
+  final PatchbayVersionedSnapshotSource? _versionedSnapshot;
+  final PatchbaySnapshotRetentionLimits _retention;
   final PatchbaySnapshotPayloadFreezer _snapshotFreezer;
   final List<PatchbaySnapshotRevision> _snapshotRevisions =
       <PatchbaySnapshotRevision>[];
   var _nextSnapshotRevision = 0;
+  var _retainedCanonicalBytes = 0;
+  int? _contentRevision;
+
+  /// The provider sampling this batch of callers shares, if one is running.
+  ///
+  /// It covers exactly the part that must not be done twice: reading the App,
+  /// freezing it and committing a revision. Selection, diff, wait deadlines and
+  /// response assembly stay per-caller, because merging those would let one
+  /// caller's path or timeout decide another caller's answer.
+  Future<PatchbaySnapshotRead>? _sampling;
+
+  /// Canonical UTF-8 bytes currently held by retained revisions.
+  int get retainedCanonicalBytes => _retainedCanonicalBytes;
+
+  /// Revisions currently reachable for `fromRevision` diffs.
+  int get retainedRevisionCount => _snapshotRevisions.length;
+
+  /// Whether a provider sampling is currently in flight.
+  bool get hasSamplingInFlight => _sampling != null;
 
   Future<Map<String, Object?>> dispatchSnapshot([
     Map<String, Object?>? request,
@@ -140,10 +172,42 @@ final class HostSnapshotHandler {
     return body.keys.toList(growable: false)..sort();
   }
 
-  Future<PatchbaySnapshotRead> readSnapshot() async {
+  /// Reads the App snapshot, joining a sampling already in flight.
+  ///
+  /// Deliberately not `async`: the flight has to be published before the caller
+  /// gets a chance to run, or two callers arriving in the same turn would each
+  /// open one.
+  Future<PatchbaySnapshotRead> readSnapshot() {
+    final Future<PatchbaySnapshotRead>? joined = _sampling;
+    if (joined != null) return joined;
+    final Future<PatchbaySnapshotRead> flight = _sampleSnapshot();
+    _sampling = flight;
+    // Cleared the moment it settles, so a failure is shared by this batch and
+    // retried by the next caller rather than cached.
+    unawaited(
+      flight.whenComplete(() {
+        if (identical(_sampling, flight)) _sampling = null;
+      }),
+    );
+    return flight;
+  }
+
+  Future<PatchbaySnapshotRead> _sampleSnapshot() async {
     final Map<String, Object?> declared;
+    final int? contentRevision;
     try {
-      declared = await _snapshot();
+      if (_versionedSnapshot case final PatchbayVersionedSnapshotSource read) {
+        final PatchbaySnapshotSample sample = await read();
+        final PatchbaySnapshotRead? refused = _refuseRevision(sample);
+        if (refused != null) return refused;
+        final PatchbaySnapshotRead? reused = _reuseRetained(sample);
+        if (reused != null) return reused;
+        contentRevision = sample.contentRevision;
+        declared = sample.body;
+      } else {
+        contentRevision = null;
+        declared = await _snapshot!();
+      }
     } on Object catch (error) {
       return PatchbaySnapshotRead.violated(
         patchbayProviderViolationEnvelope(
@@ -163,48 +227,142 @@ final class HostSnapshotHandler {
         violationToken: violationToken,
       );
     } on PatchbaySnapshotPayloadViolation catch (error) {
-      final Map<String, Object?> details = error.belongsTo(violationToken)
-          ? error.details
-          : <String, Object?>{
-              'reason': 'snapshotPayloadInvalid',
-              'failure': 'unsupportedType',
-              'path': r'$',
-              'type': error.runtimeType.toString(),
-            };
+      return _projectPayloadViolation(error, violationToken);
+    }
+    return _readOf(_commit(frozen, contentRevision));
+  }
+
+  /// Turns a freezer violation into the answer that matches which budget it
+  /// crossed. A violation carrying a foreign token was thrown by the App
+  /// itself, so nothing inside it is trusted.
+  PatchbaySnapshotRead _projectPayloadViolation(
+    PatchbaySnapshotPayloadViolation error,
+    Object violationToken,
+  ) {
+    if (!error.belongsTo(violationToken)) {
       return PatchbaySnapshotRead.violated(
         patchbayProviderViolationEnvelope(
           'The App snapshot source violates the Patchbay JSON contract.',
-          details,
+          <String, Object?>{
+            'reason': 'snapshotPayloadInvalid',
+            'failure': 'unsupportedType',
+            'path': r'$',
+            'type': error.runtimeType.toString(),
+          },
         ),
       );
     }
-    final String canonical = frozen.canonical;
-    PatchbaySnapshotRevision revision;
-    if (_snapshotRevisions.isNotEmpty &&
-        _snapshotRevisions.last.canonical == canonical) {
-      revision = PatchbaySnapshotRevision(
-        revision: _snapshotRevisions.last.revision,
-        canonical: canonical,
-        body: frozen.body,
+    if (error.kind == PatchbaySnapshotPayloadViolationKind.runBudget) {
+      return PatchbaySnapshotRead.violated(
+        _rejectionEnvelope(
+          'snapshotPayloadTooLarge',
+          'The App snapshot exceeds the per-snapshot budget of this host.',
+          error.details,
+        ),
       );
-      _snapshotRevisions[_snapshotRevisions.length - 1] = revision;
-    } else {
-      revision = PatchbaySnapshotRevision(
-        revision: ++_nextSnapshotRevision,
-        canonical: canonical,
-        body: frozen.body,
-      );
-      _snapshotRevisions.add(revision);
-      if (_snapshotRevisions.length > patchbaySnapshotRevisionRetention) {
-        _snapshotRevisions.removeAt(0);
-      }
     }
+    return PatchbaySnapshotRead.violated(
+      patchbayProviderViolationEnvelope(
+        'The App snapshot source violates the Patchbay JSON contract.',
+        error.details,
+      ),
+    );
+  }
+
+  /// Refuses a consumer revision that is negative or has gone backwards.
+  PatchbaySnapshotRead? _refuseRevision(PatchbaySnapshotSample sample) {
+    final int? previous = _contentRevision;
+    if (sample.contentRevision >= 0 &&
+        (previous == null || sample.contentRevision >= previous)) {
+      return null;
+    }
+    return PatchbaySnapshotRead.violated(
+      patchbayProviderViolationEnvelope(
+        'The App reported a snapshot revision that is not monotonic.',
+        <String, Object?>{
+          'reason': 'revisionRegressed',
+          'contentRevision': sample.contentRevision,
+          if (previous != null) 'previousContentRevision': previous,
+        },
+      ),
+    );
+  }
+
+  /// Answers from the retained view when the App says nothing changed.
+  ///
+  /// The offered body is not read at all: the whole point of the signal is to
+  /// skip the traversal, and touching the map would reintroduce the cost while
+  /// still not proving anything about it.
+  PatchbaySnapshotRead? _reuseRetained(PatchbaySnapshotSample sample) {
+    if (_contentRevision != sample.contentRevision) return null;
+    if (_snapshotRevisions.isEmpty) return null;
+    return _readOf(_snapshotRevisions.last);
+  }
+
+  /// Commits [frozen] as a revision and evicts until both budgets hold.
+  PatchbaySnapshotRevision _commit(
+    PatchbayFrozenSnapshotPayload frozen,
+    int? contentRevision,
+  ) {
+    // A host-observed source has no invalidation signal, so equal canonical
+    // content is the only evidence that nothing was committed. A consumer that
+    // reports revisions has already told us it committed, and DG-050-01 keeps
+    // that fact rather than deduplicating it away.
+    final bool dedupe =
+        contentRevision == null &&
+        _snapshotRevisions.isNotEmpty &&
+        _snapshotRevisions.last.canonical == frozen.canonical;
+    if (dedupe) {
+      final PatchbaySnapshotRevision previous = _snapshotRevisions.last;
+      _retainedCanonicalBytes -= previous.canonicalBytes;
+      _snapshotRevisions[_snapshotRevisions.length -
+          1] = PatchbaySnapshotRevision(
+        revision: previous.revision,
+        canonical: frozen.canonical,
+        canonicalBytes: frozen.canonicalBytes,
+        body: frozen.body,
+      );
+    } else {
+      _snapshotRevisions.add(
+        PatchbaySnapshotRevision(
+          revision: ++_nextSnapshotRevision,
+          canonical: frozen.canonical,
+          canonicalBytes: frozen.canonicalBytes,
+          body: frozen.body,
+        ),
+      );
+    }
+    _retainedCanonicalBytes += frozen.canonicalBytes;
+    _contentRevision = contentRevision;
+    _evict();
+    return _snapshotRevisions.last;
+  }
+
+  /// Drops the oldest revisions until both budgets hold.
+  ///
+  /// The newest revision is never dropped: it is the answer being served, and
+  /// the configuration cannot admit a snapshot it refuses to hold.
+  void _evict() {
+    while (_snapshotRevisions.length > 1 &&
+        (_snapshotRevisions.length > _retention.maxRetainedRevisions ||
+            _retainedCanonicalBytes > _retention.maxRetainedBytes)) {
+      _retainedCanonicalBytes -= _snapshotRevisions.removeAt(0).canonicalBytes;
+    }
+  }
+
+  /// One observation of [revision]: response, body and metadata built from a
+  /// single timestamp so no two views of the same read disagree.
+  PatchbaySnapshotRead _readOf(PatchbaySnapshotRevision revision) {
     final Map<String, Object?> metadata = <String, Object?>{
       'snapshotRevision': revision.revision,
-      'revisionSource': 'hostObserved',
+      'revisionSource': _versionedSnapshot == null
+          ? 'hostObserved'
+          : 'consumerReported',
       'factSource': PatchbayFactSourceWire.appRecorded.name,
       'observedAt': DateTime.now().toUtc().toIso8601String(),
-      'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
+      'retainedRevisionLimit': _retention.maxRetainedRevisions,
+      'retainedByteLimit': _retention.maxRetainedBytes,
+      'snapshotBytes': revision.canonicalBytes,
     };
     return PatchbaySnapshotRead.valid(
       <String, Object?>{...revision.body, 'schemaVersion': 1, ...metadata},
@@ -213,15 +371,26 @@ final class HostSnapshotHandler {
     );
   }
 
+  PatchbaySnapshotRevision? _retained(int revision) {
+    for (final PatchbaySnapshotRevision candidate in _snapshotRevisions) {
+      if (candidate.revision == revision) return candidate;
+    }
+    return null;
+  }
+
   Future<Map<String, Object?>> _diffSnapshot(
     PatchbaySnapshotDiffRequest request,
   ) async {
-    PatchbaySnapshotRevision? baseline;
-    for (final PatchbaySnapshotRevision candidate in _snapshotRevisions) {
-      if (candidate.revision == request.fromRevision) baseline = candidate;
-    }
+    // Looked up twice on purpose. Before the read, so a fresh App instance
+    // cannot invent a baseline it never served; after it, so a baseline this
+    // very read evicted — by count or by the byte budget — is reported as gone
+    // instead of answered from a reference the retention no longer holds.
+    final bool existed = _retained(request.fromRevision) != null;
     final PatchbaySnapshotRead read = await readSnapshot();
     if (read.violated) return read.response;
+    final PatchbaySnapshotRevision? baseline = existed
+        ? _retained(request.fromRevision)
+        : null;
     if (baseline == null) {
       return _rejectionEnvelope(
         'snapshotRevisionUnavailable',
@@ -230,7 +399,8 @@ final class HostSnapshotHandler {
           'fromRevision': request.fromRevision,
           'oldestAvailableRevision': _snapshotRevisions.first.revision,
           'snapshotRevision': _snapshotRevisions.last.revision,
-          'retainedRevisionLimit': patchbaySnapshotRevisionRetention,
+          'retainedRevisionLimit': _retention.maxRetainedRevisions,
+          'retainedByteLimit': _retention.maxRetainedBytes,
         },
       );
     }

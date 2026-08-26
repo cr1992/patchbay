@@ -247,6 +247,7 @@ const Set<String> _frozenStableCodes = <String>{
   'sessionUnreachable',
   'snapshotDiffClientUnavailable',
   'snapshotDiffLimitExceeded',
+  'snapshotPayloadTooLarge',
   'snapshotRevisionUnavailable',
   'snapshotSelectionUnsupportedByHost',
   'snapshotWaitTimeout',

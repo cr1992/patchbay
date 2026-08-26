@@ -1,4 +1,5 @@
 import 'generated/core_wire.g.dart';
+import 'host/snapshot_payload.dart' show patchbaySnapshotMaxCanonicalBytes;
 
 /// Closed vocabulary of snapshot-domain wait conditions.
 ///
@@ -83,6 +84,78 @@ const Duration patchbaySnapshotPollInterval = Duration(milliseconds: 100);
 
 /// Revisions retained per App instance for bounded snapshot diffing.
 const int patchbaySnapshotRevisionRetention = 32;
+
+/// Largest retained-revision count a host may be configured with.
+const int patchbaySnapshotRevisionRetentionCeiling = 128;
+
+/// Smallest per-snapshot canonical UTF-8 budget a host may be configured with.
+const int patchbaySnapshotMinSnapshotBytes = 64 * 1024;
+
+/// Largest per-snapshot canonical UTF-8 budget a host may be configured with.
+///
+/// It is the same number as PB-050-01's `maxCanonicalBytes` safety ceiling on
+/// purpose: a run budget above the ceiling could never be reached, so allowing
+/// one would only let an operator believe in a budget the host never applies.
+const int patchbaySnapshotSnapshotByteCeiling =
+    patchbaySnapshotMaxCanonicalBytes;
+
+/// Largest total retained canonical UTF-8 budget a host may be configured with.
+const int patchbaySnapshotRetainedByteCeiling = 32 * 1024 * 1024;
+
+/// Default per-snapshot canonical UTF-8 budget (DG-050-01).
+const int patchbaySnapshotDefaultMaxSnapshotBytes = 1024 * 1024;
+
+/// Default total retained canonical UTF-8 budget (DG-050-01).
+const int patchbaySnapshotDefaultMaxRetainedBytes = 8 * 1024 * 1024;
+
+/// The three budgets a host applies to snapshot revision retention.
+///
+/// Counting revisions alone bounds how many answers a diff can reach back to
+/// but says nothing about how much memory they hold, so one large App
+/// snapshot could pin tens of megabytes for the life of the App instance.
+/// These budgets are host-owned: they are not negotiated on the wire and they
+/// do not change what a valid snapshot means, only how much of it this host is
+/// willing to keep and to serve in one answer.
+///
+/// [maxSnapshotBytes] is a *run* budget the operator chooses. It is deliberately
+/// separate from PB-050-01's [patchbaySnapshotSnapshotByteCeiling], which is a
+/// contract ceiling no configuration may raise: crossing the run budget is a
+/// `snapshotPayloadTooLarge` rejection, crossing the ceiling stays a provider
+/// protocol violation.
+final class PatchbaySnapshotRetentionLimits {
+  const PatchbaySnapshotRetentionLimits({
+    this.maxRetainedRevisions = patchbaySnapshotRevisionRetention,
+    this.maxSnapshotBytes = patchbaySnapshotDefaultMaxSnapshotBytes,
+    this.maxRetainedBytes = patchbaySnapshotDefaultMaxRetainedBytes,
+  }) : assert(maxRetainedRevisions >= 1),
+       assert(maxRetainedRevisions <= patchbaySnapshotRevisionRetentionCeiling),
+       assert(maxSnapshotBytes >= patchbaySnapshotMinSnapshotBytes),
+       assert(maxSnapshotBytes <= patchbaySnapshotSnapshotByteCeiling),
+       // A total below the single-snapshot budget would evict the revision it
+       // just committed, which is a configuration that can never hold what it
+       // accepts.
+       assert(maxRetainedBytes >= maxSnapshotBytes),
+       assert(maxRetainedBytes <= patchbaySnapshotRetainedByteCeiling);
+
+  static const PatchbaySnapshotRetentionLimits production =
+      PatchbaySnapshotRetentionLimits();
+
+  /// How many revisions stay reachable for `fromRevision` diffs.
+  final int maxRetainedRevisions;
+
+  /// Canonical UTF-8 bytes one snapshot may encode to.
+  final int maxSnapshotBytes;
+
+  /// Canonical UTF-8 bytes all retained revisions may hold together.
+  final int maxRetainedBytes;
+
+  /// The per-snapshot budget actually applied, clamped to the contract
+  /// ceiling so a release-mode misconfiguration degrades to the ceiling
+  /// instead of running unbounded.
+  int get effective => maxSnapshotBytes < patchbaySnapshotSnapshotByteCeiling
+      ? maxSnapshotBytes
+      : patchbaySnapshotSnapshotByteCeiling;
+}
 
 /// Maximum number of path changes returned by one diff.
 const int patchbaySnapshotDiffMaxChanges = 500;
