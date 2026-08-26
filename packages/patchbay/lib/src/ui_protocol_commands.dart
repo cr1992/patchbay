@@ -255,6 +255,93 @@ PatchbayCommandDescriptor _gesture(
   ],
 );
 
+/// PB-050-17 / DG-050-10：identifier 锚定的 scroll-to-reveal。
+///
+/// 独立顶层命令，不进 `ui.gesture.*`（那族已冻结为「合成指针事件序列」）也不进
+/// `ui.semantics.*`（那族的形状是「派发一个 allowlist 内的 action，返回
+/// dispatched」）。它是写操作，因此也不是 `ui.wait` 的一个 condition。
+///
+/// `direction` 说的是**内容序**而不是屏幕方向：`forward` = 朝 `maxScrollExtent`
+/// 前进。落到哪个 `SemanticsAction` 由容器当前暴露的 action 与观察到的位移符号
+/// 确定，不由参数字面指定——否则 reverse 列表和横向列表就要求调用方先知道布局
+/// 方向。**不存在任何坐标入参**（design.md 非目标红线在本命令上的落点）。
+final patchbayUiRevealCommandDescriptor = _ui(
+  'ui.reveal',
+  'Drive a scroll container until a Semantics identifier is mounted and '
+      'exposed.',
+  parameters: <PatchbayParameterDescriptor>[
+    const PatchbayParameterDescriptor(
+      name: 'identifier',
+      type: PatchbayParameterType.string,
+      required: true,
+      summary:
+          'Stable Semantics identifier of the target. It does not have to be '
+          'mounted yet — that is what this command is for. Do not follow a '
+          'reveal with ui.wait semanticsMounted: mounting and exposure both '
+          'happen inside this one request, and semanticsMounted is the weaker '
+          'of the two checks, so it cannot vouch for a reveal. Success means '
+          'Patchbay observed the target exposed under a fixed five-point '
+          'sample on the terminating frame; it is not a proof of reachability '
+          'and says nothing about the next frame — that is what the returned '
+          'generation is for.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'container',
+      type: PatchbayParameterType.string,
+      summary:
+          'Semantics identifier anchoring the scroll container to drive. Omit '
+          'it only when exactly one candidate container is resolvable.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'direction',
+      type: PatchbayParameterType.enumeration,
+      defaultValue: 'both',
+      allowedValues: <String>['forward', 'backward', 'both'],
+      summary:
+          'Content order, not screen direction: forward moves toward '
+          'maxScrollExtent. An explicit direction may spend one reverse probe '
+          'step when the container is not resting at either end.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'maxSteps',
+      type: PatchbayParameterType.integer,
+      defaultValue: 40,
+      summary:
+          'Scroll actions this call may dispatch in total (1..200). It is the '
+          'only hard ceiling: lazy-loaded growth resets the stall counter but '
+          'never extends this budget.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'timeoutMs',
+      type: PatchbayParameterType.integer,
+      defaultValue: 5000,
+      summary:
+          'One deadline for the whole call (1..120000), frozen at admission '
+          'and never rewritten while escalating outward.',
+    ),
+  ],
+  cliSyntax: const <PatchbayCliSyntax>[
+    PatchbayCliSyntax(
+      id: 'uiReveal',
+      path: <String>['ui', 'reveal'],
+      summary:
+          'Scroll an identifier into view and report how to reach it next.',
+      usageSuffix:
+          '<identifier> [--container <identifier>] '
+          '[--direction <forward|backward|both>] [--max-steps <n>] '
+          '[--timeout-ms <ms>]',
+      positionalParameters: <String>['identifier'],
+      optionParameters: <String, String>{
+        'container': 'container',
+        'direction': 'direction',
+        'maxSteps': 'max-steps',
+        'timeoutMs': 'timeout-ms',
+      },
+      positiveParameters: <String>{'maxSteps', 'timeoutMs'},
+    ),
+  ],
+);
+
 final patchbayUiWaitCommandDescriptor = _ui(
   'ui.wait',
   'Wait for one bounded Flutter observation condition.',
@@ -544,6 +631,7 @@ final List<PatchbayCommandDescriptor> patchbayUiProtocolCliCommandDescriptors =
       patchbayUiGesturePressHoldCommandDescriptor,
       patchbayUiGestureDragCommandDescriptor,
       patchbayUiGestureFlingCommandDescriptor,
+      patchbayUiRevealCommandDescriptor,
       patchbayUiWaitCommandDescriptor,
       patchbayUiKeepAwakeSetCommandDescriptor,
       patchbayUiKeepAwakeStatusCommandDescriptor,
