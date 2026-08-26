@@ -37,14 +37,15 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 - [Invocation cooperative cancellation、deadline 与统一受理预算](0.5.0/invocation-cancellation.md)
 - [树类大载荷落 artifact](0.5.0/tree-artifact-output.md)
 - [--view brief 瘦 JSON 视图](0.5.0/brief-view.md)
+- [identifier 锚定的通用 Semantics action](0.5.0/semantics-identifier-action.md)
+- [domain 写命令 gate 强制执行](0.5.0/domain-gate-enforcement.md)
 
 0.5.0 提案中：
 
 - [Snapshot 双预算、single-flight 与可选 source revision](0.5.0/snapshot-resources-revisions.md)
 - [Semantics probe 请帧策略与 identifier 索引](0.5.0/semantics-probe-scheduling.md)
-- [identifier 锚定的通用 Semantics action](0.5.0/semantics-identifier-action.md)
 - [CLI 公共 API surface 收口](0.5.0/cli-public-api-surface.md)
-- [domain 写命令 gate 强制执行](0.5.0/domain-gate-enforcement.md)
+- [workspace / worktree 级会话亲和性](0.5.0/workspace-session-affinity.md)
 
 已延期、尚未进入版本范围的候选方案：
 
