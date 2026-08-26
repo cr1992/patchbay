@@ -119,8 +119,8 @@ final class HostSnapshotHandler {
       final PatchbaySnapshotRead? read = await _readSnapshotWithin(
         timeout - elapsed.elapsed,
       );
-      // The budget ran out inside a sampling this caller only joined. Nothing
-      // was observed, so nothing is reported as observed.
+      // The budget ran out while the App was still being sampled. Nothing was
+      // observed, so nothing is reported as observed.
       if (read == null) break;
       if (read.violated) return read.response;
       polls += 1;
@@ -161,9 +161,9 @@ final class HostSnapshotHandler {
         'pollIntervalMs': patchbaySnapshotPollInterval.inMilliseconds,
         'polls': polls,
         // Present exactly when a poll resolved something. A wait whose budget
-        // was spent inside a shared sampling saw nothing, and reporting a miss
-        // it never looked for would read as "the field is absent" instead of
-        // "the App never answered".
+        // was spent waiting on the sampling saw nothing, and reporting a miss it
+        // never looked for would read as "the field is absent" instead of "the
+        // App never answered".
         if (last
             case final PatchbaySnapshotSelection resolved) ...<String, Object?>{
           'observed': resolved.toJson(),
@@ -195,45 +195,32 @@ final class HostSnapshotHandler {
     final Future<PatchbaySnapshotRead> flight = _sampleSnapshot();
     _sampling = flight;
     // Cleared the moment it settles, so a failure is shared by this batch and
-    // retried by the next caller rather than cached.
-    unawaited(flight.whenComplete(() => _releaseSampling(flight)));
+    // retried by the next caller rather than cached. Settling is the only thing
+    // that clears it: a caller giving up on its own budget says nothing about
+    // whether the provider call it was watching is still running.
+    unawaited(
+      flight.whenComplete(() {
+        if (identical(_sampling, flight)) _sampling = null;
+      }),
+    );
     return flight;
   }
 
   /// Reads the App snapshot for a caller that has [budget] left of its own.
   ///
-  /// Opening a sampling and joining one are not the same wait. A caller that
-  /// opens it owns the provider call, and keeps the behaviour the budget has
-  /// always had: the read runs to completion and the budget then decides
-  /// whether that answer is still wanted, so a slow source still reports what
-  /// it saw rather than nothing. A caller that *joins* is waiting on somebody
-  /// else's provider call, and sharing the sampling must never mean sharing
-  /// the budget — so the join is capped by what this caller has left.
+  /// Opening the sampling and joining one are the same wait here: whoever
+  /// declared a budget races it against the one sampling, and running out of it
+  /// answers `snapshotWaitTimeout` instead of waiting forever. Nothing is
+  /// cancelled and nothing is dropped — the sampling stays the sampling in
+  /// flight, so a wedged provider call is made once and never again.
   ///
-  /// Returns null when the budget ran out before the shared sampling answered.
-  /// The sampling is dropped at that moment: a provider call the last declared
-  /// budget already outlived is no longer the sampling "in flight", and leaving
-  /// it registered is what turns one wedged provider call into an App that can
-  /// never be sampled again.
+  /// Returns null when the budget ran out before the sampling answered.
   Future<PatchbaySnapshotRead?> _readSnapshotWithin(Duration budget) async {
-    final Future<PatchbaySnapshotRead>? joined = _sampling;
-    if (joined == null) return readSnapshot();
     try {
-      return await joined.timeout(budget);
+      return await readSnapshot().timeout(budget);
     } on TimeoutException {
-      _releaseSampling(joined);
       return null;
     }
-  }
-
-  /// Stops publishing [flight] as the sampling this batch shares.
-  ///
-  /// Identity-guarded on purpose: a sampling that settles after it was dropped
-  /// must not clear one somebody else has since opened. The dropped Future is
-  /// left running — nothing here can cancel a provider call — and its result
-  /// still reaches whoever is still waiting on it.
-  void _releaseSampling(Future<PatchbaySnapshotRead> flight) {
-    if (identical(_sampling, flight)) _sampling = null;
   }
 
   Future<PatchbaySnapshotRead> _sampleSnapshot() async {
