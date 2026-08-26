@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:args/args.dart';
 
+import 'artifact_download.dart';
 import 'command_help.dart';
 import 'command_registry.dart';
 import 'doctor.dart';
@@ -172,6 +173,12 @@ final class PatchbayReplSession {
         if (_resolvedView(parsed) == patchbayViewBrief && !_json) {
           throw const FormatException('--view brief requires --json');
         }
+        // F6 (PB-050-20 follow-up): validate this line's --max-inline-bytes
+        // before it ever reaches `_execute` below — the render-time parse in
+        // `_finishReplRendering` ran after the line's own RPC had already
+        // gone out, so a malformed value used to dispatch the command anyway
+        // and fail only once rendering tried to use it.
+        ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes');
       } on FormatException catch (error) {
         _writeFailure(
           number,
@@ -239,6 +246,29 @@ final class PatchbayReplSession {
           parsed.rest,
           PatchbayExitCode.usage,
           error.sentence,
+        );
+      } on PatchbayArtifactDownloadException catch (error) {
+        // A local disk failure — writing PB-050-20's spilled member, or the
+        // existing blob download path a `capture --output` line also runs
+        // inside `_execute` — says nothing about whether the connection this
+        // session is reusing is still good, unlike the
+        // PatchbayProtocolException / PatchbaySessionException /
+        // PatchbayTransportException cases below (not caught here; they fall
+        // through and end the session on purpose, because there the peer
+        // itself is no longer trustworthy). So this line reports and the
+        // session keeps consuming the lines after it, the same way a usage
+        // error does — where "session-level" would have used
+        // `PatchbayErrorEnvelope(failure.code)` and exit code `protocol`
+        // (see cli.dart's own `on PatchbayArtifactDownloadException` catch),
+        // this per-line failure carries the identical `{code, details}`
+        // shape and exit code, just wrapped in the per-line envelope instead
+        // of ending the process.
+        _writeFailure(
+          number,
+          parsed.rest,
+          PatchbayExitCode.protocol,
+          'patchbay protocol error: ${error.code}',
+          envelope: PatchbayErrorEnvelope(error.code),
         );
       }
     }
@@ -401,19 +431,33 @@ final class PatchbayReplSession {
     }
   }
 
+  /// Writes one line's failure inside the per-line envelope
+  /// (`{line, command, exitCode, error}`) every result — success or
+  /// failure — uses, so a JSON consumer never has to special-case a
+  /// terminated-vs-continuing line by shape.
+  ///
+  /// [envelope], when given, replaces the plain-string `error` value with
+  /// the same `{code, details}` shape `PatchbayErrorEnvelope.toJson()['error']`
+  /// produces at session level for the identical exception — the failure
+  /// class this line hit is the same one the session-ending catches in
+  /// `cli.dart` report, so a consumer parsing `error.code` should not have to
+  /// know whether this particular failure happened to end the session or
+  /// not. Every other caller here still passes a human [message] alone,
+  /// unchanged from before this parameter existed.
   void _writeFailure(
     int number,
     List<String> command,
     int exitCode,
-    String message,
-  ) {
+    String message, {
+    PatchbayErrorEnvelope? envelope,
+  }) {
     if (_json) {
       _out.writeln(
         jsonEncode(<String, Object?>{
           'line': number,
           'command': command,
           'exitCode': exitCode,
-          'error': message,
+          'error': envelope == null ? message : envelope.toJson()['error'],
         }),
       );
       return;

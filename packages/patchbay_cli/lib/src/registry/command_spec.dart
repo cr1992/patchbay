@@ -64,8 +64,25 @@ final class GeneratedProtocolCommand implements PatchbayFriendlyCommandSpec {
   List<String> get path => syntax.path;
   @override
   String get summary => syntax.summary;
+
+  /// F8 (PB-050-20 follow-up): `ui semantics tree` accepts `--output`,
+  /// `--force` and `--max-inline-bytes` exactly the way the plain
+  /// `uiWidgetTree`/`uiRenderTree`/`uiFocusTree` declarations in
+  /// `friendly_commands.dart` do — `friendly_command_registry.dart`'s
+  /// `allowedOptions` already grants all three whenever [artifact] is
+  /// `renderedMember` — but the wire-declared `syntax.usageSuffix` has no way
+  /// to know about this CLI-only PB-050-20 decision, the same reason
+  /// [artifact] below cannot live on the wire descriptor either. This
+  /// literal is deliberately kept identical to those three siblings' own
+  /// `usageSuffix` so a `--help ui semantics tree` line reads the same way
+  /// theirs does.
   @override
-  String get usageSuffix => syntax.usageSuffix;
+  String get usageSuffix {
+    if (serviceName == _renderedMemberServiceCommand) {
+      return '[--output <path>] [--force] [--max-inline-bytes <n>]';
+    }
+    return syntax.usageSuffix;
+  }
 
   /// PB-050-20: `ui semantics tree`'s only reachable CLI declaration is this
   /// generated wrapper. `PatchbayFriendlyCommand.uiSemanticsTree` is a

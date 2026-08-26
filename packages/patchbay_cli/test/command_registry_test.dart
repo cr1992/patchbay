@@ -372,6 +372,35 @@ void main() {
     }
   });
 
+  test('F7: renderedMember (PB-050-20 spill) coverage is exactly the four '
+      'tree-shaped commands, enumerated from the live registry', () {
+    // The actual set is derived from `PatchbayFriendlyCommandRegistry
+    // .commands` — the same table `resolve`/`specFor` dispatch against —
+    // never re-declared here, so this only breaks when the registry's own
+    // `artifact` dispositions actually change. `ui semantics tree` is a
+    // `GeneratedProtocolCommand` (its renderedMember override lives in
+    // `command_spec.dart`); the other three are plain
+    // `PatchbayFriendlyCommand` declarations in `friendly_commands.dart`.
+    final Set<String> actual = PatchbayFriendlyCommandRegistry.commands
+        .where(
+          (PatchbayFriendlyCommandSpec spec) =>
+              spec.artifact == PatchbayArtifactDisposition.renderedMember,
+        )
+        .map((PatchbayFriendlyCommandSpec spec) => spec.path.join(' '))
+        .toSet();
+    // The frozen expectation (tree-artifact-output.md's four covered
+    // commands) — a ratchet, not a mirror of production code: adding a
+    // fifth renderedMember command, or dropping/renaming one of these
+    // four, must fail this test rather than pass silently.
+    const Set<String> expected = <String>{
+      'ui semantics tree',
+      'ui widget-tree',
+      'ui render-tree',
+      'ui focus-tree',
+    };
+    expect(actual, expected);
+  });
+
   test('ui text keeps the variadic trailing text and generation parsing', () {
     final PatchbayFriendlyInvocation set = _resolve(<String>[
       'ui',

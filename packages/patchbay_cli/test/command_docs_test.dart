@@ -171,6 +171,42 @@ after
     });
   }
 
+  test('N1: SKILL.md states brief-view.md section 8\'s three facts near the '
+      '"If output is large" guidance, without copying its field list', () {
+    final String skill = File(
+      '../../skills/use-patchbay/SKILL.md',
+    ).readAsStringSync();
+    final String routeSection = skill.substring(
+      skill.indexOf('## Route the task'),
+      skill.indexOf('## Working contract'),
+    );
+
+    expect(routeSection, contains('If output is large'));
+    // Fact 1: machine consumption defaults to `--json --view brief`.
+    expect(routeSection, contains('--json --view brief'));
+    // Fact 2: an omitted field is named in `localView.omitted`, not silent.
+    expect(routeSection, contains('localView.omitted'));
+    // Fact 3: `--view full` expands it, is overridable per repl line, and
+    // a re-run is a new observation.
+    expect(routeSection, contains('--view full'));
+    expect(routeSection, contains('repl session'));
+    expect(routeSection, contains('new observation'));
+    // brief-view.md section 8 forbids copying the projection table's own
+    // field list into the Skill — those dotted paths would drift the
+    // moment the frozen table changes, which is exactly what the Skill
+    // must not do.
+    for (final String tablePattern in <String>[
+      r'$.payload.nodes',
+      r'$.payload.records',
+      r'$.commands[].parameters',
+      r'$.commands[].responseSchema',
+      r'$.commands[].executionContract',
+      r'$.commands[].retryPolicy',
+    ]) {
+      expect(routeSection, isNot(contains(tablePattern)));
+    }
+  });
+
   test('checked-in command documents have no generation drift', () async {
     final ProcessResult result = await Process.run(
       Platform.resolvedExecutable,

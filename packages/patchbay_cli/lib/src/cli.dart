@@ -275,6 +275,12 @@ Future<int> runPatchbayCli(
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
+    // F6 (PB-050-20 follow-up): a malformed --max-inline-bytes must fail
+    // before the RPC it would only ever matter for is sent. Parsing it only
+    // at render time, after `_executeOnce` had already invoked the App, let
+    // a bad value dispatch the command anyway and report a usage failure on
+    // a side effect that had already happened.
+    ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes');
     final Outcome outcome = await _renewKeepAwakeAfterSuccess(
       connection,
       parsed,

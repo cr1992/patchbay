@@ -19,7 +19,11 @@ runtime, plugin, launcher, or permission grant.
   request. The runtime catalog owns availability, parameters, gates, retry eligibility, and sensitive
   input facts.
 - If output is large, prefer a CLI-advertised brief, path selection, output file, or artifact flow.
-  Expand the full payload only when the task requires it.
+  Machine consumption should default to `--json --view brief`; a field a brief response leaves out is
+  never silent — it is always named in that response's `localView.omitted`, so a missing field is not
+  evidence the App omitted it. Expand with `--view full` (overridable per line inside a repl session)
+  only when the task requires it, and treat that expansion as a new observation, not a replay of the
+  brief one.
 - Read the repository guide or a focused package document only when live help and descriptors do not
   answer the current task. Do not preload the complete guide for routine diagnosis.
 

@@ -108,7 +108,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` |
 | `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
 | `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree` | 协议 descriptor | `ui.semantics.tree` |
+| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | 协议 descriptor | `ui.semantics.tree` |
 | `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` |
 | `patchbay ui targets --emit-manifest` | local 显式声明 | — |
 | `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` |
