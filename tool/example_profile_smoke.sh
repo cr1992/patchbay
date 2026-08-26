@@ -260,6 +260,18 @@ else
 fi
 
 echo
+echo "== reveal 答复形态（PB-050-17，不依赖任何 debug-only API）=="
+# reveal 的整条路径——语义树观察、occlusion 判定、语义 action 派发——都走
+# `debugSemantics`（release 才为 null），与上面已经 required 的 ui tap 同源，
+# 因此在 profile 下同样必须可用，不进 degradable 那一组。这里只验答复形态
+# （退出码 + 不落进 transport），语义正确性由 example_precheck.sh 在 debug
+# 下逐条断言，本脚本不重复求全覆盖。
+probe 'navigation go reveal' required --json navigation go example.reveal
+probe 'ui reveal' required --json ui reveal example.reveal.row.far \
+  --max-steps 60 --timeout-ms 20000
+probe 'navigation go home（reveal 收尾）' required --json navigation go example.home
+
+echo
 echo "== debug-only 的面（只验类型化降级，不写死期望）=="
 probe 'ui inspect on' degradable --json ui inspect on --ttl-ms 60000
 probe 'ui widget-tree' degradable --json ui widget-tree

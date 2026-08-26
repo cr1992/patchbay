@@ -653,6 +653,19 @@ PatchbaySemanticsActionDecision _semanticsActionPolicy(
       gateIds: <String>{exampleWriteGate},
     );
   }
+  // PB-050-17: both rows `ui.reveal` can drive to reveal double as the tap
+  // targets for the two `reachability` values it reports — `pointer` goes on
+  // to `ui tap` (hit-test resolved), `semanticsOnly` to `ui action ... tap`
+  // (semantics-only). Both land on the same `tapIdentifier` seam and
+  // therefore the same policy check, so one rule covers the full chain the
+  // device precheck exercises after a reveal.
+  if ((target.identifier == revealTargetSemanticsId ||
+          target.identifier == revealSemanticsOnlyRowId) &&
+      action == PatchbaySemanticsAction.tap) {
+    return const PatchbaySemanticsActionDecision.allow(
+      gateIds: <String>{exampleWriteGate},
+    );
+  }
   return const PatchbaySemanticsActionDecision.reject(
     rejectionNotice: 'This example does not allow that semantics action.',
   );
