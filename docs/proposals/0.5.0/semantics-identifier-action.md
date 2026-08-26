@@ -1,6 +1,6 @@
 # 0.5.0 identifier 锚定的通用 Semantics action
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-10
 >
@@ -21,7 +21,7 @@
 ### 目标
 
 - 为现有公开 Semantics action allowlist 提供 identifier 锚定的一步式命令。
-- generation 未显式提供时由 App 第一次解析结果产生内部围栏；门后仍必须二次解析并核对同一代际。
+- `generation` 必填（2026-08-25 裁决改判）：调用方前置围栏 + App 内部 pin + 门后二次解析核对同一代际，三道围栏全开。
 - 保持 identifier 未命中、歧义、换代、policy/gate、lifecycle 与敏感输入的 fail-closed 语义。
 - 旧 nodeId action 与 `ui.semantics.tap` 无修改继续工作，三条路径共享同一 dispatch 安全原语。
 
@@ -40,19 +40,19 @@
 
 ```console
 $ patchbay ui action <identifier> <action> [text]
-$ patchbay ui action <identifier> <action> [text] --generation <generation>
+$ patchbay ui action <identifier> <generation> <action> [text]
 $ patchbay --stdin ui action <identifier> setText
 ```
 
 对照候选是 `ui semantics action-by-identifier`。两者只允许选一个 canonical path，不同时发布 alias；无论选择
-哪一个，`generation` 都是 path/位置参数之后的 per-command option，只有 `--stdin` 是全局 flag。
+哪一个，`generation` 都是紧随 `identifier` 的必填位置参数（与 gesture 家族一致），只有 `--stdin` 是全局 flag。
 
 wire 参数：
 
 - `identifier`：必填、非空 string，使用 Flutter Semantics identifier 命名空间；
 - `action`：必填 enum，与 0.4.1 `ui.semantics.action` descriptor 的公开 allowlist 完全一致：`tap`、`focus`、
   `scrollUp`、`scrollDown`、`scrollLeft`、`scrollRight`、`setText`；
-- `generation`：可选、非负 integer，是调用方从先前观察取得的额外围栏；
+- `generation`：必填、非负 integer，调用方从先前观察取得的前置围栏（2026-08-25 裁决改判）；
 - `text`：仅 `setText` 可带，其他 action 携带即稳定拒绝；
 - `inputWasStdin`：沿用现有 CLI provenance marker，调用方不能用普通 JSON 值伪造 stdin 来源。
 
@@ -61,8 +61,8 @@ registration 必须与现有 `ui.semantics.tap` 一样设置 `strictKeys: true`�
 现有 unknown-field 失败形状拒绝，不得静默忽略。nodeId `ui.semantics.action` 未启用 strictKeys 的历史行为
 不扩散到这条新命令。
 
-`PatchbaySemanticsBridge` 新增 `invokeIdentifier` 公共入口，参数与 wire 同构。`generation` 省略时不是“不检查”：
-第一次唯一解析得到的 generation 会被 pin，随后传入第二次解析。显式 generation 先作为调用方前置围栏，
+`PatchbaySemanticsBridge` 新增 `invokeIdentifier` 公共入口，参数与 wire 同构。`generation` 必填：
+首次解析即与调用方值核对（与 PB-050-15 对齐），pin 后传入第二次解析。它先作为调用方前置围栏，
 第一次解析不一致即拒绝；一致后仍按同一个值完成门后二次复核。
 
 执行 payload 沿用 `ui.semantics.tap` 和 `ui.semantics.action` 现有的两种不同形状，不得合并字段：
@@ -141,15 +141,18 @@ release 构建继续由现有编译期裁除边界控制，不因新增 public m
 
 ## 待裁决
 
-- 是否接受 `ui.semantics.actionByIdentifier` 作为独立 service command，而不是给既有 nodeId command 增加
-  互斥参数联合？本稿建议接受，保持旧 descriptor required 字段不变。
-- CLI canonical path 选择与 `ui tap` 对称的 `ui action`，还是更显式但更深的
-  `ui semantics action-by-identifier`？本稿建议 `ui action`；只发布一个 path，不增加 alias，并在 help 中与
-  nodeId `ui semantics action` 互相指路。
-- generation 是否可选？本稿建议与 `ui.semantics.tap` 一致可选，但省略只省调用方前置围栏，不省 App 内部
-  pin 与二次复核。
-- 是否严格复用现有七项 public allowlist？本稿建议是；其余 enum 值另行排期，避免无意扩张 policy 面。
+（四项均已裁决，见下节；原问题文本保留于版本历史。）
 
+### 裁决结论（2026-08-25，仓主授权代理裁决）
+
+1. **接受独立命令 `ui.semantics.actionByIdentifier`**：参数联合会破坏旧 descriptor 的 required 约束，
+   与 anchored-tap 被否决方案同一判例。
+2. **CLI canonical path 取 `ui action`**：与 `ui tap` 对称，单 path 无 alias，help 与 nodeId 版互相指路。
+3. **`generation` 必填**（推翻本稿「可选」建议）：仓主在 PB-050-15 复核时确立的判例——内部 pin 防不了
+   「调用方观察后、命令开始前 identifier 被新节点复用」的窗口；identifier 锚定的写派发一律用最强围栏。
+   正文参数表、CLI 语法与 bridge 入口段已按此修订；实现须含「缺 generation 即 invalidParams / CLI
+   usage 错误」用例。`ui.semantics.tap` 的既有可选契约不动（另行条目再议统一）。
+4. **严格复用既有七项 public allowlist**：不借本条扩 policy 面，与「longPress 不进 allowlist」裁决同向。
 ## 被否决方案
 
 - `generation: "latest"`：破坏 integer wire 类型，并把“选当前实例”误写成“无需代际围栏”。
