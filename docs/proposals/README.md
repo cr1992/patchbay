@@ -42,10 +42,11 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 - [workspace / worktree 级会话亲和性](0.5.0/workspace-session-affinity.md)
 - [Semantics probe 请帧策略与 identifier 索引](0.5.0/semantics-probe-scheduling.md)
 - [Snapshot 双预算、single-flight 与可选 source revision](0.5.0/snapshot-resources-revisions.md)
+- [CLI 公共 API surface 收口](0.5.0/cli-public-api-surface.md)
 
 0.5.0 提案中：
 
-- [CLI 公共 API surface 收口](0.5.0/cli-public-api-surface.md)
+（暂无）
 
 已延期、尚未进入版本范围的候选方案：
 
