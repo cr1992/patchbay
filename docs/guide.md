@@ -221,8 +221,11 @@ App 拒绝、协议错误和 provider 已返回的结果都不重试。host 在�
 
 用 `patchbay describe <namespace.command>` 可只读检查 catalog 行、response schema 模式与
 `retryEligibility`，不会调用命令。需要把调试调用接入审计时，在 host 注入 `auditSink`；host 会先保留
-最近 256 条脱敏事实，再 best-effort 投递 sink。事件只含参数的递归类型、键结构和长度档位，不含标量值；
-sink 失败默认隔离，也可用 `onAuditSinkError` 上报，不能改写已经发生的命令结果。
+最近 256 条脱敏事实，再由单消费者按账本顺序投递 sink。active Future 与 waiting 事件共同受
+`auditQueueCapacity` 有界约束（默认 256）；溢出、关闸后的事件和 sink failure 都由
+`onAuditSinkError` 隔离上报，不能改写已经发生的命令结果。host 终止时调用 `drainAudit()` 可得到
+settled / overflow / abandoned 统计，`dispose()` 会执行同一有预算 drain。事件只含参数的递归类型、
+键结构和长度档位，不含标量值。
 
 #### 敏感参数由 host 强制，adapter 不用配合
 

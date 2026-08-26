@@ -18,6 +18,7 @@ final class PatchbayFlutterServiceHost {
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
   }) : _host = _buildHost(
          applicationId: applicationId,
          bridge: bridge,
@@ -28,6 +29,7 @@ final class PatchbayFlutterServiceHost {
          registrar: registrar,
          auditSink: auditSink,
          onAuditSinkError: onAuditSinkError,
+         auditQueueCapacity: auditQueueCapacity,
        );
 
   PatchbayFlutterServiceHost.withDomainCatalogProvider({
@@ -40,6 +42,7 @@ final class PatchbayFlutterServiceHost {
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
   }) : _host = _buildHost(
          applicationId: applicationId,
          bridge: bridge,
@@ -50,6 +53,7 @@ final class PatchbayFlutterServiceHost {
          registrar: registrar,
          auditSink: auditSink,
          onAuditSinkError: onAuditSinkError,
+         auditQueueCapacity: auditQueueCapacity,
        );
 
   static PatchbayServiceHost _buildHost({
@@ -63,6 +67,7 @@ final class PatchbayFlutterServiceHost {
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    required int auditQueueCapacity,
   }) {
     assert((domainCatalog == null) || domainCatalogProvider == null);
     final PatchbayCommandRegistry registry =
@@ -93,6 +98,7 @@ final class PatchbayFlutterServiceHost {
         registrar: registrar,
         auditSink: auditSink,
         onAuditSinkError: onAuditSinkError,
+        auditQueueCapacity: auditQueueCapacity,
         registry: registry,
         catalogProvider: _FlutterCatalogProvider(provider, bridge),
         snapshot: effectiveSnapshot,
@@ -108,6 +114,7 @@ final class PatchbayFlutterServiceHost {
       registrar: registrar,
       auditSink: auditSink,
       onAuditSinkError: onAuditSinkError,
+      auditQueueCapacity: auditQueueCapacity,
       registry: registry,
       catalog: () async => _withUiTargets(
         await domainCatalog?.call() ?? const <String, Object?>{},
@@ -141,6 +148,13 @@ final class PatchbayFlutterServiceHost {
   int get schemaVersion => PatchbayServiceHost.schemaVersion;
 
   List<PatchbayAuditEvent> get auditEvents => _host.auditEvents;
+
+  Future<PatchbayAuditDrainResult> drainAudit({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _host.drainAudit(timeout: timeout);
+
+  Future<void> dispose({Duration auditTimeout = const Duration(seconds: 2)}) =>
+      _host.dispose(auditTimeout: auditTimeout);
 
   Future<Map<String, Object?>> dispatchCatalog() => _host.dispatchCatalog();
 

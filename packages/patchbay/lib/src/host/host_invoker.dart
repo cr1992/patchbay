@@ -10,6 +10,7 @@ import '../gates.dart';
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
 import '../response_schema.dart';
+import 'audit_dispatcher.dart';
 import 'host_catalog.dart';
 import 'host_models.dart';
 
@@ -19,12 +20,22 @@ final class HostInvokerHandler {
     required PatchbayCommandRegistry registry,
     required HostCatalogHandler catalogHandler,
     PatchbayGateEvaluator? domainGates,
-    this.auditSink,
-    this.onAuditSinkError,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
   }) : _invoke = invokeSource,
        _registry = registry,
        _catalogHandler = catalogHandler,
-       _domainGates = domainGates;
+       _domainGates = domainGates {
+    validateAuditQueueCapacity(auditQueueCapacity);
+    _auditDispatcher = auditSink == null
+        ? null
+        : AuditDispatcher(
+            sink: auditSink,
+            capacity: auditQueueCapacity,
+            onError: onAuditSinkError,
+          );
+  }
 
   final PatchbayInvocationSource _invoke;
   final PatchbayCommandRegistry _registry;
@@ -36,15 +47,34 @@ final class HostInvokerHandler {
   /// their own declared gates inside their registration or bridge handler, and
   /// running the same IDs twice would turn one authorization into two.
   final PatchbayGateEvaluator? _domainGates;
-  final PatchbayAuditSink? auditSink;
-  final PatchbayAuditSinkErrorHandler? onAuditSinkError;
+  late final AuditDispatcher? _auditDispatcher;
+  Future<PatchbayAuditDrainResult>? _emptyAuditDrain;
 
   final List<PatchbayAuditEvent> _auditLedger = <PatchbayAuditEvent>[];
+  var _nextAuditSequence = 1;
   final Map<(String, String), PatchbayExternalInvocationRecord>
   _externalInvocations = <(String, String), PatchbayExternalInvocationRecord>{};
 
   List<PatchbayAuditEvent> get auditEvents =>
       List<PatchbayAuditEvent>.unmodifiable(_auditLedger);
+
+  Future<PatchbayAuditDrainResult> drainAudit({
+    Duration timeout = const Duration(seconds: 2),
+  }) {
+    final AuditDispatcher? dispatcher = _auditDispatcher;
+    if (dispatcher != null) return dispatcher.drain(timeout);
+    final Future<PatchbayAuditDrainResult>? existing = _emptyAuditDrain;
+    if (existing != null) return existing;
+    validateAuditDrainTimeout(timeout);
+    return _emptyAuditDrain = Future<PatchbayAuditDrainResult>.value(
+      const PatchbayAuditDrainResult(
+        outcome: PatchbayAuditDrainOutcome.drained,
+        settledCount: 0,
+        overflowDroppedCount: 0,
+        abandonedCount: 0,
+      ),
+    );
+  }
 
   Future<Map<String, Object?>> dispatchInvoke(
     String command,
@@ -389,20 +419,8 @@ final class HostInvokerHandler {
     );
     if (_auditLedger.length == 256) _auditLedger.removeAt(0);
     _auditLedger.add(event);
-    final PatchbayAuditSink? sink = auditSink;
-    if (sink == null) return;
-    unawaited(
-      Future<void>.sync(() => sink(event)).catchError((
-        Object error,
-        StackTrace stackTrace,
-      ) {
-        try {
-          onAuditSinkError?.call(error, stackTrace, event);
-        } on Object {
-          // Sink error swallowed safely.
-        }
-      }),
-    );
+    _auditDispatcher?.enqueue(event, _nextAuditSequence);
+    _nextAuditSequence += 1;
   }
 
   static Map<String, Object?> _invalidInvocationEnvelope(

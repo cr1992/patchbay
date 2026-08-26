@@ -42,6 +42,7 @@ final class PatchbayServiceHost {
     PatchbayGateEvaluator? domainGates,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
   }) => PatchbayServiceHost._(
     applicationId: applicationId,
     catalogSource: catalog,
@@ -54,6 +55,7 @@ final class PatchbayServiceHost {
     domainGates: domainGates,
     auditSink: auditSink,
     onAuditSinkError: onAuditSinkError,
+    auditQueueCapacity: auditQueueCapacity,
   );
 
   factory PatchbayServiceHost.withCatalogProvider({
@@ -68,6 +70,7 @@ final class PatchbayServiceHost {
     PatchbayGateEvaluator? domainGates,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
   }) => PatchbayServiceHost._(
     applicationId: applicationId,
     catalogProvider: catalogProvider,
@@ -80,6 +83,7 @@ final class PatchbayServiceHost {
     domainGates: domainGates,
     auditSink: auditSink,
     onAuditSinkError: onAuditSinkError,
+    auditQueueCapacity: auditQueueCapacity,
   );
 
   PatchbayServiceHost._({
@@ -95,6 +99,7 @@ final class PatchbayServiceHost {
     PatchbayGateEvaluator? domainGates,
     this.auditSink,
     this.onAuditSinkError,
+    required this.auditQueueCapacity,
   }) : assert((catalogSource == null) != (catalogProvider == null)),
        appInstanceId = appInstanceId ?? patchbayGenerateNonce(),
        _registry = registry ?? PatchbayCommandRegistry(const []),
@@ -112,6 +117,7 @@ final class PatchbayServiceHost {
       domainGates: domainGates,
       auditSink: auditSink,
       onAuditSinkError: onAuditSinkError,
+      auditQueueCapacity: auditQueueCapacity,
     );
     _vmServiceRegistrar = HostVmServiceRegistrar(
       applicationId: applicationId,
@@ -145,6 +151,9 @@ final class PatchbayServiceHost {
   final Set<PatchbayFeature> _declaredFeatures;
   final PatchbayAuditSink? auditSink;
   final PatchbayAuditSinkErrorHandler? onAuditSinkError;
+  final int auditQueueCapacity;
+
+  Future<void>? _disposeFuture;
 
   late final HostCatalogHandler _catalogHandler;
   late final HostSnapshotHandler _snapshotHandler;
@@ -153,6 +162,23 @@ final class PatchbayServiceHost {
 
   /// The newest 256 redacted command facts, in dispatch completion order.
   List<PatchbayAuditEvent> get auditEvents => _invokerHandler.auditEvents;
+
+  /// Stops accepting audit deliveries and waits for the accepted prefix.
+  ///
+  /// The first call freezes [timeout]. Later calls return the same terminal
+  /// future and ignore their timeout argument.
+  Future<PatchbayAuditDrainResult> drainAudit({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _invokerHandler.drainAudit(timeout: timeout);
+
+  /// Drains host-owned resources. Repeated calls return the same future.
+  Future<void> dispose({Duration auditTimeout = const Duration(seconds: 2)}) {
+    final Future<void>? existing = _disposeFuture;
+    if (existing != null) return existing;
+    return _disposeFuture = drainAudit(
+      timeout: auditTimeout,
+    ).then<void>((_) {});
+  }
 
   /// Capabilities this host declares on the identity plane.
   Set<PatchbayFeature> get features => <PatchbayFeature>{
