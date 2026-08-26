@@ -535,6 +535,216 @@ void main() {
     });
   });
 
+  group('a sampling that never settles', () {
+    /// A source whose first sampling never answers, and whose later samplings
+    /// do. The `hang` future is deliberately never completed: a provider that
+    /// wedges once is the failure the Proposal names as `source hang`, and it
+    /// is the only shape that separates "shares the sampling in flight" from
+    /// "is owned by it".
+    ({Future<Map<String, Object?>> Function() source, List<int> calls})
+    wedged() {
+      final Completer<Map<String, Object?>> hang =
+          Completer<Map<String, Object?>>();
+      final List<int> calls = <int>[];
+      return (
+        calls: calls,
+        source: () {
+          calls.add(calls.length + 1);
+          if (calls.length == 1) return hang.future;
+          return Future<Map<String, Object?>>.value(<String, Object?>{
+            'call': <String, Object?>{'session': 'device-${calls.length}'},
+          });
+        },
+      );
+    }
+
+    Map<String, Object?> _waitRequest(int timeoutMs) => <String, Object?>{
+      'path': 'call.session',
+      'until': 'exists',
+      'timeoutMs': timeoutMs,
+    };
+
+    test(
+      'a joined waiter keeps its own budget when the sampling hangs',
+      () async {
+        final ({
+          Future<Map<String, Object?>> Function() source,
+          List<int> calls,
+        })
+        provider = wedged();
+        final HostSnapshotHandler handler = HostSnapshotHandler(
+          snapshotSource: provider.source,
+        );
+
+        // The owner opens the sampling and is swallowed by it. Everything after
+        // this point is a *joined* caller, and a joined caller's budget is its
+        // own.
+        unawaited(handler.dispatchSnapshot());
+        expect(handler.hasSamplingInFlight, isTrue);
+        expect(provider.calls.length, 1);
+
+        final Stopwatch elapsed = Stopwatch()..start();
+        final Map<String, Object?> response = await handler
+            .dispatchSnapshot(_waitRequest(200))
+            .timeout(const Duration(seconds: 5));
+        elapsed.stop();
+
+        expect(_rejection(response)['code'], 'snapshotWaitTimeout');
+        expect(_details(response), containsPair('timeoutMs', 200));
+        expect(
+          _details(response)['polls'],
+          0,
+          reason: 'a sampling that never answered cannot be counted as a poll',
+        );
+        expect(
+          elapsed.elapsed,
+          lessThan(const Duration(seconds: 2)),
+          reason: 'the dead flight must not swallow the caller budget',
+        );
+        expect(provider.calls.length, 1);
+      },
+    );
+
+    test('a joined VM Service waiter keeps its own budget too', () async {
+      final ({Future<Map<String, Object?>> Function() source, List<int> calls})
+      provider = wedged();
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'dev.patchbay.budget',
+        appInstanceId: 'instance-hang',
+        registrar: (_, _) {},
+        catalog: () async => const <String, Object?>{'commands': <Object?>[]},
+        invoke: (_, _, String requestId) async =>
+            PatchbayInvocation.accepted(requestId: requestId).toJson(),
+        snapshot: provider.source,
+      );
+
+      unawaited(host.dispatchSnapshot());
+      expect(provider.calls.length, 1);
+
+      final Stopwatch elapsed = Stopwatch()..start();
+      final ServiceExtensionResponse vm = await host
+          .handleSnapshot(PatchbayServiceHost.snapshotMethod, <String, String>{
+            'isolateId': 'main',
+            PatchbayServiceHost.snapshotRequestKey: jsonEncode(
+              _waitRequest(200),
+            ),
+          })
+          .timeout(const Duration(seconds: 5));
+      elapsed.stop();
+
+      final Map<String, Object?> decoded =
+          jsonDecode(vm.result!) as Map<String, Object?>;
+      expect(_rejection(decoded)['code'], 'snapshotWaitTimeout');
+      expect(_details(decoded), containsPair('timeoutMs', 200));
+      expect(elapsed.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+
+    test('the dead flight is dropped so the next read can retry', () async {
+      final ({Future<Map<String, Object?>> Function() source, List<int> calls})
+      provider = wedged();
+      final HostSnapshotHandler handler = HostSnapshotHandler(
+        snapshotSource: provider.source,
+      );
+
+      unawaited(handler.dispatchSnapshot());
+      await handler
+          .dispatchSnapshot(_waitRequest(60))
+          .timeout(const Duration(seconds: 5));
+
+      // The Proposal's failure-injection node: a hung source leaves no
+      // unfinished flight behind, and the next call retries.
+      expect(handler.hasSamplingInFlight, isFalse);
+      expect(handler.retainedCanonicalBytes, 0);
+
+      final Map<String, Object?> plain = await handler
+          .dispatchSnapshot()
+          .timeout(const Duration(seconds: 5));
+      expect(provider.calls.length, 2);
+      expect(plain['snapshotRevision'], 1);
+
+      final Map<String, Object?> selection = await handler
+          .dispatchSnapshot(<String, Object?>{'path': 'call.session'})
+          .timeout(const Duration(seconds: 5));
+      expect(provider.calls.length, 3);
+      expect(selection['selection'], <String, Object?>{
+        'path': 'call.session',
+        'found': true,
+        'value': 'device-3',
+      });
+    });
+
+    test('the dead flight is dropped for the VM Service side too', () async {
+      final ({Future<Map<String, Object?>> Function() source, List<int> calls})
+      provider = wedged();
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'dev.patchbay.budget',
+        appInstanceId: 'instance-hang',
+        registrar: (_, _) {},
+        catalog: () async => const <String, Object?>{'commands': <Object?>[]},
+        invoke: (_, _, String requestId) async =>
+            PatchbayInvocation.accepted(requestId: requestId).toJson(),
+        snapshot: provider.source,
+      );
+
+      unawaited(host.dispatchSnapshot());
+      await host
+          .handleSnapshot(PatchbayServiceHost.snapshotMethod, <String, String>{
+            'isolateId': 'main',
+            PatchbayServiceHost.snapshotRequestKey: jsonEncode(
+              _waitRequest(60),
+            ),
+          })
+          .timeout(const Duration(seconds: 5));
+
+      final ServiceExtensionResponse vm = await host
+          .handleSnapshot(
+            PatchbayServiceHost.snapshotMethod,
+            const <String, String>{'isolateId': 'main'},
+          )
+          .timeout(const Duration(seconds: 5));
+      final Map<String, Object?> decoded =
+          jsonDecode(vm.result!) as Map<String, Object?>;
+
+      expect(provider.calls.length, 2);
+      expect(decoded['snapshotRevision'], 1);
+    });
+
+    test('a joiner still inside its budget shares the sampling', () async {
+      final Completer<Map<String, Object?>> gate =
+          Completer<Map<String, Object?>>();
+      var calls = 0;
+      final HostSnapshotHandler handler = HostSnapshotHandler(
+        snapshotSource: () {
+          calls += 1;
+          return gate.future;
+        },
+      );
+
+      unawaited(handler.dispatchSnapshot());
+      final Future<Map<String, Object?>> joined = handler.dispatchSnapshot(
+        _waitRequest(5000),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      // Nothing has expired, so the batch is still one sampling: the repair
+      // must not turn "slow" into "sample again".
+      expect(calls, 1);
+      expect(handler.hasSamplingInFlight, isTrue);
+
+      gate.complete(<String, Object?>{
+        'call': <String, Object?>{'session': 'device-1'},
+      });
+      final Map<String, Object?> response = await joined.timeout(
+        const Duration(seconds: 5),
+      );
+      expect(
+        (response['wait']! as Map<String, Object?>)['outcome'],
+        'observed',
+      );
+      expect(calls, 1);
+    });
+  });
+
   group('consumer reported revisions', () {
     test('an unchanged revision never touches the offered body', () async {
       var revision = 7;
