@@ -21,7 +21,7 @@ $ patchbay --help
 ```
 
 For the trade-offs between the three installation forms — including prebuilt release binaries,
-a startup-time comparison, and the trap that running
+their runtime requirements, and the trap that running
 `dart run patchbay_cli:patchbay` inside a consumer's repository directory resolves to the version
 that repo pins — see [the installation section of the usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)
 (currently in Chinese). When changing the CLI itself, `dart run tool/build_cli.dart` compiles the
@@ -29,6 +29,21 @@ current working tree into an AOT executable, with the output landing in `build/`
 
 The examples below consistently write `dart run bin/patchbay.dart` (the in-package development
 form); after a global install, substitute `patchbay` for it.
+
+## Process Model and Workflow Choice
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Lifecycle of Patchbay one-shot commands, repl, and launch">
+</p>
+
+The app and CLI have separate lifecycles: ordinary commands make one request and exit while the app
+keeps running; `repl` only reuses a connection; `launch` only starts, discovers, and supervises the
+app/session. `launch` and `repl` are complementary. `logs tail` is also a bounded long-poll, not an
+endless `tail -f`.
+
+The exact choices, exit conditions, and two-terminal example have one source of truth:
+[Choose a workflow](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流).
+This package README deliberately does not duplicate that table.
 
 ## Command Reference
 
@@ -525,11 +540,9 @@ distribute a bearer on the app's behalf. Logs are app records the consumer has a
 capture proves only the composited result of Flutter repaint boundaries, excludes system permission
 dialogs, and may be missing PlatformViews.
 
-System permission orchestration uses an explicit external driver. Android 0.4.0 release-gates adb
-status/normalize/reset. The source repository also includes a buildable iOS XCUITest runner for
-physical-device camera, microphone, and location reset/exercise; the App must initiate its own
-permission request, and unsupported status/normalize, notification reset, signing or language
-conditions fail closed. See [platform permission drivers](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md).
+System permission orchestration is opt-in through an explicit external driver; unsupported device,
+runner, signing, and language conditions fail closed. See
+[platform permission drivers](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md).
 For the stable commands, passthrough boundaries, and exit conditions of the three trees and
 actions, see
 [`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)

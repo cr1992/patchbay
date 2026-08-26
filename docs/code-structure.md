@@ -53,7 +53,7 @@
 | **警戒线（告警）** | 单函数 > 150 行；单文件 > 800 行（测试 > 1000 行）；文件相比基线变长 | `check_structure_ratchet.dart` | 打印后正常退出，不阻断 |
 
 公共 API surface 按 `export` / `show` / `hide` / `part` 展开计算，而不是比对 barrel 文本——
-0.4.1 的泄漏正是 barrel 一字未改而符号集合扩大了 45 个。有意变更公共面时跑
+仓库曾出现 barrel 一字未改、符号集合却扩大 45 个的泄漏。有意变更公共面时跑
 `dart run tool/check_api_surface.dart --update` 并在 MR 描述里解释。
 
 硬规则挑的都是"评审用肉眼很难稳定抓住、但一旦发生就确定是错"的结构错误。

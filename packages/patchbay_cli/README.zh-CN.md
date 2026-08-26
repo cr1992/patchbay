@@ -18,12 +18,26 @@ $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不�
 $ patchbay --help
 ```
 
-三种安装形态的取舍（含 Release 预编译二进制、启动耗时对比，以及「在接入方仓目录里
+三种安装形态的取舍（含 Release 预编译二进制、运行时要求，以及「在接入方仓目录里
 `dart run patchbay_cli:patchbay` 会解析到该仓 pin 的版本」这个坑）见
 [使用指南的安装节](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)。改 CLI 本身时，`dart run tool/build_cli.dart`
 把当前工作树编成 AOT 可执行文件，产物落在 `build/`。
 
 以下示例统一写 `dart run bin/patchbay.dart`（包内开发姿势）；全局安装后可等价替换为 `patchbay`。
+
+## 进程模型与工作流选择
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Patchbay CLI 的一次性命令、repl 与 launch 生命周期">
+</p>
+
+App 与 CLI 是两个生命周期：普通命令请求一次后退出，App 继续运行；`repl` 只复用连接；`launch`
+只负责启动、发现和监督 App/session。`launch` 与 `repl` 可以配合，`logs tail` 也是有界长轮询，
+不是无限 `tail -f`。
+
+选择、退出条件和双终端示例以
+[使用指南的「先选工作流」](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流)为唯一事实源；
+本包 README 不再复制一份容易漂移的表格。
 
 ## 命令速查
 
@@ -424,5 +438,7 @@ navigation、wait、capture、结构化日志与 direct 仅在运行时 catalog/
 不通过 ADB、坐标点击或 Widget 文本猜测补齐缺失能力，也不会替 App 自动启动 direct listener 或分发
 bearer。日志是 consumer 已脱敏的 App 记录；capture 只证明 Flutter repaint boundary 的合成结果，不含
 系统权限弹窗，PlatformView 也可能缺失。
+系统权限编排只通过显式外部 driver opt-in；设备、runner、签名或语言条件不满足时 fail-closed。详见
+[平台权限 driver](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md)。
 三树与 action 的稳定命令、passthrough 边界和退出条件见
 [`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。

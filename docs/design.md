@@ -406,10 +406,9 @@ wire 面有握手兜底：版本对不上就 `schemaVersionMismatch`，谁都不
 - 不支持 release 构建，不建立任何降级通道；
 - 装卸包与进程管理不做——那是 adb / xcrun 的地盘；
 - **四个 package 不直接操作系统 UI**。系统权限编排由 CLI 通过版本化 driver protocol 调用外部
-  companion 完成，App 内代码不获得任何操作系统 UI 的操作能力，release 构建不可达。这条原本是
-  「系统权限弹窗不做」；0.4.0 放宽了它管的层级而不是它的实质——App 内不越权、不重造 adb 两件事
-  都保留，companion 就是 adb / simctl / hdc 本身的调用方。处理方式与「不重造 DevTools，能力走
-  转发」相同。
+  companion 完成，App 内代码不获得任何操作系统 UI 的操作能力，release 构建不可达。边界始终是
+  App 内不越权、不重造 adb；companion 只是 adb / simctl / hdc 本身的调用方，与“不重造 DevTools，
+  能力走转发”同理。
 
 放弃的特性进本节；红线的放宽会改变协议行为或安全边界，记入 [CHANGELOG](../CHANGELOG.md)。
 两者都不静默改写。

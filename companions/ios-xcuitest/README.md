@@ -1,6 +1,6 @@
 # iOS XCUITest permission runner
 
-这个工程是 Patchbay 0.4.0 的外部系统权限 companion。它只使用 XCTest 公共 API：
+这个工程是 Patchbay 的外部系统权限 companion，只使用 XCTest 公共 API：
 
 - 对 camera、microphone、locationWhenInUse 调用 `resetAuthorizationStatus(for:)`；
 - 在 App 自己发起权限请求后，从 SpringBoard accessibility tree 校验权限身份并操作唯一匹配的 decision；

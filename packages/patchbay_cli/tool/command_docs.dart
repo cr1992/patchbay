@@ -11,8 +11,6 @@ const String _skillDocument = '../../skills/$_managedSkillName/SKILL.md';
 
 const List<({String path, bool chinese})> _documents =
     <({String path, bool chinese})>[
-      (path: '../../README.md', chinese: false),
-      (path: '../../README.zh-CN.md', chinese: true),
       (path: 'README.md', chinese: false),
       (path: 'README.zh-CN.md', chinese: true),
     ];

@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Patchbay CLI workflows</title>
+  <desc id="desc">One running app supports three CLI workflows. One-shot commands connect, request, print, and exit. REPL connects once and runs many commands. Launch starts and supervises the app session, while commands run from another terminal. Launch and REPL are complementary.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0c111e"/>
+      <stop offset="1" stop-color="#11182a"/>
+    </linearGradient>
+    <linearGradient id="appRail" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#58f3c2" stop-opacity="0.16"/>
+      <stop offset="0.52" stop-color="#63b8ff" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#b77cff" stop-opacity="0.16"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#9db0d0" stroke-opacity="0.045"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000714" flood-opacity="0.42"/>
+    </filter>
+    <marker id="arrowMint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0l10 5-10 5z" fill="#58f3c2"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0l10 5-10 5z" fill="#63b8ff"/>
+    </marker>
+    <marker id="arrowViolet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0l10 5-10 5z" fill="#b77cff"/>
+    </marker>
+    <clipPath id="frame"><rect width="1280" height="640" rx="28"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="640" fill="url(#bg)"/>
+    <rect width="1280" height="640" fill="url(#grid)"/>
+    <circle cx="1110" cy="110" r="260" fill="#b77cff" opacity="0.035"/>
+    <circle cx="110" cy="590" r="230" fill="#58f3c2" opacity="0.03"/>
+
+    <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+      <text x="64" y="54" fill="#f2f6ff" font-size="25" font-weight="760" letter-spacing="2">CLI WORKFLOWS</text>
+      <text x="305" y="53" fill="#7787a6" font-size="12" font-weight="650" letter-spacing="1.7">THREE ENTRY POINTS · ONE RUNNING APP</text>
+
+      <g filter="url(#shadow)">
+        <rect x="64" y="86" width="1152" height="112" rx="22" fill="url(#appRail)" stroke="#8193b2" stroke-opacity="0.42"/>
+      </g>
+      <circle cx="101" cy="127" r="10" fill="#58f3c2"/>
+      <circle cx="101" cy="158" r="5" fill="#58f3c2" opacity="0.46"/>
+      <text x="128" y="128" fill="#f2f6ff" font-size="21" font-weight="760">RUNNING PATCHBAY APP</text>
+      <text x="128" y="159" fill="#aebbd1" font-size="14">started by flutter run, consumer tooling, or launch</text>
+      <rect x="906" y="116" width="266" height="50" rx="25" fill="#0b1220" stroke="#58f3c2" stroke-opacity="0.55"/>
+      <text x="1039" y="146" text-anchor="middle" fill="#58f3c2" font-size="13" font-weight="760" letter-spacing="1.15">APP KEEPS RUNNING</text>
+
+      <g font-size="10" font-weight="760" letter-spacing="1.25">
+        <text x="240" y="236" text-anchor="middle" fill="#58f3c2">CONNECTS FOR ONE REQUEST</text>
+        <text x="640" y="236" text-anchor="middle" fill="#63b8ff">REUSES ONE CONNECTION</text>
+        <text x="1040" y="236" text-anchor="middle" fill="#b77cff">STARTS + SUPERVISES</text>
+      </g>
+      <path d="M240 264V206" stroke="#58f3c2" stroke-width="2" marker-end="url(#arrowMint)"/>
+      <path d="M640 264V206" stroke="#63b8ff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <path d="M1040 264V206" stroke="#b77cff" stroke-width="2" marker-end="url(#arrowViolet)"/>
+
+      <g filter="url(#shadow)">
+        <rect x="64" y="268" width="352" height="238" rx="22" fill="#101a27" stroke="#58f3c2" stroke-opacity="0.5"/>
+        <rect x="464" y="268" width="352" height="238" rx="22" fill="#101827" stroke="#63b8ff" stroke-opacity="0.5"/>
+        <rect x="864" y="268" width="352" height="238" rx="22" fill="#171527" stroke="#b77cff" stroke-opacity="0.5"/>
+      </g>
+
+      <g>
+        <rect x="88" y="293" width="104" height="28" rx="14" fill="#58f3c2" fill-opacity="0.14"/>
+        <text x="140" y="312" text-anchor="middle" fill="#58f3c2" font-size="11" font-weight="800" letter-spacing="1.25">DEFAULT</text>
+        <text x="88" y="358" fill="#f2f6ff" font-size="25" font-weight="780">ONE-SHOT</text>
+        <text x="88" y="389" fill="#aebbd1" font-size="14">Occasional command</text>
+        <g fill="#d7e0ef" font-size="14">
+          <text x="88" y="429">connect → request → output → exit</text>
+          <text x="88" y="461" fill="#7f91ae">Next command reconnects.</text>
+        </g>
+      </g>
+
+      <g>
+        <rect x="488" y="293" width="126" height="28" rx="14" fill="#63b8ff" fill-opacity="0.14"/>
+        <text x="551" y="312" text-anchor="middle" fill="#63b8ff" font-size="11" font-weight="800" letter-spacing="1.25">MANY COMMANDS</text>
+        <text x="488" y="358" fill="#f2f6ff" font-size="25" font-weight="780">REPL</text>
+        <text x="488" y="389" fill="#aebbd1" font-size="14">App is already running</text>
+        <g fill="#d7e0ef" font-size="14">
+          <text x="488" y="429">connect once → line 1 → … → line N</text>
+          <text x="488" y="461" fill="#7f91ae">exit / quit / EOF ends the session.</text>
+        </g>
+      </g>
+
+      <g>
+        <rect x="888" y="293" width="118" height="28" rx="14" fill="#b77cff" fill-opacity="0.14"/>
+        <text x="947" y="312" text-anchor="middle" fill="#b77cff" font-size="11" font-weight="800" letter-spacing="1.25">OPTIONAL</text>
+        <text x="888" y="358" fill="#f2f6ff" font-size="25" font-weight="780">LAUNCH</text>
+        <text x="888" y="389" fill="#aebbd1" font-size="14">Discovery + hot restart</text>
+        <g fill="#d7e0ef" font-size="14">
+          <text x="888" y="429">start child → register → supervise</text>
+          <text x="888" y="461" fill="#7f91ae">Send commands from another terminal.</text>
+        </g>
+      </g>
+
+      <rect x="64" y="542" width="1152" height="56" rx="18" fill="#0b1220" stroke="#8193b2" stroke-opacity="0.28"/>
+      <circle cx="95" cy="570" r="5" fill="#63b8ff"/>
+      <text x="115" y="576" fill="#dce5f4" font-size="14" font-weight="650">launch manages app/session lifecycle</text>
+      <text x="420" y="576" fill="#667793" font-size="15">+</text>
+      <text x="451" y="576" fill="#dce5f4" font-size="14" font-weight="650">repl manages repeated commands</text>
+      <text x="760" y="576" fill="#7787a6" font-size="13">complementary, not alternatives</text>
+    </g>
+  </g>
+</svg>

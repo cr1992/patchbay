@@ -310,7 +310,7 @@ so a bare string cannot masquerade as provenance.
 The terminal schema is deeply frozen when the job starts and checked before its event enters the
 ledger. An invalid provider payload is replaced with a value-free `providerProtocolViolation`; the
 invalid payload itself is never retained. A registry constructed without `commandRegistry` and a
-job started without `command` keep the 0.3 free-payload behavior.
+job started without `command` keep the compatibility free-payload behavior.
 
 Commands that publish device execution evidence use the closed `execution.classification` values
 `notSent`, `sentUnconfirmed`, `unchanged`, and `deviceConfirmed`. Configure confirmation and stale

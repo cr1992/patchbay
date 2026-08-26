@@ -97,29 +97,13 @@ import 'package:patchbay_flutter/patchbay_flutter.dart';
 void main() {
   if (!kReleaseMode) {
     final gates = PatchbayGateEvaluator(
-      // No argument reaches this gate, for any command, so it cannot tell a
-      // read from a write by itself — that's why it stays open. Every
-      // read-only command this minimal setup exposes (catalog, snapshot,
-      // ui.wait, Semantics observation) only ever passes through this one
-      // gate.
+      // Open the minimal read-only surface.
       baseGate: () => const PatchbayGateDecision.allow(),
-      // Only write-classified operations declare a consumer gate ID at all,
-      // so rejecting anything that isn't explicitly authorized here is what
-      // keeps writes closed by factory default.
+      // Write operations declare consumer gates; unknown gates stay closed.
       consumerGate: (id) => PatchbayGateDecision.reject(
         code: 'unknownConsumerGate',
-        notice: 'No consumer gate named "$id" — this is a factory-safe '
-            'default: write commands stay closed until the host '
-            'authorizes them here.',
+        notice: 'No consumer gate named "$id".',
       ),
-      // To open one write gate for a trusted driver, replace the function
-      // body above with something like:
-      //   consumerGate: (id) => id == 'app.write'
-      //       ? const PatchbayGateDecision.allow()
-      //       : PatchbayGateDecision.reject(
-      //           code: 'unknownConsumerGate',
-      //           notice: 'No consumer gate named "$id".',
-      //         ),
     );
 
     PatchbayFlutterServiceHost(
@@ -132,25 +116,9 @@ void main() {
 }
 ```
 
-The shortest possible integration opens read-only diagnostics by default; every write must be
-declared and pass through a gate explicitly. This minimal integration already gives you identity,
-catalog, an empty snapshot, read-only Semantics observation, and `ui.wait`. Semantics actions are
-rejected by default; domain commands, capture, logs, and navigation each require the app to inject
-the corresponding capability explicitly.
-
-When you need a stable text target, replace the existing Key with a `PatchbayKey`. It is a
-`GlobalKey`, so it must be cached like any ordinary `GlobalKey` and never reconstructed on every
-`build()`:
-
-```dart
-late final PatchbayKey phoneKey = PatchbayKey.text('login.phone');
-
-@override
-Widget build(BuildContext context) => TextField(
-  key: phoneKey,
-  controller: phoneController,
-);
-```
+This opens read-only diagnostics; writes stay closed until the app declares and authorizes their
+gates. Domain commands, stable UI targets, capture, logs, and navigation are optional additions in
+the [integration guide](docs/guide.md#app-接入).
 
 ### 4. Connect to the running app
 
@@ -164,6 +132,11 @@ $ patchbay --ws-uri '<VM Service URI>' catalog
 $ patchbay --ws-uri '<VM Service URI>' --json snapshot
 ```
 
+When `identity` reports the `applicationId` you registered and all three commands exit `0` (with
+no `error` envelope under `--json`), the minimal read-only path is working. Ordinary Patchbay
+commands are one-shot processes: each connects, makes its request, prints the result, and exits
+while the app keeps running. The next command reconnects to that app.
+
 A VM Service URI usually carries authentication material — keep it out of scripts, logs, and
 anything you commit. Once the launcher is wired up you can drop `--ws-uri` entirely; see
 [automatic session discovery](docs/guide.md#6-会话自动发现可选). With several devices connected at
@@ -171,14 +144,21 @@ once, use `patchbay sessions list` to see the available sessions and `patchbay s
 <session-id>` to pin one, so later commands no longer need `--session`; see
 [session selection](docs/guide.md#会话选择).
 
-UI targets in the catalog come with their current `generation`. Write operations that declare a
-caller-side generation fence (text input, for example) must carry that value, so a late command
-cannot land on a same-named widget that has since remounted; `ui tap` may omit the generation, as
-the host pins the generation for that operation once it has resolved the identifier:
+#### Choose a day-to-day workflow
 
-```console
-$ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '13800000000'
-```
+<p align="center">
+  <img src="docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Three Patchbay CLI workflows: one-shot commands exit after one request, repl reuses a connection, and launch starts and supervises the app session">
+</p>
+
+- **Default:** keep `flutter run` alive and use one-shot commands for occasional lookups.
+- **Repeated commands:** enter `repl` after the app is running; it reuses a connection but does not
+  start the app.
+- **Automatic discovery:** after session declaration is wired, terminal A runs `launch`; terminal B
+  runs ordinary commands or `repl`.
+
+`launch` and `repl` are complementary; run `patchbay doctor` first when connection state is unclear.
+The exact exit conditions and two-terminal example live only in
+[Choose a workflow](docs/guide.md#先选工作流) in the usage guide.
 
 ## What You Can Do
 
@@ -203,81 +183,8 @@ $ patchbay logs tail
 $ patchbay repl < commands.txt
 ```
 
-<!-- PATCHBAY_COMMAND_REFERENCE:START -->
-This table describes syntax shipped by this CLI. Protocol-backed rows come from repository descriptors; client and local rows remain explicit CLI declarations. It is not the runtime capability catalog; use `patchbay catalog` for actual availability.
-
-| CLI syntax | Declaration source | Protocol command |
-|---|---|---|
-| `patchbay blob get <blob-id> --output <path>` | client CLI declaration | `blob.metadata` |
-| `patchbay blob metadata <blob-id>` | client CLI declaration | `blob.metadata` |
-| `patchbay capture diff <before-blob-id> <after-blob-id>` | client CLI declaration | `ui.capture.diff` |
-| `patchbay capture root --output <path>` | protocol descriptor | `ui.capture` |
-| `patchbay capture target <target-id> <generation> --output <path>` | protocol descriptor | `ui.capture` |
-| `patchbay catalog` | client CLI declaration | — |
-| `patchbay describe <service-command>` | local CLI declaration | — |
-| `patchbay doctor` | local CLI declaration | — |
-| `patchbay doctor permission` | local CLI declaration | — |
-| `patchbay exec <service-command>` | client CLI declaration | — |
-| `patchbay identity` | client CLI declaration | — |
-| `patchbay job cancel <job-id>` | client CLI declaration | `patchbay.job.cancel` |
-| `patchbay job get <job-id>` | client CLI declaration | `patchbay.job.get` |
-| `patchbay launch -- <consumer command>` | local CLI declaration | — |
-| `patchbay logs export --output <path>` | client CLI declaration | `logs.export` |
-| `patchbay logs query` | client CLI declaration | `logs.query` |
-| `patchbay logs tail` | client CLI declaration | `logs.tail` |
-| `patchbay navigation back [--revision <revision>]` | protocol descriptor | `navigation.back` |
-| `patchbay navigation catalog` | protocol descriptor | `navigation.catalog` |
-| `patchbay navigation current` | protocol descriptor | `navigation.current` |
-| `patchbay navigation go <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.go` |
-| `patchbay navigation push <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.push` |
-| `patchbay net profile` | client CLI declaration | — |
-| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client CLI declaration | — |
-| `patchbay permission capabilities` | local CLI declaration | — |
-| `patchbay permission exercise <permission> --decision <decision>` | local CLI declaration | — |
-| `patchbay permission fail <permission> --state <state>` | local CLI declaration | — |
-| `patchbay permission normalize <permission> --state <state>` | local CLI declaration | — |
-| `patchbay permission reset <permission>` | local CLI declaration | — |
-| `patchbay permission status <permission>` | local CLI declaration | — |
-| `patchbay repl` | client CLI declaration | — |
-| `patchbay session use <session-id> \| --clear` | local CLI declaration | — |
-| `patchbay sessions list` | local CLI declaration | — |
-| `patchbay sessions prune` | local CLI declaration | — |
-| `patchbay snapshot [--path <dot.path>]` | client CLI declaration | — |
-| `patchbay snapshot diff --from <revision>` | client CLI declaration | — |
-| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client CLI declaration | — |
-| `patchbay trace diff <before-trace-id> <after-trace-id>` | local CLI declaration | — |
-| `patchbay trace export <trace-id> --output <directory>` | local CLI declaration | — |
-| `patchbay trace mark <note>` | local CLI declaration | — |
-| `patchbay trace prune [--dry-run]` | local CLI declaration | — |
-| `patchbay trace show <trace-id>` | local CLI declaration | — |
-| `patchbay trace start --name <name> [--activate] [--pin]` | local CLI declaration | — |
-| `patchbay trace stop [trace-id]` | local CLI declaration | — |
-| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
-| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` |
-| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` |
-| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.pressHold` |
-| `patchbay ui inspect off` | protocol descriptor | `ui.inspect.select` |
-| `patchbay ui inspect on [--ttl-ms <ms>]` | protocol descriptor | `ui.inspect.select` |
-| `patchbay ui inspect status` | protocol descriptor | `ui.inspect.status` |
-| `patchbay ui keep-awake off` | protocol descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake on [--lease-ms <ms>]` | protocol descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake status` | protocol descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
-| `patchbay ui semantics action <node-id> <generation> <action> [text]` | protocol descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | protocol descriptor | `ui.semantics.tree` |
-| `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` |
-| `patchbay ui targets --emit-manifest` | local CLI declaration | — |
-| `patchbay ui text enter <target-id> <generation> [text]` | protocol descriptor | `ui.text.enter` |
-| `patchbay ui text set <target-id> <generation> [text]` | protocol descriptor | `ui.text.set` |
-| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local CLI declaration | — |
-| `patchbay ui wait destination <destination-id>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait frame-revision <revision>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait semantics-mounted <identifier>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait semantics-unmounted <identifier>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait semantics-value <identifier> <value>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait tree-revision <revision>` | protocol descriptor | `ui.wait` |
-| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
-<!-- PATCHBAY_COMMAND_REFERENCE:END -->
+Use `patchbay help <topic>` for shipped syntax and `patchbay catalog` for what the connected App
+actually exposes. The full generated table stays in the [CLI package reference](packages/patchbay_cli/README.md).
 
 ## Why Patchbay
 
@@ -339,6 +246,7 @@ Long-form documents under `docs/` are currently in Chinese only.
 - **[Flutter package](packages/patchbay_flutter/README.md)** — UI observation, operations, navigation, and capture
 - **[CLI package](packages/patchbay_cli/README.md)** — the full command set and connection safety
 - **[Direct transport](packages/patchbay_transport/README.md)** — HTTP protocol and LAN risks
+- **[Agent Skill](skills/use-patchbay/SKILL.md)** — read-only-first task routing and live discovery for AI agents
 - **[Changelog](CHANGELOG.md)** — unreleased and released changes to the API, protocol, and security behavior
 
 ## License
