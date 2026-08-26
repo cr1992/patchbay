@@ -129,6 +129,7 @@ void main() {
         commands.map((Map<String, Object?> row) => row['name']),
         containsAll(<String>{
           'ui.semantics.action',
+          'ui.semantics.actionByIdentifier',
           'ui.gesture.pressHold',
           'ui.gesture.drag',
           'ui.gesture.fling',

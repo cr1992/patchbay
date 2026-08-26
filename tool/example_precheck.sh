@@ -419,6 +419,26 @@ echo
 echo "== UI 观察与操作 =="
 check 'ui semantics tree' 0 "'nodes' in json.dumps(doc)" --json ui semantics tree
 check 'ui tap increment' 0 "" --json ui tap example.counter.increment
+ACTION_GEN="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
+import json, sys
+doc = json.load(sys.stdin)
+payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
+print(next((n.get('generation') for n in payload.get('nodes', [])
+            if n.get('identifier') == 'example.identifier.action'), ''))
+")"
+if [ -n "$ACTION_GEN" ]; then
+  check 'ui action focus' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui action example.identifier.action "$ACTION_GEN" focus
+  check 'ui action scrollDown' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui action example.identifier.action "$ACTION_GEN" scrollDown
+  check 'ui action setText' 0 \
+    "doc['payload']['outcome'] == 'dispatched' and doc['payload']['length'] == 8" \
+    --json ui action example.identifier.action "$ACTION_GEN" setText precheck
+else
+  printf '  ✗ %-42s %s\n' 'identifier action generation' \
+    '未从 semantics 树解析到 example.identifier.action 的 generation'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('identifier action generation')
+fi
 check 'ui wait tree-revision' 0 "" --json ui wait tree-revision 1
 check 'ui widget-tree' 0 "" --json ui widget-tree
 check 'ui render-tree' 0 "" --json ui render-tree

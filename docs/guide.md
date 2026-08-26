@@ -662,6 +662,7 @@ $ patchbay session use <id>|--clear          # 固定 / 取消固定会话
 $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
 $ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
+$ patchbay ui action <identifier> <gen> <action> [text] # 通用 identifier action，generation 必填
 $ patchbay ui verify-manifest <file>        # 声明 ↔ 运行时挂载对账
 $ patchbay ui inspect on|off|status         # 设备端 widget inspector 选择模式（带租约，自动还原）
 $ patchbay ui widget-tree|render-tree|focus-tree
@@ -837,8 +838,12 @@ App 的 snapshot 回调自己抛错时，答复是 `providerProtocolViolation` +
 校验都在 App 侧完成。`--generation` 可选，传了是你自己的前置围栏；不传时围栏由桥在过门前 pin 的
 generation 提供。同 identifier 挂载多个实例、identifier 不存在、代际过期都是带 details 的稳定拒绝。
 
-> `ui tap` 与 `ui semantics action` 需要 App 侧注入 `PatchbaySemanticsActionPolicy` 才会进 catalog
-> ——默认 deny，没注入时这两条命令根本不出现在 `patchbay catalog` 里，调用得到
+非 tap 动作用 `ui action <identifier> <generation> <action> [text]`。generation 必须来自先前的 Semantics
+观察；App 会在过门前后各解析一次并核对同一代际。允许的 action 仅为 `tap`、`focus`、四向 scroll 与
+`setText`，不会接受 `latest`、自动重试或未公开 action；敏感 `setText` 继续用全局 `--stdin`。
+
+> `ui tap`、`ui action` 与 `ui semantics action` 需要 App 侧注入 `PatchbaySemanticsActionPolicy` 才会进
+> catalog——默认 deny，没注入时这些命令根本不出现在 `patchbay catalog` 里，调用得到
 > `commandNotRegistered`（只读的 `ui semantics tree` 不受影响）。接法与 policy 语义见
 > [`patchbay_flutter/doc/ui-inspection-and-actions.md`](../packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。
 

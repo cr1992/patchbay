@@ -111,6 +111,16 @@ Semantics 观察由 `patchbay_flutter` 使用公开 Flutter API 建立。host �
 
 结果同样只声明 `dispatched`，不冒充页面或领域完成。
 
+### 按 identifier 派发通用 action
+
+`ui.semantics.actionByIdentifier` 把同一安全原语扩展到公开的 tap、focus、四向 scroll 与 setText；CLI
+canonical path 是 `ui action <identifier> <generation> <action> [text]`。generation 必填，先在首次解析时
+核对，再 pin 过 policy/gate await，派发前按同一 identifier 与 generation 二次解析。缺失或过期、同名
+多节点、unknown key 与未公开 action 都 fail-closed；不接受 `latest`，也不自动重取或重放写操作。
+
+setText 仅在 action 为 `setText` 时接收 text；敏感输入继续要求 `--stdin`，响应只给 length/redaction，
+从不回显原文。旧 `ui tap` 与 nodeId `ui semantics action` 的命令、JSON 和失败码保持不变。
+
 ### 锚定式 press-hold / drag / fling
 
 `ui.gesture.pressHold|drag|fling` 先按稳定 Semantics `identifier` 找到唯一节点，并要求调用方携带该
@@ -185,6 +195,8 @@ consumer 可以用一个保守的全局 UI interaction gate 开始接入，无�
 patchbay ui semantics tree
 patchbay ui semantics action <node-id> <generation> <action>
 patchbay ui semantics action <node-id> <generation> setText --stdin
+patchbay ui action <identifier> <generation> <action> [text]
+patchbay --stdin ui action <identifier> <generation> setText
 patchbay ui tap <identifier>
 patchbay ui tap <identifier> --generation <generation>
 patchbay ui widget-tree

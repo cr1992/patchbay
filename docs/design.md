@@ -239,6 +239,13 @@ sequenceDiagram
 目录、日志、可复用脚本或调试轨迹。一旦它被持久化，任何"照着记录再跑一遍"的能力就天然有了一个
 绝对坐标入口，上面那条红线就只剩字面。
 
+通用 Semantics 写动作同样不得把“当前最新节点”当作围栏。`ui.semantics.actionByIdentifier` 要求调用方
+携带先前观察到的 generation，在一次 App 受理内按 identifier 唯一解析、核对该代际、执行 policy/gate，
+再以同一 generation 门后二次解析后派发。它只覆盖既有七项公开 action allowlist；缺 generation、换代、
+歧义、未知参数或未公开 action 均 fail-closed，不自动重取或重放。CLI canonical path 是
+`ui action <identifier> <generation> <action> [text]`；旧 `ui tap` 与 nodeId action 契约保持不变。完整边界见
+已接受的 [Identifier action](proposals/0.5.0/semantics-identifier-action.md)。
+
 调试轨迹的事实边界同样以观察者为准：CLI 只持久化自己实际看到的 session、request/response、job、
 执行证据和 artifact，不把 App host 内部 audit sink 的事实自动升级为 CLI 已观察事实。M0 原先关于
 “共用 emit 点”的结论因 host/CLI 进程边界无法成立，已于 2026-08-18 明示重新接受为：四包不为此新增

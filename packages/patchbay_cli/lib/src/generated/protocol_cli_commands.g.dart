@@ -66,6 +66,13 @@ final GeneratedProtocolCommand _uiSemanticsActionProtocolCommand =
       syntaxIndex: 0,
     );
 
+final GeneratedProtocolCommand _uiActionProtocolCommand =
+    GeneratedProtocolCommand(
+      descriptor: patchbayUiSemanticsActionByIdentifierCommandDescriptor,
+      serviceName: 'ui.semantics.actionByIdentifier',
+      syntaxIndex: 0,
+    );
+
 final GeneratedProtocolCommand _uiTapProtocolCommand = GeneratedProtocolCommand(
   descriptor: patchbayUiSemanticsTapCommandDescriptor,
   serviceName: 'ui.semantics.tap',
@@ -212,6 +219,7 @@ final List<PatchbayFriendlyCommandSpec> _patchbayFriendlyCommands =
       _uiTextEnterProtocolCommand,
       _uiSemanticsTreeProtocolCommand,
       _uiSemanticsActionProtocolCommand,
+      _uiActionProtocolCommand,
       _uiTapProtocolCommand,
       _uiGesturePressHoldProtocolCommand,
       _uiGestureDragProtocolCommand,

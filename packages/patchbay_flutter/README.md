@@ -242,8 +242,15 @@ with `uiSemanticsGenerationStale`; callers may additionally pass a `generation` 
 up-front fence. Multiple mounted instances of the same identifier are always rejected as
 ambiguous, never picked by tree order.
 
-This command shares one action policy with `ui.semantics.action`: with no consumer policy it
-neither enters the catalog nor can be dispatched. Misses, ambiguity, and stale generations all
+For the same identifier-first flow with another public action, use
+`ui.semantics.actionByIdentifier` / `patchbay ui action <identifier> <generation> <action> [text]`.
+Unlike the legacy tap command, its caller generation is required: the bridge checks it on the
+first resolution, pins it across policy and gates, and checks it again immediately before
+dispatch. It exposes only tap, focus, four-direction scroll, and setText; it never substitutes
+`latest` or retries a write against a replacement node.
+
+These commands share one action policy with `ui.semantics.action`: with no consumer policy they
+neither enter the catalog nor can be dispatched. Misses, ambiguity, and stale generations all
 carry details (the mounted identifier list is capped at 20 entries, plus the candidate list and
 expected/current generation), and labels of obscured nodes are redacted in those details —
 a rejection must be actionable without becoming a second observation surface that bypasses the

@@ -81,4 +81,34 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('identifier action freezes the required generation CLI contract', () {
+    final PatchbayCommandDescriptor descriptor =
+        patchbayUiSemanticsActionByIdentifierCommandDescriptor;
+    final PatchbayCliSyntax syntax = descriptor.cliSyntax.single;
+
+    expect(descriptor.name, 'ui.semantics.actionByIdentifier');
+    expect(descriptor.parameters.map((parameter) => parameter.name), <String>[
+      'identifier',
+      'generation',
+      'action',
+      'text',
+      'inputWasStdin',
+    ]);
+    expect(
+      descriptor.parameters
+          .where((parameter) => parameter.required)
+          .map((parameter) => parameter.name),
+      <String>['identifier', 'generation', 'action'],
+    );
+    expect(syntax.path, <String>['ui', 'action']);
+    expect(syntax.positionalParameters, <String>[
+      'identifier',
+      'generation',
+      'action',
+    ]);
+    expect(syntax.nonNegativeParameters, <String>{'generation'});
+    expect(syntax.stdinParameter, 'text');
+    expect(syntax.stdinMarkerParameter, 'inputWasStdin');
+  });
 }

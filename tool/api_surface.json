@@ -209,6 +209,7 @@
     "patchbayUiKeepAwakeStatusCommandDescriptor",
     "patchbayUiProtocolCliCommandDescriptors",
     "patchbayUiRevealCommandDescriptor",
+    "patchbayUiSemanticsActionByIdentifierCommandDescriptor",
     "patchbayUiSemanticsActionCommandDescriptor",
     "patchbayUiSemanticsTapCommandDescriptor",
     "patchbayUiSemanticsTreeCommandDescriptor",

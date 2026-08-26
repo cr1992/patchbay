@@ -228,6 +228,11 @@ void main() {
           _ when spec.name == 'uiTextSet' || spec.name == 'uiTextEnter' =>
             <String>['field.id', '3', 'hello'],
           _ when spec.name == 'uiSemanticsAction' => <String>['42', '7', 'tap'],
+          _ when spec.name == 'uiAction' => <String>[
+            'profile.action',
+            '7',
+            'tap',
+          ],
           _ when spec.name == 'uiTap' => <String>['login.submit'],
           _ when spec.name == 'uiReveal' => <String>['row.42'],
           _
@@ -509,6 +514,60 @@ void main() {
     );
     expect(
       () => _resolve(<String>['ui', 'tap', 'a.b', 'c.d']),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('ui action requires generation and preserves stdin provenance', () {
+    final PatchbayFriendlyInvocation action = _resolve(<String>[
+      'ui',
+      'action',
+      'profile.name',
+      '7',
+      'setText',
+    ], stdin: () => 'private value');
+    expect(action.serviceCommand, 'ui.semantics.actionByIdentifier');
+    expect(action.arguments, <String, Object?>{
+      'identifier': 'profile.name',
+      'generation': 7,
+      'action': 'setText',
+      'text': '',
+      'inputWasStdin': false,
+    });
+
+    final PatchbayFriendlyInvocation fromStdin = _resolve(<String>[
+      '--stdin',
+      'ui',
+      'action',
+      'profile.name',
+      '7',
+      'setText',
+    ], stdin: () => 'private value');
+    expect(fromStdin.arguments, <String, Object?>{
+      'identifier': 'profile.name',
+      'generation': 7,
+      'action': 'setText',
+      'text': 'private value',
+      'inputWasStdin': true,
+    });
+
+    expect(
+      () => _resolve(<String>['ui', 'action', 'profile.name', 'tap']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>['ui', 'action', 'profile.name', '-1', 'tap']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>[
+        'ui',
+        'action',
+        'profile.name',
+        '7',
+        'tap',
+        'unexpected',
+      ]),
       throwsA(isA<FormatException>()),
     );
   });
