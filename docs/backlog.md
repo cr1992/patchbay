@@ -13,7 +13,8 @@
 
 | 条目 | 动机 / 证据 | 状态 |
 |---|---|---|
-| （暂无） | — | — |
+| BUG-20260826-01：Android 权限 `status`/`capabilities` 把「已声明未物化」误判为 `notDeclaredByApp` | `dumpsys package` 的 `requested permissions:` 小节已声明 CAMERA/RECORD_AUDIO/ACCESS_FINE_LOCATION/POST_NOTIFICATIONS，但 `runtime permissions:` 只在权限被请求/授予/拒绝过之后才物化对应行（真机实测：同一安装当时仅 `ACCESS_COARSE_LOCATION` 物化）；`_status` 与 `_probeCapabilities` 此前只认 `runtime permissions:` 判"是否声明"，把这种懒物化态误判为 `notDeclaredByApp`，并在 `PatchbayPermissionDriverRunner` 每次 normalize/reset 前的 capabilities preflight 里把动作集收窄成只剩 `status`，导致主线四步预检退 6。改为先认 `requested permissions:` 判声明，已声明无记录报新增 `platformState: noRuntimeRecord`（`state` 映射为既有词表的 `notDetermined`），`supportedActions` 恢复完整动作集。真机验证：`permission status` 四权限、`permission capabilities`、`permission fail` 策略对比、`normalize denied` 不可达四项均已转绿；normalize granted / 幂等重放 / reset 三项当时仍卡在 BUG-20260826-02 的独立成因，随其修复一并转绿（`tool/example_precheck.sh` 完整跑到 90 通过 0 失败） | 已验证 |
+| BUG-20260826-02：Android `normalize granted` / `reset` 写后复核偶发把已生效的授予误判成 `permissionStateMismatch` | 修复 BUG-20260826-01 后，normalize/reset 才第一次真正跑到 `pm grant` / `pm revoke` 之后的复核（此前一直卡在 preflight）；最初真机复现（Xiaomi/MIUI，`product:rodin`）被诊断为"`pm grant` 退出后立即查询 `dumpsys package` 有较高概率仍读到物化前的状态，最终一致而非授权失败"，controller 据此裁决批准在写后复核前对**读**做有界指数退避重试（100ms 起，总窗口 ≤5s，计入既有单次写操作超时预算，不改 30s/120s 预算模型与 `permissionStateMismatch` 语义），不重发 grant/revoke，覆盖 `_normalize` 与 `_reset` 两处同型写后复核——重试机制已实现（`_statusAfterMutation`，注入式 delay 使重试可在单测里免真实等待地被断言）。**加了重试仍复现**，逐层加日志排查后定位到真正根因是 `_status` 的正则缺陷：`, flags=[...]` 是可选小节，Android 在权限当前没有任何标记时（典型形态——刚 `pm grant` 出来）整段省略它、不打印成 `flags=[]`；旧正则把这段写成必需，于是这类行永远匹配不上、落进"没有条目"分支，重试多少次都在读同一段解析失败的文本。已在 `_status` 把 `, flags=[...]` 改成可选分组修复，重试逻辑按裁决保留作为对更少见的真实设备最终一致性窗口的防御。两处修复均已单测红验证（regex 缺陷用录制自真机的无 flags 行断言；重试逻辑保留原两形态断言）。真机复验：四步全绿（normalize granted / 幂等重放退 0、denied 不可达退 5、reset 退 0），`tool/example_precheck.sh` 完整跑到 **90 通过 0 失败** | 实现中 |
 
 ## 特性
 
