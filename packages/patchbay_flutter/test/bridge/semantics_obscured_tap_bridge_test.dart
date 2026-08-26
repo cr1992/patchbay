@@ -1,16 +1,16 @@
-// PB-050-16 repro: obscured-target tap admission gap.
+// PB-050-16 repro, flipped: obscured-target tap admission.
 //
-// This test asserts CURRENT DEFECT BEHAVIOR. `ui.semantics.tap` dispatches
-// straight through to a Semantics target that is fully covered by an
-// opaque, *non-modal* overlay (no BlockSemantics / ModalBarrier involved),
-// because the admission check in semantics_bridge.dart (~423-428) only
-// rejects on `isInvisible || areUserActionsBlocked`, and
-// `areUserActionsBlocked` is only ever set true by BlockSemantics. A real
+// Before DG-050-09 landed this test asserted the DEFECT: `ui.semantics.tap`
+// dispatched straight through to a Semantics target that is fully covered by
+// an opaque, *non-modal* overlay (no BlockSemantics / ModalBarrier involved),
+// because admission only rejected on `isInvisible || areUserActionsBlocked`
+// and `areUserActionsBlocked` is only ever set true by BlockSemantics. A real
 // pointer at the same on-screen position only reaches the overlay.
 //
-// Once occlusion-aware admission lands (see DG-050-09), the (a) assertions
-// below should flip: `tapIdentifier` must reject with a stable rejection
-// code instead of dispatching, and `buttonTaps` must stay 0.
+// The (a) assertions below are now the post-fix expectation: `tapIdentifier`
+// rejects with `uiSemanticsTargetObscured` and `buttonTaps` stays 0. The (b)
+// assertions are unchanged - they are the independent evidence that the
+// target really is visually occluded and not merely semantically hidden.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
@@ -19,8 +19,10 @@ import '../fixture/flutter_bridge_fixtures.dart';
 
 void main() {
   group('Patchbay semantics tap obscured target (PB-050-16)', () {
-    testWidgets('an opaque non-modal overlay does not block ui.semantics.tap, '
-        'though it blocks a real pointer at the same position', (tester) async {
+    testWidgets('an opaque non-modal overlay blocks ui.semantics.tap, '
+        'exactly as it blocks a real pointer at the same position', (
+      tester,
+    ) async {
       var buttonTaps = 0;
       var overlayTaps = 0;
       const Key overlayKey = ValueKey<String>('obscured.overlay');
@@ -67,21 +69,23 @@ void main() {
       );
       addTearDown(bridge.semantics.dispose);
 
-      // (a) ui.semantics.tap path: dispatches straight to the occluded
-      // target's callback. This is the defect this repro pins down - see
-      // the file header for the rejected-post-fix expectation.
+      // (a) ui.semantics.tap path: the fixed-sample occlusion admission
+      // finds every probe point absorbed by the overlay and fails closed
+      // before `performAction`.
       final PatchbayInvocation result = await pumpUntilComplete(
         tester,
         bridge.semantics.tapIdentifier(identifier: 'obscured.button'),
       );
 
-      expect(result.admission, PatchbayAdmission.accepted);
-      expect(result.payload['outcome'], 'dispatched');
+      expect(result.admission, PatchbayAdmission.rejected);
+      expect(result.rejection?.code, 'uiSemanticsTargetObscured');
+      expect(result.rejection?.details['reason'], 'hitTestOrClip');
+      expect(result.rejection?.details['identifier'], 'obscured.button');
       expect(
         buttonTaps,
-        1,
+        0,
         reason:
-            'PB-050-16: ui.semantics.tap punched through the opaque '
+            'PB-050-16: ui.semantics.tap must not punch through the opaque '
             'overlay onto the fully covered target',
       );
       expect(overlayTaps, 0);
@@ -95,7 +99,7 @@ void main() {
       expect(overlayTaps, 1);
       expect(
         buttonTaps,
-        1,
+        0,
         reason:
             'a real touch at the same position must not reach the '
             'occluded button',
