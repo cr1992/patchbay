@@ -81,8 +81,11 @@ Make sure `~/.local/bin` is on `PATH`. `dart pub global activate patchbay_cli` r
 alternative, but it installs an app snapshot loaded by the Dart runtime, not a standalone native
 AOT executable; do not use it to measure native AOT startup.
 
-When that compatibility form is required, pin it to the same package version with
-`dart pub global activate patchbay_cli 0.4.1`.
+When that compatibility form is required, pin it to the same package version:
+
+```console
+$ dart pub global activate patchbay_cli 0.4.1
+```
 
 ### 3. Register at the composition root
 

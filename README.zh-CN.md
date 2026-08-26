@@ -74,7 +74,11 @@ $ patchbay --help
 
 确保 `~/.local/bin` 在 `PATH`。`dart pub global activate patchbay_cli` 安装的是由 Dart runtime
 加载的 app snapshot，并非独立原生 AOT；它可以作为兼容形态使用，但不应拿它验证 AOT 启动耗时。
-需要该兼容形态时，用 `dart pub global activate patchbay_cli 0.4.1` 按同一 package 版本固定安装。
+需要该兼容形态时，按同一 package 版本固定安装：
+
+```console
+$ dart pub global activate patchbay_cli 0.4.1
+```
 
 ### 3. 在组合根注册
 
