@@ -264,7 +264,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay ui keep-awake status` | protocol descriptor | `ui.keepAwake.status` |
 | `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
 | `patchbay ui semantics action <node-id> <generation> <action> [text]` | protocol descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree` | protocol descriptor | `ui.semantics.tree` |
+| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | protocol descriptor | `ui.semantics.tree` |
 | `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` |
 | `patchbay ui targets --emit-manifest` | local CLI declaration | — |
 | `patchbay ui text enter <target-id> <generation> [text]` | protocol descriptor | `ui.text.enter` |
