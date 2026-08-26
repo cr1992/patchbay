@@ -259,3 +259,33 @@ Matrix4 patchbayTransformToRoot(SemanticsNode node) {
   }
   return result;
 }
+
+/// 固定采样遮挡复核：返回拒绝 `reason`，null 表示通过。
+///
+/// 五点固定采样、**任一点通过即通过**，五点全被挡才拒绝。通过的两态是
+/// [PatchbayOcclusionState.reachable] 与
+/// [PatchbayOcclusionState.noPointerFootprint]：后者不可省——`Semantics(onTap:)`
+/// 包一个不参与命中测试的子树是合法写法，照搬 gesture 的布尔规则会把这些目标
+/// 全判成遮挡。
+///
+/// 诚实边界：这是固定采样准入，不是可达性证明。目标只在采样点之外露出窄缝时
+/// 会被误拒（fail-closed，与本闸方向一致）；它也只证明调用瞬间目标未被 App 内
+/// 可观测的层覆盖，不承诺 App 外部系统窗口，那一面由 `systemUiUnexpected` 表达。
+///
+/// 全程同步：不请帧、不遍历语义树、不新增 timer，最多 5 次 `hitTestInView`。
+/// PB-050-17 的 reveal 判据与这里同源，直接复用本函数即可。
+String? patchbaySampledOcclusionReason({
+  required SemanticsOwner owner,
+  required SemanticsNode node,
+}) {
+  final PatchbayOcclusionResolution resolution =
+      patchbayResolveOcclusionGeometry(owner: owner, node: node);
+  final PatchbayOcclusionGeometry? geometry = resolution.geometry;
+  if (geometry == null) return resolution.reason;
+  for (final PatchbayOcclusionProbe probe in patchbaySemanticsProbeSamples) {
+    if (geometry.probe(probe.x, probe.y) != PatchbayOcclusionState.obstructed) {
+      return null;
+    }
+  }
+  return PatchbayOcclusionReason.hitTestOrClip;
+}

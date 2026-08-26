@@ -150,7 +150,7 @@ final class PatchbaySemanticsSnapshot {
 }
 
 final class PatchbaySemanticsResolution {
-  const PatchbaySemanticsResolution.resolved(this.owner, this.target)
+  const PatchbaySemanticsResolution.resolved(this.owner, this.target, this.node)
     : code = null,
       details = const <String, Object?>{};
 
@@ -158,10 +158,17 @@ final class PatchbaySemanticsResolution {
     this.code, {
     this.details = const <String, Object?>{},
   }) : owner = null,
-       target = null;
+       target = null,
+       node = null;
 
   final SemanticsOwner? owner;
   final PatchbaySemanticsTarget? target;
+
+  /// 本次解析命中的语义节点本身。
+  ///
+  /// PB-050-16 的遮挡复核要在同一次 resolve 的结论上做几何判定，不能靠
+  /// nodeId 再查一次树——那会引入第二个真源和一次新的漂移窗口。
+  final SemanticsNode? node;
   final String? code;
   final Map<String, Object?> details;
 

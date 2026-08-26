@@ -299,6 +299,7 @@ const Set<String> _frozenStableCodes = <String>{
   'uiSemanticsNodeNotObserved',
   'uiSemanticsPolicyChanged',
   'uiSemanticsTargetAmbiguous',
+  'uiSemanticsTargetObscured',
   'uiSemanticsTextRequired',
   'uiSemanticsUnavailable',
   'uiSemanticsUnexpectedText',
