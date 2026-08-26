@@ -40,6 +40,23 @@ extension on PatchbaySemanticsAction {
     PatchbaySemanticsAction.collapse => false,
     PatchbaySemanticsAction.setText => false,
   };
+
+  bool get _isPublicIdentifierAction => switch (this) {
+    PatchbaySemanticsAction.tap ||
+    PatchbaySemanticsAction.focus ||
+    PatchbaySemanticsAction.scrollUp ||
+    PatchbaySemanticsAction.scrollDown ||
+    PatchbaySemanticsAction.scrollLeft ||
+    PatchbaySemanticsAction.scrollRight ||
+    PatchbaySemanticsAction.setText => true,
+    PatchbaySemanticsAction.longPress ||
+    PatchbaySemanticsAction.dismiss ||
+    PatchbaySemanticsAction.showOnScreen ||
+    PatchbaySemanticsAction.increase ||
+    PatchbaySemanticsAction.decrease ||
+    PatchbaySemanticsAction.expand ||
+    PatchbaySemanticsAction.collapse => false,
+  };
 }
 
 /// Public-API Flutter Semantics observer and action dispatcher.
@@ -203,6 +220,50 @@ final class PatchbaySemanticsBridge {
     resolve: (int? _) =>
         _resolve(nodeId: nodeId, generation: generation, action: action),
   );
+
+  /// Resolves a stable Semantics [identifier] and dispatches one public
+  /// [action] while preserving the caller's required [generation] fence.
+  Future<PatchbayInvocation> invokeIdentifier({
+    required String identifier,
+    required int generation,
+    required PatchbaySemanticsAction action,
+    String? text,
+    bool inputWasStdin = false,
+    String? requestId,
+  }) {
+    final String id = requestId ?? _newRequestId();
+    final List<String> invalid = <String>[
+      if (identifier.isEmpty) 'identifier',
+      if (generation < 0) 'generation',
+      if (!action._isPublicIdentifierAction) 'action',
+    ];
+    if (invalid.isNotEmpty) {
+      return Future<PatchbayInvocation>.value(
+        PatchbayInvocation.rejected(
+          requestId: id,
+          rejection: PatchbayRejection(
+            code: 'invalidUiArguments',
+            notice:
+                'identifier must be non-empty, generation non-negative, and '
+                'action publicly declared.',
+            details: <String, Object?>{'invalid': invalid},
+          ),
+        ),
+      );
+    }
+    return _dispatch(
+      requestId: id,
+      action: action,
+      identifier: identifier,
+      text: text,
+      inputWasStdin: inputWasStdin,
+      resolve: (int? pinnedGeneration) => _resolveIdentifier(
+        identifier: identifier,
+        expectedGeneration: pinnedGeneration ?? generation,
+        action: action,
+      ),
+    );
+  }
 
   /// Resolves a stable Semantics [identifier] and dispatches `tap` in one
   /// admitted request.

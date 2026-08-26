@@ -98,6 +98,16 @@ void main() {
       expect(details['missing'], <String>['identifier']);
     });
 
+    test('ui.semantics.actionByIdentifier 少了 generation', () async {
+      final Map<String, Object?> details = await _details(
+        'ui.semantics.actionByIdentifier',
+        const <String, Object?>{'identifier': 'app.save', 'action': 'tap'},
+      );
+
+      expect(details['command'], 'ui.semantics.actionByIdentifier');
+      expect(details['missing'], <String>['generation']);
+    });
+
     test('navigation.go 少了 revision 与 destinationId', () async {
       final Map<String, Object?> details = await _details(
         'navigation.go',
@@ -126,6 +136,20 @@ void main() {
       final Map<String, Object?> details = await _details(
         'ui.semantics.tap',
         const <String, Object?>{'identifier': 'app.save', 'nodeId': 7},
+      );
+
+      expect(details['unexpected'], <String>['nodeId']);
+    });
+
+    test('identifier action 在 bridge 前拒绝未声明的键', () async {
+      final Map<String, Object?> details = await _details(
+        'ui.semantics.actionByIdentifier',
+        const <String, Object?>{
+          'identifier': 'app.save',
+          'generation': 1,
+          'action': 'tap',
+          'nodeId': 7,
+        },
       );
 
       expect(details['unexpected'], <String>['nodeId']);
@@ -191,6 +215,19 @@ void main() {
           'nodeId': 1,
           'generation': 0,
           'action': 'teleport',
+        },
+      );
+
+      expect(details['invalid'], <String>['action']);
+    });
+
+    test('identifier action 不扩散内部 Semantics action', () async {
+      final Map<String, Object?> details = await _details(
+        'ui.semantics.actionByIdentifier',
+        const <String, Object?>{
+          'identifier': 'app.save',
+          'generation': 1,
+          'action': 'longPress',
         },
       );
 

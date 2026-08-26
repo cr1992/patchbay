@@ -117,6 +117,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay trace show <trace-id>` | local CLI declaration | — |
 | `patchbay trace start --name <name> [--activate] [--pin]` | local CLI declaration | — |
 | `patchbay trace stop [trace-id]` | local CLI declaration | — |
+| `patchbay ui action <identifier> <generation> <action> [text]` | protocol descriptor | `ui.semantics.actionByIdentifier` |
 | `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` |
@@ -261,6 +262,12 @@ it makes it the caller's own up-front fence, and omitting it leaves the fence to
 bridge pins before the gates. Misses, ambiguity, and stale generations are all stable rejections
 with details (respectively: the list of mounted identifiers, the candidate list, and
 expected/current), so an empty rejection never pushes the caller back to a whole-tree dump.
+
+`ui action <identifier> <generation> <action> [text]` provides the same one-request resolution for
+the other public Semantics actions. Here the caller generation is required and is checked before
+and after policy/gate evaluation. The command exposes only tap, focus, four-direction scroll, and
+setText; it never accepts `latest` or retries against a replacement node. Sensitive setText input
+uses the global `--stdin` flag.
 
 ### UI Target Declaration Reconciliation
 

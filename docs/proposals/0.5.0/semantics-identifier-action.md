@@ -39,9 +39,8 @@
 既有 `ui tap` 同处顶层的短路径 `ui action`：
 
 ```console
-$ patchbay ui action <identifier> <action> [text]
 $ patchbay ui action <identifier> <generation> <action> [text]
-$ patchbay --stdin ui action <identifier> setText
+$ patchbay --stdin ui action <identifier> <generation> setText
 ```
 
 对照候选是 `ui semantics action-by-identifier`。两者只允许选一个 canonical path，不同时发布 alias；无论选择
@@ -84,15 +83,14 @@ registration 必须与现有 `ui.semantics.tap` 一样设置 `strictKeys: true`�
 
 1. 校验 identifier/action/text/provenance；
 2. 过基础 gate 与 lifecycle；
-3. 按 identifier 解析唯一、可执行节点，并校验可选 caller generation；
+3. 按 identifier 解析唯一、可执行节点，并校验必填的 caller generation；
 4. pin 当前 generation，执行 consumer action policy；
 5. 过声明 gate；
 6. 按相同 identifier 与 pinned generation 二次解析，重新执行 policy 并核对 gate/sensitive 决策未漂移；
 7. 派发 action，等待现有一帧观察并返回执行 payload。
 
-第一次解析之前节点已经换代时，未显式提供 generation 的调用语义是“操作受理时唯一挂载的当前实例”；
-一旦第一次解析完成，后续任何 identity/generation 变化都必须 `uiSemanticsGenerationStale`，不能把第二次
-解析得到的新实例当成等价目标。
+第一次解析之前节点已经换代时，必填 caller generation 立即触发 `uiSemanticsGenerationStale`；第一次解析
+完成后，后续任何 identity/generation 变化同样必须 stale，不能把第二次解析得到的新实例当成等价目标。
 
 稳定失败沿用现有 code：`invalidUiArguments`、`uiSemanticsActionsDisabled`、`uiLifecycleNotResumed`、
 `uiSemanticsUnavailable`、`uiSemanticsIdentifierNotFound`、`uiSemanticsIdentifierAmbiguous`、
@@ -130,8 +128,8 @@ release 构建继续由现有编译期裁除边界控制，不因新增 public m
   digest 只因 commands 集变化；unknown key 在 bridge/policy 调用前稳定拒绝。
 - widget test：七个公开 action 的唯一 identifier 路径；not found、20 条 mounted identifier 截断、重复
   identifier、blocked/unavailable、lifecycle 与 policy deny。
-- generation 竞态：第一次解析前替换在无 caller fence 时可选中当前实例；第一次解析后、gate await 中替换
-  必须 stale；显式 caller generation 在第一次解析时即可 stale；禁止任何自动重试。
+- generation 竞态：第一次解析前替换由必填 caller fence 立即判 stale；第一次解析后、gate await 中替换
+  同样必须 stale；禁止任何自动重试。
 - policy 竞态：二次 policy 的 gate IDs 或 sensitiveInput 漂移稳定 `uiSemanticsPolicyChanged`。
 - setText：缺 text、意外 text、普通输入、obscured/policy-sensitive + stdin/non-stdin，所有输出均不含原文。
 - 兼容 golden：0.4.1 reader 读取新 catalog；旧 tap/nodeId action 的 valid/rejection JSON 逐字节不变；新 CLI

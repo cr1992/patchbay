@@ -298,6 +298,20 @@ final class PatchbayFlutterServiceHost {
       ),
       _uiRegistration<Map<String, Object?>>(
         next(),
+        _decodeSemanticsIdentifierAction,
+        (request, requestId) async => (await bridge.semantics.invokeIdentifier(
+          identifier: request['identifier']! as String,
+          generation: request['generation']! as int,
+          action: request['decodedAction']! as PatchbaySemanticsAction,
+          text: request['text'] as String?,
+          inputWasStdin: request['inputWasStdin'] == true,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        available: bridge.semantics.actionsEnabled,
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
         _decodeSemanticsTap,
         (request, requestId) async => (await bridge.semantics.tapIdentifier(
           identifier: request['identifier']! as String,
@@ -574,6 +588,40 @@ final class PatchbayFlutterServiceHost {
     return arguments;
   }
 
+  static Map<String, Object?> _decodeSemanticsIdentifierAction(
+    Map<String, Object?> arguments,
+  ) {
+    _rejectUnexpected(arguments, const <String>{
+      'identifier',
+      'generation',
+      'action',
+      'text',
+      'inputWasStdin',
+    });
+    final Object? rawAction = arguments['action'];
+    final PatchbayParameterDescriptor actionParameter =
+        patchbayUiSemanticsActionByIdentifierCommandDescriptor.parameters
+            .singleWhere(
+              (PatchbayParameterDescriptor parameter) =>
+                  parameter.name == 'action',
+            );
+    final PatchbaySemanticsAction? action =
+        rawAction is String && actionParameter.allowedValues.contains(rawAction)
+        ? PatchbaySemanticsAction.fromWireName(rawAction)
+        : null;
+    if (arguments['identifier'] is! String ||
+        arguments['generation'] is! int ||
+        action == null ||
+        arguments['text'] != null && arguments['text'] is! String ||
+        arguments['inputWasStdin'] != null &&
+            arguments['inputWasStdin'] is! bool) {
+      throw const FormatException(
+        'invalid semantics identifier action arguments',
+      );
+    }
+    return <String, Object?>{...arguments, 'decodedAction': action};
+  }
+
   static Map<String, Object?> _decodeGesture(
     Map<String, Object?> arguments,
     PatchbayGestureKind kind,
@@ -672,6 +720,7 @@ final class PatchbayFlutterServiceHost {
     patchbayUiTextEnterCommandDescriptor,
     patchbayUiSemanticsTreeCommandDescriptor,
     patchbayUiSemanticsActionCommandDescriptor,
+    patchbayUiSemanticsActionByIdentifierCommandDescriptor,
     patchbayUiSemanticsTapCommandDescriptor,
     patchbayUiGesturePressHoldCommandDescriptor,
     patchbayUiGestureDragCommandDescriptor,

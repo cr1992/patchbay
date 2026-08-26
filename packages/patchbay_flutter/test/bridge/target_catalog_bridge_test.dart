@@ -97,6 +97,7 @@ void main() {
         .toSet();
     expect(names, contains('ui.semantics.tree'));
     expect(names, isNot(contains('ui.semantics.action')));
+    expect(names, isNot(contains('ui.semantics.actionByIdentifier')));
     expect(
       <Object?, Object?>{
         for (final Map<String, Object?> command
@@ -258,6 +259,7 @@ void main() {
           .toSet();
 
       expect(names, contains('ui.semantics.action'));
+      expect(names, contains('ui.semantics.actionByIdentifier'));
     },
   );
 

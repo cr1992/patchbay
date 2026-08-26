@@ -152,6 +152,48 @@ final patchbayUiSemanticsActionCommandDescriptor = _ui(
   ],
 );
 
+final patchbayUiSemanticsActionByIdentifierCommandDescriptor = _ui(
+  'ui.semantics.actionByIdentifier',
+  'Resolve a stable Semantics identifier and invoke an allowed action.',
+  parameters: <PatchbayParameterDescriptor>[
+    _p('identifier', PatchbayParameterType.string, required: true),
+    _p('generation', PatchbayParameterType.integer, required: true),
+    _p(
+      'action',
+      PatchbayParameterType.enumeration,
+      required: true,
+      allowedValues: const <String>[
+        'tap',
+        'focus',
+        'scrollUp',
+        'scrollDown',
+        'scrollLeft',
+        'scrollRight',
+        'setText',
+      ],
+    ),
+    _p('text', PatchbayParameterType.string),
+    _p('inputWasStdin', PatchbayParameterType.boolean),
+  ],
+  cliSyntax: const <PatchbayCliSyntax>[
+    PatchbayCliSyntax(
+      id: 'uiAction',
+      path: <String>['ui', 'action'],
+      summary: 'Resolve an identifier and dispatch a semantics action.',
+      usageSuffix: '<identifier> <generation> <action> [text]',
+      positionalParameters: <String>['identifier', 'generation', 'action'],
+      nonNegativeParameters: <String>{'generation'},
+      trailingParameter: 'text',
+      stdinParameter: 'text',
+      stdinMarkerParameter: 'inputWasStdin',
+      trailingWhen: PatchbayCliEqualsCondition(
+        parameter: 'action',
+        value: 'setText',
+      ),
+    ),
+  ],
+);
+
 final patchbayUiSemanticsTapCommandDescriptor = _ui(
   'ui.semantics.tap',
   'Resolve a stable Semantics identifier and tap it in one request.',
@@ -627,6 +669,7 @@ final List<PatchbayCommandDescriptor> patchbayUiProtocolCliCommandDescriptors =
       patchbayUiTextEnterCommandDescriptor,
       patchbayUiSemanticsTreeCommandDescriptor,
       patchbayUiSemanticsActionCommandDescriptor,
+      patchbayUiSemanticsActionByIdentifierCommandDescriptor,
       patchbayUiSemanticsTapCommandDescriptor,
       patchbayUiGesturePressHoldCommandDescriptor,
       patchbayUiGestureDragCommandDescriptor,

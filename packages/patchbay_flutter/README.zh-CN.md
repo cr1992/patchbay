@@ -208,7 +208,12 @@ Tab 可以直接从 Semantics 快照发现并执行原 callback，完整复用 W
 `uiSemanticsGenerationStale` 拒绝；调用方另可传 `generation` 做自己的前置围栏。同 identifier 多个
 mounted 实例一律歧义拒绝，不按树顺序选。
 
-该命令与 `ui.semantics.action` 共用同一个 action policy：没有 consumer policy 时它不进 catalog、
+其他公开 action 走 `ui.semantics.actionByIdentifier` /
+`patchbay ui action <identifier> <generation> <action> [text]`。它与旧 tap 不同，调用方 generation 必填：
+bridge 首次解析先核对，在 policy/gate await 期间 pin 住，派发前再核对一次。公开范围只含 tap、focus、
+四向 scroll 与 setText；不会用 `latest` 替代代际，也不会对新实例自动重放写操作。
+
+这些命令与 `ui.semantics.action` 共用同一个 action policy：没有 consumer policy 时它们不进 catalog、
 也不可派发。未命中、多义与代际过期都带 details（已挂载 identifier 清单上限 20 条、候选列表、
 expected/current generation），obscured 节点的 label 在 details 中脱敏——拒绝要可行动，但不能变成
 第二个绕过树上限的观察面。

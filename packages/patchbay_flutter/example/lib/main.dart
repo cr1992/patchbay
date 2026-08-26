@@ -13,6 +13,7 @@ import 'example_reveal_screen.dart';
 const String exampleApplicationId = 'dev.patchbay.example';
 const String counterSemanticsId = 'example.counter.value';
 const String incrementSemanticsId = 'example.counter.increment';
+const String identifierActionSemanticsId = 'example.identifier.action';
 const String noteTargetId = 'example.note';
 const String cardCaptureTargetId = 'example.card.capture';
 const String semanticsBenchmarkCommand = 'example.benchmark.semanticsProbe';
@@ -585,7 +586,7 @@ FutureOr<PatchbayGateDecision> _allowBaseGate() =>
 /// This example does **not** call it for `exampleWriteGate`, though — it
 /// allows that one gate outright. That is a deliberate, disclosed exception,
 /// not the recommended default: `tool/example_precheck.sh` drives
-/// `ui.tap`/`ui.gesture.*`/`navigation.go|push|back`/`ui.inspect.select`/
+/// `ui.tap`/`ui.action`/`ui.gesture.*`/`navigation.go|push|back`/`ui.inspect.select`/
 /// `ui.keepAwake.set`/`ui.text.set|enter` plus the domain write chain on a
 /// real device and asserts they succeed (AGENTS.md "验证分两段", stage one),
 /// and that precheck's pass/fail contract must not change under this task
@@ -624,9 +625,8 @@ PatchbayGateDecision factoryDefaultWriteGateDecision(String gateId) =>
 
 /// Executable semantics actions are opt-in per target.
 ///
-/// The increment button is the only actionable node. The counter value is a
-/// read-only live region: allowing a tap there would let a caller "press" a
-/// label and read the result as a domain effect.
+/// The increment button and the explicit identifier-action probe are the only
+/// actionable nodes. The counter value remains a read-only live region.
 PatchbaySemanticsActionDecision _semanticsActionPolicy(
   PatchbaySemanticsTarget target,
   PatchbaySemanticsAction action,
@@ -637,8 +637,18 @@ PatchbaySemanticsActionDecision _semanticsActionPolicy(
       gateIds: <String>{exampleWriteGate},
     );
   }
+  if (target.identifier == identifierActionSemanticsId &&
+      const <PatchbaySemanticsAction>{
+        PatchbaySemanticsAction.focus,
+        PatchbaySemanticsAction.scrollDown,
+        PatchbaySemanticsAction.setText,
+      }.contains(action)) {
+    return const PatchbaySemanticsActionDecision.allow(
+      gateIds: <String>{exampleWriteGate},
+    );
+  }
   return const PatchbaySemanticsActionDecision.reject(
-    rejectionNotice: 'Only the increment button accepts semantics actions.',
+    rejectionNotice: 'This example does not allow that semantics action.',
   );
 }
 
@@ -906,6 +916,14 @@ final class _ExampleHomeScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          Semantics(
+            identifier: identifierActionSemanticsId,
+            focusable: true,
+            onFocus: () {},
+            onScrollDown: () {},
+            onSetText: (_) {},
+            child: const SizedBox(width: 1, height: 1),
+          ),
           TextField(
             key: noteKey,
             controller: noteController,

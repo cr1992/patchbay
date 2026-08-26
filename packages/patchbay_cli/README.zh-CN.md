@@ -110,6 +110,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay trace show <trace-id>` | local 显式声明 | — |
 | `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — |
 | `patchbay trace stop [trace-id]` | local 显式声明 | — |
+| `patchbay ui action <identifier> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.actionByIdentifier` |
 | `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
@@ -234,6 +235,10 @@ stream 每批 timeline event 到达即汇总，触顶马上取消订阅；原始
 调用方自己的前置围栏；不传时围栏由 bridge 在过门前 pin 住的 generation 提供。未命中、多义和代际
 过期都是带 details 的稳定拒绝（分别给出已挂载 identifier 清单、候选列表、expected/current），不会用
 空拒绝把调用方推回全树 dump。
+
+`ui action <identifier> <generation> <action> [text]` 为其他公开 Semantics action 提供相同的一步式解析；
+这里 generation 必填，App 在 policy/gate 前后核对同一代际。它只接受 tap、focus、四向 scroll 与
+setText，不接受 `latest` 或自动重试；敏感 setText 使用全局 `--stdin`。
 
 ### UI 目标声明对账
 

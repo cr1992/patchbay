@@ -45,6 +45,7 @@ void main() {
     'patchbay.job.wait',
     'ui.semantics.tree',
     'ui.semantics.action',
+    'ui.semantics.actionByIdentifier',
     'ui.semantics.tap',
     'ui.gesture.pressHold',
     'ui.gesture.drag',
@@ -298,6 +299,14 @@ void main() {
                 },
               ).toJson(),
               'ui.semantics.action' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'dispatched',
+                  'source': 'uiObserved',
+                  'arguments': args,
+                },
+              ).toJson(),
+              'ui.semantics.actionByIdentifier' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: <String, Object?>{
                   'outcome': 'dispatched',
