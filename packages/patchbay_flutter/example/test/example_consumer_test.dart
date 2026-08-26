@@ -160,6 +160,8 @@ void main() {
           jobGetCommand,
           jobWaitCommand,
           jobCancelCommand,
+          cooperativeWaitCommand,
+          unresponsiveWaitCommand,
         }),
       );
       final List<Map<String, Object?>> targets =

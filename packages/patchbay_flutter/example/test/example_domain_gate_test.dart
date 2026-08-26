@@ -1,4 +1,4 @@
-/// PB-050-25 的逐命令回归矩阵：example 全部 10 条 domain 命令 + 边界行，
+/// PB-050-25 的逐命令回归矩阵：example 全部 domain 命令 + 边界行，
 /// 门开 / 门关两态各跑一遍。
 ///
 /// 驱动的是 example 真正发货的那个 host、那份目录和那个 adapter，只把
@@ -33,6 +33,8 @@ const Set<String> _readCommands = <String>{
   jobGetCommand,
   jobWaitCommand,
   semanticsBenchmarkCommand,
+  cooperativeWaitCommand,
+  unresponsiveWaitCommand,
 };
 
 void main() {
@@ -116,7 +118,7 @@ void main() {
       );
     });
 
-    test('the four read commands are admitted without touching the '
+    test('the read commands are admitted without touching the '
         'gate', () async {
       final _Harness harness = _harness()..gate.open = false;
 
@@ -155,6 +157,68 @@ void main() {
         'benchmarkInvalid',
       );
       expect(harness.gateCalls, isEmpty);
+    });
+
+    test('cooperative wait confirms an explicit stop', () async {
+      final _Harness harness = _harness();
+      const String requestId = 'cooperative-stop';
+      const String ownerToken = 'EEEEEEEEEEEEEEEEEEEEEE';
+      final PatchbayHostInvocationHandle invocation = harness.host.service
+          .dispatchInvokeHandle(
+            cooperativeWaitCommand,
+            const <String, Object?>{'timeoutMs': 5000},
+            requestId,
+            ownerToken: ownerToken,
+          );
+      await Future<void>.delayed(Duration.zero);
+
+      final PatchbayInvocationCancellationResult cancellation = await harness
+          .host
+          .service
+          .cancelInvocation(
+            command: cooperativeWaitCommand,
+            requestId: requestId,
+            ownerToken: ownerToken,
+          );
+
+      expect(
+        cancellation.outcome,
+        PatchbayInvocationCancellationOutcome.confirmed,
+      );
+      expect(_code(await invocation.response), 'invocationCancelled');
+      await invocation.lifecycle;
+    });
+
+    test('unresponsive wait retains its slot after deadline', () async {
+      final _Harness harness = _harness();
+      final Map<String, Object?> response = await harness.host.service
+          .dispatchInvoke(
+            unresponsiveWaitCommand,
+            const <String, Object?>{'timeoutMs': 1},
+            'unresponsive-deadline',
+            ownerToken: 'FFFFFFFFFFFFFFFFFFFFFF',
+            deadline: const Duration(milliseconds: 1),
+          );
+
+      expect(_code(response), 'invocationDeadlineExceeded');
+      expect(_details(response), <String, Object?>{
+        'reason': 'callerDeadlineExceeded',
+        'cancellation': 'requested',
+      });
+      expect(
+        await harness.host.service.drainInvocations(timeout: Duration.zero),
+        isA<PatchbayInvocationDrainResult>()
+            .having(
+              (PatchbayInvocationDrainResult result) => result.outcome,
+              'outcome',
+              PatchbayInvocationDrainOutcome.timedOut,
+            )
+            .having(
+              (PatchbayInvocationDrainResult result) => result.abandonedCount,
+              'abandonedCount',
+              1,
+            ),
+      );
     });
   });
 
@@ -239,34 +303,28 @@ void main() {
       },
     );
 
-    test(
-      'a retried requestId is told its earlier admission happened',
-      () async {
-        final _Harness harness = _harness();
+    test('an idempotent retry replays before a new gate admission', () async {
+      final _Harness harness = _harness();
 
-        expect(
-          await harness.accept(
-            idempotentTouchCommand,
-            const <String, Object?>{},
-            requestId: 'touch-1',
-          ),
-          containsPair('touches', 1),
-        );
-
-        harness.gate.open = false;
-        final Map<String, Object?> refused = await harness.invoke(
+      expect(
+        await harness.accept(
           idempotentTouchCommand,
           const <String, Object?>{},
           requestId: 'touch-1',
-        );
+        ),
+        containsPair('touches', 1),
+      );
 
-        expect(_code(refused), 'writeGateClosedByDefault');
-        expect(_details(refused), <String, Object?>{
-          'gateId': exampleWriteGate,
-          'priorRequestObserved': true,
-        });
-      },
-    );
+      harness.gate.open = false;
+      final Map<String, Object?> replay = await harness.accept(
+        idempotentTouchCommand,
+        const <String, Object?>{},
+        requestId: 'touch-1',
+      );
+
+      expect(replay, containsPair('touches', 1));
+      expect(harness.gateCalls, <String>[exampleWriteGate]);
+    });
 
     test('the audit ledger records the refusal without the gate ID', () async {
       final _Harness harness = _harness()..gate.open = false;

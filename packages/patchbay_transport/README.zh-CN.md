@@ -21,7 +21,7 @@
   都停止接收新连接；
 - 每个已认证请求仍必须在 JSON object 中携带 `schemaVersion`、`applicationId`、`appInstanceId`；
   host 在调用业务 handler 前重新读取 identity 并同时与启动身份、请求身份核对；
-- `/patchbay/direct/v1/{identity,catalog,snapshot,invoke}` 是全部可达面。未知字段、路径、方法、query、
+- `/patchbay/direct/v1/{identity,catalog,snapshot,invoke,cancel-invocation}` 是全部可达面。未知字段、路径、方法、query、
   content type 或 JSON 形状 fail-closed；没有远端任意方法反射。
 
 LAN 模式是明文 HTTP。bearer 只提供持有者认证，**不提供机密性、服务端身份认证或重放防护**；同一
@@ -57,7 +57,15 @@ Android、iOS 与 HarmonyOS 都只消费本包的 `dart:io` socket；package 本
 }
 ```
 
-`invoke` 仅增加 `command`、`arguments` 和 `requestId`。command 是否存在、参数 schema、gate、并发所有权
+legacy `invoke` 仅增加 `command`、`arguments` 和 `requestId`。声明 `invocationCancellation` 的 host 还可接收
+`ownerToken`；调用方 deadline 仍只放在 `x-patchbay-deadline-ms`。identity operation 的 result 会返回排序后的
+`features`，request identity 与 response pinning 继续严格限定为原来的三个身份字段。
+
+context-aware host 通过 `/cancel-invocation` 接收 `command`、`requestId` 和 `ownerToken`。cancel 使用独立并发槽，
+普通请求卡死也不会堵住自身控制面。`PatchbayDirectInvocationHandle.response` 可先关闭 HTTP response，普通
+processing slot 只在 `lifecycle` 完成后释放；legacy handler 的两条 Future 绑定为同一生命周期。
+
+command 是否存在、参数 schema、gate、并发所有权
 和事实强度继续由注入 handler 负责；transport 不从字符串推导命令，也不把 `accepted` 升级为执行成功。
 Direct client 会验证 handler result 回显同一个 `requestId`；不一致返回 `requestIdMismatch`，不会作为
 业务结果交给调用方。空 `requestId` 在发送前以 `protocolError` 拒绝。

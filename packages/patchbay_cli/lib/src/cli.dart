@@ -354,8 +354,11 @@ Future<int> runPatchbayCli(
       envelope: PatchbayErrorEnvelope(
         failure.code,
         details: unresponsive
-            ? const <String, Object?>{'hint': patchbayAppUnresponsiveHint}
-            : const <String, Object?>{},
+            ? <String, Object?>{
+                'hint': patchbayAppUnresponsiveHint,
+                ...failure.details,
+              }
+            : failure.details,
       ),
       exitCode: PatchbayExitCode.transport,
     );

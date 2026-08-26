@@ -37,6 +37,7 @@ void main() {
       PatchbayServiceHost.catalogMethod,
       PatchbayServiceHost.snapshotMethod,
       PatchbayServiceHost.invokeMethod,
+      PatchbayServiceHost.cancelInvocationMethod,
     });
     final ServiceExtensionResponse response =
         await handlers[PatchbayServiceHost.identityMethod]!(

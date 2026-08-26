@@ -54,8 +54,10 @@ final class PatchbayDirectClient {
     required Map<String, Object?> arguments,
     required String requestId,
     Duration? deadline,
+    String? ownerToken,
   }) async {
-    if (requestId.isEmpty) {
+    if (requestId.isEmpty ||
+        (ownerToken != null && !_ownerToken.hasMatch(ownerToken))) {
       throw const PatchbayDirectClientException('protocolError');
     }
     final Map<String, Object?> result = await _call('invoke', <String, Object?>{
@@ -63,11 +65,30 @@ final class PatchbayDirectClient {
       'command': command,
       'arguments': arguments,
       'requestId': requestId,
+      if (ownerToken != null) 'ownerToken': ownerToken,
     }, deadline: deadline);
     if (result['requestId'] != requestId) {
       throw const PatchbayDirectClientException('requestIdMismatch');
     }
     return result;
+  }
+
+  Future<Map<String, Object?>> cancelInvocation({
+    required String command,
+    required String requestId,
+    required String ownerToken,
+  }) {
+    if (command.isEmpty ||
+        requestId.isEmpty ||
+        !_ownerToken.hasMatch(ownerToken)) {
+      throw const PatchbayDirectClientException('protocolError');
+    }
+    return _call('cancel-invocation', <String, Object?>{
+      ..._expectedIdentity.toJson(),
+      'command': command,
+      'requestId': requestId,
+      'ownerToken': ownerToken,
+    });
   }
 
   void close({bool force = false}) {
@@ -102,7 +123,7 @@ final class PatchbayDirectClient {
       if (deadline != null) {
         request.headers.set(
           PatchbayDirectHost.deadlineHeader,
-          '${wait.inMilliseconds}',
+          '${deadline.inMilliseconds}',
         );
       }
       request.add(utf8.encode(jsonEncode(body)));
@@ -175,6 +196,8 @@ final class PatchbayDirectClient {
       appInstanceId: appInstanceId,
     );
   }
+
+  static final RegExp _ownerToken = RegExp(r'^[A-Za-z0-9_-]{22}$');
 
   static Uri _validateSession(
     PatchbayDirectSession session,

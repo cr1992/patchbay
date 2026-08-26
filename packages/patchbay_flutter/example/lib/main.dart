@@ -216,7 +216,7 @@ final class PatchbayExampleHost {
       registrar: registrar,
       domainCatalog: _catalog,
       snapshot: _snapshot,
-      domainInvoke: _invoke,
+      domainInvokeWithContext: _invokeWithContext,
       // 审计事件只带参数形状与门结果，不带参数值；把它写进 example 自己的日志源，
       // 于是 `logs.*` 里能看到「谁在什么门下调了什么」，而值仍然不出 App。
       auditSink: _audit,
@@ -287,13 +287,14 @@ final class PatchbayExampleHost {
     },
   };
 
-  Future<Map<String, Object?>> _invoke(
+  Future<Map<String, Object?>> _invokeWithContext(
     String command,
     Map<String, Object?> arguments,
     String requestId,
+    PatchbayInvocationContext context,
   ) => command == semanticsBenchmarkCommand
       ? _benchmarkSemantics(arguments, requestId)
-      : domain.invoke(command, arguments, requestId);
+      : domain.invokeWithContext(command, arguments, requestId, context);
 
   Future<Map<String, Object?>> _benchmarkSemantics(
     Map<String, Object?> arguments,

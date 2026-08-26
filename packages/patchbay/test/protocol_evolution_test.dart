@@ -63,6 +63,7 @@ void main() {
 
       expect(identity['features'], <String>[
         PatchbayFeature.catalogDigest.name,
+        PatchbayFeature.invocationCancellation.name,
         PatchbayFeature.snapshotRevisionDiff.name,
         PatchbayFeature.snapshotSelectors.name,
       ]);
@@ -78,6 +79,7 @@ void main() {
       // 不能因为 Set 迭代顺序看起来变了。
       expect(identity['features'], <String>[
         PatchbayFeature.catalogDigest.name,
+        PatchbayFeature.invocationCancellation.name,
         PatchbayFeature.lifecycleState.name,
         PatchbayFeature.snapshotRevisionDiff.name,
         PatchbayFeature.snapshotSelectors.name,
@@ -94,6 +96,7 @@ void main() {
 
       expect(host.features, <PatchbayFeature>{
         PatchbayFeature.catalogDigest,
+        PatchbayFeature.invocationCancellation,
         PatchbayFeature.lifecycleState,
         PatchbayFeature.snapshotRevisionDiff,
         PatchbayFeature.snapshotSelectors,

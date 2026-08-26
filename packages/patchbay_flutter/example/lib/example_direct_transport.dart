@@ -45,11 +45,53 @@ final class ExampleDirectTransport {
           schemaVersion: PatchbayServiceHost.schemaVersion,
           applicationId: host.applicationId,
           appInstanceId: host.appInstanceId,
+          features: <String>[
+            for (final PatchbayFeature feature in host.features) feature.name,
+          ],
         ),
         catalog: host.dispatchCatalog,
         snapshot: ([Map<String, Object?>? request]) =>
             host.dispatchSnapshot(request),
-        invoke: host.dispatchInvoke,
+        invokeWithContext:
+            (
+              String command,
+              Map<String, Object?> arguments,
+              String requestId, {
+              String? ownerToken,
+              Duration? deadline,
+            }) {
+              final PatchbayHostInvocationHandle handle = host
+                  .dispatchInvokeHandle(
+                    command,
+                    arguments,
+                    requestId,
+                    ownerToken: ownerToken,
+                    deadline: deadline,
+                  );
+              return PatchbayDirectInvocationHandle(
+                response: handle.response,
+                lifecycle: handle.lifecycle,
+              );
+            },
+        cancelInvocation:
+            (
+              String command,
+              String requestId,
+              String ownerToken, {
+              required String reason,
+            }) => host
+                .cancelInvocation(
+                  command: command,
+                  requestId: requestId,
+                  ownerToken: ownerToken,
+                  reason: PatchbayInvocationCancellationReason.values.byName(
+                    reason,
+                  ),
+                )
+                .then(
+                  (PatchbayInvocationCancellationResult result) =>
+                      result.toJson(),
+                ),
       ),
       config: PatchbayDirectHostConfig(port: port),
     );
