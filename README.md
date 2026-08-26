@@ -164,12 +164,34 @@ $ patchbay --ws-uri '<VM Service URI>' catalog
 $ patchbay --ws-uri '<VM Service URI>' --json snapshot
 ```
 
+When `identity` reports the `applicationId` you registered and all three commands exit `0` (with
+no `error` envelope under `--json`), the minimal read-only path is working. Ordinary Patchbay
+commands are one-shot processes: each connects, makes its request, prints the result, and exits
+while the app keeps running. The next command reconnects to that app.
+
 A VM Service URI usually carries authentication material — keep it out of scripts, logs, and
 anything you commit. Once the launcher is wired up you can drop `--ws-uri` entirely; see
 [automatic session discovery](docs/guide.md#6-会话自动发现可选). With several devices connected at
 once, use `patchbay sessions list` to see the available sessions and `patchbay session use
 <session-id>` to pin one, so later commands no longer need `--session`; see
 [session selection](docs/guide.md#会话选择).
+
+#### Choose a day-to-day workflow
+
+- **First run or occasional lookup:** keep `flutter run` alive and use one-shot commands as shown
+  above. This is the default path.
+- **Many commands in sequence:** with the app already running, use
+  `patchbay --ws-uri '<VM Service URI>' repl` to connect once and execute lines until `exit`,
+  `quit`, or EOF. `repl` does not start the app.
+- **Automatic discovery, hot restart, and long sessions:** after the optional session declaration
+  is integrated, terminal A runs `patchbay launch -- flutter run ...` to start and supervise the
+  app; terminal B runs ordinary commands or `patchbay repl`. `launch` owns app/session lifecycle,
+  while `repl` sends repeated commands. They can be used together and are not alternatives.
+- **Not sure where it failed:** run `patchbay doctor` first. It checks session, connection,
+  catalog, and lifecycle in dependency order.
+
+See [Choose a workflow](docs/guide.md#先选工作流) in the usage guide for the full comparison and
+two-terminal example.
 
 UI targets in the catalog come with their current `generation`. Write operations that declare a
 caller-side generation fence (text input, for example) must carry that value, so a late command

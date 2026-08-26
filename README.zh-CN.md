@@ -148,10 +148,27 @@ $ patchbay --ws-uri '<VM Service URI>' catalog
 $ patchbay --ws-uri '<VM Service URI>' --json snapshot
 ```
 
+`identity` 返回与你接入时一致的 `applicationId`，且三条命令都以 `0` 退出（`--json` 输出没有
+`error` 信封），就表示最小只读链路已经跑通。普通 Patchbay 命令都是一次性进程：完成连接、请求和
+输出后立即按结果退出，App 继续运行；下一条命令会重新连接同一个 App。
+
 VM Service URI 通常包含认证信息，不要把它写入脚本、日志或提交物。接入 launcher 后可以把
 `--ws-uri` 省略，详见[会话自动发现](docs/guide.md#6-会话自动发现可选)。多台设备同时连着时用
 `patchbay sessions list` 看有哪些会话、`patchbay session use <session-id>` 固定一个，之后的命令
 不必再逐条敲 `--session`，详见[会话选择](docs/guide.md#会话选择)。
+
+#### 日常工作流怎么选
+
+- **先跑通、偶尔查一条：** 保持 `flutter run` 运行，像上面一样执行一次性命令。这是默认路径。
+- **连续执行很多条：** App 已经运行时，用 `patchbay --ws-uri '<VM Service URI>' repl` 建一次连接并
+  逐行执行；输入 `exit` / `quit` 或关闭 stdin 后退出。`repl` 不负责启动 App。
+- **自动发现、hot restart 与长会话：** 完成可选的 session 声明接入后，在终端 A 用
+  `patchbay launch -- flutter run ...` 启动并监督 App；终端 B 再执行普通命令或 `patchbay repl`。
+  `launch` 管 App 与 session 生命周期，`repl` 管连续发命令，两者可以配合，并非二选一。
+- **不知道卡在哪：** 先运行 `patchbay doctor`，按 session → connection → catalog → lifecycle 的
+  顺序查看第一处失败。
+
+完整选择表和双终端示例见[使用指南的「先选工作流」](docs/guide.md#先选工作流)。
 
 catalog 中的 UI target 会返回当前 `generation`。声明了调用方代际围栏的写操作（如文本输入）
 必须携带这个值，防止迟到的命令打到重挂载后的同名控件；`ui tap` 可以省略 generation，host 会在

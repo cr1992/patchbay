@@ -9,6 +9,40 @@
 - 使用 UI 能力时需要 Flutter `>=3.38.0`；
 - App 必须以 debug 或 profile 构建运行。
 
+## 先选工作流
+
+先把 App 的生命周期和 CLI 的生命周期分开看：App 由 `flutter run` 或接入方自己的工具保持运行；
+普通 Patchbay 命令连接这个 App，完成一次请求后退出。退出 CLI 不会关闭 App，下一条命令会重新连接。
+
+| 你的场景 | App 侧 | CLI 侧 | 退出行为 |
+|---|---|---|---|
+| 第一次跑通、偶尔查一条 | `flutter run` | 带 `--ws-uri` 的普通命令 | 每条命令输出后退出；App 继续运行 |
+| 连续执行很多条 | App 已经运行 | `patchbay ... repl` | 复用一次连接，直到 `exit` / `quit`、stdin 关闭或连接类错误 |
+| 自动发现、hot restart、长会话 | `patchbay launch -- flutter run ...` | 另一个终端执行普通命令或 `patchbay repl` | launcher 跟随 child；命令进程保持各自生命周期 |
+| 连接或能力异常 | App 保持现场 | `patchbay doctor` | 检查完 session、connection、catalog、lifecycle 后退出 |
+
+最短路径只需要第一行，不必先接 launcher。VM Service URI 通常含认证信息，只用于当前可信调试会话，
+不要写进脚本、日志或提交物。最小接入完成后，`identity` 应返回接入时声明的 `applicationId`；随后
+三条命令都以 `0` 退出（`--json` 输出没有 `error` 信封），就表示只读链路已经跑通。
+
+需要自动发现时，`launch` 与 `repl` 可以这样配合：
+
+```console
+# 终端 A：启动并监督 App；需要先完成第 6 节的 session 声明接入
+$ patchbay launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+
+# 终端 B：对已发现的 App 发一次性命令，或进入连续命令会话
+$ patchbay identity
+$ patchbay repl
+```
+
+两者不是二选一：`launch` 负责 App/session 生命周期、断线恢复和 hot restart 重锚；`repl` 只负责在
+已经选定的 App 上复用连接、连续发命令，它不会启动或监督 App。`logs tail` 也不是常驻 daemon：它在
+一次有界等待内逐行输出日志，收到结果或本次等待结束后退出。
+
+阅读路线也按这个顺序：先用根 README 跑通只读链路；需要自动发现时读第 6 节；连接异常看
+`doctor`；需要连续执行时再读 CLI 手册的 `repl`，不必为了普通一次性命令先理解所有高级入口。
+
 ## 安装
 
 ### App 依赖
@@ -62,10 +96,10 @@ $ patchbay --help
 
 ```console
 $ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.1/patchbay-0.4.1-macos-arm64
-$ shasum -a 256 patchbay-0.4.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
-$ chmod +x patchbay-0.4.0-macos-arm64
+$ shasum -a 256 patchbay-0.4.1-macos-arm64      # 与同一 Release 的 checksums.txt 对照
+$ chmod +x patchbay-0.4.1-macos-arm64
 $ mkdir -p ~/.local/bin
-$ mv patchbay-0.4.0-macos-arm64 ~/.local/bin/patchbay
+$ mv patchbay-0.4.1-macos-arm64 ~/.local/bin/patchbay
 ```
 
 Release 资产不携带可执行位，`chmod +x` 是必需的一步。用**浏览器**下载的 macOS 产物还会被
