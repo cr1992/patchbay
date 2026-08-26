@@ -162,6 +162,14 @@ occurrence backstop 按常量关系 `maxExpandedOccurrences >= maxCanonicalBytes
 single-flight 只覆盖进行中的采样：owner Future settle 即清除，失败对本批共享、下一次调用可重试，
 owner 放弃等待也不会把这一批挂死。
 
+开启采样和加入采样不是同一种等待。开启者拥有那次 provider 调用，保持既有语义——读完再由预算裁决这份
+答复是否还算数，因此慢 source 仍能报出它看见的东西；**加入者等的是别人的 provider 调用，所以它的等待
+以自己的剩余预算为上限**，预算耗尽即按既有 `snapshotWaitTimeout` 答复，并把这次采样从「进行中」摘除，
+下一次调用重新采样。这正是 Proposal 失败注入节点要求的「source hang 不遗留未完成 flight」：没有它，一次
+永不返回的 provider 调用会把整个 appInstance 的 snapshot 面永久钉死。被摘除的 Future 不会被取消（host
+取消不了 provider 调用），它的结果仍然送达仍在等的调用者；`snapshotWaitTimeout` 的 `details` 在一次轮询
+都没完成时不给出 `observed`（`polls` 为 `0`），因为「App 没答复」不是「字段不存在」。
+
 ### 可选的 consumer 上报 revision
 
 `PatchbaySnapshotSource` 保持不变并继续返回 `revisionSource: hostObserved`；新增互斥的
