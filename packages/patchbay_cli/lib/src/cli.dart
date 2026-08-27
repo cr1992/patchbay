@@ -35,12 +35,10 @@ import 'ui_manifest.dart';
 
 /// Runs one CLI invocation.
 ///
-/// This is the whole `package:patchbay_cli/patchbay_cli.dart` surface together
-/// with [PatchbayExitCode] (PB-050-13): an embedder hands over an argument
-/// vector and reads back the process exit code, exactly as the `patchbay`
-/// executable does. Everything a run needs beyond that — transports, session
-/// records, permission drivers — is named on the command line, never as a Dart
-/// parameter.
+/// With [PatchbayExitCode] this is the whole public Dart surface of the CLI
+/// (PB-050-13): an embedder hands over an argument vector and reads back the
+/// process exit code. Everything else a run needs — transports, session
+/// records, permission drivers — is named on the command line.
 Future<int> runPatchbayCli(List<String> arguments) =>
     runPatchbayCliWithSeams(arguments);
 
@@ -48,11 +46,9 @@ Future<int> runPatchbayCli(List<String> arguments) =>
 ///
 /// [connect], [replInput], [output] and [errorOutput] are test seams. They let
 /// a test observe how many times a session actually dials the App and drive a
-/// repl without a terminal; production callers pass none of them.
-///
-/// Deliberately not exported: DG-050-07 froze the public CLI library at two
-/// symbols, and these parameters are injection points for this package's own
-/// tests. Their names and shapes carry no compatibility promise.
+/// repl without a terminal; production callers pass none of them. DG-050-07
+/// froze the public library at two symbols, so this entry point is deliberately
+/// not exported and its shape carries no compatibility promise.
 Future<int> runPatchbayCliWithSeams(
   List<String> arguments, {
   Future<PatchbayClient> Function(ArgResults options)? connect,
