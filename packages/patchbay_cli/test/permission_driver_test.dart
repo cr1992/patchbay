@@ -12,6 +12,19 @@ import 'package:patchbay_cli/src/session/session_resolver.dart';
 import 'package:patchbay_cli/src/session/session_store.dart';
 import 'package:test/test.dart';
 
+// Real driver spawns are real subprocesses (see `_driver` below): under
+// `dart test`'s default concurrency, many test files fork these at once and
+// cold VM startup can spike well past a couple of seconds on a loaded
+// machine. These calls aren't exercising the timeout mechanism itself — they
+// just need enough wall-clock headroom for a normal (fast) response to land
+// before the budget lapses — so the ceiling is generous. It still sits under
+// `PatchbayPermissionBudget.read.maximumDuration` (30s) so
+// `PatchbayPermissionDriverRunner.run` accepts it without throwing
+// `permissionTimeoutInvalid`. The one test that deliberately races a slow
+// driver (`one total timeout budget terminates a slow driver`) keeps its own
+// tight, intentionally-asserted timeout instead of this constant.
+const Duration _driverCallBudget = Duration(seconds: 15);
+
 String _quoted(String value) => "'${value.replaceAll("'", "'\\''")}'";
 
 String _driver(String mode) {
@@ -113,7 +126,7 @@ void main() {
     await expectLater(
       client.call(
         _request(PatchbayPermissionOperation.capabilities),
-        timeout: const Duration(seconds: 2),
+        timeout: _driverCallBudget,
       ),
       throwsA(
         isA<PatchbayPermissionDriverException>().having(
@@ -136,7 +149,7 @@ void main() {
           );
       final PatchbayPermissionDriverResponse response = await unknown.run(
         _request(PatchbayPermissionOperation.status),
-        timeout: const Duration(seconds: 3),
+        timeout: _driverCallBudget,
       );
       expect(response.after?.state, PatchbayPermissionState.unknown);
       expect(response.after?.platformState, 'vendorFutureState');
@@ -147,7 +160,7 @@ void main() {
             PatchbayPermissionOperation.status,
             permission: 'not-supported',
           ),
-          timeout: const Duration(seconds: 3),
+          timeout: _driverCallBudget,
         ),
         throwsA(
           isA<PatchbayPermissionDriverException>().having(
@@ -164,6 +177,12 @@ void main() {
     final PatchbayPermissionDriverClient client =
         PatchbayPermissionDriverClient(executable: _driver('timeout'));
     await expectLater(
+      // Deliberately tight and NOT `_driverCallBudget`: this test's whole
+      // point is the timeout race. The 'timeout' fixture always sleeps 2s
+      // before responding, so any budget far below that (however slow
+      // process spawn itself is) still deterministically yields
+      // budgetExceeded — the assertion never depends on how fast the host
+      // happens to be.
       client.call(
         _request(PatchbayPermissionOperation.capabilities),
         timeout: const Duration(milliseconds: 100),
@@ -197,7 +216,7 @@ void main() {
             PatchbayPermissionDriverClient(executable: _driver(fixture.$1)),
           );
       await expectLater(
-        runner.run(_request(fixture.$2), timeout: const Duration(seconds: 3)),
+        runner.run(_request(fixture.$2), timeout: _driverCallBudget),
         throwsA(
           isA<PatchbayPermissionDriverException>().having(
             (PatchbayPermissionDriverException error) => error.code,
@@ -243,7 +262,7 @@ void main() {
         PatchbayPermissionOperation.fail,
         state: PatchbayPermissionState.denied,
       ),
-      timeout: const Duration(seconds: 3),
+      timeout: _driverCallBudget,
     );
     expect(response.admission, 'rejected');
     expect(response.code, 'permissionStateMismatch');
