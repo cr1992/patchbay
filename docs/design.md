@@ -164,11 +164,13 @@ owner 放弃等待也不会把这一批挂死。
 
 开启采样和加入采样不是同一种等待。开启者拥有那次 provider 调用，保持既有语义——读完再由预算裁决这份
 答复是否还算数，因此慢 source 仍能报出它看见的东西；**加入者等的是别人的 provider 调用，所以它的等待
-以自己的剩余预算为上限**，预算耗尽即按既有 `snapshotWaitTimeout` 答复，并把这次采样从「进行中」摘除，
-下一次调用重新采样。这正是 Proposal 失败注入节点要求的「source hang 不遗留未完成 flight」：没有它，一次
-永不返回的 provider 调用会把整个 appInstance 的 snapshot 面永久钉死。被摘除的 Future 不会被取消（host
-取消不了 provider 调用），它的结果仍然送达仍在等的调用者；`snapshotWaitTimeout` 的 `details` 在一次轮询
-都没完成时不给出 `observed`（`polls` 为 `0`），因为「App 没答复」不是「字段不存在」。
+以自己的剩余预算为上限**，预算耗尽即按既有 `snapshotWaitTimeout` 答复。**调用者超时不摘除进行中的
+采样**：`_sampling` 只在 settle（成功或失败）时清除——摘除再重开会对挂死的 source 制造随流量线性增长
+的悬空 provider 调用，还会让被摘除的旧采样与新采样乱序 settle，把 host 自己造成的乱序当成 App 的
+revision 回退。于是一次永不返回的 provider 调用在 host 侧恒只有一条：后到的带预算调用者全部按自身
+预算拿到类型化答复；开启它的那一位与不带 host 预算的纯读一样，由传输层 deadline 兜底——这与既有
+纯读语义同形。若该采样最终 settle，结果照常判定并提交一次；`snapshotWaitTimeout` 的 `details` 在一次
+轮询都没完成时不给出 `observed`（`polls` 为 `0`），因为「App 没答复」不是「字段不存在」。
 
 ### 可选的 consumer 上报 revision
 
