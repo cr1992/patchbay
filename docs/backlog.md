@@ -1,134 +1,62 @@
 # 问题与特性台账
 
-> 本仓已确认缺陷与待实现特性的**唯一真源**。本文件只维护编号、标题、动机、目标版本、实施状态和
-> Proposal 指针；优先级、依赖、验收与技术方案分别由版本计划和 Proposal 维护。完整权责见
-> [规划与交付治理](planning.md)。完成后由发布 MR 聚合进 CHANGELOG 对应版本段，并在四包实际发布之后由 finalize 从此处删行。
+> 本仓已确认缺陷与待实现特性的**唯一真源**是 [`backlog.d/`](backlog.d/README.md)：一条目一个碎片
+> 文件。台账只维护编号、标题、动机、目标版本、实施状态和 Proposal 指针；优先级、依赖、验收与技术
+> 方案分别由版本计划和 Proposal 维护。完整权责见 [规划与交付治理](planning.md)。完成后由发布 MR
+> 聚合进 CHANGELOG 对应版本段，并在四包实际发布之后由 finalize 删除对应碎片。
 > `design-gate` 条目未经仓主裁决不得进入实现 MR。
 > 已裁决不做的方向见 [design.md 的非目标台账](design.md)，此处不重复、不重提。
 >
 > 当前排期见 [Patchbay 0.5.0 版本计划](releases/0.5.0.md)。进入版本计划不等于越过设计闸门；
 > `待裁决` 条目必须先完成对应裁决，才能进入实现 MR。
 
-## 缺陷
+## 本文件为什么没有大表
 
-| 条目 | 动机 / 证据 | 状态 |
+台账曾经是本文件里的四张大表。仓规要求每个实现 MR 更新自己条目的状态行，而大表把所有条目放在同一
+个文件的相邻行上——并行分支各改各的行，三方合并却稳定撞成 hunk 冲突。这不是协作纪律问题，是存储
+结构问题：写入是按条目独占的，存储却是按文件共享的。
+
+治法与当年的根 `CHANGELOG.md`（PB-040-20）相同：把条目拆成 [`backlog.d/`](backlog.d/README.md) 下
+一条目一个碎片。独立修改从此落在不同文件里；两个 MR 真的在改同一条目时才冲突，那正是需要冲突的
+情况。
+
+同理，本文件也**不做入库的生成物总表**：入库总表会被每个实现 MR 重新生成，相邻行的冲突原样回来，
+等于白拆。要看全表就按需现渲一份，看完即弃。
+
+## 目录与编号
+
+四类条目共用一个碎片目录，种类由编号前缀决定：
+
+| 前缀 | 章节 | 用途 |
 |---|---|---|
-| BUG-20260826-01：Android 权限 `status`/`capabilities` 把「已声明未物化」误判为 `notDeclaredByApp` | `dumpsys package` 的 `requested permissions:` 小节已声明 CAMERA/RECORD_AUDIO/ACCESS_FINE_LOCATION/POST_NOTIFICATIONS，但 `runtime permissions:` 只在权限被请求/授予/拒绝过之后才物化对应行（真机实测：同一安装当时仅 `ACCESS_COARSE_LOCATION` 物化）；`_status` 与 `_probeCapabilities` 此前只认 `runtime permissions:` 判"是否声明"，把这种懒物化态误判为 `notDeclaredByApp`，并在 `PatchbayPermissionDriverRunner` 每次 normalize/reset 前的 capabilities preflight 里把动作集收窄成只剩 `status`，导致主线四步预检退 6。改为先认 `requested permissions:` 判声明，已声明无记录报新增 `platformState: noRuntimeRecord`（`state` 映射为既有词表的 `notDetermined`），`supportedActions` 恢复完整动作集。真机验证：`permission status` 四权限、`permission capabilities`、`permission fail` 策略对比、`normalize denied` 不可达四项均已转绿；normalize granted / 幂等重放 / reset 三项当时仍卡在 BUG-20260826-02 的独立成因，随其修复一并转绿（`tool/example_precheck.sh` 完整跑到 90 通过 0 失败） | 已验证 |
-| BUG-20260826-02：Android `normalize granted` / `reset` 写后复核偶发把已生效的授予误判成 `permissionStateMismatch` | 修复 BUG-20260826-01 后，normalize/reset 才第一次真正跑到 `pm grant` / `pm revoke` 之后的复核（此前一直卡在 preflight）；最初真机复现（Xiaomi/MIUI，`product:rodin`）被诊断为"`pm grant` 退出后立即查询 `dumpsys package` 有较高概率仍读到物化前的状态，最终一致而非授权失败"，controller 据此裁决批准在写后复核前对**读**做有界指数退避重试（100ms 起，总窗口 ≤5s，计入既有单次写操作超时预算，不改 30s/120s 预算模型与 `permissionStateMismatch` 语义），不重发 grant/revoke，覆盖 `_normalize` 与 `_reset` 两处同型写后复核——重试机制已实现（`_statusAfterMutation`，注入式 delay 使重试可在单测里免真实等待地被断言）。**加了重试仍复现**，逐层加日志排查后定位到真正根因是 `_status` 的正则缺陷：`, flags=[...]` 是可选小节，Android 在权限当前没有任何标记时（典型形态——刚 `pm grant` 出来）整段省略它、不打印成 `flags=[]`；旧正则把这段写成必需，于是这类行永远匹配不上、落进"没有条目"分支，重试多少次都在读同一段解析失败的文本。已在 `_status` 把 `, flags=[...]` 改成可选分组修复，重试逻辑按裁决保留作为对更少见的真实设备最终一致性窗口的防御。两处修复均已单测红验证（regex 缺陷用录制自真机的无 flags 行断言；重试逻辑保留原两形态断言）。真机复验：四步全绿（normalize granted / 幂等重放退 0、denied 不可达退 5、reset 退 0），`tool/example_precheck.sh` 完整跑到 **90 通过 0 失败** | 实现中 |
-| BUG-20260827-01：没有 `procps` 的 Linux 主机上，每条会话记录都被判死并删除 | `PlatformProcessUtils.isProcessAlive` 把「`kill` 不在 `PATH` 上、`Process.runSync` 抛 `ProcessException`」和「OS 回答说进程不在」压成同一个 `false`。Debian/Ubuntu `-slim`、distroless 和绝大多数语言基镜像（含 `dart:stable`）都不带 `procps`，`kill` / `ps` 都不是可执行文件，于是这类主机上**每一条**会话记录都被判 `sessionStaleProcess` 并 `store.remove`，App 全程活着也连不上。实测：`dart:stable` 镜像里 `PlatformProcessUtils.isProcessAlive(<自己的 pid>)` 返回 `false`；`cross_process_test.dart` 在该镜像稳定失败（与 CPU 限额无关，`--cpus=1` 与不限额都在 2–5 秒内失败），压力脚本 500/500 次活进程探测全部误判为死。修复：`isProcessAlive` 改成三态（`true`/`false`/`null` = 问不到），`null` 与 `processStartTimeSignature` 早已文档化的策略一致地降级为 `identityUnverified`，绝不 fail-closed；同时在 Linux 上改用 `/proc/<pid>` 直接作答，无需子进程，procfs 不可用时才回落 `kill`。PID 复用判死这条守卫不变。**新增「死判活」窗口的实际边界**（独立证伪核实后收窄的表述）：`null` 存活判定只在非 Linux 或无可用 procfs、且探测工具无法启动时出现；此时 `resolve()` 后续的握手真正逐字段拦截的只有 `schemaVersion` 与 `applicationId` 两项（`appInstanceId`/`isolateId` 不匹配只设 `lastStaleCode = sessionRuntimeRestarted`，随后照样进 `valid`），防落错目标的完整链条还要靠生产 wsUri 携带的 VM Service auth token——回收端口不可能恰好满足记录里那条含 token 的 URI path，因此实际风险是连不上而不是连错。**三条已知残余**（均如实披露，本次不改）：(1) procfs 分支对他人进程的 EPERM 语义与 `kill` 分支不同——`kill -0` 遇 EPERM 退非零、被判死，这是刻意保留的既有读法，而 `/proc/<pid>` 对他人进程仍存在、判活；影响面限于没有 `processStartTime` 的老记录（有签名的记录会在启动身份比对处被拦下），且会话目录本就是 0700 同用户模型。(2) 被 pin 的记录在 `null` 探测主机上连不上时，`sessions prune` 按设计删不掉它（`_statusFor` 读到 alive、TTL 分支只对 `wsUri == null` 生效），已改为不再指向 prune 的专用 hint，但「记录只能靠 `session use --clear` 退出」这一形态本身仍在。(3) `doctor` 对 `live` + `identityUnverified` 仍报 `ok`，因此在探针永远无法回答的主机上这项恒绿；**不在本次改 doctor 语义**——PB-050-18 对 legacy 记录同样选择报 `ok`，翻这个先例是另一个决策 | 已验证 |
+| `PB` | 特性 | 已登记的特性 / 治理项，例如 `PB-050-13.md` |
+| `BUG` | 缺陷 | 未排期缺陷，例如 `BUG-20260826-01.md` |
+| `DOC` | 文档债 | 可随任意批次走的文档快赢项 |
+| `DG` | design-gate | 需仓主裁决后才能动工的裁决点 |
 
-## 特性
+字段、状态词表、单行小节约束和文件名规则以 [`backlog.d/README.md`](backlog.d/README.md) 为准。
 
-| 编号 | 条目 | 动机 / 出处 | 目标版本 | 状态 | Proposal / 备注 |
-|---|---|---|---|---|---|
-| PB-040-01 | 锚定式手势 `ui.gesture.*`：press-hold / drag 路径 / fling，identifier 锚定 + 相对比例坐标 + 代际围栏 | 接入方真机验证分工：方向盘按压态、小窗拖动只能 adb 坐标打 | 0.4.0 | 已验证 | [锚定式手势](proposals/0.4.0/anchored-gestures.md)；DG-040-01 |
-| PB-040-02 | 定时 capture + golden diff：第 N 帧截取、两帧差异率 | 接入方：首帧变形取证只能 screencap 关键帧对比（Flutter 自绘部分可收编；OS 合成层不做，见非目标） | 0.4.0 | 实现中 | [视觉证据](proposals/0.4.0/visual-evidence.md) |
-| PB-040-03 | 屏幕唤醒：会话活跃期间 app 自动 keep-screen-on（Android `FLAG_KEEP_SCREEN_ON` + iOS `isIdleTimerDisabled`，会话静默自动释放，debug-only） | 真机调试息屏即 UI 面全拒（实测），iOS 无系统级 stay-awake；自动会使息屏行为本身的测试失真，需留关闭出口 | 0.4.0 | 实现中 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md)；DG-040-02 |
-| PB-040-04 | host 侧声明 `snapshotSelectors` capability，CLI 据此判定而非猜测失败形态 | 现状是 CLI 捕获 `invalidParams` / `protocolError` 反推“老 host”；feature capabilities 前置已合入（849043a） | 0.4.0 | 已验证 | — |
-| PB-040-05 | 统一 CommandRegistry：descriptor+decoder+gate+handler+validator 过同一 dispatcher | 第二 consumer 手写 adapter 的元键坑已实证核心不机检 descriptor 语义的风险 | 0.4.0 | 已验证 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-06 | CLI 注册 / 帮助表改由命令 descriptor 生成 | `packages/patchbay_cli/lib/src/cli.dart` 的手写 switch 臂是 0.3.0 并行开发中最大的一类冲突源 | 0.4.0 | 已验证 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-07 | README / 文档命令参考表由 descriptor / help 输出生成 | 双语 README 与包 README 的命令表靠人肉逐字节核对保持一致 | 0.4.0 | 已验证 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-08 | 幂等 retryPolicy；审计 sink；CLI `describe` | dogfood（`doctor` 已实现） | 0.4.0 | 已验证 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-09 | DevTools 借用：perf VM RPC 有界摘要 | 帧耗时、jank、heap 与 GC 计数此前只能开 DevTools 人眼看，CLI 拿不到可机读摘要 | 0.4.0 | 实现中 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md)；net 已拆出为 PB-040-28；待接入方书面确认 perf 口径 |
-| PB-040-10 | snapshot revision / diff | dogfood（低优先级） | 0.4.0 | 已验证 | [视觉证据](proposals/0.4.0/visual-evidence.md) |
-| PB-040-11 | launcher 监督循环与显式 pending session | 首个接入方已落项目级重连监督，第二接入方已集成 session store | 0.4.0 | 已验证 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
-| PB-040-12 | `ui verify-manifest` 按 destination 逐屏巡检 | v1 只对账当前挂载态；巡检会驱动导航并改变 App 状态 | 0.4.0 | 实现中 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
-| PB-040-13 | `ui verify-manifest` 接受 YAML manifest | v1 只认 JSON；大清单人手维护 YAML 更省事 | 0.4.0 | 已验证 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
-| PB-040-14 | `ui verify-manifest` 覆盖 Semantics identifier | catalog `uiTargets` 与 Semantics identifier 是两个命名空间和两套挂载语义 | 0.4.0 | 实现中 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
-| PB-040-15 | `ui targets --emit-manifest` 生成 expected-targets manifest 初稿 | 真机验收现在要照着 catalog 手抄清单 | 0.4.0 | 已验证 | [Manifest 与巡检](proposals/0.4.0/manifest-navigation.md) |
-| PB-040-16 | `wire_codegen --write` 顺手刷新协议面 surface golden | golden 重生成与 codegen 分离，0.3.0 聚合时才发现 12 个 wire 类型漂移（7eb6236） | 0.4.0 | 已验证 | — |
-| PB-040-17 | `release_prep --apply` 覆盖 `patchbayPackageVersion` 与两份 README 的版本引用 | 0.3.0 定版实撞 apply 后版本引用漂移；host 会据此报告 `serverVersion` | 0.4.0 | 已验证 | — |
-| PB-040-18 | `release_prep --apply` 自动冻结本版协议面进兼容语料库 | 旧版语料目前手工冻结，版本过去后不可再生成 | 0.4.0 | 已验证 | — |
-| PB-040-19 | command_codegen check 的样例 contract 瘦身 | 208 行样例生成物只为 drift 门禁长期入仓 | 0.4.0 | 已验证 | — |
-| PB-040-20 | CHANGELOG 碎片化：每 MR 一文件 + `release_prep` 聚合 | 0.3.0 并行分支持续冲突根 CHANGELOG | 0.4.0 | 已验证 | 规范与 MR 流程已落地，自动聚合待实现 |
-| PB-040-21 | 统一执行证据模型：区分未发送、已发送未确认、同值无变化、设备已确认 | DP 同值写入时设备不回报，已造成回归误判 | 0.4.0 | 实现中 | [命令契约](proposals/0.4.0/command-contracts.md)；DG-040-05 |
-| PB-040-22 | command/job 响应 schema | `--json` 只稳定外层信封，自由 `Map` 仍迫使脚本到处判空 | 0.4.0 | 已验证 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| PB-040-23 | 调试轨迹持久化：以 traceId 记录 CLI 实际观察到的跨命令 session、请求/响应、job、执行证据、人工标记与 artifact，支持查看、导出和 diff；host-only audit 不自动回传 | 一次调试的细节目前散落在终端历史、临时 JSON 和 App 内存中，无法复盘或比较回归 | 0.4.0 | 实现中 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
-| PB-040-24 | 从调试轨迹生成 scenario 并受控回放 | 跑通的操作链需要沉淀为自动化，但应等待 recorder、权限 driver 和真实轨迹 schema 稳定 | — | 待排期 | [未来回放](proposals/future/trace-replay.md)；DG-040-06 |
-| PB-040-29 | example 覆盖全部可注入面 + 本地端到端预检 `tool/example_precheck.sh` | CI 三个 job 全在无设备容器里跑，证明不了「CLI 真的连上了设备上的 host」；example 此前只接 0.3.0 时代的面，0.4.0 能力在设备上一条都打不到 | 0.4.0 | 已验证 | 预检门禁见 [发版清单](release-checklist.md) 第 2 节；SC-040-04 |
-| PB-040-28 | DevTools 借用：net 脱敏画像 | 阻塞在上游——`vm_service 15.2.0` 的 `getHttpProfile` 在调用方介入前已带 body/headers/cookies 与含 query 值的 URI，RPC 无采集前过滤参数，先收全量再脱敏已被 DG-040-03 否决。0.4.0 交付形态是不发布 capability、稳定返回 `networkProfilingUnavailable` | — | 待排期 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md) 的「net 的实现阻断」；DG-040-03；外部 App 内 observer 实现仅作为调研证据，不解除阻断；解除条件仍是上游开放采集前字段过滤，或接入方提供只产生已脱敏事件的 host collector |
-| PB-040-25 | 平台权限状态与规范化：AI 可查询 capability/status，并以 Android adb 的 normalize/reset/fail 建立可复核的权限前置状态 | 原生权限状态具有历史性；不预检就会让同一调试链在首次、已授权、永久拒绝设备上走不同路径 | 0.4.0 | 已验证 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-02；SC-040-03；[Android 矩阵](verification/android-permission-matrix.md)；[example 矩阵](verification/example-permission-matrix.md) |
-| PB-040-26 | iOS XCUITest 系统权限弹窗 runner 与恢复协议 | Patchbay 只能观察 Flutter UI；真机实践证明“App 触发 + XCTest reset/alert accessibility + 重连复核”可形成不使用坐标或私有 API 的闭环 | 0.4.0 | 已验证 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；SC-040-05；[真机矩阵](verification/ios-permission-xcuitest.md) |
-| PB-040-27 | HarmonyOS 兼容验证 spike 与 permission capability 矩阵：OpenHarmony Flutter、VM attach、Semantics/lifecycle、hdc + UiTest/Hypium | 架构可接入，但当前 Flutter 3.44.9 CI 与真机均未覆盖 HarmonyOS，不能直接宣称支持 | 0.4.0 | 实现中 | [平台权限](proposals/0.4.0/platform-permissions.md)；[当前报告](verification/harmonyos-compatibility.md)；已到 SDK/真机阻塞，capability 保持 `unsupported` |
-| PB-040-30 | 失效会话的引导式恢复：列出同一应用的可用候选，并在显式确认后完成 prune / reselect / rebind，供 one-shot 与显式选择 `--reconnect` 的 REPL 复用 | 真机长流程伴随进程替换时，既有 `sessionStaleProcess` fail-closed 能防止误连另一设备，但操作员仍需手工拼接恢复步骤；重度 REPL 也已实证 App hot restart 后只能终止并另起进程 | — | 待排期 | 落地前补 Proposal；保持“固定会话不自动改选”，REPL 不得因 `--reconnect` 静默切换 App / device identity |
-| PB-040-31 | CLI 长流程状态可视化：持续呈现当前命令、job phase、外部 driver 等待、终态与恢复提示 | CLI 目前适合机器读取最终信封，但操作者在长流程中难以判断是在执行、等待外部系统 UI 还是已经结束；需要一个仍保持结构化输出与脱敏边界的 Patchbay 自有进度面 | — | 待排期 | 与 job 事件和 PB-040-26 恢复阶段共用事实源，不要求接入方 App 提供调试 UI，也不新增第二套状态机 |
-| PB-040-32 | 敏感参数的字段级无回显注入：由 descriptor 声明 sensitive 字段，CLI 通过 prompt/provider 合并且不进入 argv、history 或 trace | 现有 `--stdin` 能安全注入整行 JSON，但真实长流程仍需人工组装 payload；字段级输入可降低误回显和结构错误，同时保持自动化入口 | — | 待排期 | 与 PB-040-24 的回放凭据重新注入共用安全边界；落地前补 Proposal |
-| PB-040-33 | Android 官方 UiAutomator reference runner 与通用系统弹窗识别 | Android OEM 对权限弹窗结构存在差异；应以 Android 官方 accessibility/resource 能力为基线、逐设备探测并 fail-closed，不把逐 OEM 文案与坐标 matcher 变成核心契约 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-07；由 SC-040-02 延期 |
-| PB-040-34 | 权限专用 trace 事件与损坏轨迹下的恢复语义 | 权限状态机需要可复盘，但 trace 写入侧事件类型是封闭表；必须先裁决损坏轨迹是否阻断被观测命令，不能直接把五类权限事件接入 sink | — | 待裁决 | [平台权限](proposals/0.4.0/platform-permissions.md)；DG-040-08 待建立 |
-| PB-040-35 | iOS 真机权限 `status/normalize` 的权威事实源 | XCTest 能 reset 与操作系统弹窗，但没有面向任意真机 App 的通用公开授权查询/grant API；不能把 XCTest 命令退出 0 当成设备状态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持 capability unsupported，落地前补 Proposal |
-| PB-040-36 | iOS notifications reset 与接入方触发端到端矩阵 | XCTest 没有 notifications 的 protected resource reset，且系统弹窗必须由 App 自己发起；当前 runner 只能处理已出现的弹窗，尚不能形成可重复初始态 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；0.4.0 降级边界见 SC-040-05 |
-| PB-040-37 | iOS XCTest reset 后的 debug App 自动重启与 launcher 重附加 | `resetAuthorizationStatus(for:)` 会终止被试 App；launcher 能识别断连但无法自动建立新的 debug isolate，长矩阵需要人工重跑接入方官方 run/attach 工具 | — | 待排期 | [平台权限](proposals/0.4.0/platform-permissions.md)；保持固定 session 不静默改选 |
-| PB-050-01 | snapshot provider JSON 边界与冻结读视图 | source 返回非 JSON、非字符串 key、循环引用或过深结构时，canonical 化可能越过 provider 违规边界直接抛错；有效结果又返回 consumer 活对象而非已冻结 revision body | 0.5.0 | 已验证 | [Snapshot provider 边界](proposals/0.5.0/snapshot-provider-boundary.md)；Proposal 接受前只允许失败注入与原型验证 |
-| PB-050-02 | snapshot 双预算、single-flight 与可选 source revision | revision 目前只按 32 份计数、没有字节上限；高频 wait 会重复拉取并全量 canonical 编码，consumer 又没有可选的内容 revision 快路径 | 0.5.0 | 实现中 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md)（已接受）；DG-050-01 已裁决：1MiB/8MiB/32 默认、4MiB 天花板常量关系、consumerReported 不加 capability、同 canonical 仍递增；host 侧双预算/single-flight/versioned source 已实现并单测转绿，真机由 RC 矩阵聚合验证 |
-| PB-050-03 | invocation catalog policy 热路径与失效协议 | 每次带参数调用都会重建完整 catalog、UI target 与 digest；直接绕过 catalog 又会破坏“任一非法条目使整份目录失效”的 fail-closed 契约 | 0.5.0 | 已验证 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md)；DG-050-02 |
-| PB-050-04 | semantics probe 帧放大量测与决策证据 | 每次 probe 都可能主动 `scheduleFrame` 并等待 `endOfFrame`，`ui.wait` 随后还会再等一帧；先量化帧驱动与遍历各自占比，避免在没有事实时优化小头 | 0.5.0 | 已验证 | [量测报告](verification/0.5.0-semantics-probe-benchmark.md)；只交付 instrumentation、benchmark 与建议，不改变请帧、等待、缓存或 generation 行为 |
-| PB-050-05 | audit sink 顺序投递与有界背压 | 当前异步 sink 独立启动，完成/持久化顺序无保证，慢 sink 的 pending Future 数量也无上限；审计账本与外部投递缺少一致的丢失报告 | 0.5.0 | 已验证 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md)；DG-050-03 |
-| PB-050-06 | invocation cooperative cancellation、deadline 与统一受理预算 | direct timeout 后保留 slot 是防止卡死 handler 后继续堆积的刻意语义；registry 路径又未纳入统一运行预算，缺少可证明的取消确认与统一生命周期 | 0.5.0 | 实现中 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md)；DG-050-04 已裁决；execution 默认 8、active-owner record 上限 256；VM/direct 与 legacy/context-aware 降级矩阵已落实现和回归，仓内 example Android 真机 95/95、iOS 模拟器 84/84 预检已通过，待业务接入方验收 |
-| PB-050-07 | semantics probe 请帧策略与 identifier 索引 | 减少主动请帧或按 tree revision 缓存 identifier 都会改变 `ui.wait` 的观察时机、elapsed/frameRevision 与 generation 边界，不能作为“透明降载”越过默认行为门禁 | 0.5.0 | 实现中 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md)（已接受）；DG-050-05 已裁决：one-shot 零额外帧、frameRevision 全计入、index 本版不做（阈值 20% 或 P95>2ms）；请帧策略与 `ui.wait` cadence 已实现并由帧计数断言冻结，Android 真机 debug 预检 106/0 与 profile smoke 17/0 已跑，接入方验收随 RC 矩阵 |
-| PB-050-08 | REPL 终止错误与单行流契约 | 正常 `--json repl` 已按行输出 compact JSON，但 transport / protocol / session failure 冒到 one-shot `_fail` 后会变成多行 pretty JSON；按行消费方无法把它识别为终止事实，FIFO 写端随后可能在 reader 已退出时挂死 | 0.5.0 | 已验证 | 复用既有 error envelope 与退出码，只修复已承诺的 JSONL 一致性；不在本条加入 reconnect |
-| PB-050-09 | CLI 诊断与命令语义可发现性 | 重度使用实证 `sessionDirectoryEmpty` 无恢复指引，已能自动分块落盘的 `capture ... --output` / `blob get ... --output` 未从 raw service 路径就地指向，`text.set` / `text.enter` 的 callback 差异虽已冻结但只在包文档可见，`id` / `identifier` 与 request `limit` / response `length` 的不同事实域也要靠试错辨认 | 0.5.0 | 已验证 | 只改 hint、人读成功摘要、help、文档与回归测试；五条验收均有单测/golden 且全绿（error_envelope/command_help/result/repl/brief_view）；此前「设备聚合验证待补」已由后续多轮真机预检（覆盖 session/capture/blob/text/repl 面）实质补齐 |
-| PB-050-10 | identifier 锚定的通用 semantics action | `ui tap <identifier>` 已有单请求解析与 generation 复核，但非 tap action 仍只能携带快照的 `nodeId + generation`，高变动树上需要调用方自行重取重试 | 0.5.0 | 已验证 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md)；DG-050-06；新增独立命令，不把 integer `generation` 扩成 `latest` 字符串 |
-| PB-050-11 | 结构化日志 event 身份与服务端过滤 | record 只冻结 `message + fields`，接入方可把同一事件名分别放进 `fields.event` 或 message，消费方会漏检；现有 query 只有 level/category/time 过滤 | — | 待排期 | 接入方 log source 先统一映射；核心落地前补 Proposal，联合裁决一等 event 字段、legacy 兼容及 query/tail/export 过滤 |
-| PB-050-12 | 最低支持 SDK 组合与 CI 证据 | package 声明 Dart `>=3.11.0`、Flutter `>=3.38.0`，但合入 CI 只跑 Flutter 3.44.9 自带的 Dart；文档下限与两个约束的真实可安装交集尚未被机检证明 | 0.5.0 | 实现中 | [调查结论](verification/0.5.0-flutter-sdk-floor.md)：两条声明约束不可能同时成立（Flutter 3.38.x 全系只带 Dart 3.10.x）；机检确定的最早可安装组合是 Flutter 3.41.0 / Dart 3.11.0，已接入非阻断 `sdk_floor` CI lane（`tool/verify_sdk_floor.sh`）；该组合在本地 macOS 与 Linux GitLab CI（pipeline 6028）两个平台独立复现下均未能通过既有一条 reveal 测试断言，已登记 PB-050-28 跟踪。**根因已定位（2026-08-27）：3.41.x 不含上游 `af35e77c83d`，`Semantics(identifier:)` 在那之前不自成语义节点，patchbay identifier 锚定安全模型的前提在 3.41.x 上不成立——3.41.0 不可能靠改仓内代码变成「已验证下限」。** 同日**「已知问题二」（3.44.0/3.44.1 的 `ink_sparkle.frag` 着色器失败）被证伪**：那是同一棵工作树跨 SDK 切换留下的构建缓存污染，已在已知全绿的 3.44.9 上用同样手法复现出同一异常；清缓存后 **Flutter 3.44.0 跑完整 `tool/verify_sdk_floor.sh` 退出码 0、五包 1498 测试全绿**，「最早全绿组合」因此从 3.44.9 下移到 3.44.0，恰与「最早含 `af35e77c83d` 的 stable」重合。仓主 2026-08-27 裁决口径 A，按版本计划「提高公开下限先走 Proposal」的要求补 [SDK 下限提升 Proposal](proposals/0.5.0/sdk-floor-raise.md)（已接受）：四包与 example 下限提至 **Flutter `>=3.44.0` / Dart `>=3.12.0`**，`sdk_floor` lane 钉 3.44.0 并摘掉 `allow_failure`，语义由「探测性非阻断」转为「已验证下限的守门」；README 双语与 `docs/guide.md` 的下限数字同步。最早可安装与已验证下限至此合一 |
-| PB-050-13 | CLI 公共 API surface 收口 | 0.4.1 的 canonical CLI library 暴露 203 个符号，包内 47 个文件通过根 barrel 访问实现与测试 seam，API golden 只能冻结漂移，不能证明 launcher/trace/session/doctor 等实现应成为 SDK | 0.5.0 | 实现中 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)（已接受）；DG-050-07 已裁决：2+8 不扩表，两接入方中性扫描已附（一方零源码依赖；另一方的 session 注册需求由 PB-050-27 CLI 命令承接）；两个公开 library 已收至 2+8、`runPatchbayCli` 收窄为一元、包内 57 个文件改为精确 `src/` 导入；API golden 改为按公开 library 记录并重算；正/负向编译 fixture 与「包内不再 import 公开 library」守卫已绿；四个 AOT 入口已验证。接入方换 pin 后的编译门禁待接入方执行 |
-| PB-050-14 | workspace / worktree 级会话亲和性 | session 记录虽保存 `workspacePath`，默认 resolver 仍从全局目录按显式 ID、全局 pin、唯一性选择；在多个 checkout 并行时，旧 pin 可把无 `--session` 的 Agent 命令带到另一工作区的 App | 0.5.0 | 已验证 | [Workspace 会话亲和性](proposals/0.5.0/workspace-session-affinity.md)（已接受）；DG-050-12 已裁决；workspace identity 解析、按 checkout 的 scoped pin、跨作用域 fail-closed 与旧全局 pin 迁移均已实现；workspace_affinity_test.dart / workspace_migration_test.dart / workspace_pin_resources_test.dart 等覆盖 PID、共享 Git common dir、容量上限等边界，`session use --clear` 判不出工作区的拒绝语义另有回归测试，均全绿；关键闸点已用变异测试逐一验证会变红；不引入常驻 daemon 或全局 latest |
-| PB-050-15 | 锚定式合成 tap（`ui.gesture.tap`） | 手势家族只有 pressHold/drag/fling，最常用的点按缺位；`ui.semantics.tap` 走 performAction 派发，不经指针管线 | 0.5.0 | 已验证 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-08；[锚定式合成 tap](proposals/0.5.0/anchored-tap.md)；widget/CLI/descriptor 矩阵、VM/direct 对拍与独立证伪均绿，Android 真机预检（tap 三节点）与 profile smoke 已跑绿；接入方真机验收随 RC 矩阵 |
-| PB-050-16 | 点性 semantics 派发的遮挡准入 | `areUserActionsBlocked` 仅在 BlockSemantics 下为真，非模态覆盖层下 performAction 会穿透激活被盖目标，违背防误击立场（`packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart` 的 423-428 段） | 0.5.0 | 实现中 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-09；[遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；repro 已转红验收 gate 并在实现落地后转绿：点性 action 派发前新增固定采样遮挡准入（`occlusion_probe.dart`，与 gesture 共用判定基元），`semantics_occlusion_admission_test.dart` / `occlusion_probe_test.dart` / `semantics_obscured_tap_bridge_test.dart` 覆盖判定矩阵、TOCTOU 竞态、审计与既有 gesture 回归，example 补了真实浮层回归并记 CHANGELOG 碎片，均全绿；仓内设备预检与接入方真机验收均未见落地记录，两者随 RC 矩阵一并确认 |
-| PB-050-17 | identifier 锚定的 scroll-to-reveal | 懒加载列表中的目标当前无法驱动到可见可达，长列表场景的预检是假覆盖 | 0.5.0 | 已验证 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-10；[Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md)；七格竞态/失败注入补测、VM/direct 对拍、0.4.1 兼容复刻与 `tool/example_precheck.sh` / `tool/example_profile_smoke.sh` 的设备节点均已清；接入方真机验收随 RC 矩阵 |
-| PB-050-18 | 会话存活判定加进程启动身份 | 存活判据是裸 `kill -0`/`tasklist` 按 PID（`packages/patchbay_cli/lib/src/platform/process_utils.dart` 的 53-76 段），PID 复用会把死会话判成活的 | 0.5.0 | 已验证 | PID+启动时间三元比对已实现；session_identity/platform_process_utils/session_record_compat 测试覆盖 PID 复用判死、additive 字段兼容语料与老记录 identityUnverified 标注。本条的验收目标（把 PID 复用判死）成立且未被削弱；PID 探测层遗留的 fail-closed 缺口另立 BUG-20260827-01 修复——三元比对本身没错，错在它下面那层 `isProcessAlive` 用同一个 `false` 表达「进程不在」和「没有 `kill` 可执行文件」，探测工具缺失时反而先把活会话杀掉。启动身份签名仍取 `ps -o lstart=` 的本地时区格式化串，跨时区/跨 DST 读同一条记录会得到不同字符串（实测同一 PID 在 UTC/Asia-Shanghai/America-New_York 下三种输出），属同型 fail-closed 残留风险，需要改持久化格式并先过 Proposal，已登记为 PB-050-31 |
-| PB-050-19 | 会话记录解析失败改隔离 | `readAll` 解析失败即删文件，自愈同时销毁现场证据，操作者拿不到「这里曾有会话」的痕迹 | 0.5.0 | 已验证 | 解析失败移入 `.quarantine` 并由 doctor 报告已实现；session_quarantine/doctor_session_hardening 测试覆盖；临时文件与并发写入语义不变 |
-| PB-050-20 | 树类大载荷落 artifact | `ui semantics tree` 等全量进 stdout，大树即数千行；agent 消费方直接吃满上下文，破坏按需展开的信息层级 | 0.5.0 | 实现中 | 超阈值落 artifact、stdout 回校验路径已实现（`--max-inline-bytes` 阈值、`localArtifact`/`cliRendered` 回执，覆盖四棵树命令）；复用既有 `--output`/blob 形状未新增别名，阈值内输出逐字节不变；`tree_artifact_output_test.dart` 等单元/golden/端到端用例与多轮非阻断跟进（repl 落盘失败隔离、`--max-inline-bytes` 前置校验、renderedMember 清单 ratchet 等）均已用 mutation 验证能红，全绿；`tool/example_precheck.sh`/`example_profile_smoke.sh` 已埋点设备验证节点，但落地该节点的提交明确记录「未跑设备段，按分工由 controller 执行」，仓内未见其后续实跑通过的记录；[树落 artifact](proposals/0.5.0/tree-artifact-output.md) |
-| PB-050-21 | `--view brief` 瘦 JSON 视图 | `--json` 无分层，机器消费方每次吃全量信封，无法先读决策所需最小事实再选择是否展开 | 0.5.0 | 实现中 | opt-in `--view brief` 已实现，默认输出逐字节不变；瘦身字段清单由 Proposal 冻结并以 `test/golden/view_brief/` golden 锁定（catalog / diagnostic tree / identity / logs query / ui semantics tree）；`brief_view_test.dart` 覆盖投影是全函数、只对受理成功响应生效、空值不误判为已省略等边界，全绿；仓内设备预检节点已埋点，但同批提交明确记录未实跑，随 RC 矩阵确认；[brief 视图](proposals/0.5.0/brief-view.md)；排 PB-050-08/09 之后 |
-| PB-050-22 | gate 出厂默认策略 | `PatchbayGateEvaluator` 生产代码零构造，quick-start 与 example 的基础门是 `allow()`，最短接入路径没有形成“只读默认、写入显式开放”的安全起点 | 0.5.0 | 已验证 | example 与双语 README 已停用 `allow()` 基础门、改用写拒绝带解释 code 的 `exampleWriteGate` 预设门；每轮设备预检的写命令均实际过门 |
-| PB-050-23 | error code 注册表 ratchet 测试 | 稳定 code 集合目前靠自觉维护，无全树扫描锁定，新增散装码不会被机检拦截 | 0.5.0 | 已验证 | 全树扫描断言 code 字面量属于封闭注册表；纯测试 MR |
-| PB-050-24 | 消费者侧 Skill、INSTALL 与渐进式披露接入漏斗 | 接入与使用路径主要依赖大型 guide，agent 宿主没有从发现、安装、只读起步到按需展开的短漏斗；手写命令示例又会随 CLI 漂移 | 0.5.0 | 已验证 | `skills/use-patchbay/SKILL.md` + `INSTALL.md`；Skill 随 Patchbay tag 版本化，命令示例由 CLI registry 生成或对拍；干净 consumer/Agent 验收 `INSTALL -> SKILL -> identity/catalog/snapshot`，不以预载完整 guide 替代；只读闭环验收见 [验证报告](verification/0.5.0-onboarding-skill-acceptance.md) |
-| PB-050-25 | domain-plane 写命令的 gate 强制执行 | PB-050-22 实现中实证：`host_invoker.dart` 的 `_dispatchExternal` 直调 domainInvoke，descriptor `gates` 对 plane:domain 是 catalog-only 装饰，双层门安全叙事存在实质缺口 | 0.5.0 | 实现中 | 裁决见 [0.5.0 版本计划](releases/0.5.0.md)；DG-050-11；[domain gate 强制执行](proposals/0.5.0/domain-gate-enforcement.md)；repro 先行（host 编译红 + Flutter 行为红），实现落地后 `domain_gate_admission_test.dart`（host 受理段矩阵，含 TOCTOU 目录漂移、审计、VM/direct 对拍）、`domain_gate_enforcement_test.dart`（Flutter bridge 复用 evaluator）与 example 端到端 `example_domain_gate_test.dart`（开/关门、replay、审计不含 gateId）均全绿；发布说明四条义务已记入 CHANGELOG 碎片；仓内设备预检与业务接入方验收均未见落地记录，随 RC 矩阵一并确认 |
-| PB-050-27 | 外部启动会话的 CLI 注册/注销命令 | DG-050-07 中性扫描实证：存在「以自有方式启动 App、不经 `patchbay launch` 监护」的场景需要注册会话记录以获得自动发现；2+8 收口后该真实需求没有公共出口 | 0.5.0 | 实现中 | `session register --ws-uri <uri>` / 注销；复用既有 pending record 语义不新增字段；与 PB-050-13 同批交付，13 移出则一并移出；裁决见 [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)；`session register` / `session unregister` 已实现：不拨号、复用 pending 记录语义与字段、按执行 checkout 落 workspace 亲和性，`sessionAlreadyRegistered` 已登记进稳定码 ratchet；命令文档、help 与 guide 已同步。接入方脚本改调这两条命令待接入方执行 |
-| PB-050-26 | 审计事件的 reveal 富化 | `ui.reveal` 的审计事件缺 steps 与被驱动容器 nodeId 列表；补齐需改 `PatchbayAuditEvent` 公共形状与 host_invoker 记账，越出 PB-050-17 授权面 | — | 待排期 | 落地前补 Proposal（公共审计形状变更） |
-| PB-050-28 | Flutter 3.41.x 上 `areUserActionsBlocked` 对 identifier 目标失效（**根因已定位：上游缺陷，非仓内缺陷**） | ~~reveal 引擎 `_afterStep` 存在至少一帧的时序缺口~~ **已证伪**。真因是 3.41.x 不含 Flutter 上游提交 `af35e77c83d`（`[framework] Fix Text.semanticsIdentifier being absorbed by ancestor nodes`，PR #181795；首个含它的 stable 是 **3.44.0**，stable 渠道在 3.41.9 与 3.44.0 之间无发布，故 3.41.x 全系不含且不会再含）。该提交之前 `Semantics(identifier:)` 不构成语义边界，于是 `Semantics(blockUserActions: true) > Semantics(identifier:)` 两层一起被并进更上面的边界节点（`ListView.builder` 行上是 `IndexedSemantics` 建的节点）；而 `SemanticsConfiguration.absorb`（两版本逐字节相同）吸收被屏蔽子 config 时**只掩掉其 action 位、从不把 `isBlockingUserActions` 复制给吸收方**，因此该节点 `areUserActionsBlocked` 恒为 `false`。**不是时序**：多等 3 帧值不变、整条祖先链也全 `false`，信息根本不在语义树里 | — | 已验证 | **结论：本仓不改一行实现，诉求由公开下限提升消解。** 实测影响面（两版本端到端对照，证据见 [SDK 下限调查](verification/0.5.0-flutter-sdk-floor.md) 根因节）：**防误击闸未被击穿**——三种 `ui.semantics.tap` 情形回调均 0 次，框架掩掉 action 位后 `_dispatch` 的 `hasAction` 复核兜住；但对外语义在 3.41.x 上错两处：`ui.semantics.*` 用 `uiSemanticsActionUnavailable` 顶替 `uiSemanticsActionBlocked`（PB-050-16 明确要求二者不串码），`ui.reveal` 因契约上不查 action 而无兜底，把被模态屏蔽的目标报成 `revealed` + `reachability: pointer`，违反 PB-050-17 冻结的终止条件矩阵。**三条仓内修法全部被否**：多等帧连症状都治不了（多等 3 帧值不变），且即便有效也会违反 PB-050-17 冻结的「第 i 步恰好一帧」并可观测地改变 `afterTreeRevision` 与 deadline 消耗；版本感知兼容层无可读的替代信号；走渲染树重新求值 `describeSemanticsConfiguration` 属于在安全边界内新造机制、依赖 `debugSemantics`（release 下为 null，会让 `targetBlocked` 判定 debug/release 分叉），并直接改动 PB-050-16 冻结的「不修改 `areUserActionsBlocked` 既有含义」。仓主 2026-08-27 裁决采用口径 A——下限提至含上游修复的第一个 stable 3.44.0，见 [SDK 下限提升](proposals/0.5.0/sdk-floor-raise.md)。该断言与全部既有测试在 3.44.0 上实测全绿（五包 1498 个测试），`sdk_floor` lane 已钉 3.44.0 并摘掉 `allow_failure` 转为阻断门禁，本条随之关闭 |
-| PB-050-29 | `doctor` session 检查的 `quarantinedFiles` 直接输出隔离文件绝对路径 | `packages/patchbay_cli/lib/src/doctor/doctor_checks.dart` 的 `patchbaySessionFinding` 把 `PatchbaySessionStore.quarantinedFiles()`（`session_store.dart` 的 `quarantinedFiles()`）返回的 `File.path` 原样塞进 details 的 `quarantinedFiles`；同一文件 `counts()` 上方注释明确 workspace root 是「owner-only locating data……doctor output is something operators paste into issues」因此从不进入响应，`trace_redaction.dart` 的 `looksAbsolutePath`/`portableTraceValue` 也已把「看起来像绝对路径的字符串」当敏感项脱敏——quarantinedFiles 是这条既有原则目前唯一未套用的例外，doctor 输出会把本机会话目录（默认在 `Directory.systemTemp` 下，或 `--session-dir`/`PATCHBAY_SESSION_DIR` 指向的任意本机路径）逐字节暴露给同一注释承认「会被粘贴进 issue」的诊断输出 | — | 待排期 | 现状是刻意设计（`session_store.dart` 上 `quarantinedFiles()` 的注释：doctor 需要报告路径供操作者定位隔离文件），债务点在于未经脱敏/相对化处理，与仓内 workspace root / trace 对绝对路径的既有惯例不一致；落地前需裁决维持现状（并补一句解释这个例外）、改相对路径，还是套用 `looksAbsolutePath` 同款脱敏 |
-| PB-050-30 | snapshot single-flight 采样没有 host 侧主动放弃阈值，只靠传输层 deadline 兜底 | `docs/design.md`「并发读共享一次采样，不共享预算」一节记录的裁决：开启（owner）一次采样后，调用者超时不会摘除进行中的 `_sampling`——加入者（joiner）按自己的剩余预算拿到既有 `snapshotWaitTimeout`，但开启者与不带 host 预算的纯读一样，只靠传输层 deadline 兜底；这是为了避免摘除重开对挂死 source 造成随流量线性增长的悬空 provider 调用，以及新旧两条采样乱序 settle。代价是 host 没有一个独立于传输层的「进行中采样等太久就主动放弃、允许全新重试」的天花板：provider 若真的永不返回，这条采样会在 appInstance 生命周期内一直占用，host 自己没有恢复路径 | — | 待排期 | 需要修订 `docs/proposals/0.5.0/snapshot-resources-revisions.md`（PB-050-02 的 Proposal；DG-050-01 已裁决的是份数/字节预算，未覆盖这个方向）；补一个 host 主动放弃阈值前需重新评估摘除重开与乱序 settle 的 trade-off，不能直接照搬当前「只在 settle 时清除」的实现；注：核实过程中未在 Proposal 裁决结论原文里找到「属于 Proposal 修订项」这句话的字面表述，本条是基于 design.md 与实现裁决记录复核后独立登记 |
-| PB-050-31 | 会话启动身份签名改用时区无关的持久化格式 | `PlatformProcessUtils.processStartTimeSignature` 在 POSIX 上取 `ps -o lstart=` 的输出，那是**按本地时区格式化**的字符串；同一 PID、同一时刻在不同 TZ 下得到不同结果（容器实测：`TZ=UTC` → `Thu Aug 27 06:51:14 2026`、`TZ=Asia/Shanghai` → `Thu Aug 27 14:51:14 2026`、`TZ=America/New_York` → `Thu Aug 27 02:51:14 2026`）。记录写入与读取跨了 TZ——不同 shell、cron、CI job、`/etc/localtime` 不同的容器，或仅仅跨过一次 DST 切换——两个非 null 签名就会不等，`_checkProcessIdentity` 据此判 PID 复用，把一个活着的会话判死并删记录。Windows 的 `.ToString("o")` 同形（含本地偏移）。与 BUG-20260827-01 同属 fail-closed 类：探测机制自身的不稳定被当成「这是另一个进程」的确定结论 | — | 待排期 | 修复方向：Linux 改用 `/proc/<pid>/stat` 第 22 字段（`starttime`，自开机起的 tick 数，内核原值、不经格式化、与 TZ 无关）配 `/proc/sys/kernel/random/boot_id` 保证跨重启唯一。**必须先补 Proposal**：这是稳定 JSON 变更——`processStartTime` 是持久化字段，naive 实现会把新格式签名与升级前记录里的 `ps` 格式串直接比对、全部判为不等，于是升级本身就删光所有活会话记录，正是本类缺陷要防的事故。安全落法需要 scheme 前缀标记签名格式（scheme 不同 = 无法验证，绝不判死）加一个加法字段，让老 reader 继续比对旧字段。BUG-20260827-01 的修复只解决了 PID 探测层，未动本条 |
-| PB-050-32 | 清理 Dart 3.13 新 lint `unawaited_return_in_try_block` 命中的 4 处 | 与 BUG-20260827-01 无关的既有债，在其基线上独立复现：`dart:stable`（Dart 3.13.2）下 `dart analyze --fatal-infos` 在 `packages/patchbay_cli` 报 4 处 `unawaited_return_in_try_block`——`lib/src/android_permission_adapter.dart:139`、`lib/src/cli.dart:527`、`lib/src/ios_permission_adapter.dart:70`、`lib/src/ios_permission_adapter.dart:102`。当前 CI 镜像锁 Flutter 3.44.9（Dart 3.12.x）不命中，故今天不判红；镜像一旦升到带 Dart 3.13 的版本，`dart_packages` lane 的 `--fatal-infos` 立刻判红 | — | 待排期 | 纯机械修复（补 `await` 或显式 `unawaited`），无行为变化，可随任意批次走；升 CI 镜像的 MR 必须把它作为前置 |
+## 怎么读
 
-## 文档债（快赢，可随任意批次走）
+```console
+$ dart run tool/backlog_render.dart                     # 渲染只读总表到 stdout
+$ dart run tool/backlog_render.dart --out /tmp/view.md  # 或落一份临时文件
+```
 
-| 条目 | 动机 / 出处 |
-|---|---|
-| （暂无） | |
-
-## design-gate（需仓主裁决后动工）
-
-| 编号 | 裁决点 | 目标版本 | 状态 | Proposal |
-|---|---|---|---|---|
-| DG-040-04 | macOS 桌面 lifecycle 闸判定：“失焦但在渲”是否放行 | 0.4.0 | 已裁决 | [Launcher](proposals/0.4.0/launcher-session.md)、[手势](proposals/0.4.0/anchored-gestures.md) |
-| DG-040-01 | 锚定式手势：相对比例坐标与“不做坐标定位”的边界 | 0.4.0 | 已裁决 | [锚定式手势](proposals/0.4.0/anchored-gestures.md) |
-| DG-040-02 | 自动 keep-screen-on：默认行为、关闭出口与静默释放 | 0.4.0 | 已裁决 | [Launcher 与唤醒租约](proposals/0.4.0/launcher-session.md) |
-| DG-040-03 | DevTools net 画像的采集前脱敏口径 | 0.4.0 | 已裁决 | [DevTools 画像](proposals/0.4.0/devtools-profiling.md) |
-| DG-040-05 | 执行证据词表、job 终态和 CLI 退出码的边界 | 0.4.0 | 已裁决 | [命令契约](proposals/0.4.0/command-contracts.md) |
-| DG-040-06 | 轨迹回放的写操作确认、目标重解析、敏感值重新注入和失败停止语义 | — | 待裁决 | [未来回放](proposals/future/trace-replay.md) |
-| DG-040-07 | platform driver 的信任边界、`exercise allow` 确认模型、Android/iOS P0 权限集合与 HarmonyOS 验证基线 | 0.4.0 | 已裁决 | [平台权限](proposals/0.4.0/platform-permissions.md) |
-| DG-040-08 | 损坏轨迹的恢复与阻断语义，以及权限专用事件扩展写入侧封闭表的前置条件 | — | 待裁决 | [调试轨迹](proposals/0.4.0/debug-traces.md) |
-| DG-050-01 | snapshot 单份/总保留字节默认值、与 4 MiB/occurrence 硬天花板的对齐、超限失败，以及 consumer revision 的事实来源与兼容形状 | 0.5.0 | 已裁决 | [Snapshot 资源与 revision](proposals/0.5.0/snapshot-resources-revisions.md)；裁决结论见 Proposal 末节 |
-| DG-050-02 | catalog policy 缓存的失效信号，以及动态目录无 revision 时继续逐次校验还是禁止缓存 | 0.5.0 | 已裁决 | [Catalog policy 缓存](proposals/0.5.0/catalog-policy-cache.md) |
-| DG-050-03 | audit 队列满时的保留/丢弃策略、丢失报告与 dispose drain 预算 | 0.5.0 | 已裁决 | [Audit 有序投递](proposals/0.5.0/audit-delivery.md) |
-| DG-050-04 | cancellation 的确认事实、legacy handler 降级、deadline 后 slot 释放条件与 host-wide 受理上限 | 0.5.0 | 已裁决 | [Invocation 生命周期](proposals/0.5.0/invocation-cancellation.md)；execution 默认 8，active-owner/control 面分别有界 |
-| DG-050-05 | semantics owner 已可用时是否仍主动请帧、`ui.wait` 的观察 cadence，以及 identifier cache 的失效与 generation 复核 | 0.5.0 | 已裁决 | [Semantics probe 调度](proposals/0.5.0/semantics-probe-scheduling.md)；裁决结论见 Proposal 末节 |
-| DG-050-06 | 通用 identifier action 的独立命令形状、CLI canonical path、`strictKeys` 与 unknown key 处置、可选 caller generation 与公开 action allowlist | 0.5.0 | 已裁决 | [Identifier action](proposals/0.5.0/semantics-identifier-action.md) |
-| DG-050-07 | CLI 公共 API 收口：canonical 入口保留 2 个、8 个迁入 opt-in client、其余 193 个彻底退出公共面，且不提供 legacy/testing 过渡入口 | 0.5.0 | 已裁决 | [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)；裁决结论与两接入方中性扫描摘要见 Proposal 末节 |
-| DG-050-08 | 锚定式合成 tap 的命令形状、指针注入语义与 `ui.semantics.tap` 并存边界 | 0.5.0 | 已裁决 | [锚定式合成 tap](proposals/0.5.0/anchored-tap.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
-| DG-050-09 | 点性 semantics 派发的遮挡准入范围、拒绝码与不提供 bypass 的边界 | 0.5.0 | 已裁决 | [遮挡准入](proposals/0.5.0/semantics-occlusion-admission.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
-| DG-050-10 | scroll-to-reveal 的写操作定性、Semantics 域实现边界与成功判据 | 0.5.0 | 已裁决 | [Scroll-to-reveal](proposals/0.5.0/semantics-scroll-reveal.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
-| DG-050-11 | domain 写命令过声明门的强制执行边界、受影响面与老 consumer 兼容语义 | 0.5.0 | 已裁决 | [domain gate 强制执行](proposals/0.5.0/domain-gate-enforcement.md)；裁决记录见 [0.5.0 版本计划](releases/0.5.0.md) |
-| DG-050-12 | canonical checkout identity、legacy record/global pin 迁移、per-workspace pin、显式跨工作区选择与资源上限 | 0.5.0 | 已裁决 | [Workspace 会话亲和性](proposals/0.5.0/workspace-session-affinity.md)；裁决结论见 Proposal 末节 |
+渲染视图是**视图不是真源**，不要提交。查单条直接读 `docs/backlog.d/<编号>.md`；查某个版本的排期
+读[版本计划](releases/)，那里才有优先级、依赖和退出条件。
 
 ## 维护规则
 
-- 一条一行，动机一句话，证据给指针；不粘贴过程，不在状态或备注中重复版本优先级和依赖。
-- 状态只用：`待排期`、`待裁决`、`已排期`、`实现中`、`已验证`；版本计划负责优先级、依赖和退出条件。
+- 一条目一个碎片文件；动机一句话，证据给指针；不粘贴过程，不在状态或备注中重复版本优先级和依赖。
+- **实现 MR 只改自己条目的碎片。** 不要顺手整理别人的碎片，不要把多个条目的状态合进一次编辑，
+  也不要以任何形式重新引入入库总表——这三条是碎片化能消除冲突的前提。
+- 状态只用：`待排期`、`待裁决`、`已排期`、`实现中`、`已验证`，外加发布收尾专用的 `待真机验收`
+  （由收尾人标注、`release_finalize` 消费，口径见[发版清单](release-checklist.md)第 10 节，日常 MR
+  不用）；design-gate 只用 `待裁决`、`已裁决`。版本计划负责优先级、依赖和退出条件。
 - `已验证` 的判据是**验收条件已被机检完全覆盖并跑绿**（CI 门禁、golden、包内测试）。版本计划的退出条件
   点名真机或接入方书面确认的条目，合入后只能记 `实现中`，直到证据到位——绿的单测不代表真机结论。
 - `待裁决` 条目必须同时引用 design-gate 和 Proposal；Proposal 状态不代表实施状态。
-- 完成 = 移入 CHANGELOG 对应版本段并删行；放弃 = 移入 design.md 非目标台账并写理由。
-- 延期 = 通过范围变更 MR 清除目标版本、标回 `待排期`，并保留未满足的证据指针。
+- 完成 = 移入 CHANGELOG 对应版本段并删除碎片；放弃 = 移入 design.md 非目标台账并写理由。
+- 延期 = 通过范围变更 MR 把 `target` 清成 `—`、`status` 标回 `待排期`，并保留未满足的证据指针。
 - 每个 MR 和发版前运行 `dart run tool/check_planning.dart`。

@@ -44,6 +44,16 @@
 
 完整规则和范围变更流程见 [`docs/planning.md`](docs/planning.md)。
 
+## backlog
+
+- 问题与特性台账是 `docs/backlog.d/` 下**一条目一个碎片文件**，不是一张大表。
+- 一个实现 MR 只改自己条目的碎片。不要顺手整理别人的碎片，不要把多个条目的状态合进一次编辑，
+  也不要以任何形式重新引入入库的总表（包括「工具生成、随 MR 提交」的版本）——这正是并行 MR 曾经
+  互相打红的成因。
+- 要看全表用 `dart run tool/backlog_render.dart` 按需现渲，看完即弃，不提交。
+- 字段、状态词表、编号前缀与文件名规则以 [`docs/backlog.d/README.md`](docs/backlog.d/README.md)
+  为准，由 `dart run tool/check_planning.dart` 机检。
+
 ## CHANGELOG
 
 - 用户可见行为随实现 MR 写入 `changelog.d/<target-version>/` 下的独占碎片；不同版本不得共享目录。

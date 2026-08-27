@@ -7,7 +7,8 @@
 
 | 文档 | 唯一负责 | 不得维护 |
 |---|---|---|
-| [backlog](backlog.md) | 条目编号、标题、动机、目标版本、实施状态、Proposal 指针 | 版本优先级、实施顺序、验收条件、技术方案正文 |
+| [backlog 碎片](backlog.d/README.md) | 条目编号、标题、动机、目标版本、实施状态、Proposal 指针 | 版本优先级、实施顺序、验收条件、技术方案正文 |
+| [backlog 入口](backlog.md) | 台账阅读入口、编号前缀与维护规则 | 条目行本身——它们住在 `backlog.d/` 碎片里 |
 | [当前版本计划](releases/0.5.0.md) | 版本目标、P0/P1/P2、依赖与实施顺序、版本验收和退出条件 | 条目实施状态、重复的条目标题、方案裁决正文 |
 | [Proposal](proposals/README.md) | API / wire、状态机、边界、兼容策略、资源预算、验证方案和设计裁决 | 排期优先级、实施进度、发布结果 |
 | [design.md](design.md) | 已接受且跨版本长期有效的设计立场 | 尚未裁决的方案和单版本排期 |
@@ -36,11 +37,24 @@
   -> 实现 MR（实现中）
   -> 验证完成（已验证）
   -> 发布 MR 聚合到 CHANGELOG
-  -> 发布完成后 finalize 从 backlog 删行
+  -> 发布完成后 finalize 删除该条目的 backlog 碎片
 ```
 
 范围、方案和实现允许在同一个 MR 中推进的前提是变更仍可独立评审且没有绕过裁决。存在未决
 design-gate 时，实现代码不得先行合入。
+
+## backlog 碎片
+
+台账是 `docs/backlog.d/` 下**一条目一个碎片文件**，不是一张入库的大表。理由与 `changelog.d/`
+相同：写入按条目独占，存储也必须按条目独占，否则并行 MR 改各自的状态行却落在同一文件的相邻行，
+三方合并稳定撞成 hunk 冲突。
+
+- **实现 MR 只改自己条目的碎片。** 不顺手整理别人的碎片，不把多个条目的状态合进一次编辑。
+- 不要以任何形式重新引入入库的总表（包括「由工具生成、随 MR 提交」的版本）：生成物同样会被每个
+  实现 MR 重写，冲突原样回来。要看全表用 `dart run tool/backlog_render.dart` 按需现渲，看完即弃。
+- 编号前缀决定种类（`PB` / `BUG` / `DOC` / `DG`），文件名必须与 frontmatter 的 `id` 一致。
+- 字段、状态词表、单行小节约束和链接前缀规则以 [`backlog.d/README.md`](backlog.d/README.md) 为准，
+  由 `check_planning` 机检。
 
 ## 什么时候必须写 Proposal
 
@@ -62,16 +76,16 @@ Proposal 必须使用[模板](proposals/_template.md)，并至少冻结：目标
 
 ## MR 规则
 
-1. 范围 MR 同时更新 backlog 和对应版本计划；不改变运行时行为，无需 CHANGELOG 碎片。
+1. 范围 MR 同时更新条目碎片和对应版本计划；不改变运行时行为，无需 CHANGELOG 碎片。
 2. Proposal MR 写 `Plan: PB-...` 和关联的 `DG-...`，不把“默认建议”当成已裁决事实。
 3. 实现 MR 必须引用已接受 Proposal；实现若偏离，先更新 Proposal 并重新评审。
-4. 范围延期先改版本计划，再清除 backlog 的目标版本；禁止只改其中一份。
-5. 发布 MR 聚合 CHANGELOG 并定版版本号，**不动 backlog 和版本计划状态**，也不回写 Proposal 的
+4. 范围延期先改版本计划，再把条目碎片的 `target` 清成 `—`；禁止只改其中一份。
+5. 发布 MR 聚合 CHANGELOG 并定版版本号，**不动 backlog 碎片和版本计划状态**，也不回写 Proposal 的
    实施状态。
-6. 发布收尾由 `tool/release_finalize.dart` 在**四包实际发布之后**执行：删除已完成 backlog 行、
+6. 发布收尾由 `tool/release_finalize.dart` 在**四包实际发布之后**执行：删除已完成条目的碎片、
    把版本计划标为已发布。它的产物走一个小 MR 合回 `main`（`main` 受保护，不接受直接推送）。
    顺序不能颠倒——finalize 会写下「已发布」，在包还没上 pub.dev 时执行等于替未发生的事实背书；
-   而四包是按依赖顺序逐个推、可能中途被拒的，先删行再发布会留下 backlog 已清空、版本却没发出去
+   而四包是按依赖顺序逐个推、可能中途被拒的，先删碎片再发布会留下台账已清空、版本却没发出去
    且无处回滚的悬空状态。
 
 ## 交付单元与 MR 颗粒度
@@ -118,17 +132,21 @@ MR 模板必须声明目标分支、依赖链和交付单元类型。评审时�
 仓根运行：
 
 ```console
-$ dart run tool/check_planning.dart
+$ dart run tool/check_planning.dart      # 结构 + 跨文档一致性，CI 门禁
+$ dart run tool/backlog_render.dart      # 按需渲染只读台账总表，不提交
 ```
 
 CI 会检查：
 
 - `AGENTS.md` 存在，`CLAUDE.md` 只包含 `@AGENTS.md`，防止 Agent 指令双真源；
-- backlog 的 PB / DG 编号唯一，实施状态属于封闭枚举；
-- backlog 中目标为当前版本的 PB 条目，在对应版本计划 P0/P1/P2 范围表中恰好出现一次；
+- 每个 backlog 碎片的文件名与 frontmatter `id` 一致（编号唯一由此保证），字段与正文小节都在封闭集
+  内、必填项齐全、小节单行且可渲染成表格单元格、仓内链接带 `../` 前缀；
+- 实施状态与目标版本属于封闭枚举（design-gate 另有自己的状态词表）；
+- 目标为当前版本的 PB 条目，在对应版本计划 P0/P1/P2 范围表中恰好出现一次；
 - 版本范围表不引用不存在的 PB，也不复制 backlog 的标题列；
-- backlog 中引用的 Proposal 和 design-gate 文件/编号存在；
-- 标记 `待裁决` 的条目必须同时引用 Proposal 和 design-gate。
+- 碎片中引用的 Proposal 和 design-gate 文件/编号存在，且 Proposal 声明了该编号；
+- 标记 `待裁决` 的条目必须同时引用 Proposal 和 design-gate；
+- `docs/backlog.md` 没有重新长出条目行——入库总表一旦回潮，碎片化消除的冲突会原样回来。
 - `release_prep` 另行检查当前文档的版本锚点、hosted 安装口径、中性示例与架构 SVG；历史区不参与
   当前版本漂移判定。
 
