@@ -2,7 +2,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/permission_command.dart';
+import 'package:patchbay_cli/src/permission_driver.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_resolver.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
 import 'package:test/test.dart';
 
 String _quoted(String value) => "'${value.replaceAll("'", "'\\''")}'";
@@ -89,7 +96,7 @@ Future<Map<String, Object?>> _runCli(
 }) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     arguments,
     output: out,
     errorOutput: err,

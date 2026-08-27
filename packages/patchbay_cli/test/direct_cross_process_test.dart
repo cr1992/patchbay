@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/rpc_timeout.dart';
 import 'package:test/test.dart';
 
 void main() {

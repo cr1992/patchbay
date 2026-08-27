@@ -1,6 +1,7 @@
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/android_permission_adapter.dart';
+import 'package:patchbay_cli/src/permission_platform_adapter.dart';
 
 Future<void> main() async {
   exitCode = await runPatchbayPermissionPlatformAdapter(

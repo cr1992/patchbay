@@ -3,7 +3,15 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/doctor/doctor_checks.dart';
+import 'package:patchbay_cli/src/doctor/doctor_models.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/rpc_timeout.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -64,7 +72,7 @@ void main() {
   }) async {
     final StringBuffer out = StringBuffer();
     final StringBuffer err = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>['--session-dir', directory.path, ...arguments],
       connect:
           connect ?? (_) async => fail('this run must not need a connection'),
@@ -542,7 +550,7 @@ void main() {
       final StringBuffer out = StringBuffer();
       final StringBuffer err = StringBuffer();
 
-      await runPatchbayCli(
+      await runPatchbayCliWithSeams(
         <String>['--session-dir', directory.path, 'repl'],
         connect: (_) async => _healthyClient(),
         replInput: Stream<String>.fromIterable(<String>['doctor']),
@@ -568,7 +576,7 @@ void main() {
       store.write(_record('worktree-a'));
       final StringBuffer out = StringBuffer();
       final StringBuffer err = StringBuffer();
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>['--session-dir', directory.path, '--json', 'repl'],
         connect: (_) async => client,
         replInput: Stream<String>.fromIterable(lines),

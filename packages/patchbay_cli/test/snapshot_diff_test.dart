@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/direct_connection.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:patchbay_transport/patchbay_transport.dart';
 import 'package:test/test.dart';
 
@@ -11,7 +13,7 @@ Future<({int exitCode, Map<String, Object?> response})> _run(
   FakePatchbayClient client,
 ) async {
   final StringBuffer out = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     <String>['--json', 'snapshot', 'diff', '--from', '7'],
     connect: (_) async => client,
     output: out,

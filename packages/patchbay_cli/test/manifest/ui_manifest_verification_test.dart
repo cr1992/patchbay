@@ -1,5 +1,8 @@
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/manifest/manifest_models.dart';
+import 'package:patchbay_cli/src/manifest/manifest_report.dart';
+import 'package:patchbay_cli/src/manifest/manifest_verifier.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 import '../fixture/fake_client.dart';

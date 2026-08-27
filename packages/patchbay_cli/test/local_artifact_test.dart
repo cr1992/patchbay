@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/artifact_download.dart';
 import 'package:patchbay_cli/src/output/local_artifact.dart';
+import 'package:patchbay_cli/src/registry/command_spec.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 /// A minimal [PatchbayFriendlyCommandSpec] the test controls directly,

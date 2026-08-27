@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/trace/trace_models.dart';
+import 'package:patchbay_cli/src/trace/trace_store.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -58,7 +61,7 @@ void main() {
   }) async {
     final StringBuffer out = StringBuffer();
     final StringBuffer err = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       args,
       connect: (_) async => client,
       output: out,
@@ -434,7 +437,7 @@ void main() {
         activate: true,
       );
       final StringBuffer out = StringBuffer();
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>['--trace-dir', store.root.path, '--json', 'repl'],
         connect: (_) async => semanticsTreeClient(bigSemanticsTreePayload()),
         replInput: Stream<String>.fromIterable(<String>['ui semantics tree']),
@@ -484,7 +487,7 @@ void main() {
         cliVersion: 'test',
         activate: true,
       );
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>['--trace-dir', store.root.path, '--json', 'repl'],
         connect: (_) async =>
             semanticsTreeClient(bigSemanticsTreePayload(nodeCount: 1)),

@@ -1,5 +1,6 @@
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/performance_profile.dart';
 
 /// One recorded call against the fake connection.
 typedef FakeInvocation = ({

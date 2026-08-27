@@ -1,5 +1,5 @@
-import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:patchbay_cli/src/output/output_formatter.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 void main() {

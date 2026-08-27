@@ -2,7 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/rpc_timeout.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -144,7 +148,7 @@ final class _Run {
 Future<_Run> _run(List<String> arguments, PatchbayClient client) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     arguments,
     connect: (_) async => client,
     output: out,

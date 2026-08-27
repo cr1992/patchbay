@@ -1,8 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
 import 'package:patchbay_cli/src/output/local_artifact.dart';
+import 'package:patchbay_cli/src/repl.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 /// The URI path segment a VM Service record carries as its auth token.
@@ -43,7 +50,7 @@ void main() {
   Future<_Run> run(List<String> arguments) async {
     final StringBuffer out = StringBuffer();
     final StringBuffer err = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>['--session-dir', directory.path, ...arguments],
       connect: (_) async =>
           fail('a session-directory command must not dial the App'),
