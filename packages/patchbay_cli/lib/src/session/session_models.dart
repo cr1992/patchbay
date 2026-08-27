@@ -563,12 +563,15 @@ final class PatchbaySessionListing {
   /// what turns that inventory into an answer about *here*.
   final PatchbayWorkspaceAffinity workspaceAffinity;
 
-  /// `true` when [status] was decided on the PID alone: [record] predates
-  /// process-launch-identity capture (PB-050-18), or the OS declined to
-  /// answer the current start-time probe. Always `false` when the record's
-  /// process-launch identity was actually compared — including when that
-  /// comparison is what produced [PatchbaySessionStatus.stale] for a
-  /// PID-reuse collision, which is a definite answer, not an unverified one.
+  /// `true` when [status] was decided on less than a full launch-identity
+  /// comparison: [record] predates process-launch-identity capture
+  /// (PB-050-18), the OS declined to answer the current start-time probe,
+  /// or — since BUG-20260827-01 — the PID probe itself could not be run at
+  /// all, which is the standing condition on a host with no `procps` and no
+  /// procfs. Always `false` when the record's process-launch identity was
+  /// actually compared — including when that comparison is what produced
+  /// [PatchbaySessionStatus.stale] for a PID-reuse collision, which is a
+  /// definite answer, not an unverified one.
   final bool identityUnverified;
 
   /// One printable line. URI-free by construction.
@@ -612,7 +615,15 @@ final class PatchbaySessionPruneResult {
 
 typedef PatchbayIdentityProbe =
     Future<PatchbayRuntimeIdentity> Function(Uri uri);
-typedef PatchbayPidProbe = bool Function(int processId);
+
+/// Answers "is this PID running?" in three states, not two.
+///
+/// `null` means the OS was never actually asked -- the probing tool is
+/// missing, or the query failed for a reason that says nothing about the
+/// process. It must degrade to "cannot verify", never to "dead": reading it
+/// as dead is what let a container image without `procps` (no `kill`, no
+/// `ps`) report every live session stale and delete its record.
+typedef PatchbayPidProbe = bool? Function(int processId);
 
 typedef PatchbaySessionClock = DateTime Function();
 

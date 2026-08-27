@@ -48,6 +48,7 @@ void main() {
         4242,
         runner: fake,
         isWindows: false,
+        isLinux: false,
       );
       expect(alive, isTrue);
       expect(fake.executedSync, hasLength(1));
@@ -64,11 +65,18 @@ void main() {
         9999,
         runner: fake,
         isWindows: false,
+        isLinux: false,
       );
+      // `kill` ran and answered. That is a real verdict, not a shrug.
       expect(alive, isFalse);
     });
 
-    test('POSIX: returns false on ProcessException', () {
+    test('POSIX: returns null -- not false -- when `kill` is not on PATH', () {
+      // The regression this guards: Debian/Ubuntu `-slim`, distroless and
+      // most language base images (`dart:stable` included) ship no `procps`,
+      // so `kill` does not exist and `Process.runSync` throws. Answering
+      // `false` there declared every live session stale and deleted its
+      // record.
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) => throw const ProcessException('kill', []),
       );
@@ -76,8 +84,9 @@ void main() {
         9999,
         runner: fake,
         isWindows: false,
+        isLinux: false,
       );
-      expect(alive, isFalse);
+      expect(alive, isNull);
     });
 
     test('Windows: uses tasklist and regex matches PID in output', () {
@@ -119,6 +128,146 @@ void main() {
         expect(alive, isFalse);
       },
     );
+
+    test('Windows: a non-zero tasklist exit is inconclusive, not dead', () {
+      // A filtered `tasklist` says "no such task" on stdout and still exits
+      // 0, so a non-zero exit is `tasklist` failing -- it says nothing about
+      // the process. Nano Server images have no tasklist.exe at all.
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) => ProcessResult(123, 1, '', 'ERROR'),
+      );
+      expect(
+        PlatformProcessUtils.isProcessAlive(
+          4242,
+          runner: fake,
+          isWindows: true,
+        ),
+        isNull,
+      );
+      expect(
+        PlatformProcessUtils.isProcessAlive(
+          4242,
+          runner: FakeProcessRunner(
+            syncHandler: (exe, args) =>
+                throw const ProcessException('tasklist', []),
+          ),
+          isWindows: true,
+        ),
+        isNull,
+      );
+    });
+  });
+
+  group('PlatformProcessUtils.isProcessAlive: Linux procfs', () {
+    late Directory procRoot;
+
+    setUp(() {
+      procRoot = Directory.systemTemp.createTempSync('patchbay-fake-proc-');
+      Directory('${procRoot.path}/self').createSync();
+    });
+
+    tearDown(() {
+      if (procRoot.existsSync()) procRoot.deleteSync(recursive: true);
+    });
+
+    ProcessResult refuse(String exe, List<String> args) =>
+        fail('procfs answered; no subprocess should have been spawned');
+
+    test('an existing /proc/<pid> is alive, with no subprocess at all', () {
+      Directory('${procRoot.path}/4242').createSync();
+      final fake = FakeProcessRunner(syncHandler: refuse);
+
+      expect(
+        PlatformProcessUtils.isProcessAlive(
+          4242,
+          runner: fake,
+          isWindows: false,
+          isLinux: true,
+          procRoot: procRoot.path,
+        ),
+        isTrue,
+      );
+      // The point of the procfs path is not only correctness on hosts with
+      // no `procps`: it also removes a fork/exec per record per command.
+      expect(fake.executedSync, isEmpty);
+    });
+
+    test('a missing /proc/<pid> is dead -- PID-reuse pruning still works', () {
+      expect(
+        PlatformProcessUtils.isProcessAlive(
+          2147483647,
+          runner: FakeProcessRunner(syncHandler: refuse),
+          isWindows: false,
+          isLinux: true,
+          procRoot: procRoot.path,
+        ),
+        isFalse,
+      );
+    });
+
+    test('no procfs mounted falls back to `kill`, never to "dead"', () {
+      // A chroot or sandbox can leave `<procRoot>` absent or empty. Reading
+      // that as "every PID is dead" is exactly the failure mode being fixed,
+      // so the guard is `<procRoot>/self`, not `<procRoot>`.
+      final Directory empty = Directory.systemTemp.createTempSync(
+        'patchbay-empty-proc-',
+      );
+      addTearDown(() => empty.deleteSync(recursive: true));
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) => ProcessResult(123, 0, '', ''),
+      );
+
+      expect(
+        PlatformProcessUtils.isProcessAlive(
+          4242,
+          runner: fake,
+          isWindows: false,
+          isLinux: true,
+          procRoot: empty.path,
+        ),
+        isTrue,
+      );
+      expect(fake.executedSync.single.executable, 'kill');
+    });
+
+    test('the real /proc agrees with this process being alive', () {
+      if (!Platform.isLinux) return;
+      expect(PlatformProcessUtils.isProcessAlive(pid), isTrue);
+      expect(PlatformProcessUtils.isProcessAlive(2147483647), isFalse);
+    });
+  });
+
+  group('against a real OS process, on whatever this platform is', () {
+    // The fakes above pin the branching; this pins the thing the branching is
+    // supposed to be *about*. Whichever mechanism this platform ends up using
+    // -- procfs, `kill`, `tasklist` -- it has to get both directions right on
+    // a process the test itself controls, or `sessions list`/`prune`/resolve
+    // are deciding a session's fate on a fiction.
+    test('a running child is alive, and a reaped one is not', () async {
+      if (Platform.isWindows) return;
+      final Process child = await Process.start('/bin/sleep', <String>['30']);
+      addTearDown(() {
+        child.kill(ProcessSignal.sigkill);
+      });
+
+      expect(
+        PlatformProcessUtils.isProcessAlive(child.pid),
+        isTrue,
+        reason: 'a child that has not exited must never be reported dead',
+      );
+
+      child.kill(ProcessSignal.sigkill);
+      await child.exitCode; // reaped: the PID is genuinely gone now
+      expect(
+        PlatformProcessUtils.isProcessAlive(child.pid),
+        isFalse,
+        reason: 'pruning still has to be able to see a dead process',
+      );
+    });
+
+    test('this process can always see itself', () {
+      expect(PlatformProcessUtils.isProcessAlive(pid), isTrue);
+    });
   });
 
   group('PlatformProcessUtils.processStartTimeSignature', () {

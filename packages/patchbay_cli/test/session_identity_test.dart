@@ -3,6 +3,10 @@
 /// 覆盖三件事：PID 复用（同 PID 存活但启动时间不同）必须判死；启动身份采集不到时必须
 /// 降级成旧的纯 PID 判定，而不是 fail-closed 杀掉一个其实还活着的会话；旧记录（没有
 /// `processStartTime` 字段）在诊断输出里标注 `identityUnverified`，但存活判断完全不变。
+///
+/// BUG-20260827-01 追加第四件：PID 探测本身也可能问不到（没有 `procps` 的镜像里
+/// `kill` 根本不是可执行文件）。那种「没问到」必须与「问到了，进程不在」区分开，
+/// 同样降级成 unverified——把两者压成一个 `false` 会让这类主机上的每条记录都被删。
 library;
 
 import 'dart:io';
@@ -150,6 +154,93 @@ void main() {
         expect(listing.identityUnverified, isTrue);
         expect(listing.label, contains('identityUnverified'));
         expect(listing.toJson()['identityUnverified'], isTrue);
+      },
+    );
+  });
+
+  group('PID probe cannot answer, so nothing may be concluded', () {
+    // BUG-20260827-01. `PlatformProcessUtils.isProcessAlive` used to collapse
+    // "the OS says no" and "there is no `kill` on PATH" into the same `false`.
+    // On any image without `procps` -- `dart:stable`, Debian/Ubuntu `-slim`,
+    // distroless -- that made every command report `sessionStaleProcess` and
+    // delete a record whose App was running the whole time.
+    test('an unanswerable PID stays alive, flagged unverified', () async {
+      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+
+      final resolved = await PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => null,
+        // Must never be consulted: with no verdict on the PID there is
+        // nothing for a launch signature to be a signature *of*.
+        processStartTimeProbe: (_) =>
+            fail('the start-time probe must not run without a PID verdict'),
+        identityProbe: (_) async => _identity(),
+      ).resolve();
+
+      expect(resolved.record.sessionId, 'unanswerable');
+      expect(store.readAll(), hasLength(1));
+    });
+
+    test('inventory() reports it live and unverified, never stale', () {
+      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => null,
+        processStartTimeProbe: (_) => 'launch-b',
+      ).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.live);
+      expect(listing.identityUnverified, isTrue);
+    });
+
+    test('prune() does not delete a record it could not judge', () {
+      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+
+      final PatchbaySessionPruneResult result = PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => null,
+      ).prune();
+
+      expect(result.removed, isEmpty);
+      expect(store.readAll(), hasLength(1));
+    });
+
+    test('select() still pins it rather than refusing', () {
+      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => null,
+      ).select('unanswerable');
+
+      expect(listing.identityUnverified, isTrue);
+      expect(store.readSelectionFor(_workspace), 'unanswerable');
+    });
+
+    test(
+      'a definite "not running" is still stale -- the guard is not weakened',
+      () {
+        store.write(_record('really-dead', processStartTime: 'launch-a'));
+
+        expect(
+          () => PatchbaySessionResolver(
+            store: store,
+            workspaceProbe: () => _workspace,
+            workspaceIdentityAt: (_) => null,
+            pidProbe: (_) => false,
+          ).select('really-dead'),
+          throwsA(_sessionError('sessionStaleProcess')),
+        );
+        expect(store.readAll(), isEmpty);
       },
     );
   });

@@ -226,12 +226,25 @@ final class PatchbaySessionResolver {
   /// [_ProcessIdentityCheck.identityUnverified] for diagnostics only. The
   /// same degrade applies when the OS declines to answer the current probe:
   /// this never fails closed and kills a session it merely could not verify.
+  ///
+  /// The PID probe itself gets that same treatment. It is a three-state
+  /// answer ([PatchbayPidProbe]), and "the OS was never asked" -- no `kill`
+  /// or `tasklist` on `PATH`, which is the normal state of a slim container
+  /// image -- must degrade to unverified, not to dead. Reading it as dead is
+  /// what made every session on such a host report `sessionStaleProcess` and
+  /// lose its record.
   _ProcessIdentityCheck _checkProcessIdentity(PatchbaySessionRecord record) {
-    if (!_pidProbe(record.processId)) {
+    final bool? running = _pidProbe(record.processId);
+    if (running == false) {
       return const _ProcessIdentityCheck(
         alive: false,
         identityUnverified: false,
       );
+    }
+    if (running == null) {
+      // Nothing was learned about the PID, so nothing can be concluded about
+      // the launch identity sitting on top of it either.
+      return const _ProcessIdentityCheck(alive: true, identityUnverified: true);
     }
     final String? expected = record.processStartTime;
     if (expected == null) {
@@ -394,7 +407,7 @@ final class PatchbaySessionResolver {
     }
   }
 
-  static bool _isProcessAlive(int processId) =>
+  static bool? _isProcessAlive(int processId) =>
       PlatformProcessUtils.isProcessAlive(processId);
 
   static String? _probeProcessStartTime(int processId) =>
