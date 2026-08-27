@@ -97,6 +97,8 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay permission reset <permission>` | local 显式声明 | — |
 | `patchbay permission status <permission>` | local 显式声明 | — |
 | `patchbay repl` | client 显式声明 | — |
+| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local 显式声明 | — |
+| `patchbay session unregister <session-id>` | local 显式声明 | — |
 | `patchbay session use <session-id> \| --clear` | local 显式声明 | — |
 | `patchbay sessions list` | local 显式声明 | — |
 | `patchbay sessions prune` | local 显式声明 | — |

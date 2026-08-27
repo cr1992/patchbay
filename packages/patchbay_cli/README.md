@@ -104,6 +104,8 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay permission reset <permission>` | local CLI declaration | — |
 | `patchbay permission status <permission>` | local CLI declaration | — |
 | `patchbay repl` | client CLI declaration | — |
+| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local CLI declaration | — |
+| `patchbay session unregister <session-id>` | local CLI declaration | — |
 | `patchbay session use <session-id> \| --clear` | local CLI declaration | — |
 | `patchbay sessions list` | local CLI declaration | — |
 | `patchbay sessions prune` | local CLI declaration | — |

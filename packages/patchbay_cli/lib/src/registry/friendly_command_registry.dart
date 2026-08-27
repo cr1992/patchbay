@@ -135,6 +135,12 @@ abstract final class FriendlyCommandRegistryResolver {
           }),
         PatchbayFriendlyCommand.sessionUse =>
           ArgumentDecoder.sessionUseArguments(tail, options),
+        PatchbayFriendlyCommand.sessionRegister =>
+          ArgumentDecoder.sessionRegisterArguments(tail, options),
+        PatchbayFriendlyCommand.sessionUnregister => ArgumentDecoder.oneTail(
+          tail,
+          (String sessionId) => <String, Object?>{'sessionId': sessionId},
+        ),
         PatchbayFriendlyCommand.permissionStatus ||
         PatchbayFriendlyCommand.permissionReset => ArgumentDecoder.oneTail(
           tail,
@@ -380,6 +386,14 @@ abstract final class FriendlyCommandRegistryResolver {
           <String>['sessions', 'use'],
           <String>['session', 'use'],
         ),
+        const _PathAlias(
+          <String>['sessions', 'register'],
+          <String>['session', 'register'],
+        ),
+        const _PathAlias(
+          <String>['sessions', 'unregister'],
+          <String>['session', 'unregister'],
+        ),
         const _PathAlias(<String>['navigate'], <String>['navigation']),
         const _PathAlias(<String>['nav'], <String>['navigation']),
         const _PathAlias(<String>['wait'], <String>['ui', 'wait']),
@@ -456,6 +470,8 @@ abstract final class FriendlyCommandRegistryResolver {
       'permission-driver',
       'device-id',
       'application-id',
+      'process-id',
+      'build-mode',
       'state',
       'decision',
       'confirm-system-permission',
@@ -595,6 +611,19 @@ abstract final class FriendlyCommandRegistryResolver {
       },
       PatchbayFriendlyCommand.snapshotDiff => const <String>{'from'},
       PatchbayFriendlyCommand.sessionUse => const <String>{'clear'},
+      // `--ws-uri` is a *recorded* value here, not a dialled one: the whole
+      // command is a local write to the session directory. It is deliberately
+      // absent from `friendlyOptions` below, because that list is a
+      // reject-everywhere-else list and `--ws-uri` is legal on every command
+      // that actually connects.
+      PatchbayFriendlyCommand.sessionRegister => const <String>{
+        'ws-uri',
+        'application-id',
+        'device-id',
+        'process-id',
+        'build-mode',
+      },
+      PatchbayFriendlyCommand.sessionUnregister => const <String>{},
       // `uiSemanticsTree` is never matched (see the comment on its
       // declaration in friendly_commands.dart); `exec`'s options cover the
       // stub too so a future un-deprecation would not need to change this.

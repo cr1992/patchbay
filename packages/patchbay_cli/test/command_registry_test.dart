@@ -210,7 +210,8 @@ void main() {
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
           PatchbayFriendlyCommand.snapshotDiff => const <String>[],
-          PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
+          PatchbayFriendlyCommand.sessionUse ||
+          PatchbayFriendlyCommand.sessionUnregister => <String>['worktree-a'],
           PatchbayFriendlyCommand.permissionStatus ||
           PatchbayFriendlyCommand.permissionReset ||
           PatchbayFriendlyCommand.permissionNormalize ||
@@ -312,6 +313,16 @@ void main() {
         if (spec == PatchbayFriendlyCommand.permissionExercise) ...<String>[
           '--decision',
           'deny',
+        ],
+        if (spec == PatchbayFriendlyCommand.sessionRegister) ...<String>[
+          '--ws-uri',
+          'ws://127.0.0.1:1/ws',
+          '--application-id',
+          'com.example.app',
+          '--device-id',
+          'fixture-device',
+          '--process-id',
+          '4242',
         ],
         if (spec == PatchbayFriendlyCommand.uiTargets) '--emit-manifest',
         if (spec == PatchbayFriendlyCommand.traceStart) ...<String>[

@@ -172,6 +172,24 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     usageSuffix: '<session-id> | --clear',
     target: PatchbayCommandTarget.localSessionStore,
   ),
+  sessionRegister(
+    null,
+    <String>['session', 'register'],
+    summary:
+        'Record an App this checkout started itself, so later commands '
+        'discover it without --ws-uri.',
+    usageSuffix:
+        '--ws-uri <uri> --application-id <id> --device-id <id> '
+        '--process-id <pid> [<session-id>]',
+    target: PatchbayCommandTarget.localSessionStore,
+  ),
+  sessionUnregister(
+    null,
+    <String>['session', 'unregister'],
+    summary: 'Remove one session record by id, without dialling the App.',
+    usageSuffix: '<session-id>',
+    target: PatchbayCommandTarget.localSessionStore,
+  ),
   traceStart(
     null,
     <String>['trace', 'start'],
