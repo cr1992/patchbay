@@ -1,6 +1,7 @@
 # 公开仓 CI 门禁：四个 job 与 GitLab .gitlab-ci.yml 的四检查项一一对应
 # （sdk_floor / dart_packages / flutter_package / codegen_drift），两边改动需同步。
-# Flutter 版本与 GitLab CI 镜像 flutter-node:3.44.9 对齐。
+# Flutter 版本（上界）与 GitLab CI 镜像 flutter-node:3.44.9 对齐；sdk_floor 跑的是
+# pubspec 声明的下限 3.44.0，两个数字不是同一件事，见 docs/compat-matrix.md。
 name: CI
 
 on:
@@ -18,10 +19,12 @@ concurrency:
 
 env:
   FLUTTER_VERSION: '3.44.9'
-  # PB-050-12：声明的 Flutter 下限（>=3.38.0）与 Dart 下限（>=3.11.0）无法在同一个真实
-  # release 上同时成立（3.38.x 全系只内置 Dart 3.10.x）；两个约束共同要求的最早可安装
-  # release 是 3.41.0。详情见 docs/verification/0.5.0-flutter-sdk-floor.md。
-  SDK_FLOOR_FLUTTER_VERSION: '3.41.0'
+  # PB-050-12：pubspec 声明的 SDK 下限，由 sdk_floor job 守门。旧声明
+  # （Flutter >=3.38.0 + Dart >=3.11.0）指向一个装不出来的组合（3.38.x 全系只内置
+  # Dart 3.10.x）；最早可安装的 3.41.x 又缺 Flutter 上游提交 af35e77c83d，导致
+  # ui.reveal 的遮挡判定 fail-open。含该修复的第一个 stable 是 3.44.0，实测五包全绿。
+  # 事实链与裁决见 docs/proposals/0.5.0/sdk-floor-raise.md。
+  SDK_FLOOR_FLUTTER_VERSION: '3.44.0'
 
 jobs:
   dart_packages:
@@ -95,14 +98,13 @@ jobs:
   # sdk_floor 因为实测在 GitLab 共享 runner 上和其余三条 job 抢 CPU/内存/磁盘 I/O、
   # 顶爆过 dart_packages 的一个 30s 超时用例，被挪到了排在 check 之后的独立 stage）。
   #
-  # continue-on-error：截至本次调查，3.41.0 在本地 macOS arm64 复现下未能通过既有的
-  # reveal 终止条件矩阵一条断言，且未在 Linux 上复核过。结论明朗前先非阻断跑，取得
-  # 该组合在真实 CI 平台上的第一手数据，不用一个还没坐实的失败卡住其余三条 job。
+  # 本 job 是**已验证下限的守门**：跑的版本就是 pubspec 声明的下限，跑红即代表声明下限
+  # 不再成立，必须阻断——因此没有 continue-on-error。修复方向只有「修代码让下限重新
+  # 成立」或「再走一次 Proposal 调整下限数字」，不允许挂回 continue-on-error 消音。
   sdk_floor:
     needs: [dart_packages, flutter_package, codegen_drift]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -110,5 +112,5 @@ jobs:
           flutter-version: ${{ env.SDK_FLOOR_FLUTTER_VERSION }}
           channel: stable
           cache: true
-      - name: 最低可安装 Flutter / Dart 组合
+      - name: 已验证的最低 Flutter / Dart 组合
         run: ./tool/verify_sdk_floor.sh

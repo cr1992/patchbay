@@ -1,5 +1,5 @@
-# Patchbay 独立仓 CI：全仓排版 + 四包 analyze + test + 生成物零漂移，外加一条非阻断的
-# 最低 SDK 探测 lane。
+# Patchbay 独立仓 CI：全仓排版 + 四包 analyze + test + 生成物零漂移，外加一条守住已验证
+# SDK 下限的 lane。
 # 双 CI 并行：GitLab（本文件）+ GitHub Actions（.github/workflows/ci.yml，公开仓协作门禁），
 # 四 job 两边一一对应，改动需同步。
 
@@ -12,28 +12,28 @@ default:
 
 stages: [check, sdk_floor_check]
 
-# PB-050-12：声明的 Flutter 下限（>=3.38.0）与 Dart 下限（>=3.11.0）无法在同一个真实
-# Flutter release 上同时成立——3.38.x 全系只内置 Dart 3.10.x。两个约束共同要求的最早
-# 可安装 Flutter release 是 3.41.0（内置 Dart 3.11.0），这条 lane 只解压这一份
-# SHA-256 固定的 archive 并把它插到 PATH 最前面验证，不改变默认镜像的 3.44.9 全局
-# SDK，也不影响开发者本地 Flutter。
+# PB-050-12：**已验证下限的守门 lane。** 它跑的版本就是 pubspec 声明的下限
+# （Flutter 3.44.0 / Dart 3.12.0），只解压这一份 SHA-256 固定的 archive 并把它插到
+# PATH 最前面验证，不改变默认镜像的 3.44.9 全局 SDK，也不影响开发者本地 Flutter。
+# 跑红即代表声明下限不再成立，必须阻断——修复方向只有「修代码让下限重新成立」或
+# 「再走一次 Proposal 调整下限数字」，不允许重新挂上 allow_failure 消音。
+#
+# 下限为什么是 3.44.0：旧声明（Flutter >=3.38.0 + Dart >=3.11.0）指向一个装不出来的
+# 组合（3.38.x 全系只内置 Dart 3.10.x）；最早可安装的 3.41.x 又缺 Flutter 上游提交
+# af35e77c83d，在那之前 Semantics(identifier:) 不构成语义边界，导致 ui.reveal 的遮挡
+# 判定 fail-open。含该修复的第一个 stable 就是 3.44.0，且实测五个包全绿。完整事实链
+# 与裁决见 docs/proposals/0.5.0/sdk-floor-raise.md。
 #
 # 独立 stage、排在 check 之后：GitLab 同 stage 默认并行调度，实测证明这条 lane 拉取
 # 解压 2.2GB archive 再对五个包 analyze+test（约 8m26s）会在同一 runner 上和 check
 # stage 的三条 job 抢 CPU/内存/磁盘 I/O，曾把 dart_packages 里一个平时稳定的 30s
 # 超时用例顶爆（pipeline 6005 实测复现）。放进之后一个 stage 是为了让它在其余三条
 # 跑完、runner 上没有并发负载之后再起跑，不是为了排队等它们“批准”。
-#
-# allow_failure：截至本次调查，3.41.0 在本地 macOS arm64 复现下未能通过既有的
-# reveal 终止条件矩阵一条断言（详情见 docs/verification/0.5.0-flutter-sdk-floor.md）；
-# 该复现还没有在 Linux 上复核过，是否同样失败仍待这条 lane 的真实结果确认。在结论
-# 明朗前先非阻断跑，避免用一个还没坐实是否可稳定复现的失败卡住其余三条 lane。
 sdk_floor:
   stage: sdk_floor_check
-  allow_failure: true
   variables:
-    SDK_FLOOR_ARCHIVE_URL: https://storage.flutter-io.cn/flutter_infra_release/releases/stable/linux/flutter_linux_3.41.0-stable.tar.xz
-    SDK_FLOOR_ARCHIVE_SHA256: 368ae5b6993c51861324e704c42d61c4e290fba7213a88fd0e9fec15ded54599
+    SDK_FLOOR_ARCHIVE_URL: https://storage.flutter-io.cn/flutter_infra_release/releases/stable/linux/flutter_linux_3.44.0-stable.tar.xz
+    SDK_FLOOR_ARCHIVE_SHA256: e1ec95e6c550458a34de93580cb85dac24da0e9bedb9bb42811f050ac5a0c7d5
     SDK_FLOOR_ARCHIVE_PATH: $CI_PROJECT_DIR/.ci/flutter-sdk-floor.tar.xz
     SDK_FLOOR_FLUTTER_DIR: $CI_PROJECT_DIR/.ci/flutter
   script:

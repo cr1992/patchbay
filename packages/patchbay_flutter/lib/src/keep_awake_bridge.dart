@@ -60,17 +60,13 @@ typedef PatchbayKeepAwakeDelegate = FutureOr<void> Function(bool enabled);
 /// back.
 final class PatchbayKeepAwakeBridge {
   PatchbayKeepAwakeBridge({
-    required PatchbayGateEvaluator gates,
-    required bool Function() isAppResumed,
-    required PatchbayLifecycleStateReader lifecycleState,
-    PatchbayKeepAwakeDelegate? delegate,
+    required this._gates,
+    required this._isAppResumed,
+    required this._lifecycleState,
+    this._delegate,
     Set<String> gateIds = const <String>{},
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _isAppResumed = isAppResumed,
-       _lifecycleState = lifecycleState,
-       _delegate = delegate,
-       gateIds = Set<String>.unmodifiable(gateIds),
+  }) : gateIds = Set<String>.unmodifiable(gateIds),
        _newRequestId = newRequestId ?? _defaultRequestId;
 
   /// The lease an engagement takes when the caller names none.
