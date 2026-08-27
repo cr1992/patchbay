@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../platform/process_utils.dart';
 import 'session_models.dart';
+import 'session_store_seam.dart';
 import 'workspace_identity.dart';
 
 final class PatchbaySessionStore {
@@ -317,6 +318,10 @@ final class PatchbaySessionStore {
     );
     try {
       temporary.writeAsStringSync(contents, flush: true);
+      // The only window where a crash can be observed from outside: the new
+      // content exists, and nothing at `target` has changed yet. See
+      // `session_store_seam.dart` -- always null outside tests.
+      patchbayAtomicWriteInterrupt?.call(target);
       temporary.renameSync(target);
     } finally {
       if (temporary.existsSync()) temporary.deleteSync();

@@ -80,6 +80,62 @@ void main() {
       },
     );
 
+    test(
+      'an explicit --session never re-homes the record it reaches',
+      () async {
+        // The red line of the whole feature, seen from the write side. Crossing
+        // checkouts explicitly completes a real handshake, and a handshake
+        // proves the App is alive -- never that it belongs *here*. Backfilling
+        // the workspace triple off the back of one would silently annex another
+        // checkout's session, after which every later command in this checkout
+        // would pick it up implicitly, with no `--session` and no warning.
+        store.write(_legacyRecord('unprovable', workspacePath: '/moved/away'));
+        store.write(_record('declared', workspace: _there));
+
+        final PatchbaySessionResolver resolver = _resolver(
+          store,
+          identityAt: (_) => null,
+        );
+        expect(
+          (await resolver.resolve(sessionId: 'unprovable')).record.workspaceId,
+          isNull,
+        );
+        expect(
+          (await resolver.resolve(sessionId: 'declared')).record.workspaceId,
+          _there.workspaceId,
+        );
+
+        // A legacy record stays legacy: unproven membership is not upgraded by
+        // being reached, only by being provable.
+        final PatchbaySessionRecord unprovable = _storedRecord('unprovable');
+        expect(unprovable.workspaceId, isNull);
+        expect(unprovable.workspaceKind, isNull);
+        expect(unprovable.workspaceIdentityVersion, isNull);
+        expect(unprovable.workspacePath, '/moved/away');
+        expect(
+          (jsonDecode(_fileOf('unprovable')) as Map<String, Object?>)
+              .containsKey('workspaceId'),
+          isFalse,
+        );
+
+        // And a record that already names another checkout keeps naming it.
+        expect(_storedRecord('declared').workspaceId, _there.workspaceId);
+        expect(_storedRecord('declared').workspacePath, _there.canonicalRoot);
+
+        // Neither one became implicitly selectable here.
+        await expectLater(
+          resolver.resolve(),
+          throwsA(
+            isA<PatchbaySessionException>().having(
+              (e) => e.code,
+              'code',
+              'sessionWorkspaceEmpty',
+            ),
+          ),
+        );
+      },
+    );
+
     test('a moved workspace path degrades to unverified, not to current', () {
       store.write(_legacyRecord('legacy', workspacePath: '/moved/away'));
 
@@ -207,6 +263,52 @@ void main() {
           ),
         ),
       );
+    });
+
+    // The three tests above hand `adoptable` in as a constant, which pins the
+    // store's half of the contract but says nothing about the predicate the
+    // resolver actually supplies. These drive the real one: reading
+    // `selection` is what triggers the one-shot migration.
+    test('the resolver refuses to adopt a pin naming a foreign record', () {
+      store.write(_record('elsewhere', workspace: _there));
+      store.writeLegacyGlobalSelection('elsewhere');
+
+      expect(_resolver(store).selection, isNull);
+
+      // Retired, never adopted -- and the record it named is untouched.
+      expect(store.readSelectionFor(_here), isNull);
+      expect(store.readLegacyGlobalSelection(), isNull);
+      expect(store.readAll().single.sessionId, 'elsewhere');
+    });
+
+    test('the resolver refuses to adopt a pin it cannot prove', () {
+      store.write(_legacyRecord('legacy', workspacePath: '/moved/away'));
+      store.writeLegacyGlobalSelection('legacy');
+
+      // Unprovable is not "probably ours": inheriting a global pin on a
+      // record whose path no longer recomputes is exactly the cross-checkout
+      // misdirection the retirement exists to end.
+      expect(_resolver(store, identityAt: (_) => null).selection, isNull);
+      expect(store.readSelectionFor(_here), isNull);
+    });
+
+    test('the resolver adopts a pin whose record proves it belongs here', () {
+      store.write(
+        _legacyRecord('legacy', workspacePath: '/canonical/here/sub'),
+      );
+      store.writeLegacyGlobalSelection('legacy');
+
+      // The control for the two above: the predicate is not a constant `false`
+      // either -- a provable record still keeps its pin across the upgrade.
+      expect(
+        _resolver(
+          store,
+          identityAt: (String path) =>
+              path == '/canonical/here/sub' ? _here : null,
+        ).selection,
+        'legacy',
+      );
+      expect(store.readSelectionFor(_here), 'legacy');
     });
 
     test('the scoped pin is never written back to the global file', () {
@@ -400,6 +502,11 @@ final PatchbayWorkspaceIdentity _there = PatchbayWorkspaceIdentity.of(
 
 String _fileOf(String sessionId) =>
     File('${directory.path}/$sessionId.json').readAsStringSync();
+
+PatchbaySessionRecord _storedRecord(String sessionId) =>
+    PatchbaySessionRecord.fromJson(
+      jsonDecode(_fileOf(sessionId)) as Map<String, Object?>,
+    );
 
 PatchbaySessionResolver _resolver(
   PatchbaySessionStore store, {

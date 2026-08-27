@@ -11,6 +11,7 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/commands/session_commands.dart';
 import 'package:patchbay_cli/src/session/workspace_selection.dart';
 import 'package:test/test.dart';
 
@@ -263,6 +264,64 @@ void main() {
       expect(store.readSelectionFor(_here), isNull);
       expect(store.readSelectionFor(_there), 'elsewhere');
     });
+
+    test('--clear refuses when the workspace cannot be established', () {
+      // Pinned while the checkout was knowable...
+      store.write(_record('here-a'));
+      _resolver(store).select('here-a');
+      expect(store.readSelectionFor(_here), 'here-a');
+
+      // ...and now unpinned from a process that cannot tell which checkout it
+      // is in. Clearing "the pin that applies here" is meaningless without a
+      // "here", so it refuses exactly like `session use <id>` does.
+      final PatchbaySessionResolver blind = PatchbaySessionResolver(
+        store: store,
+        pidProbe: (_) => true,
+        identityProbe: (_) async => _identity,
+        workspaceProbe: () => null,
+      );
+
+      expect(
+        blind.clearSelection,
+        throwsA(
+          isA<PatchbaySessionException>()
+              .having((e) => e.code, 'code', 'sessionWorkspaceUnavailable')
+              .having((e) => e.hint, 'hint', contains('--session')),
+        ),
+      );
+      // The pin is still on disk: a silent success here would report "no
+      // session was pinned" while every later command kept using `here-a`.
+      expect(store.readSelectionFor(_here), 'here-a');
+    });
+
+    test('the --clear command reports the refusal instead of success', () {
+      store.write(_record('here-a'));
+      _resolver(store).select('here-a');
+
+      final ArgResults parsed = patchbayCliParser().parse(<String>[
+        '--session-dir',
+        directory.path,
+        'session',
+        'use',
+        '--clear',
+      ]);
+      final PatchbayFriendlyInvocation friendly =
+          PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+
+      expect(
+        () => LocalSessionCommandHandler.useSession(
+          PatchbaySessionResolver(
+            store: store,
+            pidProbe: (_) => true,
+            identityProbe: (_) async => _identity,
+            workspaceProbe: () => null,
+          ),
+          friendly,
+        ),
+        throwsA(_sessionError('sessionWorkspaceUnavailable')),
+      );
+      expect(store.readSelectionFor(_here), 'here-a');
+    });
   });
 
   group('inventory and affinity', () {
@@ -303,6 +362,48 @@ void main() {
       ).inventory()) {
         expect(listing.label, isNot(contains(_here.canonicalRoot)));
       }
+    });
+
+    test('a pin naming a record that is not ours never marks it', () {
+      // The id matches the pin exactly, so id equality alone would call this
+      // selected. It is not: `selected` means "what a command *here* would
+      // use", and a command here would refuse this record outright
+      // (`sessionSelectionStale`). Printing `*` next to it -- and answering
+      // `selected: "elsewhere"` on the JSON channel -- would tell the operator
+      // their next write lands on another checkout's device.
+      store.write(_record('elsewhere', workspace: _there));
+      store.writeSelectionFor(_here, 'elsewhere');
+
+      final List<PatchbaySessionListing> listings = _resolver(
+        store,
+      ).inventory();
+
+      expect(_affinityOf(listings, 'elsewhere'), 'foreign');
+      expect(_selectedOf(listings, 'elsewhere'), isFalse);
+      expect(
+        LocalSessionCommandHandler.selectedId(listings),
+        isNull,
+        reason: 'the JSON `selected` field must agree with the listing',
+      );
+      expect(
+        LocalSessionCommandHandler.sessionLines(listings),
+        startsWith(' '),
+      );
+    });
+
+    test('a pin naming an unprovable legacy record never marks it', () {
+      // Same gate, the other unproven affinity: a legacy record whose path no
+      // longer recomputes is not "probably ours", it is unproven.
+      store.write(_legacyRecord('legacy', workspacePath: '/gone/worktree'));
+      store.writeSelectionFor(_here, 'legacy');
+
+      final List<PatchbaySessionListing> listings = _resolver(
+        store,
+      ).inventory();
+
+      expect(_affinityOf(listings, 'legacy'), 'legacyUnverified');
+      expect(_selectedOf(listings, 'legacy'), isFalse);
+      expect(LocalSessionCommandHandler.selectedId(listings), isNull);
     });
 
     test('an unavailable identity proves nothing current', () {

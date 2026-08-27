@@ -146,9 +146,21 @@ final class PatchbaySessionResolver {
     );
   }
 
+  /// Removes the pin that applies here.
+  ///
+  /// Refuses with `sessionWorkspaceUnavailable` when the workspace cannot be
+  /// established, exactly like [select]. Returning quietly instead would be
+  /// the worst of both: `session use --clear` would report "no session was
+  /// pinned" while a scoped pin sits untouched on disk, still aiming every
+  /// later command at a device the operator believes they have unpinned.
   void clearSelection() {
     final PatchbayWorkspaceIdentity? identity = workspace;
-    if (identity == null) return;
+    if (identity == null) {
+      throw const PatchbaySessionException(
+        'sessionWorkspaceUnavailable',
+        hint: patchbaySessionWorkspaceUnavailableHint,
+      );
+    }
     store.clearSelectionFor(identity);
   }
 

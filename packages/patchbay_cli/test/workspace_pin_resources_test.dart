@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/session/session_store_seam.dart';
 import 'package:test/test.dart';
 
 late Directory directory;
@@ -140,6 +141,80 @@ void main() {
       expect(store.readSelectionFor(_here), 'here-a');
       // A stray temp file is not a pin and not a record.
       expect(store.readAll(), hasLength(2));
+    });
+
+    test('interrupting the real write path leaves the previous pin intact', () {
+      // The test above plants the residue a crash would have left. This one
+      // crashes: the interrupt fires inside the store's own write, after the
+      // temp file is written and before the rename. That is the difference
+      // between "a stray file is ignored" and "the write is atomic".
+      store.write(_record('here-a'));
+      store.write(_record('here-b'));
+      store.writeSelectionFor(_here, 'here-a');
+      final String before = _pinBody(_here);
+
+      expect(
+        () => runWithAtomicWriteInterrupt(
+          (String target) => throw const FileSystemException('power lost'),
+          () => store.writeSelectionFor(_here, 'here-b'),
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(store.readSelectionFor(_here), 'here-a');
+      expect(_pinBody(_here), before);
+      // No half-written pin and no orphaned temp left behind either.
+      expect(
+        directory.listSync().where(
+          (FileSystemEntity entity) => entity.path.contains('.tmp-'),
+        ),
+        isEmpty,
+      );
+      expect(store.readAll(), hasLength(2));
+    });
+
+    test('the new pin is parked in a temp file until the rename', () {
+      // What makes the previous test's guarantee possible, asserted directly:
+      // at the one moment a crash is observable, the target still holds the
+      // old pin and the new content exists only under a temp name. An
+      // in-place overwrite would fail this while still passing every
+      // "residue is ignored" fixture.
+      store.write(_record('here-a'));
+      store.write(_record('here-b'));
+      store.writeSelectionFor(_here, 'here-a');
+
+      var observed = false;
+      runWithAtomicWriteInterrupt((String target) {
+        observed = true;
+        expect(target, _pinPath(_here));
+        expect(
+          jsonDecode(File(target).readAsStringSync()),
+          containsPair('sessionId', 'here-a'),
+          reason: 'the target must not change before the rename',
+        );
+        final List<File> parked = directory
+            .listSync()
+            .whereType<File>()
+            .where((File file) => file.path.contains('.tmp-'))
+            .toList();
+        expect(parked, hasLength(1));
+        expect(
+          jsonDecode(parked.single.readAsStringSync()),
+          containsPair('sessionId', 'here-b'),
+          reason: 'the new pin must already be fully written',
+        );
+      }, () => store.writeSelectionFor(_here, 'here-b'));
+
+      expect(observed, isTrue);
+      // Returning from the interrupt lets the rename happen, so the write
+      // still completes: the seam observes, it does not change the outcome.
+      expect(store.readSelectionFor(_here), 'here-b');
+      expect(
+        directory.listSync().where(
+          (FileSystemEntity entity) => entity.path.contains('.tmp-'),
+        ),
+        isEmpty,
+      );
     });
 
     test('a stale lock file does not block or corrupt the next write', () {
