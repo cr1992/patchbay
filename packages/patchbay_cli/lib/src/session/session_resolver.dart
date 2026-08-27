@@ -7,6 +7,29 @@ import 'session_store.dart';
 import 'workspace_identity.dart';
 import 'workspace_selection.dart';
 
+/// What to tell the operator when the pinned session will not resolve *and*
+/// this host cannot establish whether its process is alive.
+///
+/// Deliberately never issues the imperative "run `patchbay sessions prune`".
+/// Where the PID probe can never answer — no `kill`/`tasklist` on `PATH` and
+/// no usable procfs — prune cannot retire this record: it asks
+/// [PatchbaySessionResolver._statusFor], which reads an unverifiable process
+/// as alive, and the pending-TTL branch that would otherwise expire the
+/// record only fires when there is no `wsUri`. Sending the operator there
+/// spends the one command they were told would fix it and changes nothing.
+/// It still *names* prune, because that is the next thing they would reach
+/// for anyway and they are better off being told why it will not work.
+///
+/// Private, and here rather than beside the other hints in session_models:
+/// this one has a single use site, and keeping it off the library's exported
+/// surface keeps the API golden untouched.
+const String _selectionUnverifiableHint =
+    'the pinned session will not resolve, and this host cannot tell whether '
+    'its process is still alive (no usable `kill`/`tasklist`/procfs), so '
+    '`patchbay sessions prune` cannot retire the record: run `patchbay '
+    'session use --clear`, then connect explicitly with `--ws-uri <uri>` or '
+    'start the App again under `patchbay launch`';
+
 final class PatchbaySessionResolver {
   PatchbaySessionResolver({
     PatchbaySessionStore? store,
@@ -244,7 +267,11 @@ final class PatchbaySessionResolver {
     if (running == null) {
       // Nothing was learned about the PID, so nothing can be concluded about
       // the launch identity sitting on top of it either.
-      return const _ProcessIdentityCheck(alive: true, identityUnverified: true);
+      return const _ProcessIdentityCheck(
+        alive: true,
+        identityUnverified: true,
+        livenessUnverified: true,
+      );
     }
     final String? expected = record.processStartTime;
     if (expected == null) {
@@ -305,8 +332,14 @@ final class PatchbaySessionResolver {
     final valid = <PatchbayDiscoveredSession>[];
     final pending = <PatchbaySessionRecord>[];
     String? lastStaleCode;
+    // Set only for a record that survives this loop *and* whose process could
+    // not be liveness-verified. That is the one shape for which the ordinary
+    // "run `sessions prune`" advice is a dead end -- see the hint choice at
+    // the end of this method.
+    bool unverifiableSurvivor = false;
     for (final record in candidates) {
-      if (!_checkProcessIdentity(record).alive) {
+      final _ProcessIdentityCheck check = _checkProcessIdentity(record);
+      if (!check.alive) {
         store.remove(record.sessionId);
         lastStaleCode = 'sessionStaleProcess';
         continue;
@@ -335,7 +368,11 @@ final class PatchbaySessionResolver {
         lastStaleCode = 'sessionIdentityMismatch';
         continue;
       } on Object {
+        // The record stays on disk: an unreachable endpoint is not proof the
+        // App is gone. When the PID could not be verified either, nothing in
+        // this process can ever retire this record on its own.
         lastStaleCode = 'sessionUnreachable';
+        unverifiableSurvivor |= check.livenessUnverified;
         continue;
       }
       if (identity.schemaVersion != PatchbayServiceHost.schemaVersion ||
@@ -373,7 +410,11 @@ final class PatchbaySessionResolver {
     }
     throw PatchbaySessionException(
       lastStaleCode ?? 'sessionNotFound',
-      hint: pinned ? patchbaySessionSelectionStaleHint : null,
+      hint: pinned
+          ? (unverifiableSurvivor
+                ? _selectionUnverifiableHint
+                : patchbaySessionSelectionStaleHint)
+          : null,
     );
   }
 
@@ -421,6 +462,7 @@ final class _ProcessIdentityCheck {
   const _ProcessIdentityCheck({
     required this.alive,
     required this.identityUnverified,
+    this.livenessUnverified = false,
   });
 
   /// `false` means this record's process is gone -- either the PID has no
@@ -430,4 +472,15 @@ final class _ProcessIdentityCheck {
 
   /// See [PatchbaySessionListing.identityUnverified].
   final bool identityUnverified;
+
+  /// `true` only when the PID probe itself returned no verdict, so [alive]
+  /// is a fail-open default rather than an observation.
+  ///
+  /// Narrower than [identityUnverified], which is also set for a legacy
+  /// record with no captured signature and for a start-time probe that
+  /// declined -- in both of those the PID *was* observed. Kept separate
+  /// because the operator-facing hint claims this host cannot answer the
+  /// liveness question at all, and that has to be literally true when it is
+  /// printed.
+  final bool livenessUnverified;
 }

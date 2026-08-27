@@ -110,13 +110,29 @@ abstract final class PlatformProcessUtils {
 
   /// Liveness straight from procfs, or `null` when procfs cannot answer.
   ///
-  /// Guarded on `<procRoot>/self` rather than `<procRoot>` alone: a chroot or
-  /// sandbox that exposes an empty `/proc` directory would otherwise make
-  /// every PID look dead. Proving procfs is really mounted for *this*
-  /// namespace first keeps that case on the tool-based fallback.
+  /// The guard is `<procRoot>/<our own pid>`, not `<procRoot>` and not
+  /// `<procRoot>/self`. Two different misconfigurations have to be caught,
+  /// and only the self-PID lookup catches both:
+  ///
+  /// * A chroot or sandbox with no procfs at all, or an empty `/proc`
+  ///   directory — `<procRoot>` alone would look fine and every PID would
+  ///   read as dead.
+  /// * A procfs belonging to a *different* PID namespace, bind-mounted in.
+  ///   `<procRoot>/self` still resolves there — it is a magic symlink that
+  ///   answers for whichever namespace owns the mount — so it proves nothing
+  ///   about whether the PIDs this process knows mean anything in it. Every
+  ///   `<procRoot>/<recorded pid>` lookup would then be answering a question
+  ///   about someone else's PID space, and `kill -0` (which does run in our
+  ///   namespace) would have got it right.
+  ///
+  /// Finding our own PID is a necessary condition, not a proof of namespace
+  /// identity: two namespaces can both contain the same PID number. It rules
+  /// out the misconfigurations above, which is what it is here to do; when it
+  /// fails, the tool-based probe takes over rather than anything being
+  /// declared dead.
   static bool? _procfsLiveness(int processId, String procRoot) {
     try {
-      if (!Directory('$procRoot/self').existsSync()) return null;
+      if (!Directory('$procRoot/$pid').existsSync()) return null;
       return Directory('$procRoot/$processId').existsSync();
     } on FileSystemException {
       return null;

@@ -163,7 +163,9 @@ void main() {
 
     setUp(() {
       procRoot = Directory.systemTemp.createTempSync('patchbay-fake-proc-');
-      Directory('${procRoot.path}/self').createSync();
+      // A procfs that knows this process is the precondition for trusting it
+      // at all -- see the bind-mounted-foreign-procfs test below.
+      Directory('${procRoot.path}/$pid').createSync();
     });
 
     tearDown(() {
@@ -208,7 +210,7 @@ void main() {
     test('no procfs mounted falls back to `kill`, never to "dead"', () {
       // A chroot or sandbox can leave `<procRoot>` absent or empty. Reading
       // that as "every PID is dead" is exactly the failure mode being fixed,
-      // so the guard is `<procRoot>/self`, not `<procRoot>`.
+      // so the guard is a PID lookup inside it, not the directory itself.
       final Directory empty = Directory.systemTemp.createTempSync(
         'patchbay-empty-proc-',
       );
@@ -226,6 +228,38 @@ void main() {
           procRoot: empty.path,
         ),
         isTrue,
+      );
+      expect(fake.executedSync.single.executable, 'kill');
+    });
+
+    test('a procfs from another PID namespace is refused, not believed', () {
+      // A container that bind-mounts the parent namespace's /proc into a
+      // child PID namespace: `<procRoot>/self` still resolves -- it is a
+      // magic symlink answering for whichever namespace owns the mount -- but
+      // the PIDs this process knows mean nothing in it. Trusting it would
+      // manufacture a brand-new deterministic false-dead, in a case where
+      // `kill -0` (which runs in *our* namespace) gets it right. So the
+      // guard must be our own PID, and `self` alone must not satisfy it.
+      final Directory foreign = Directory.systemTemp.createTempSync(
+        'patchbay-foreign-proc-',
+      );
+      addTearDown(() => foreign.deleteSync(recursive: true));
+      Directory('${foreign.path}/self').createSync();
+      Directory('${foreign.path}/1').createSync();
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) => ProcessResult(123, 0, '', ''),
+      );
+
+      expect(
+        PlatformProcessUtils.isProcessAlive(
+          4242,
+          runner: fake,
+          isWindows: false,
+          isLinux: true,
+          procRoot: foreign.path,
+        ),
+        isTrue,
+        reason: 'must fall through to `kill`, not read the foreign procfs',
       );
       expect(fake.executedSync.single.executable, 'kill');
     });

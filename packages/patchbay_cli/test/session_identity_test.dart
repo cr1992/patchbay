@@ -227,6 +227,115 @@ void main() {
     });
 
     test(
+      'an unresolvable pin is not sent to `prune`, which cannot help',
+      () async {
+        // The hint has to survive being acted on. `prune` only removes records
+        // whose status is stale; an unverifiable process reads as alive, and
+        // the pending-TTL branch that would otherwise expire the record fires
+        // only when there is no wsUri. So the old advice was a loop here.
+        store.write(_record('unanswerable', processStartTime: 'launch-a'));
+        store.writeSelectionFor(_workspace, 'unanswerable');
+
+        await expectLater(
+          PatchbaySessionResolver(
+            store: store,
+            workspaceProbe: () => _workspace,
+            workspaceIdentityAt: (_) => null,
+            pidProbe: (_) => null,
+            identityProbe: (_) async =>
+                throw const SocketException('connection refused'),
+          ).resolve(),
+          throwsA(
+            isA<PatchbaySessionException>()
+                .having((error) => error.code, 'code', 'sessionUnreachable')
+                // Never the imperative. The old hint opened with "run
+                // `patchbay sessions prune`", and acting on that here
+                // changes nothing.
+                .having(
+                  (error) => error.hint,
+                  'hint',
+                  isNot(contains('run `patchbay sessions prune`')),
+                )
+                // Naming prune in order to rule it out beats omitting it:
+                // the operator's next instinct is the command we just
+                // disarmed, so the hint should say why it will not work.
+                .having(
+                  (error) => error.hint,
+                  'hint',
+                  contains('cannot retire the record'),
+                )
+                .having(
+                  (error) => error.hint,
+                  'hint',
+                  contains('session use --clear'),
+                ),
+          ),
+        );
+        // Still on disk -- precisely why prune would have been a loop.
+        expect(store.readAll(), hasLength(1));
+      },
+    );
+
+    test('a verifiably dead pin still gets the ordinary prune hint', () async {
+      // The swap must stay narrow: when the OS did answer, `prune` works and
+      // is still the right thing to recommend.
+      store.write(_record('really-dead', processStartTime: 'launch-a'));
+      store.writeSelectionFor(_workspace, 'really-dead');
+
+      await expectLater(
+        PatchbaySessionResolver(
+          store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
+          pidProbe: (_) => false,
+        ).resolve(),
+        throwsA(
+          isA<PatchbaySessionException>()
+              .having((error) => error.code, 'code', 'sessionStaleProcess')
+              // The imperative form specifically: the unverifiable-host hint
+              // also contains the word "prune", but only in order to rule it
+              // out, so a bare contains('prune') would not tell them apart.
+              .having(
+                (error) => error.hint,
+                'hint',
+                contains('run `patchbay sessions prune`'),
+              ),
+        ),
+      );
+    });
+
+    test('a merely unverified launch identity keeps the prune hint', () async {
+      // livenessUnverified is deliberately narrower than identityUnverified:
+      // here the PID *was* observed, so the new hint's claim that this host
+      // cannot answer the liveness question would be a lie.
+      store.write(_record('legacy', processStartTime: null));
+      store.writeSelectionFor(_workspace, 'legacy');
+
+      await expectLater(
+        PatchbaySessionResolver(
+          store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
+          pidProbe: (_) => true,
+          identityProbe: (_) async =>
+              throw const SocketException('connection refused'),
+        ).resolve(),
+        throwsA(
+          isA<PatchbaySessionException>()
+              .having((error) => error.code, 'code', 'sessionUnreachable')
+              // The imperative form specifically: the unverifiable-host hint
+              // also contains the word "prune", but only in order to rule it
+              // out, so a bare contains('prune') would not tell them apart.
+              .having(
+                (error) => error.hint,
+                'hint',
+                contains('run `patchbay sessions prune`'),
+              ),
+        ),
+      );
+    });
+
+    test(
       'a definite "not running" is still stale -- the guard is not weakened',
       () {
         store.write(_record('really-dead', processStartTime: 'launch-a'));
