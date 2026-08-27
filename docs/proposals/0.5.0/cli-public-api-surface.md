@@ -31,7 +31,8 @@
 
 - canonical library 只保留 CLI 嵌入所需的 2 个符号；
 - 新增一个显式 opt-in client library，只保留 8 个与连接、identity、snapshot 直接相关的符号；
-- `bin/`、`tool/`、example 和单元测试按职责精确导入 `src/`，仅公共契约测试导入两个公开 library；
+- `bin/`、`tool/` 和单元测试按职责精确导入 `src/`；`packages/patchbay_cli/example/` 是演示公开
+  入口本身用法的示范页，与公共契约测试一样导入两个公开 library，不导入 `src/`；
 - API 门禁按 library 分别冻结符号，并对任何新增执行默认拒绝、逐 PB 放行；
 - 两个已知内部接入方完成源码 import 扫描，发现使用时提供迁移编译证据；
 - CLI 命令、退出码、stdout/stderr、稳定 JSON、wire、VM Service/direct 语义和 AOT 产物入口保持不变。
@@ -164,7 +165,8 @@ pub 的 `^0.4.1` 约束不会自动选择 0.5.0；git/tag pin 接入方必须显
   - `patchbay_cli.dart` 编译 fixture 只能访问 `runPatchbayCli` 与 `PatchbayExitCode`；
   - `patchbay_client.dart` fixture 逐个构造/引用 8 个允许符号；第 9 个未授权符号必须编译失败或被 surface
     checker 拒绝；
-  - 包内除公共 API fixture 外，不再 import `package:patchbay_cli/patchbay_cli.dart`；
+  - 包内除公共 API fixture 与 `example/` 的公开入口示范外，不再 import
+    `package:patchbay_cli/patchbay_cli.dart`；
   - 四包 API golden、command docs/codegen、analyze 与全部测试全绿；
   - AOT 编译 `bin/patchbay.dart`、Android/iOS permission binaries 与 reference launcher。
 - VM/direct：两个新 factory 复用现有实现；identity、catalog、snapshot、invoke、requestId mismatch、timeout
@@ -210,6 +212,20 @@ DG-050-07 接受前必须附两个内部接入方的中性 import 扫描结论�
    若 13 按范围变更移出本版，27 一并移出。
 3. **接受「外部源码依赖 executable internals 必须迁移到 CLI JSON 或自有实现」的原则性表述**，
    本次扫描据此闭环：涉事脚本在换 pin 时改为调用上述 CLI 命令即可，语义等价。
+
+### 文字修正（2026-08-27，实现后独立证伪）
+
+「目标」与「验证」两处原文把 `packages/patchbay_cli/example/` 与 `bin/` / `tool/` / 单元测试
+并列，要求它同样精确导入 `src/`。实现与独立证伪均判定该表述写反了方向：该 example 是 pub.dev
+渲染给使用者看的「本包怎么用」示范页，它演示的正是公开入口本身（`runPatchbayCli`），改成导入
+`src/cli.dart` 等于在示范页上教使用者绕开 `lib/src/` 的私有约定。
+
+因此把这两处改为：`example/` 与公共契约测试同类，导入两个公开 library，不导入 `src/`。
+
+本次修正只改「谁可以 import 公开 library」这一条边界的措辞，**不改动 2 + 8 封闭清单本身，也不
+改动 DG-050-07 的任何实质结论**（不扩表、不设过渡入口、外部依赖 executable internals 必须迁移）。
+包内允许 import 公开 library 的文件由 `packages/patchbay_cli/test/public_api_surface_test.dart`
+的守卫测试逐个钉死，扩大该名单和扩表一样需要先改本文。
 
 ## 被否决方案
 

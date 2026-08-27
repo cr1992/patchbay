@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
 
 /// Ends the process on the command's result instead of draining the isolate.
 ///

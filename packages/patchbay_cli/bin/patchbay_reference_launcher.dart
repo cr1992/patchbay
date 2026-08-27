@@ -1,4 +1,12 @@
-// 宿主侧会话声明器的参考实现。仓内 example 用它，接入方可以照抄。
+// 宿主侧会话声明器的参考实现，仓内 example 预检用它。
+//
+// **接入方不要照抄本文件。** 它写的是「被 `patchbay launch` 监督的子进程如何声明自己」，
+// 依赖 launch context 注入的 launchId / ownerPid / workspace，并且直接用了包内 `src/`
+// 实现——PB-050-13 之后 `src/` 不是公共 API，外部包 import 它属于 implementation import。
+// 自己起 App、不走 `patchbay launch` 的接入方改用 CLI 命令登记会话（PB-050-27）：
+//   patchbay session register --ws-uri <uri> --application-id <id> \
+//     --device-id <id> --process-id <pid> [<session-id>]
+//   patchbay session unregister <session-id>   # 退出路径上清理
 //
 // 为什么需要它：权限写操作（`normalize` / `exercise` / `fail`）只接受 `--session`，也就是
 // 必须存在 launcher 会话库里的一条活动记录；而记录**由被 `patchbay launch` 监督的子进程
@@ -16,8 +24,10 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:patchbay_cli/src/platform/process_utils.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 
 Future<int> main(List<String> arguments) async {
   final Map<String, String> options = _parse(arguments);

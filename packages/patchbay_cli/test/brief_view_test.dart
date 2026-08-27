@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
 import 'package:patchbay_cli/src/output/brief_view.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 /// PB-050-21: `--view brief` projection.

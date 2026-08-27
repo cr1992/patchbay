@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/manifest/manifest_models.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 import '../fixture/fake_client.dart';
@@ -251,7 +253,7 @@ void main() {
     () async {
       final StringBuffer out = StringBuffer();
       final StringBuffer err = StringBuffer();
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>['--json', 'repl'],
         connect: (_) async =>
             clientFixture(uiTargets: <Object?>[targetFixture('a.b')]),
@@ -285,7 +287,7 @@ void main() {
       '${directory.path}/targets.json',
     ).writeAsStringSync('{"targets": [{"id": "login.otp", "kind": "text"}]}');
     final StringBuffer out = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>['repl'],
       connect: (_) async => clientFixture(),
       replInput: Stream<String>.fromIterable(<String>[

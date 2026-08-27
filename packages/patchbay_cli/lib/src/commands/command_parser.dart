@@ -212,6 +212,18 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('device-id', help: 'Explicit platform device selection.')
   ..addOption('application-id', help: 'Explicit platform application ID.')
   ..addOption(
+    'process-id',
+    help:
+        'session register: PID of the local process that owns the App '
+        'session; its liveness is what later marks the record stale.',
+  )
+  ..addOption(
+    'build-mode',
+    help:
+        'session register: build mode recorded on the session (default '
+        'debug).',
+  )
+  ..addOption(
     'state',
     allowed: <String>[
       for (final PatchbayPermissionState state

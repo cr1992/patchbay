@@ -11,7 +11,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/rpc_timeout.dart';
 import 'package:test/test.dart';
 
 /// 冻结对端时给 CLI 的预算。取小值让用例快，回归时的失败模式是「永不退出」，

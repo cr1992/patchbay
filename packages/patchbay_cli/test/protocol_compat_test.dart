@@ -20,7 +20,15 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/artifact_download.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/doctor/doctor_checks.dart';
+import 'package:patchbay_cli/src/doctor/doctor_models.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -207,7 +215,7 @@ void main() {
   Future<_Run> runDoctor(PatchbayClient client) async {
     final StringBuffer out = StringBuffer();
     final StringBuffer err = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>['--session-dir', directory.path, '--json', 'doctor'],
       connect: (ArgResults _) async => client,
       output: out,

@@ -39,6 +39,27 @@ App 与 CLI 是两个生命周期：普通命令请求一次后退出，App 继�
 [使用指南的「先选工作流」](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流)为唯一事实源；
 本包 README 不再复制一份容易漂移的表格。
 
+## Dart 入口
+
+驱动 Patchbay 的稳定方式是可执行文件加 `--json`。只有在进程边界确实碍事时才需要下面两个小
+library，它们合起来就是本包**全部**的公共源码面——其余实现都在 `lib/src/` 下，属于随时可变的
+实现细节。
+
+```dart
+// 在进程内跑一次 CLI 调用，读它的退出码。
+import 'package:patchbay_cli/patchbay_cli.dart'; // runPatchbayCli, PatchbayExitCode
+
+// 需要从 Dart 里持有一条连接，而不是每条命令起一次进程时。
+import 'package:patchbay_cli/patchbay_client.dart';
+// PatchbayClient, PatchbaySnapshotDiffClient, PatchbayRuntimeIdentity,
+// PatchbayProtocolException, PatchbayTransportException, PatchbaySnapshotRequest,
+// connectPatchbayVmService, connectPatchbayDirect
+```
+
+launcher、session、trace、doctor、repl、manifest 与权限 driver 的实现不可 import：请走 CLI 命令
+与它们的稳定 JSON。不经 `patchbay launch` 启动的 App 用 `patchbay session register` 登记会话，
+而不是自己写会话记录。
+
 ## 命令速查
 
 查看帮助不会发现会话、连接 App 或读取 bearer/敏感 stdin：
@@ -97,6 +118,8 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay permission reset <permission>` | local 显式声明 | — |
 | `patchbay permission status <permission>` | local 显式声明 | — |
 | `patchbay repl` | client 显式声明 | — |
+| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local 显式声明 | — |
+| `patchbay session unregister <session-id>` | local 显式声明 | — |
 | `patchbay session use <session-id> \| --clear` | local 显式声明 | — |
 | `patchbay sessions list` | local 显式声明 | — |
 | `patchbay sessions prune` | local 显式声明 | — |

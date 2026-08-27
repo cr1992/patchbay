@@ -1,7 +1,8 @@
 // ignore_for_file: deprecated_member_use_from_same_package
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
 import 'package:test/test.dart';
 
 /// Resolves [argv] with an injected sensitive reader so the shapes that accept
@@ -209,7 +210,8 @@ void main() {
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
           PatchbayFriendlyCommand.snapshotDiff => const <String>[],
-          PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
+          PatchbayFriendlyCommand.sessionUse ||
+          PatchbayFriendlyCommand.sessionUnregister => <String>['worktree-a'],
           PatchbayFriendlyCommand.permissionStatus ||
           PatchbayFriendlyCommand.permissionReset ||
           PatchbayFriendlyCommand.permissionNormalize ||
@@ -311,6 +313,16 @@ void main() {
         if (spec == PatchbayFriendlyCommand.permissionExercise) ...<String>[
           '--decision',
           'deny',
+        ],
+        if (spec == PatchbayFriendlyCommand.sessionRegister) ...<String>[
+          '--ws-uri',
+          'ws://127.0.0.1:1/ws',
+          '--application-id',
+          'com.example.app',
+          '--device-id',
+          'fixture-device',
+          '--process-id',
+          '4242',
         ],
         if (spec == PatchbayFriendlyCommand.uiTargets) '--emit-manifest',
         if (spec == PatchbayFriendlyCommand.traceStart) ...<String>[

@@ -2,8 +2,42 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/permission_command.dart';
+import 'package:patchbay_cli/src/permission_driver.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_resolver.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
 import 'package:test/test.dart';
+
+// Real driver spawns are real subprocesses (see `_driver` below): under
+// `dart test`'s default concurrency, many test files fork these at once and
+// cold VM startup can spike well past a couple of seconds on a loaded
+// machine. These calls aren't exercising the timeout mechanism itself — they
+// just need enough wall-clock headroom for a normal (fast) response to land
+// before the budget lapses — so the ceiling is generous. It still sits under
+// `PatchbayPermissionBudget.read.maximumDuration` (30s) so
+// `PatchbayPermissionDriverRunner.run` accepts it without throwing
+// `permissionTimeoutInvalid`. The one test that deliberately races a slow
+// driver (`one total timeout budget terminates a slow driver`) keeps its own
+// tight, intentionally-asserted timeout instead of this constant.
+const Duration _driverCallBudget = Duration(seconds: 15);
+
+// Two tests below (`CLI fake driver closes ...` and `mutating operations
+// only allow ...`) chain several real driver-backed CLI invocations through
+// `_runCli` -> `runPatchbayCliWithSeams` without a per-call `timeout:`
+// argument -- each call spawns a real driver subprocess and runs under
+// production's own default `PatchbayPermissionBudget`, not a value declared
+// in this file. What this constant bounds is the *whole test*, the same
+// role `cross_process_test.dart`'s 120s and `_driverCallBudget` above play
+// for their own tests: real-subprocess headroom, not a mechanism under test.
+// A local `--cpus=1 --memory=4g` container repro run alongside the other
+// heavy cross-process test files measured both tests hitting the implicit
+// `dart test` default (30s) even though each finishes in a few seconds in
+// isolation; widened with real margin rather than trimmed further.
+const Timeout _cliProcessBudget = Timeout(Duration(seconds: 60));
 
 String _quoted(String value) => "'${value.replaceAll("'", "'\\''")}'";
 
@@ -89,7 +123,7 @@ Future<Map<String, Object?>> _runCli(
 }) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     arguments,
     output: out,
     errorOutput: err,
@@ -106,7 +140,7 @@ void main() {
     await expectLater(
       client.call(
         _request(PatchbayPermissionOperation.capabilities),
-        timeout: const Duration(seconds: 2),
+        timeout: _driverCallBudget,
       ),
       throwsA(
         isA<PatchbayPermissionDriverException>().having(
@@ -129,7 +163,7 @@ void main() {
           );
       final PatchbayPermissionDriverResponse response = await unknown.run(
         _request(PatchbayPermissionOperation.status),
-        timeout: const Duration(seconds: 3),
+        timeout: _driverCallBudget,
       );
       expect(response.after?.state, PatchbayPermissionState.unknown);
       expect(response.after?.platformState, 'vendorFutureState');
@@ -140,7 +174,7 @@ void main() {
             PatchbayPermissionOperation.status,
             permission: 'not-supported',
           ),
-          timeout: const Duration(seconds: 3),
+          timeout: _driverCallBudget,
         ),
         throwsA(
           isA<PatchbayPermissionDriverException>().having(
@@ -157,6 +191,12 @@ void main() {
     final PatchbayPermissionDriverClient client =
         PatchbayPermissionDriverClient(executable: _driver('timeout'));
     await expectLater(
+      // Deliberately tight and NOT `_driverCallBudget`: this test's whole
+      // point is the timeout race. The 'timeout' fixture always sleeps 2s
+      // before responding, so any budget far below that (however slow
+      // process spawn itself is) still deterministically yields
+      // budgetExceeded — the assertion never depends on how fast the host
+      // happens to be.
       client.call(
         _request(PatchbayPermissionOperation.capabilities),
         timeout: const Duration(milliseconds: 100),
@@ -190,7 +230,7 @@ void main() {
             PatchbayPermissionDriverClient(executable: _driver(fixture.$1)),
           );
       await expectLater(
-        runner.run(_request(fixture.$2), timeout: const Duration(seconds: 3)),
+        runner.run(_request(fixture.$2), timeout: _driverCallBudget),
         throwsA(
           isA<PatchbayPermissionDriverException>().having(
             (PatchbayPermissionDriverException error) => error.code,
@@ -236,7 +276,7 @@ void main() {
         PatchbayPermissionOperation.fail,
         state: PatchbayPermissionState.denied,
       ),
-      timeout: const Duration(seconds: 3),
+      timeout: _driverCallBudget,
     );
     expect(response.admission, 'rejected');
     expect(response.code, 'permissionStateMismatch');
@@ -277,6 +317,7 @@ void main() {
         expect(response['admission'], 'accepted', reason: command.join(' '));
       }
     },
+    timeout: _cliProcessBudget,
   );
 
   test(
@@ -320,41 +361,49 @@ void main() {
     },
   );
 
-  test('mutating operations only allow debug and profile sessions', () async {
-    for (final String buildMode in <String>['release', 'debuggable', 'Debug']) {
-      final String driver = _driver('normal');
-      final Map<String, Object?> response = await _runCli(
-        <String>[
-          '--json',
-          '--permission-driver',
-          driver,
-          'permission',
-          'normalize',
-          'camera',
-          '--state',
-          'granted',
-        ],
-        runner: _commandRunner(driver, buildMode: buildMode),
-        expectedExit: PatchbayExitCode.typedFailure,
-      );
-      expect(
-        (response['error']! as Map)['code'],
-        'permissionReleaseBuildForbidden',
-        reason: buildMode,
-      );
-    }
+  test(
+    'mutating operations only allow debug and profile sessions',
+    () async {
+      for (final String buildMode in <String>[
+        'release',
+        'debuggable',
+        'Debug',
+      ]) {
+        final String driver = _driver('normal');
+        final Map<String, Object?> response = await _runCli(
+          <String>[
+            '--json',
+            '--permission-driver',
+            driver,
+            'permission',
+            'normalize',
+            'camera',
+            '--state',
+            'granted',
+          ],
+          runner: _commandRunner(driver, buildMode: buildMode),
+          expectedExit: PatchbayExitCode.typedFailure,
+        );
+        expect(
+          (response['error']! as Map)['code'],
+          'permissionReleaseBuildForbidden',
+          reason: buildMode,
+        );
+      }
 
-    final String profileDriver = _driver('normal');
-    final Map<String, Object?> profile = await _runCli(<String>[
-      '--json',
-      '--permission-driver',
-      profileDriver,
-      'permission',
-      'normalize',
-      'camera',
-      '--state',
-      'granted',
-    ], runner: _commandRunner(profileDriver, buildMode: 'profile'));
-    expect(profile['admission'], 'accepted');
-  });
+      final String profileDriver = _driver('normal');
+      final Map<String, Object?> profile = await _runCli(<String>[
+        '--json',
+        '--permission-driver',
+        profileDriver,
+        'permission',
+        'normalize',
+        'camera',
+        '--state',
+        'granted',
+      ], runner: _commandRunner(profileDriver, buildMode: 'profile'));
+      expect(profile['admission'], 'accepted');
+    },
+    timeout: _cliProcessBudget,
+  );
 }

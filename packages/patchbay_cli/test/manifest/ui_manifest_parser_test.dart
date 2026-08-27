@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/manifest/manifest_models.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
 import 'package:test/test.dart';
 
 import '../fixture/fake_client.dart';
@@ -323,7 +326,7 @@ void main() {
     test('a missing file is reported as unreadable, not as empty', () async {
       final StringBuffer out = StringBuffer();
       final StringBuffer err = StringBuffer();
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>[
           '--json',
           'ui',
@@ -356,7 +359,7 @@ void main() {
       final StringBuffer out = StringBuffer();
       final StringBuffer err = StringBuffer();
 
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>['--json', 'ui', 'verify-manifest', file.path],
         connect: (_) async {
           dialled = true;

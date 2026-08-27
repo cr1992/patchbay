@@ -1,7 +1,11 @@
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/repl.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
 import 'package:test/test.dart';
 
 /// A client that counts how many times a session actually dials the App.
@@ -126,7 +130,7 @@ Future<_Session> _repl(
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
   var connects = 0;
-  final int code = await runPatchbayCli(
+  final int code = await runPatchbayCliWithSeams(
     arguments,
     connect: (_) async {
       connects += 1;

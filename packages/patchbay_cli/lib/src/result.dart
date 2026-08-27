@@ -3,6 +3,11 @@ import 'dart:convert';
 
 import 'ui_manifest.dart';
 
+/// The exit codes `runPatchbayCli` and the `patchbay` executable return.
+///
+/// The values are a stable contract: a script branches on them, so a code
+/// never changes meaning and a new class of failure gets a new number rather
+/// than reusing one.
 abstract final class PatchbayExitCode {
   static const int accepted = 0;
   static const int transport = 3;

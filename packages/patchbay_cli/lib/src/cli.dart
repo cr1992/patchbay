@@ -33,18 +33,23 @@ import 'trace.dart';
 import 'trace/trace_context.dart';
 import 'ui_manifest.dart';
 
-export 'commands/command_parser.dart';
-// 拆分把这个常量从 cli.dart 挪进了 runners/，若不再导出就会从公共面消失——
-// 那是补丁版不能接受的移除。
-export 'runners/snapshot_runner.dart'
-    show patchbaySnapshotSelectorUnsupportedCode;
-
 /// Runs one CLI invocation.
+///
+/// With [PatchbayExitCode] this is the whole public Dart surface of the CLI
+/// (PB-050-13): an embedder hands over an argument vector and reads back the
+/// process exit code. Everything else a run needs — transports, session
+/// records, permission drivers — is named on the command line.
+Future<int> runPatchbayCli(List<String> arguments) =>
+    runPatchbayCliWithSeams(arguments);
+
+/// The seam-carrying entry point, internal to this package.
 ///
 /// [connect], [replInput], [output] and [errorOutput] are test seams. They let
 /// a test observe how many times a session actually dials the App and drive a
-/// repl without a terminal; production callers pass none of them.
-Future<int> runPatchbayCli(
+/// repl without a terminal; production callers pass none of them. DG-050-07
+/// froze the public library at two symbols, so this entry point is deliberately
+/// not exported and its shape carries no compatibility promise.
+Future<int> runPatchbayCliWithSeams(
   List<String> arguments, {
   Future<PatchbayClient> Function(ArgResults options)? connect,
   Stream<String>? replInput,
@@ -500,7 +505,7 @@ Future<int> _runPatchbayCliWithTrace(
       );
     }
     return runZoned(
-      () => runPatchbayCli(
+      () => runPatchbayCliWithSeams(
         arguments,
         connect: connect,
         replInput: replInput,
@@ -525,7 +530,7 @@ Future<int> _runPatchbayCliWithTrace(
     final String? traceId = store.resolve(parsed.option('trace'));
     if (traceId == null) {
       return runZoned(
-        () => runPatchbayCli(
+        () => runPatchbayCliWithSeams(
           arguments,
           connect: connect,
           replInput: replInput,
@@ -550,7 +555,7 @@ Future<int> _runPatchbayCliWithTrace(
       recorder.sessionObserved(sessionRef);
     }
     final int exitCode = await runZoned(
-      () => runPatchbayCli(
+      () => runPatchbayCliWithSeams(
         arguments,
         connect: connect,
         replInput: replInput,

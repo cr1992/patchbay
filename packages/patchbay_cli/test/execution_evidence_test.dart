@@ -1,7 +1,8 @@
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -181,7 +182,7 @@ Map<String, Object?> _execution(String classification, String factSource) =>
 Future<_Run> _run(FakePatchbayClient client, {bool wait = false}) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     <String>['--json', if (wait) '--wait', 'exec', 'fixture.command'],
     connect: (_) async => client,
     output: out,

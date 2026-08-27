@@ -1,4 +1,4 @@
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/sensitive_input.dart';
 import 'package:test/test.dart';
 
 void main() {

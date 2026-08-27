@@ -9,8 +9,8 @@ library;
 
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
 import 'package:patchbay_cli/src/platform/process_utils.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 void main() {

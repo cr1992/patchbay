@@ -10,8 +10,17 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
 import 'package:patchbay_cli/src/commands/session_commands.dart';
+import 'package:patchbay_cli/src/doctor/doctor_checks.dart';
+import 'package:patchbay_cli/src/doctor/doctor_models.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_resolver.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/trace_session_ref.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:patchbay_cli/src/session/workspace_selection.dart';
 import 'package:test/test.dart';
 

@@ -2,7 +2,15 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/android_permission_adapter.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/doctor/doctor_models.dart';
+import 'package:patchbay_cli/src/ios_permission_adapter.dart';
+import 'package:patchbay_cli/src/permission_platform_adapter.dart';
+import 'package:patchbay_cli/src/permission_recovery.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_resolver.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
 import 'package:test/test.dart';
 
 PatchbayPermissionDriverRequest _request(

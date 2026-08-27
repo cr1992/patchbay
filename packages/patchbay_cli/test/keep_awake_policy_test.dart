@@ -1,6 +1,8 @@
 import 'dart:convert';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/keep_awake_policy.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -43,7 +45,7 @@ void main() {
       final StringBuffer helpOutput = StringBuffer();
 
       expect(
-        await runPatchbayCli(
+        await runPatchbayCliWithSeams(
           const <String>['--help'],
           output: helpOutput,
           errorOutput: StringBuffer(),
@@ -54,7 +56,7 @@ void main() {
       expect(helpOutput, isNotEmpty);
 
       expect(
-        await runPatchbayCli(
+        await runPatchbayCliWithSeams(
           const <String>['identity'],
           connect: (_) async => _client(),
           output: StringBuffer(),
@@ -70,7 +72,7 @@ void main() {
     final FakePatchbayClient client = _client();
     final StringBuffer output = StringBuffer();
 
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       const <String>['--json', '--keep-awake', 'identity'],
       connect: (_) async => client,
       output: output,
@@ -96,7 +98,7 @@ void main() {
   test('--no-keep-awake suppresses an enabled local default', () async {
     final FakePatchbayClient client = _client();
 
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       const <String>['--json', '--no-keep-awake', 'identity'],
       connect: (_) async => client,
       output: StringBuffer(),
@@ -117,7 +119,7 @@ void main() {
       ],
     );
 
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       const <String>['--json', '--keep-awake', 'ui', 'keep-awake', 'status'],
       connect: (_) async => client,
       output: StringBuffer(),
@@ -141,7 +143,7 @@ void main() {
           ],
         );
 
-        final int exitCode = await runPatchbayCli(
+        final int exitCode = await runPatchbayCliWithSeams(
           <String>['--json', '--keep-awake', 'ui', 'keep-awake', operation],
           connect: (_) async => client,
           output: StringBuffer(),
@@ -165,7 +167,7 @@ void main() {
       handle: (_, _) async => fakeCommandNotRegistered(),
     );
 
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       const <String>['--json', '--keep-awake', 'exec', 'debug.reject'],
       connect: (_) async => client,
       output: StringBuffer(),
@@ -184,7 +186,7 @@ void main() {
     );
     final StringBuffer output = StringBuffer();
 
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       const <String>['--json', '--keep-awake', 'identity'],
       connect: (_) async => client,
       output: output,
@@ -208,7 +210,7 @@ void main() {
     );
     final StringBuffer output = StringBuffer();
 
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       const <String>['--keep-awake', 'identity'],
       connect: (_) async => client,
       output: output,

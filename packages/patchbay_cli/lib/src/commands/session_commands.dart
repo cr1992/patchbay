@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:args/args.dart';
 
 import '../command_registry.dart';
+import '../platform/process_utils.dart';
 import '../session.dart';
 
 /// A local command answer, in both the JSON and human-readable forms the CLI prints.
@@ -11,13 +14,14 @@ final class LocalOutcome {
   final String text;
 }
 
-/// Handler for local `sessions list`, `sessions prune`, and `session use` commands.
+/// Handler for the local `sessions`/`session` commands: list, prune, use,
+/// register and unregister.
 abstract final class LocalSessionCommandHandler {
   /// Runs one session-directory command: no transport, no catalog, no App.
   static LocalOutcome runLocalSessionCommand(ArgResults parsed) {
-    validateLocalSessionShape(parsed);
     final PatchbayFriendlyInvocation friendly =
         PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed)!;
+    validateLocalSessionShape(parsed, friendly.spec);
     final PatchbaySessionResolver sessions = PatchbaySessionResolver(
       store: PatchbaySessionStore(parsed.option('session-dir')),
     );
@@ -25,6 +29,14 @@ abstract final class LocalSessionCommandHandler {
       PatchbayFriendlyCommand.sessionsList => listSessions(sessions),
       PatchbayFriendlyCommand.sessionsPrune => pruneSessions(sessions),
       PatchbayFriendlyCommand.sessionUse => useSession(sessions, friendly),
+      PatchbayFriendlyCommand.sessionRegister => registerSession(
+        sessions,
+        friendly,
+      ),
+      PatchbayFriendlyCommand.sessionUnregister => unregisterSession(
+        sessions,
+        friendly,
+      ),
       _ => throw StateError(
         'unexpected local session command ${friendly.spec.name}',
       ),
@@ -32,7 +44,17 @@ abstract final class LocalSessionCommandHandler {
   }
 
   /// Refuses options that suggest talking to an App.
-  static void validateLocalSessionShape(ArgResults parsed) {
+  ///
+  /// `session register` is the one exception, and only for `--ws-uri`: it
+  /// *records* that endpoint for later discovery instead of dialling it, which
+  /// is exactly why it can stay a local command. `--session` and the direct
+  /// options remain refused there too — naming an existing session, or a
+  /// second transport, says nothing about the record being written.
+  static void validateLocalSessionShape(
+    ArgResults parsed,
+    PatchbayFriendlyCommandSpec spec,
+  ) {
+    final bool records = spec == PatchbayFriendlyCommand.sessionRegister;
     for (final String name in const <String>[
       'ws-uri',
       'session',
@@ -40,11 +62,129 @@ abstract final class LocalSessionCommandHandler {
       'direct-token-stdin',
     ]) {
       if (!parsed.wasParsed(name)) continue;
+      if (records && name == 'ws-uri') continue;
       throw FormatException(
-        '--$name does not apply to a session-directory command: it reads the '
-        'local launcher records, not a running App',
+        '--$name does not apply to a session-directory command: it works on '
+        'the local launcher records, not on a running App',
       );
     }
+  }
+
+  /// Writes one record for an App this checkout started outside
+  /// `patchbay launch` (PB-050-27).
+  ///
+  /// Deliberately no handshake: a local session command never dials, so the
+  /// declared `applicationId` is reconciled the same way a launcher-declared
+  /// record's is — on the first command that actually connects, which removes
+  /// the record on a mismatch. What this call does own is the workspace triple:
+  /// it is stamped from *this* process's checkout (PB-050-14), which is what
+  /// makes the record discoverable here without `--session` and invisible to
+  /// other checkouts.
+  static LocalOutcome registerSession(
+    PatchbaySessionResolver sessions,
+    PatchbayFriendlyInvocation friendly,
+  ) {
+    final Map<String, Object?> arguments = friendly.arguments;
+    final int processId = arguments['processId']! as int;
+    final String sessionId =
+        arguments['sessionId'] as String? ??
+        'external-$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    // Read-then-write, not a locked claim: two registrations racing on the
+    // same explicit id would both pass this check. The write itself is still
+    // atomic (temp+rename), so the loser overwrites rather than tearing, and
+    // the id is one the caller chose — the check exists to stop an operator
+    // from silently replacing a record they forgot about, not to arbitrate
+    // between concurrent writers of the same name.
+    if (sessions.store.readAll().any(
+      (PatchbaySessionRecord record) => record.sessionId == sessionId,
+    )) {
+      throw const PatchbaySessionException(
+        'sessionAlreadyRegistered',
+        hint:
+            'a record with that id already exists: unregister it first, or '
+            'omit <session-id> and let the CLI name this one',
+      );
+    }
+    final PatchbayWorkspaceIdentity? workspace = sessions.workspace;
+    final DateTime createdAt = DateTime.now().toUtc();
+    final PatchbaySessionRecord record = PatchbaySessionRecord(
+      sessionId: sessionId,
+      applicationId: arguments['applicationId']! as String,
+      // Both stay null exactly as a launcher-declared pending record leaves
+      // them: they are the App's own answer, and nothing here has asked it.
+      appInstanceId: null,
+      isolateId: null,
+      processId: processId,
+      wsUri: arguments['wsUri']! as String,
+      buildMode: arguments['buildMode']! as String,
+      createdAt: createdAt,
+      workspacePath: workspace?.canonicalRoot ?? _currentDirectory(),
+      deviceId: arguments['deviceId']! as String,
+      // The writer's own claim, and it stays `pending` because this process is
+      // not the App: `live` is what a completed handshake promotes it to.
+      state: PatchbaySessionStatus.pending,
+      // No `expiresAtMs`: the pending TTL bounds "declared but no transport
+      // yet", and this record was born with its transport.
+      observedAtMs: createdAt.millisecondsSinceEpoch,
+      processStartTime: PlatformProcessUtils.processStartTimeSignature(
+        processId,
+      ),
+      workspaceIdentityVersion: workspace == null
+          ? null
+          : patchbayWorkspaceIdentityVersion,
+      workspaceKind: workspace?.kind,
+      workspaceId: workspace?.workspaceId,
+    );
+    sessions.store.write(record);
+    final PatchbaySessionListing listing = sessions.inventory().firstWhere(
+      (PatchbaySessionListing listing) => listing.record.sessionId == sessionId,
+    );
+    return LocalOutcome(<String, Object?>{
+      'session': listing.toJson(),
+    }, 'registered ${listing.label}');
+  }
+
+  /// Removes one record by id, and any pin that named it.
+  ///
+  /// Succeeds when the record is already gone, and says so: this is the
+  /// cleanup half of [registerSession], and a trap that runs after
+  /// `sessions prune` already removed a dead record must not report a failure
+  /// for doing its job. `removed` is the machine-readable answer.
+  static LocalOutcome unregisterSession(
+    PatchbaySessionResolver sessions,
+    PatchbayFriendlyInvocation friendly,
+  ) {
+    final String sessionId = friendly.arguments['sessionId']! as String;
+    final bool existed = sessions.store.readAll().any(
+      (PatchbaySessionRecord record) => record.sessionId == sessionId,
+    );
+    sessions.store.remove(sessionId);
+    sessions.store.pruneScopedSelections();
+    return LocalOutcome(
+      <String, Object?>{'sessionId': sessionId, 'removed': existed},
+      existed
+          ? 'unregistered $sessionId'
+          : 'no session record named $sessionId',
+    );
+  }
+
+  /// The working directory, for a record that has no provable workspace.
+  ///
+  /// Reached only when the workspace probe already failed, and it fails closed
+  /// for the same reason that probe does: a record has to name *some*
+  /// directory, and inventing one would make it claim a checkout it never ran
+  /// in.
+  static String _currentDirectory() {
+    try {
+      final String path = Directory.current.path;
+      if (path.isNotEmpty) return path;
+    } on Object {
+      // Falls through to the same refusal as an unreadable directory.
+    }
+    throw const PatchbaySessionException(
+      'sessionWorkspaceUnavailable',
+      hint: patchbaySessionWorkspaceUnavailableHint,
+    );
   }
 
   static LocalOutcome listSessions(PatchbaySessionResolver sessions) {

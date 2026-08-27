@@ -1,12 +1,28 @@
 import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/command_help.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 /// Matches the root help's "Friendly command groups" listing row for [group].
 Matcher _listsGroup(String group) =>
     matches(RegExp('^  $group +\\d+ commands?\$', multiLine: true));
+
+// Real `dart run bin/patchbay.dart` spawns are real subprocesses, each a full
+// cold JIT compile from source -- the same real-subprocess-under-contention
+// class `cross_process_test.dart`'s 120s ceiling already accounts for. These
+// three tests aren't exercising a timeout mechanism; they just need enough
+// wall-clock headroom for several real compiles to land before the implicit
+// `dart test` default (30s) lapses. A local `--cpus=1 --memory=4g` container
+// repro run alongside the other heavy cross-process test files measured the
+// ten-spawn test at ~36s wall-clock -- already past the implicit default --
+// even though the lighter one- and three-spawn tests here typically finish
+// in a couple of seconds; widened uniformly for all three rather than tuned
+// per test.
+const Timeout _cliSpawnBudget = Timeout(Duration(seconds: 90));
 
 void main() {
   test('launcher help exposes the local keep-awake override pair', () {
@@ -196,59 +212,66 @@ Availability is still decided by the running App catalog.
         );
       }
     },
+    timeout: _cliSpawnBudget,
   );
 
-  test('help covers every command the CLI can dispatch, end to end', () async {
-    // Process-level because the regression was reachable only through argv:
-    // `patchbay help job` and `patchbay ui widget-tree --help` both exited 64
-    // while the same commands executed fine.
-    Future<ProcessResult> run(List<String> arguments) => Process.run(
-      Platform.resolvedExecutable,
-      <String>['run', 'bin/patchbay.dart', ...arguments],
-      workingDirectory: Directory.current.path,
-    );
+  test(
+    'help covers every command the CLI can dispatch, end to end',
+    () async {
+      // Process-level because the regression was reachable only through argv:
+      // `patchbay help job` and `patchbay ui widget-tree --help` both exited 64
+      // while the same commands executed fine.
+      //
+      // (See `_cliSpawnBudget` above -- three real `dart run` spawns below.)
+      Future<ProcessResult> run(List<String> arguments) => Process.run(
+        Platform.resolvedExecutable,
+        <String>['run', 'bin/patchbay.dart', ...arguments],
+        workingDirectory: Directory.current.path,
+      );
 
-    final ProcessResult root = await run(<String>['--help']);
-    expect(root.exitCode, 0, reason: root.stderr.toString());
-    for (final String group in <String>[
-      'identity',
-      'catalog',
-      'snapshot',
-      'exec',
-      'job',
-      'session',
-      'sessions',
-      'navigation',
-      'ui',
-      'logs',
-      'capture',
-      'blob',
-      'perf',
-      'net',
-    ]) {
-      expect(root.stdout, _listsGroup(group), reason: group);
-    }
+      final ProcessResult root = await run(<String>['--help']);
+      expect(root.exitCode, 0, reason: root.stderr.toString());
+      for (final String group in <String>[
+        'identity',
+        'catalog',
+        'snapshot',
+        'exec',
+        'job',
+        'session',
+        'sessions',
+        'navigation',
+        'ui',
+        'logs',
+        'capture',
+        'blob',
+        'perf',
+        'net',
+      ]) {
+        expect(root.stdout, _listsGroup(group), reason: group);
+      }
 
-    final ProcessResult job = await run(<String>['help', 'job']);
-    expect(job.exitCode, 0, reason: job.stderr.toString());
-    expect(job.stdout, contains('job get <job-id>'));
-    expect(job.stdout, contains('job cancel <job-id>'));
+      final ProcessResult job = await run(<String>['help', 'job']);
+      expect(job.exitCode, 0, reason: job.stderr.toString());
+      expect(job.stdout, contains('job get <job-id>'));
+      expect(job.stdout, contains('job cancel <job-id>'));
 
-    final ProcessResult ui = await run(<String>['help', 'ui']);
-    expect(ui.exitCode, 0, reason: ui.stderr.toString());
-    for (final String command in <String>[
-      'ui widget-tree',
-      'ui render-tree',
-      'ui focus-tree',
-      'ui semantics tree',
-      'ui semantics action',
-      'ui text set',
-      'ui text enter',
-      'ui wait semantics-mounted',
-    ]) {
-      expect(ui.stdout, contains(command), reason: command);
-    }
-  });
+      final ProcessResult ui = await run(<String>['help', 'ui']);
+      expect(ui.exitCode, 0, reason: ui.stderr.toString());
+      for (final String command in <String>[
+        'ui widget-tree',
+        'ui render-tree',
+        'ui focus-tree',
+        'ui semantics tree',
+        'ui semantics action',
+        'ui text set',
+        'ui text enter',
+        'ui wait semantics-mounted',
+      ]) {
+        expect(ui.stdout, contains(command), reason: command);
+      }
+    },
+    timeout: _cliSpawnBudget,
+  );
 
   test('a catalog command name is a help topic', () {
     final ArgParser parser = patchbayCliParser();
@@ -404,16 +427,20 @@ Availability is still decided by the running App catalog.
     );
   });
 
-  test('unknown help topic is a usage error without connecting', () async {
-    final ProcessResult result = await Process.run(
-      Platform.resolvedExecutable,
-      <String>['run', 'bin/patchbay.dart', 'help', 'not-a-group'],
-      workingDirectory: Directory.current.path,
-    );
-    expect(result.exitCode, PatchbayExitCode.usage);
-    expect(result.stderr, contains('unknown help topic'));
-    expect(result.stderr, isNot(contains('session')));
-  });
+  test(
+    'unknown help topic is a usage error without connecting',
+    () async {
+      final ProcessResult result = await Process.run(
+        Platform.resolvedExecutable,
+        <String>['run', 'bin/patchbay.dart', 'help', 'not-a-group'],
+        workingDirectory: Directory.current.path,
+      );
+      expect(result.exitCode, PatchbayExitCode.usage);
+      expect(result.stderr, contains('unknown help topic'));
+      expect(result.stderr, isNot(contains('session')));
+    },
+    timeout: _cliSpawnBudget,
+  );
 
   test('an unknown protocol name is still an unknown topic', () {
     // The catalog-name lookup must not become a wildcard: a name no

@@ -231,6 +231,10 @@ const Set<String> _frozenStableCodes = <String>{
   'responseTooLarge',
   'schemaVersionMismatch',
   'sensitiveInputRequiresStdin',
+  // PB-050-27：`session register` 拒绝覆盖一条同名记录。注册是写操作，静默覆盖会
+  // 换掉另一个 App 的会话，所以这里必须有一个可判别的码，而不是复用
+  // `sessionRecordInvalid`——后者说的是"这条记录读不了"，不是"这个名字已经有人用"。
+  'sessionAlreadyRegistered',
   'sessionAmbiguous',
   'sessionDirectoryEmpty',
   'sessionIdInvalid',

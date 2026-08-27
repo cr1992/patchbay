@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
 import 'package:yaml/yaml.dart';
 
 const String commandReferenceStart =
