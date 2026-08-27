@@ -448,12 +448,10 @@ final class _RawScrollSemantics extends SingleChildRenderObjectWidget {
 
 final class _RenderRawScrollSemantics extends RenderProxyBox {
   _RenderRawScrollSemantics({
-    required double position,
-    required double max,
-    required VoidCallback onScrollDown,
-  }) : _position = position,
-       _max = max,
-       _onScrollDown = onScrollDown;
+    required this._position,
+    required this._max,
+    required this._onScrollDown,
+  });
 
   double _position;
   set position(double value) {

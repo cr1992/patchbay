@@ -17,18 +17,15 @@ import 'gesture_models.dart';
 /// Identifier-anchored synthetic pointer gestures for debug builds.
 final class PatchbayGestureBridge {
   PatchbayGestureBridge({
-    required PatchbayGateEvaluator gates,
-    required PatchbaySemanticsBridge semantics,
-    PatchbayGesturePolicy? policy,
+    required this._gates,
+    required this._semantics,
+    this._policy,
     PatchbayPointerEventDispatcher? pointerDispatcher,
     PatchbayGestureDelay? delay,
     bool Function()? isAppResumed,
     PatchbayLifecycleStateReader? lifecycleState,
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _semantics = semantics,
-       _policy = policy,
-       _dispatchPointer =
+  }) : _dispatchPointer =
            pointerDispatcher ??
            ((PointerEvent event) {
              GestureBinding.instance.handlePointerEvent(event);

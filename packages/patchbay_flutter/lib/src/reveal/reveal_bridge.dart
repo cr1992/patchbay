@@ -26,18 +26,14 @@ import 'reveal_models.dart';
 /// 是直接调 bridge 时的防御纵深。
 final class PatchbayRevealBridge {
   PatchbayRevealBridge({
-    required PatchbayGateEvaluator gates,
-    required PatchbaySemanticsBridge semantics,
-    required PatchbayFrameObserver frames,
-    PatchbayRevealPolicy? policy,
+    required this._gates,
+    required this._semantics,
+    required this._frames,
+    this._policy,
     bool Function()? isAppResumed,
     PatchbayLifecycleStateReader? lifecycleState,
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _semantics = semantics,
-       _frames = frames,
-       _policy = policy,
-       _isAppResumed =
+  }) : _isAppResumed =
            isAppResumed ??
            (() =>
                WidgetsBinding.instance.lifecycleState ==

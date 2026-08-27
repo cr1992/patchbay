@@ -18,20 +18,14 @@ import 'semantics_bridge.dart';
 /// 总 timeout，不额外延长预算。
 final class PatchbayUiWaitBridge {
   PatchbayUiWaitBridge({
-    required PatchbayGateEvaluator gates,
-    required PatchbaySemanticsBridge semantics,
-    required PatchbayFrameObserver frames,
-    required bool Function() isAppResumed,
-    required PatchbayLifecycleStateReader lifecycleState,
-    PatchbayNavigationBridge? navigation,
+    required this._gates,
+    required this._semantics,
+    required this._frames,
+    required this._isAppResumed,
+    required this._lifecycleState,
+    this._navigation,
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _semantics = semantics,
-       _frames = frames,
-       _isAppResumed = isAppResumed,
-       _lifecycleState = lifecycleState,
-       _navigation = navigation,
-       _newRequestId = newRequestId ?? _defaultRequestId;
+  }) : _newRequestId = newRequestId ?? _defaultRequestId;
 
   final PatchbayGateEvaluator _gates;
   final PatchbaySemanticsBridge _semantics;

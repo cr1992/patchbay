@@ -68,18 +68,13 @@ final class PatchbayNavigationAdapter {
 /// Serial, revision-fenced destination navigation with UI observation.
 final class PatchbayNavigationBridge {
   PatchbayNavigationBridge({
-    required PatchbayGateEvaluator gates,
-    required PatchbayNavigationAdapter adapter,
-    required PatchbayFrameObserver frames,
-    required bool Function() isAppResumed,
-    required PatchbayLifecycleStateReader lifecycleState,
+    required this._gates,
+    required this._adapter,
+    required this._frames,
+    required this._isAppResumed,
+    required this._lifecycleState,
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _adapter = adapter,
-       _frames = frames,
-       _isAppResumed = isAppResumed,
-       _lifecycleState = lifecycleState,
-       _newRequestId = newRequestId ?? _defaultRequestId;
+  }) : _newRequestId = newRequestId ?? _defaultRequestId;
 
   final PatchbayGateEvaluator _gates;
   final PatchbayNavigationAdapter _adapter;

@@ -87,15 +87,13 @@ enum _OwnerState { unknown, ready, awaitingFrame, disposed }
 /// while executable semantics commands stay absent from the host catalog.
 final class PatchbaySemanticsBridge {
   PatchbaySemanticsBridge({
-    required PatchbayGateEvaluator gates,
-    PatchbaySemanticsActionPolicy? actionPolicy,
+    required this._gates,
+    this._actionPolicy,
     PatchbayFrameObserver? frames,
     bool Function()? isAppResumed,
     PatchbayLifecycleStateReader? lifecycleState,
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _actionPolicy = actionPolicy,
-       _frames = frames ?? PatchbayFrameObserver(),
+  }) : _frames = frames ?? PatchbayFrameObserver(),
        _isAppResumed =
            isAppResumed ??
            (() =>

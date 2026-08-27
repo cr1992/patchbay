@@ -53,10 +53,10 @@ final class PatchbayRootController {
 /// the shared bounded blob store.
 final class PatchbayCaptureBridge {
   PatchbayCaptureBridge({
-    required PatchbayGateEvaluator gates,
-    required PatchbayUiRegistry registry,
-    required PatchbayFrameObserver frames,
-    required PatchbayArtifactService artifacts,
+    required this._gates,
+    required this._registry,
+    required this._frames,
+    required this._artifacts,
     Set<String> gateIds = const <String>{},
     PatchbayRootController? root,
     bool Function()? isAppResumed,
@@ -67,11 +67,7 @@ final class PatchbayCaptureBridge {
     this.maxBytes = 8 * 1024 * 1024,
     this.maxPixelRatio = 3,
     this.defaultTimeout = const Duration(seconds: 5),
-  }) : _gates = gates,
-       _registry = registry,
-       _frames = frames,
-       _artifacts = artifacts,
-       _gateIds = Set<String>.unmodifiable(gateIds),
+  }) : _gateIds = Set<String>.unmodifiable(gateIds),
        _root = root ?? PatchbayRootController.instance,
        _isAppResumed =
            isAppResumed ??

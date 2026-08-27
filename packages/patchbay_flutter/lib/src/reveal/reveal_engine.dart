@@ -25,23 +25,18 @@ import 'reveal_models.dart';
 /// 一次 reveal 调用的步进循环。每次调用构造一个实例，不跨调用复用。
 final class PatchbayRevealEngine {
   PatchbayRevealEngine({
-    required PatchbaySemanticsBridge semantics,
-    required PatchbayGateEvaluator gates,
-    required PatchbayFrameObserver frames,
-    required PatchbayRevealPolicy policy,
-    required bool Function() isAppResumed,
-    required SemanticsOwner owner,
+    required this._semantics,
+    required this._gates,
+    required this._frames,
+    required this._policy,
+    required this._isAppResumed,
+    required this._owner,
     required this.identifier,
     required this.direction,
     required this.maxSteps,
     required this.deadline,
     required this.durationBudgetMs,
-  }) : _semantics = semantics,
-       _gates = gates,
-       _frames = frames,
-       _policy = policy,
-       _isAppResumed = isAppResumed,
-       _owner = owner;
+  });
 
   final PatchbaySemanticsBridge _semantics;
   final PatchbayGateEvaluator _gates;
@@ -648,9 +643,9 @@ final class _Layer {
     required this.nodeId,
     required this.generation,
     required this.decision,
-    required PatchbayRevealAxis? axis,
+    required this._axis,
     required this.requested,
-  }) : _axis = axis;
+  });
 
   final String? anchorIdentifier;
   final int nodeId;
