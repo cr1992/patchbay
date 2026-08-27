@@ -33,13 +33,15 @@
 契约，不重复维护同一字段。范围或方案 MR 必须遵循[规划与交付治理](docs/planning.md)：涉及公共 API、
 协议/JSON、状态机、跨包边界、默认安全行为或 design-gate 的条目，正式实现前必须有已接受 Proposal。
 
-修改规划文档后运行：
+台账条目是 [`docs/backlog.d/`](docs/backlog.d/README.md) 下一条目一个的碎片文件，和 `changelog.d/`
+同一惯例：**实现 MR 只改自己条目的碎片**，不要重新引入入库的总表。要看全表按需现渲：
 
 ```console
-$ dart run tool/check_planning.dart
+$ dart run tool/check_planning.dart      # 结构 + 跨文档一致性
+$ dart run tool/backlog_render.dart      # 只读总表，不提交
 ```
 
-CI 会阻止 backlog 与版本范围不一致、重复编号、非法状态、悬空 Proposal/design-gate，以及待裁决条目
+CI 会阻止 backlog 与版本范围不一致、碎片字段/状态非法、悬空 Proposal/design-gate，以及待裁决条目
 没有方案入口。实现偏离已接受 Proposal 时，先修改方案并重新评审，不能只在实现 MR 中口头解释。
 
 ## CHANGELOG 碎片
