@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:patchbay/patchbay.dart';
@@ -183,7 +184,16 @@ void main() {
         'without writing anything', () async {
       await expectLater(
         PatchbayLocalArtifactWriter().write(
-          bytes: List<int>.filled(patchbayMaxLocalArtifactBytes + 1, 65),
+          // `Uint8List`, not `List<int>.filled`: the latter boxes every
+          // element in a regular growable-array slot, so a 64MB+1 buffer
+          // costs far more than 64MB to allocate — measured 30-40x slower
+          // than the typed-data equivalent, and under CI CPU contention that
+          // gap has been observed to blow past `dart test`'s 30s default
+          // timeout for a sibling test using the same pattern (see the
+          // eviction test below). The content bytes are never inspected —
+          // `write` rejects on `bytes.length` alone — so a zero-filled
+          // buffer is equivalent to the original all-65s one for this test.
+          bytes: Uint8List(patchbayMaxLocalArtifactBytes + 1),
           contentType: 'application/json',
           extension: 'json',
           commandSlug: 'ui-semantics-tree',
@@ -238,9 +248,26 @@ void main() {
       };
       // Two old, unprotected files that together exceed the cap once a new
       // write needs room.
-      final File oldest = File(
-        '${directory.path}/oldest.json',
-      )..writeAsBytesSync(List<int>.filled(patchbayOutputRetentionMaxBytes, 1));
+      //
+      // This file's size is what matters to `_pruneAutoDirectory`'s byte-cap
+      // check, never its content — `oldest.existsSync()` below is the only
+      // assertion touching it. It used to be filled via
+      // `List<int>.filled(patchbayOutputRetentionMaxBytes, 1)`: a plain
+      // `List<int>` boxes every element instead of packing raw bytes, which
+      // made both the fill and `writeAsBytesSync`'s internal byte conversion
+      // far more expensive than the 128MB the buffer conceptually represents.
+      // That overhead was invisible locally (sub-second, even saturating all
+      // cores) but reproduced under a CPU-throttled container matching CI's
+      // shared-runner shape: instrumented with a Stopwatch, the fill alone
+      // took ~13.7s and the write ~10.3s — ~24s combined, against `dart
+      // test`'s 30s default timeout, while every other step in this same
+      // test (eviction scan, verify, rename) stayed under half a second even
+      // under that same contention. That matches two real CI failures
+      // (`TimeoutException after 0:00:30`) on branches that never touched
+      // this file. `Uint8List` avoids the boxing entirely — same measured
+      // scenario dropped to well under a second.
+      final File oldest = File('${directory.path}/oldest.json')
+        ..writeAsBytesSync(Uint8List(patchbayOutputRetentionMaxBytes));
       oldest.setLastModifiedSync(
         DateTime.now().subtract(const Duration(hours: 2)),
       );
