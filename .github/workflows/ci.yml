@@ -1,5 +1,5 @@
-# 公开仓 CI 门禁：三个 job 与 GitLab .gitlab-ci.yml 的三检查项一一对应
-# （dart_packages / flutter_package / codegen_drift），两边改动需同步。
+# 公开仓 CI 门禁：四个 job 与 GitLab .gitlab-ci.yml 的四检查项一一对应
+# （sdk_floor / dart_packages / flutter_package / codegen_drift），两边改动需同步。
 # Flutter 版本与 GitLab CI 镜像 flutter-node:3.44.9 对齐。
 name: CI
 
@@ -18,6 +18,10 @@ concurrency:
 
 env:
   FLUTTER_VERSION: '3.44.9'
+  # PB-050-12：声明的 Flutter 下限（>=3.38.0）与 Dart 下限（>=3.11.0）无法在同一个真实
+  # release 上同时成立（3.38.x 全系只内置 Dart 3.10.x）；两个约束共同要求的最早可安装
+  # release 是 3.41.0。详情见 docs/verification/0.5.0-flutter-sdk-floor.md。
+  SDK_FLOOR_FLUTTER_VERSION: '3.41.0'
 
 jobs:
   dart_packages:
@@ -85,3 +89,26 @@ jobs:
           dart run packages/patchbay/bin/wire_codegen.dart --contract packages/patchbay/contracts/core_wire.json --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
           dart run packages/patchbay/bin/command_codegen.dart --contract packages/patchbay/contracts/example_commands.json --output packages/patchbay/contracts/example_commands.g.dart --check
           (cd packages/patchbay_cli && dart pub get && dart run tool/protocol_cli_codegen.dart --check && dart run tool/command_docs.dart --check)
+
+  # needs：GitHub Actions 默认每个 job 各自一台 runner，本不存在 GitLab 那种同机资源
+  # 争用；这里加 needs 纯粹是为了两边 job 结构与调度顺序保持对应（.gitlab-ci.yml 的
+  # sdk_floor 因为实测在 GitLab 共享 runner 上和其余三条 job 抢 CPU/内存/磁盘 I/O、
+  # 顶爆过 dart_packages 的一个 30s 超时用例，被挪到了排在 check 之后的独立 stage）。
+  #
+  # continue-on-error：截至本次调查，3.41.0 在本地 macOS arm64 复现下未能通过既有的
+  # reveal 终止条件矩阵一条断言，且未在 Linux 上复核过。结论明朗前先非阻断跑，取得
+  # 该组合在真实 CI 平台上的第一手数据，不用一个还没坐实的失败卡住其余三条 job。
+  sdk_floor:
+    needs: [dart_packages, flutter_package, codegen_drift]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.SDK_FLOOR_FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: 最低可安装 Flutter / Dart 组合
+        run: ./tool/verify_sdk_floor.sh
