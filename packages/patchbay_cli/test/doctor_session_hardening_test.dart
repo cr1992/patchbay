@@ -62,5 +62,17 @@ void main() {
         contains('/tmp/s/a.json.quarantine-1-2'),
       );
     });
+
+    test('patchbaySessionFinding action names all three recovery paths for '
+        'an empty directory', () {
+      final PatchbayDoctorFinding finding = patchbaySessionFinding(
+        listings: const <PatchbaySessionListing>[],
+        explicitSession: null,
+      );
+      expect(finding.details['code'], 'sessionDirectoryEmpty');
+      expect(finding.action, contains('the launcher'));
+      expect(finding.action, contains('--ws-uri'));
+      expect(finding.action, contains('patchbay session register'));
+    });
   });
 }

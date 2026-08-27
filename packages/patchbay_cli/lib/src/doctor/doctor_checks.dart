@@ -98,8 +98,9 @@ PatchbayDoctorFinding patchbaySessionFinding({
           'the App was not started through a Patchbay launcher, it has not '
           'written its record yet, or --session-dir points somewhere else',
       action:
-          'start the App through the launcher, or connect explicitly with '
-          '--ws-uri <vm-service-uri>',
+          'start the App through the launcher, connect explicitly with '
+          '--ws-uri <vm-service-uri>, or if the App already started on its '
+          'own, register it with `patchbay session register`',
       details: <String, Object?>{...counts(), 'code': 'sessionDirectoryEmpty'},
     );
   }
