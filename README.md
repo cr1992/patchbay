@@ -28,8 +28,8 @@ widgets by stable ID, and pull redacted logs and screenshots.
 adb looks at a device from outside the system; Patchbay looks at the runtime from inside the app.
 On iOS in particular, it fills in the in-app debugging surface that system tooling cannot provide.
 
-> **Project status:** `v0.4.1`; requires Dart `>=3.11.0`, and Flutter
-> `>=3.38.0` for the Flutter UI capabilities. The control plane is enabled only in debug /
+> **Project status:** `v0.4.1`; requires Dart `>=3.12.0`, and Flutter
+> `>=3.44.0` for the Flutter UI capabilities. The control plane is enabled only in debug /
 > profile; the packages can take part in a release compile, but the consumer must keep the host
 > and adapters unreachable through compile-time branching at the composition root.
 
