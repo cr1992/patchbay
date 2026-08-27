@@ -555,7 +555,7 @@ shell history 或提交物。
 ### 会话选择
 
 双设备并连（Android + iOS 同时跑）时会话不唯一，逐条命令敲长 `--session <id>` 很费。会话目录
-本身有三条命令，它们**不连 App、不读 catalog**，只读写本地记录，因此在「CLI 选不出会话」时照样能用：
+本身有一组命令，它们**不连 App、不读 catalog**，只读写本地记录，因此在「CLI 选不出会话」时照样能用：
 
 ```console
 $ patchbay sessions list                  # 有哪些记录，* 标记已固定的那条
@@ -599,6 +599,36 @@ Git 目录则是 cwd 本身；同一 checkout 的子目录算同一个，共享 
 路径一律不出（`--json` 的 `endpoint` 字段同样已打码）。
 
 会话选择是「下一个进程连哪」的事，repl 里因此不可用：那条连接已经选定了。
+
+#### 自己起 App 的会话：register / unregister
+
+上面的记录由 `patchbay launch` 监督的子进程自己声明。**如果 App 不走 `patchbay launch`**——
+自有脚本 / IDE / 构建流水线起的——记录就没人写，于是每条命令都得再传一次 `--ws-uri`。这两条
+命令补上那一段，它们同样不连 App：
+
+```console
+$ patchbay --json session register \
+    --ws-uri "$uri" \
+    --application-id com.example.app \
+    --device-id emulator-5554 \
+    --process-id $$ \
+    [my-session]                          # 省略则由 CLI 命名，并在输出里报出来
+$ patchbay session unregister my-session  # 退出时清理
+```
+
+- `--process-id` 是**本机持有这个会话的进程**（起 App 的那个脚本 / `flutter run` 进程），
+  不是设备上的 App 进程号：`sessions list` 的 `status` 与 `sessions prune` 都按它的存活判定，
+  所以它一死，记录就该消失。
+- 记录在**执行这条命令的 checkout** 名下，因此同一 checkout 里后续命令不带 `--session`
+  就能选中它，别的 checkout 看不见（同上一节的亲和性规则）。
+- 复用既有 pending 记录语义：`applicationId` 不在这里握手核对，而是像 launcher 声明的记录
+  一样，等第一条真正连上的命令去对账，不一致就按 `sessionIdentityMismatch` 删掉记录。
+- 同名记录已存在时以 `sessionAlreadyRegistered` 拒绝，不覆盖。`unregister` 在记录已经不在时
+  正常退出并报 `removed: false`——它是 cleanup trap 的一半，`sessions prune` 先一步删掉不算错。
+- 输出走既有 JSON 信封，不新增记录字段：`register` 回一个 `session` 对象（就是 `sessions list`
+  里那条），`unregister` 回 `{"sessionId": …, "removed": …}`。
+
+会话记录带认证 URI，务必在退出路径上 `unregister`（shell 里配 `trap`），不要留给下一次运行。
 
 ### 体检（doctor）
 
@@ -697,6 +727,9 @@ $ patchbay --wait exec <ns.command>         # job 命令等终态
 $ patchbay job get|cancel <job-id>
 $ patchbay sessions list|prune               # 本地会话记录，不连 App
 $ patchbay session use <id>|--clear          # 固定 / 取消固定会话
+$ patchbay session register --ws-uri <uri> --application-id <id> \
+      --device-id <id> --process-id <pid> [<session-id>]  # 自己起的 App 登记一条记录
+$ patchbay session unregister <session-id>   # 退出时清理那条记录
 $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
 $ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发（语义通道）

@@ -49,12 +49,19 @@
 | 档位 | 内容 | 门禁 | 行为 |
 |---|---|---|---|
 | **硬规则（判红）** | 跨包 `src/` 私有导入；越出包根的相对导入；领域目录循环依赖 | `check_structure_ratchet.dart` | 退出码 1，阻断 |
-| **硬规则（判红）** | 四包公共 API surface 相对 golden 的任何新增或移除 | `check_api_surface.dart` | 退出码 1，阻断 |
+| **硬规则（判红）** | 四包每个公开 library 相对 golden 的任何新增或移除，含新增 library 本身 | `check_api_surface.dart` | 退出码 1，阻断 |
 | **警戒线（告警）** | 单函数 > 150 行；单文件 > 800 行（测试 > 1000 行）；文件相比基线变长 | `check_structure_ratchet.dart` | 打印后正常退出，不阻断 |
 
 公共 API surface 按 `export` / `show` / `hide` / `part` 展开计算，而不是比对 barrel 文本——
 仓库曾出现 barrel 一字未改、符号集合却扩大 45 个的泄漏。有意变更公共面时跑
 `dart run tool/check_api_surface.dart --update` 并在 MR 描述里解释。
+
+golden 按**公开 library** 记录（`packages/<pkg>/lib/*.dart` 各一条，`lib/src/` 不算入口）：
+同名符号不跨 library 折叠，新增一个 `lib/*.dart` 本身就是新增公共面、默认判红。
+`patchbay_cli` 的两个入口是 DG-050-07 冻结的封闭清单（canonical 2 个、
+`patchbay_client.dart` 8 个），扩表要先改
+[CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md) 再改 golden，
+不能在实现 MR 里顺手 `--update`。
 
 硬规则挑的都是"评审用肉眼很难稳定抓住、但一旦发生就确定是错"的结构错误。
 警戒线挑的是"值得在评审里解释一句"的地方。
