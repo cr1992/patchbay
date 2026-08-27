@@ -9,9 +9,13 @@
 //
 // PB-050-13 起 golden 按**公开 library** 记录，而不是每包一份扁平数组：
 // `lib/` 下每个 `.dart` 都是一个可被 import 的公开入口，把它们折叠成一个集合会让
-// 「哪个入口暴露了它」无法回答，也让同名符号跨 library 相互掩盖。因此这里枚举
-// `packages/<pkg>/lib/*.dart`（不递归——`lib/src/` 按约定是实现细节），逐 library
-// 比对；新增一个 library 文件本身就是新增公共面，默认判红。
+// 「哪个入口暴露了它」无法回答，也让同名符号跨 library 相互掩盖。因此这里递归枚举
+// `packages/<pkg>/lib/**.dart`，只排除顶层 `lib/src/`（pub 的私有约定只覆盖那一个
+// 目录），逐 library 比对；新增一个 library 文件本身就是新增公共面，默认判红。
+//
+// 封闭清单的包（见 `_closedSurfacePackages`）额外要求「每个 library 的集合都算得
+// 出来」：无 `show` 的 `export 'package:…'` 当场判红，`--update` 也挡，否则那一行
+// 就是一个 golden diff 恒为 0 的绕过口子。
 //
 //   dart run tool/check_api_surface.dart            比对 golden
 //   dart run tool/check_api_surface.dart --update   重写 golden（需在 MR 中解释）
@@ -99,7 +103,17 @@ Set<String> _names(String clause) =>
     clause.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toSet();
 
 /// 从 [entry] 出发展开 export / part，算出可见的公开符号集合。
-Set<String> surfaceOf(String repoRoot, String entry, [Set<String>? seen]) {
+///
+/// [opaqueReexports] 收集本工具**算不出集合**的 re-export：无 `show` 子句的
+/// `export 'package:…'`。它们的符号集合由对方包决定，本工具不展开，因此对封闭
+/// 清单 library 来说是一个 golden diff 恒为 0 的绕过口子——见
+/// [opaquePackageReexports]。传 null 表示调用方不关心（例如只想要符号集合）。
+Set<String> surfaceOf(
+  String repoRoot,
+  String entry, {
+  Set<String>? seen,
+  List<String>? opaqueReexports,
+}) {
   seen ??= <String>{};
   if (!seen.add(entry)) return <String>{};
   final file = File('$repoRoot/$entry');
@@ -124,13 +138,23 @@ Set<String> surfaceOf(String repoRoot, String entry, [Set<String>? seen]) {
       // 包就能记进本包的公共面——`patchbay_client.dart` 的 PatchbaySnapshotRequest
       // 正是这种形态，漏记它 golden 就少一个符号。
       //
-      // 整库 `export 'package:…'`（无 show）仍然跳过：它的集合由对方包决定，展开
+      // 整库 `export 'package:…'`（无 show）不展开：它的集合由对方包决定，展开
       // 会把对方的整张表算进本包，改变 patchbay_flutter 等既有 golden 的口径。
-      // PB-050-13 只收口 CLI，不改另外三个包的公共面，所以这里保持 0.4.1 语义。
-      if (show != null) out.addAll(_names(show.group(1)!));
+      // PB-050-13 只收口 CLI，不改另外三个包的公共面，所以这里保持 0.4.1 语义——
+      // 但「不展开」等于「记不下来」，所以顺手登记，让封闭清单的包能当场判红。
+      if (show != null) {
+        out.addAll(_names(show.group(1)!));
+      } else {
+        opaqueReexports?.add("$entry: export '$target';");
+      }
       continue;
     }
-    var sub = surfaceOf(repoRoot, _resolve(entry, target), seen);
+    var sub = surfaceOf(
+      repoRoot,
+      _resolve(entry, target),
+      seen: seen,
+      opaqueReexports: opaqueReexports,
+    );
     if (show != null) {
       final keep = _names(show.group(1)!);
       sub = sub.where(keep.contains).toSet();
@@ -146,20 +170,55 @@ Set<String> surfaceOf(String repoRoot, String entry, [Set<String>? seen]) {
 
 /// `packages/<pkg>/lib` 下的每个公开 library，按包相对路径排序。
 ///
-/// 只看 `lib/` 一层：`lib/src/` 按 pub 与 lint 的既有约定是实现细节，`lib/x.dart`
-/// 则是任何人都能 import 的入口。因此「新增一个 `lib/*.dart`」等于新增公共面，
-/// 会以「新增 library」的形式判红，而不是悄悄混进某个包的符号总数里。
+/// 递归整个 `lib/`，只排除**顶层的** `lib/src/`：pub 与 lint 的私有约定只覆盖那
+/// 一个目录，`lib/extra/x.dart` 或 `lib/a/src/b.dart` 外部照样能
+/// `import 'package:<pkg>/extra/x.dart'`。早期只扫 `lib/` 一层的版本会让这些
+/// 「看起来私有、其实公开」的路径整个从 golden 里消失。
 List<String> librariesOf(String repoRoot, String pkg) {
-  final dir = Directory('$repoRoot/packages/$pkg/lib');
-  if (!dir.existsSync()) return const <String>[];
-  return dir
-      .listSync(followLinks: false)
-      .whereType<File>()
-      .map((f) => f.uri.pathSegments.last)
-      .where((name) => name.endsWith('.dart'))
-      .map((name) => 'lib/$name')
-      .toList()
-    ..sort();
+  final root = Directory('$repoRoot/packages/$pkg/lib');
+  if (!root.existsSync()) return const <String>[];
+  final out = <String>[];
+  void walk(Directory dir, String prefix) {
+    for (final entity in dir.listSync(followLinks: false)) {
+      final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      if (entity is Directory) {
+        // 只有 `lib/src/` 是私有约定；更深处叫 src 的目录不是。
+        if (prefix.isEmpty && name == 'src') continue;
+        walk(entity, '$prefix$name/');
+      } else if (entity is File && name.endsWith('.dart')) {
+        out.add('lib/$prefix$name');
+      }
+    }
+  }
+
+  walk(root, '');
+  return out..sort();
+}
+
+/// 采用封闭清单口径的包。
+///
+/// 这些包的每个公开 library 都必须能被本工具**完整算出**，否则 golden 就不是那份
+/// 清单的证据。因此它们不允许出现无 `show` 的跨包整库 re-export——那一行会让对方
+/// 包的整张表进入本包公共面，而 golden diff 恒为 0。
+///
+/// 另外三个包保持 0.4.1 口径：`patchbay_flutter` 本来就整库 re-export `patchbay`，
+/// PB-050-13 明确不动它们的公共面。
+const Set<String> _closedSurfacePackages = <String>{'patchbay_cli'};
+
+/// 封闭清单包里所有算不出集合的跨包 re-export，人读格式，每行一条。
+List<String> opaquePackageReexports(String repoRoot) {
+  final violations = <String>[];
+  for (final pkg in _packages) {
+    if (!_closedSurfacePackages.contains(pkg)) continue;
+    for (final library in librariesOf(repoRoot, pkg)) {
+      final found = <String>[];
+      surfaceOf(repoRoot, 'packages/$pkg/$library', opaqueReexports: found);
+      for (final line in found) {
+        violations.add('$pkg $library：$line');
+      }
+    }
+  }
+  return violations..sort();
 }
 
 Map<String, Map<String, List<String>>> computeSurface(String repoRoot) =>
@@ -198,6 +257,25 @@ Map<String, Map<String, List<String>>> _readGolden(String text) {
 void main(List<String> args) {
   final repoRoot = Directory.current.path;
   final update = args.contains('--update');
+
+  // 先于一切：算不出集合的 re-export 会让后面的 diff 全部失去意义，而且必须**同样
+  // 挡住 `--update`** —— 否则「加一行整库 re-export，跑一次 --update」正是这条规则
+  // 要防的绕过：golden 无变化、门禁全绿、对方包的整张表已经进了本包公共面。
+  final opaque = opaquePackageReexports(repoRoot);
+  if (opaque.isNotEmpty) {
+    stderr.writeln('封闭清单 library 出现算不出集合的跨包 re-export：');
+    for (final line in opaque) {
+      stderr.writeln('  - $line');
+    }
+    stderr.writeln(
+      '\n无 show 子句的 `export \'package:…\'` 会把对方包的整张公共面带进本包，而本工具'
+      '不展开它，\n因此 golden 记不下来、diff 恒为 0。改成精确 `show A, B;`，或把该符号'
+      '在本包重新声明。',
+    );
+    exitCode = 1;
+    return;
+  }
+
   final current = computeSurface(repoRoot);
 
   final goldenFile = File('$repoRoot/$_goldenPath');

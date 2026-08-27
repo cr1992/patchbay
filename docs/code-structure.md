@@ -56,12 +56,18 @@
 仓库曾出现 barrel 一字未改、符号集合却扩大 45 个的泄漏。有意变更公共面时跑
 `dart run tool/check_api_surface.dart --update` 并在 MR 描述里解释。
 
-golden 按**公开 library** 记录（`packages/<pkg>/lib/*.dart` 各一条，`lib/src/` 不算入口）：
-同名符号不跨 library 折叠，新增一个 `lib/*.dart` 本身就是新增公共面、默认判红。
+golden 按**公开 library** 记录：递归 `packages/<pkg>/lib/**.dart` 各一条，只排除顶层
+`lib/src/`（pub 的私有约定只覆盖那一个目录——`lib/extra/x.dart` 外部照样能 import，
+所以它必须出现在 golden 里）。同名符号不跨 library 折叠，新增一个 library 文件本身就是新增
+公共面、默认判红。
+
 `patchbay_cli` 的两个入口是 DG-050-07 冻结的封闭清单（canonical 2 个、
 `patchbay_client.dart` 8 个），扩表要先改
 [CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md) 再改 golden，
-不能在实现 MR 里顺手 `--update`。
+不能在实现 MR 里顺手 `--update`。封闭清单的包额外守一条：无 `show` 子句的
+`export 'package:…'` 当场判红，`--update` 也挡——本工具不展开整库跨包 re-export，
+所以那一行会把对方包的整张公共面带进本包而 golden diff 恒为 0。另外三个包保持 0.4.1
+口径（`patchbay_flutter` 本来就整库 re-export `patchbay`），本版不动它们的公共面。
 
 硬规则挑的都是"评审用肉眼很难稳定抓住、但一旦发生就确定是错"的结构错误。
 警戒线挑的是"值得在评审里解释一句"的地方。

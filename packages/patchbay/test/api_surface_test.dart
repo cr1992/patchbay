@@ -85,7 +85,19 @@ void main() {
           'PatchbayExitCode',
           'runPatchbayCli',
         ]);
-        expect((cli['lib/patchbay_client.dart']! as List<Object?>).length, 8);
+        // 逐个名字，不只是数量：只断言 length == 8 时，「删一个清单内符号、加一个
+        // 清单外符号、再跑一次 --update」长度仍是 8，测试照样绿——那正是这条断言
+        // 存在的理由。顺序是 golden 自己的排序（升序）。
+        expect(cli['lib/patchbay_client.dart'], <String>[
+          'PatchbayClient',
+          'PatchbayProtocolException',
+          'PatchbayRuntimeIdentity',
+          'PatchbaySnapshotDiffClient',
+          'PatchbaySnapshotRequest',
+          'PatchbayTransportException',
+          'connectPatchbayDirect',
+          'connectPatchbayVmService',
+        ]);
       });
     },
     skip: root == null ? '不在仓库工作树内（发布归档），surface 门禁不适用' : null,
@@ -167,6 +179,102 @@ void main() {
         surface['patchbay_flutter']!['lib/patchbay_flutter.dart'],
         <String>['Bridge'],
       );
+    });
+
+    // 下面三条是独立证伪复现出的绕过场景，固化成永久用例：每一条在修复前都是
+    // 「加一行 / 加一个文件 → golden diff 为 0 → 门禁全绿」。
+    test('N1：lib/ 下 src 之外的嵌套目录也是公开入口，不是盲区', () {
+      writeLibrary('patchbay_cli', 'patchbay_cli.dart', 'class Entry {}\n');
+      // `lib/src/**` 是 pub 的私有约定，外部不该 import——不记。
+      writeLibrary('patchbay_cli', 'src/hidden.dart', 'class Hidden {}\n');
+      writeLibrary(
+        'patchbay_cli',
+        'src/deep/hidden.dart',
+        'class DeepHidden {}\n',
+      );
+      // `lib/extra/**` 不是：`import 'package:patchbay_cli/extra/leak.dart'`
+      // 完全合法，所以它必须作为一条独立 library 出现在 golden 里。
+      writeLibrary('patchbay_cli', 'extra/leak.dart', 'class Leak {}\n');
+      // 更深处叫 src 的目录同样不是私有约定。
+      writeLibrary(
+        'patchbay_cli',
+        'extra/src/also_public.dart',
+        'class AlsoPublic {}\n',
+      );
+
+      final surface = tool.computeSurface(fixture.path)['patchbay_cli']!;
+
+      expect(surface.keys.toList(), <String>[
+        'lib/extra/leak.dart',
+        'lib/extra/src/also_public.dart',
+        'lib/patchbay_cli.dart',
+      ]);
+      expect(surface['lib/extra/leak.dart'], <String>['Leak']);
+      expect(surface['lib/extra/src/also_public.dart'], <String>['AlsoPublic']);
+    });
+
+    test('N2：封闭清单 library 的无 show 跨包 re-export 当场判红', () {
+      writeLibrary('patchbay', 'patchbay.dart', 'class Everything {}\n');
+      writeLibrary('patchbay_cli', 'patchbay_cli.dart', 'class Entry {}\n');
+      writeLibrary(
+        'patchbay_cli',
+        'patchbay_client.dart',
+        "export 'package:patchbay/patchbay.dart';\n",
+      );
+
+      final violations = tool.opaquePackageReexports(fixture.path);
+
+      // 没有这条规则时：golden 里 patchbay_client.dart 记 0 个符号，diff 为 0，
+      // 而实际公共面已经是 patchbay 的整张表。
+      expect(violations, hasLength(1));
+      expect(
+        violations.single,
+        contains('patchbay_cli lib/patchbay_client.dart'),
+      );
+      expect(
+        violations.single,
+        contains("export 'package:patchbay/patchbay.dart';"),
+      );
+    });
+
+    test('N2：绕过口子藏在 src/ 深处一样算数，带 show 的不算', () {
+      writeLibrary('patchbay', 'patchbay.dart', 'class Everything {}\n');
+      writeLibrary(
+        'patchbay_cli',
+        'patchbay_cli.dart',
+        "export 'src/relay.dart';\n",
+      );
+      writeLibrary(
+        'patchbay_cli',
+        'src/relay.dart',
+        "export 'package:patchbay/patchbay.dart';\n",
+      );
+      writeLibrary(
+        'patchbay_cli',
+        'patchbay_client.dart',
+        "export 'package:patchbay/patchbay.dart' show Everything;\n",
+      );
+
+      final violations = tool.opaquePackageReexports(fixture.path);
+
+      expect(violations, hasLength(1));
+      expect(violations.single, contains('patchbay_cli lib/patchbay_cli.dart'));
+      // 报的是真正出问题的那个文件，而不是入口 library。
+      expect(
+        violations.single,
+        contains('packages/patchbay_cli/lib/src/relay.dart'),
+      );
+    });
+
+    test('N2：非封闭清单的包保持 0.4.1 口径，不因整库 re-export 判红', () {
+      writeLibrary('patchbay', 'patchbay.dart', 'class Everything {}\n');
+      writeLibrary(
+        'patchbay_flutter',
+        'patchbay_flutter.dart',
+        "export 'package:patchbay/patchbay.dart';\nclass Bridge {}\n",
+      );
+
+      expect(tool.opaquePackageReexports(fixture.path), isEmpty);
     });
   });
 }
