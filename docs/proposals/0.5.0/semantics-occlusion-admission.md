@@ -85,8 +85,9 @@ enum 新增值时编译期就必须显式分类，而不是靠后来的记忆。
 `reason` 与 gesture 共用同一词表。details 不含坐标、rect、探针点、devicePixelRatio、viewId、label、value、
 hint、tooltip 与 render 类名。
 
-分工沿 PB-040-26 判例：**App 内可观测的遮挡报 `uiSemanticsTargetObscured`，外部 driver 观测到的系统窗口报
-`systemUiUnexpected`**，两者可同时出现，轨迹里能看出先后。
+分工沿 0.4.0 [平台权限](../0.4.0/platform-permissions.md) 判例：**App 内可观测的遮挡报
+`uiSemanticsTargetObscured`，外部 driver 观测到的系统窗口报 `systemUiUnexpected`**，两者可同时出现，
+轨迹里能看出先后。
 
 CLI 侧不需要码表改动：`patchbayExitCodeFor` 按 `admission` 分类，新码落在既有 `PatchbayExitCode.rejected`。
 

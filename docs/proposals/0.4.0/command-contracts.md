@@ -2,7 +2,8 @@
 
 > 状态：已接受
 >
-> 关联：PB-040-05、PB-040-06、PB-040-07、PB-040-08、PB-040-21、PB-040-22
+> 关联：PB-040-21；registry/descriptor/响应 schema/CLI 生成面已随 0.4.0 发布，见
+> [CHANGELOG.md 0.4.0 段](../../../CHANGELOG.md#040---2026-08-20)
 >
 > 设计闸门：DG-040-05
 
@@ -64,7 +65,7 @@ host 在 adapter 回程、写入 job ledger 前校验；CLI 在收到信封后�
 发现必填字段缺失、类型错误、未知变体或额外字段，返回 `providerProtocolViolation`，`details.reason`
 使用封闭值：`missingField`、`unexpectedNull`、`wrongType`、`unknownVariant`、`unknownField`。
 
-## CLI 生成面的边界（PB-040-06、PB-040-07）
+## CLI 生成面的边界（已随 0.4.0 发布）
 
 CLI 与 host **分开部署**，CLI 不可能从运行时 catalog 生成自己的解析表——它必须在拨号之前就能解析
 argv，也必须能对着一个从没见过的接入方目录工作。所以“由 descriptor 生成”只覆盖**协议自有命令**：
