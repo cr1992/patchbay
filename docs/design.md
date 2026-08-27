@@ -446,6 +446,25 @@ wire 面有握手兜底：版本对不上就 `schemaVersionMismatch`，谁都不
 所以会话记录的 `schemaVersion` 保持 `1`，新字段一律松读追加，reader 逐键读、不认识的键忽略。要真的
 需要一次不兼容的结构变更，先换目录名，让新旧两套记录互不可见，而不是指望老 CLI 认得新版本号。
 
+### SDK 下限是一组实测组合，不是两个独立数字
+
+Flutter release 自带一版精确的 Dart，framework 的 transitive package 也随之精确 pin；因此「最低
+Dart」和「最低 Flutter」不是两条可以分别宣称的承诺——两个约束必须在**同一个真实 release** 上同时
+成立才算数。PB-050-12 的调查证明了这条教训不是纸上谈兵：仓库曾同时声明 Dart `>=3.11.0` 与 Flutter
+`>=3.38.0`，但 Flutter 3.38.x 全系只内置 Dart 3.10.x，两个数字组合起来根本不指向任何一个可安装的
+真实版本。详见 [`docs/verification/0.5.0-flutter-sdk-floor.md`](verification/0.5.0-flutter-sdk-floor.md)。
+
+更进一步：**「能装」不等于「能过现有测试」。** 一份组合只要 `pub get` 能解析全部 package 就满足了
+「可安装」，但那只证明了依赖图相容，不证明源码在那份更早的 Flutter/Dart 上运行结果与当前开发/CI
+使用的版本一致。PB-050-12 的调查里，机检确定的「最早可安装」组合在本地复现下就踩到一个既有测试
+断言失败——而这与该组合能否 `pub get` 无关，只有把 `analyze` 和 `test` 也跑一遍才会暴露。反过来，
+更新的 release 也不天然更安全：调查里另一个候选版本自身带有与 patchbay 源码无关的引擎资产缺陷。
+下限验证因此必须包含完整的 resolve + analyze + test 链，不能只做依赖解析就宣称「验证过」。
+
+同样必须留意平台边界：本地或沙盒环境能跑的验证平台，不一定是实际 CI runner 的平台（例如
+macOS 与 Linux、不同 CPU 架构）。跨版本、跨平台都可能出现的差异，只有在目标平台的真实 CI 上跑过
+才能定论；本地复现出的失败/通过在写进文档时要明确标注验证平台，不能默认它可以跨平台外推。
+
 ## 传输选型
 
 - **主通道 VM Service**：debug/profile 天然存在，零额外监听面，与 DevTools 共用。
