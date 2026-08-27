@@ -97,6 +97,12 @@ void main() {
       expect(credentialInUrl.exitCode, PatchbayExitCode.usage);
       expect(credentialInUrl.stderr.toString(), isNot(contains(token)));
 
+      // Deliberately tight and untouched by the widened outer `timeout:`
+      // below: this call's whole point is the transport timeout race.
+      // `fixture.slow` always sleeps 2s before responding, so any budget far
+      // below that (however slow process spawn itself is) still
+      // deterministically yields the transport-timeout outcome -- the
+      // assertion never depends on how fast the host happens to be.
       final ProcessResult timeout = await _runDirect(
         endpoint,
         token,
@@ -110,7 +116,17 @@ void main() {
       expect(timeout.stderr.toString(), contains('frozen by the system'));
       expect(timeout.stderr.toString(), isNot(contains(token)));
     },
-    timeout: const Timeout(Duration(seconds: 45)),
+    // One real host boot plus seven real `dart run bin/patchbay.dart`
+    // compiles (`_runDirect`) chained sequentially -- the same
+    // real-subprocess-cold-start class `cross_process_test.dart`'s 120s
+    // already accounts for. Not exercising a timeout mechanism (the one
+    // deliberate race, `fixture.slow` at `timeoutMs: 20`, keeps its own tight
+    // budget below, unaffected by this). A local `--cpus=1 --memory=4g`
+    // container repro run alongside the other heavy cross-process test files
+    // measured this test at ~45.0s wall-clock (dart:test's own ceiling,
+    // not this test's logic) even though it usually finishes around 32-33s in
+    // isolation; widened with real margin rather than trimmed further.
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 }
 
