@@ -45,6 +45,29 @@ The exact choices, exit conditions, and two-terminal example have one source of 
 [Choose a workflow](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流).
 This package README deliberately does not duplicate that table.
 
+## Dart Entry Points
+
+The stable way to drive Patchbay is the executable plus `--json`. Two small Dart libraries exist
+for the cases where a process boundary is genuinely in the way, and together they are the whole
+public source surface of this package — everything else lives under `lib/src/` and is an
+implementation detail that changes without notice.
+
+```dart
+// Run one CLI invocation in-process and read its exit code.
+import 'package:patchbay_cli/patchbay_cli.dart'; // runPatchbayCli, PatchbayExitCode
+
+// Hold a connection open from Dart instead of shelling out per command.
+import 'package:patchbay_cli/patchbay_client.dart';
+// PatchbayClient, PatchbaySnapshotDiffClient, PatchbayRuntimeIdentity,
+// PatchbayProtocolException, PatchbayTransportException, PatchbaySnapshotRequest,
+// connectPatchbayVmService, connectPatchbayDirect
+```
+
+Launcher, session, trace, doctor, repl, manifest and permission-driver implementations are not
+importable: drive them through CLI commands and their stable JSON. An app started outside
+`patchbay launch` registers its session with `patchbay session register` instead of writing the
+session record itself.
+
 ## Command Reference
 
 Viewing help does not discover sessions, connect to the app, or read a bearer / sensitive stdin:

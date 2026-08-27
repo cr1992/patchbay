@@ -7,6 +7,11 @@ import 'package:vm_service/vm_service_io.dart';
 import 'request_id.dart';
 import 'performance_profile.dart';
 
+/// The App answered, and the answer broke the protocol.
+///
+/// Distinct from [PatchbayTransportException] on purpose: this one means the
+/// peer was reached and said something the contract does not allow, so a retry
+/// on the same host reproduces it.
 final class PatchbayProtocolException implements Exception {
   const PatchbayProtocolException(
     this.code, {
@@ -23,6 +28,10 @@ final class PatchbayProtocolException implements Exception {
   final Map<String, Object?> details;
 }
 
+/// The App could not be reached, or stopped answering mid-request.
+///
+/// The code names the failure class and never the transport: URIs, tokens and
+/// endpoints must not reach it, for the same reason they never reach stderr.
 final class PatchbayTransportException implements Exception {
   const PatchbayTransportException(
     this.code, {
@@ -33,6 +42,10 @@ final class PatchbayTransportException implements Exception {
   final Map<String, Object?> details;
 }
 
+/// One host's answer to the identity handshake.
+///
+/// A caller compares it field by field to decide whether the connection it
+/// just opened is the App it meant to reach.
 final class PatchbayRuntimeIdentity {
   const PatchbayRuntimeIdentity({
     required this.schemaVersion,
@@ -123,6 +136,11 @@ Set<String>? patchbayDeclaredFeatures(Map<String, Object?> identity) {
   return <String>{for (final Object? name in value) name! as String};
 }
 
+/// One open connection to a running App, whatever transport reached it.
+///
+/// Every method answers with the decoded Patchbay response document; nothing
+/// here classifies a response into a verdict — that belongs to the caller, and
+/// to the CLI's exit codes.
 abstract interface class PatchbayClient {
   Future<Map<String, Object?>> identity();
   Future<Map<String, Object?>> catalog();

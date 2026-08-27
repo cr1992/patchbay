@@ -89,6 +89,12 @@ abstract final class LocalSessionCommandHandler {
     final String sessionId =
         arguments['sessionId'] as String? ??
         'external-$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    // Read-then-write, not a locked claim: two registrations racing on the
+    // same explicit id would both pass this check. The write itself is still
+    // atomic (temp+rename), so the loser overwrites rather than tearing, and
+    // the id is one the caller chose — the check exists to stop an operator
+    // from silently replacing a record they forgot about, not to arbitrate
+    // between concurrent writers of the same name.
     if (sessions.store.readAll().any(
       (PatchbaySessionRecord record) => record.sessionId == sessionId,
     )) {
