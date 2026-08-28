@@ -8,7 +8,7 @@ import 'dart:io';
 
 import '../packages/patchbay/tool/backlog_store.dart';
 
-const _activeVersion = '0.5.0';
+const _activeVersion = '0.6.0';
 
 // `待真机验收` 是发布收尾专用状态：`release_finalize` 按它把条目归进
 // EVIDENCE_PENDING 档——实现已完成、只差真机/接入方证据，碎片保留不删，需显式
