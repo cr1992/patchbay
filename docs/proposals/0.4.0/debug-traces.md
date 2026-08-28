@@ -72,8 +72,8 @@ artifacts/
   `appRecorded/deviceReported/uiObserved/...`，两套词表不得再共用一个字段。
 
 事件类型**写入侧封闭、读取侧开放**，与 feature capability 的不对称同构：本版 writer 只能产出下列
-类型，而 reader 遇到没见过的类型必须保留但不解释、导出时不得丢失。这样后续版本（例如
-PB-040-25/26 的权限事件）新增类型时，老 reader 降级成“我不解释它”，而不是解析失败。
+类型，而 reader 遇到没见过的类型必须保留但不解释、导出时不得丢失。这样后续版本（例如已随
+0.4.0 发布的权限相关事件）新增类型时，老 reader 降级成“我不解释它”，而不是解析失败。
 
 首版写入侧封闭表：`trace.started`、`trace.truncated`、`session.observed`、`command.started`、`command.admission`、
 `job.event`、`artifact.attached`、`note.added`、`command.finished`、`trace.finished`。
@@ -93,7 +93,7 @@ PB-040-25/26 的权限事件）新增类型时，老 reader 降级成“我不�
 ## 记录边界与脱敏
 
 - 请求参数按 descriptor 处理：sensitive 字段只记 `{redacted: true, source: stdin}`，不保存值或摘要。
-- PB-040-22 响应 schema 只提供结构校验，不把字段自动升级为“可持久化”；本版默认只保存 admission、
+- 已随 0.4.0 发布的响应 schema 只提供结构校验，不把字段自动升级为“可持久化”；本版默认只保存 admission、
   稳定 code、执行证据与字段类型形状。以后若增加逐字段持久化/敏感元数据，再单独扩展值级记录。
 - 老 host 的自由 payload 默认只保存 admission、字段名集合、类型形状和 `legacyUnvalidated: true`；必须
   显式 `--include-legacy-payload` 才能保存值，并在终端二次提示。**非 TTY 环境下该标志直接拒绝**，
@@ -134,10 +134,10 @@ PB-040-24 继续保留在 backlog，但不进入 0.4.0。具体前置与候选�
 
 ## 兼容与依赖
 
-- PB-040-23 可先记录 0.3.x host，但只得到 legacy payload 形状；稳定语义依赖 PB-040-22。
-- session 跨断连延续依赖 PB-040-11；执行分类依赖 PB-040-21。
-- 权限状态与系统弹窗只有在 PB-040-25/26 落地后才能形成完整 interruption 事件；此前 trace 必须标记
-  `externalInterruptionUnknown`，不能把普通超时当成权限结论。
+- PB-040-23 可先记录 0.3.x host，但只得到 legacy payload 形状；稳定语义依赖已随 0.4.0 发布的响应 schema。
+- session 跨断连延续依赖已随 0.4.0 发布的 launcher 监督循环；执行分类依赖 PB-040-21。
+- 权限状态与系统弹窗的 trace 事件以已随 0.4.0 发布的平台权限编排（[平台权限](platform-permissions.md)）
+  为前提；此前 trace 必须标记 `externalInterruptionUnknown`，不能把普通超时当成权限结论。
 ### M0 裁决修订：audit 与 trace 的跨进程边界（重新接受）
 
 M0 原结论要求 audit 与 trace 共用 emit 点，并可逐条对应。实现前核对进程边界后确认该前提不成立：
