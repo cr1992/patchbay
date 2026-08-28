@@ -29,17 +29,44 @@ stages: [check, sdk_floor_check]
 # stage 的三条 job 抢 CPU/内存/磁盘 I/O，曾把 dart_packages 里一个平时稳定的 30s
 # 超时用例顶爆（pipeline 6005 实测复现）。放进之后一个 stage 是为了让它在其余三条
 # 跑完、runner 上没有并发负载之后再起跑，不是为了排队等它们“批准”。
+#
+# archive 取用顺序（pipeline 31482 实测：runner 到外网源只有约 0.5 MiB/s，1.469 GiB
+# 每次全量重下要近 50 分钟，曾把整条 job 顶到 1 小时超时边缘）：
+# 1. 先取本项目 generic 包仓（局域网，秒级）；
+# 2. 未命中才回退外网源，SHA-256 校验通过后自动回传包仓（自播种），此后所有流水线
+#    走包仓。播种失败只告警不阻断——下次重新走外网即可，不引入第二个失败面。
+# 完整性锚不变：无论从哪个源取到，都必须过同一行 SHA-256 校验才会被使用或回传；
+# 包仓路径含 floor 版本号，floor 经 Proposal 调整后新路径自然未命中并重新播种。
+# GitHub 侧同名 job 不受影响也无需同步改动：它经 subosito/flutter-action 按版本号取
+# SDK 并自带缓存，两边验证的是同一版本、跑同一个 tool/verify_sdk_floor.sh。
 sdk_floor:
   stage: sdk_floor_check
   variables:
     SDK_FLOOR_ARCHIVE_URL: https://storage.flutter-io.cn/flutter_infra_release/releases/stable/linux/flutter_linux_3.44.0-stable.tar.xz
+    SDK_FLOOR_ARCHIVE_CACHE_URL: $CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/flutter-sdk-floor/3.44.0/flutter_linux_3.44.0-stable.tar.xz
     SDK_FLOOR_ARCHIVE_SHA256: e1ec95e6c550458a34de93580cb85dac24da0e9bedb9bb42811f050ac5a0c7d5
     SDK_FLOOR_ARCHIVE_PATH: $CI_PROJECT_DIR/.ci/flutter-sdk-floor.tar.xz
     SDK_FLOOR_FLUTTER_DIR: $CI_PROJECT_DIR/.ci/flutter
   script:
     - mkdir -p "$CI_PROJECT_DIR/.ci"
-    - curl --fail --location --retry 3 --output "$SDK_FLOOR_ARCHIVE_PATH" "$SDK_FLOOR_ARCHIVE_URL"
+    - |
+      if curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --output "$SDK_FLOOR_ARCHIVE_PATH" "$SDK_FLOOR_ARCHIVE_CACHE_URL"; then
+        SDK_FLOOR_ARCHIVE_ORIGIN=registry
+        echo "archive 取自项目包仓"
+      else
+        SDK_FLOOR_ARCHIVE_ORIGIN=external
+        echo "包仓未命中，回退外网源（校验通过后将自动播种包仓）"
+        curl --fail --location --retry 3 --output "$SDK_FLOOR_ARCHIVE_PATH" "$SDK_FLOOR_ARCHIVE_URL"
+      fi
     - echo "$SDK_FLOOR_ARCHIVE_SHA256  $SDK_FLOOR_ARCHIVE_PATH" | sha256sum --check
+    - |
+      if [ "$SDK_FLOOR_ARCHIVE_ORIGIN" = external ]; then
+        if curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$SDK_FLOOR_ARCHIVE_PATH" "$SDK_FLOOR_ARCHIVE_CACHE_URL"; then
+          echo "已播种到项目包仓，后续流水线走局域网"
+        else
+          echo "播种包仓失败（不阻断）：本次继续，下次流水线仍走外网源"
+        fi
+      fi
     - tar --no-same-owner -xJf "$SDK_FLOOR_ARCHIVE_PATH" -C "$CI_PROJECT_DIR/.ci"
     - export PATH="$SDK_FLOOR_FLUTTER_DIR/bin:$PATH"
     - ./tool/verify_sdk_floor.sh
