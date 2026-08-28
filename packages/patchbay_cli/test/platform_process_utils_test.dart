@@ -50,6 +50,16 @@ final class FakeProcessRunner implements ProcessRunner {
 /// business being frozen into a checked-in fixture.
 const String _bootId = '00000000-0000-4000-8000-000000000001';
 
+/// Why the `ps`-fallback timezone tests cannot run on a given host.
+///
+/// Debian/Ubuntu `-slim`, distroless and most language base images ship no
+/// `procps`, so `ps` is absent and every probe in that group answers `null`.
+/// That has to surface as a skip: reported as a pass, the group would look
+/// like standing evidence for a guard it never exercised.
+const String _noPsReason =
+    'no `ps` on this host (no procps): the `v2-posix` '
+    'fallback cannot be exercised here';
+
 /// A `/proc/<pid>/stat` line whose only interesting parts are [comm] (field 2,
 /// the parsing hazard) and [startTimeTicks] (field 22, the payload).
 String _statLine({required String comm, required int startTimeTicks}) {
@@ -831,7 +841,10 @@ void main() {
 
       test('three host timezones produce one identical signature', () {
         final String? utc = probe('UTC', pinned: true);
-        if (utc == null) return; // no `ps` on this host; nothing to prove here
+        // Reported as skipped, never as passed: a slim image with no `procps`
+        // makes every probe here `null`, and an early `return` would turn all
+        // three of these tests into green no-ops that assert nothing.
+        if (utc == null) return markTestSkipped(_noPsReason);
         expect(utc, startsWith('v2-posix:'));
         expect(probe('Asia/Taipei', pinned: true), utc);
         expect(probe('America/New_York', pinned: true), utc);
@@ -843,14 +856,14 @@ void main() {
         // host whose `ps` happens to ignore `TZ`, and would therefore stop
         // being evidence of anything.
         final String? utc = probe('UTC', pinned: false);
-        if (utc == null) return;
+        if (utc == null) return markTestSkipped(_noPsReason);
         expect(probe('Asia/Taipei', pinned: false), isNot(utc));
         expect(probe('America/New_York', pinned: false), isNot(utc));
       });
 
       test('and comparing across those timezones never says "different"', () {
         final String? written = probe('UTC', pinned: true);
-        if (written == null) return;
+        if (written == null) return markTestSkipped(_noPsReason);
         final String read = probe('Asia/Taipei', pinned: true)!;
         expect(
           PlatformProcessUtils.compareStartTimeSignatures(written, read),
