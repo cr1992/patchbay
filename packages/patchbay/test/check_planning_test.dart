@@ -91,4 +91,41 @@ void main() {
     expect(result.exitCode, 1);
     expect(result.stderr, contains('release scope references a missing'));
   });
+
+  test('已发布版本的 Proposal 引用归档条目不再判红', () {
+    // 回归：finalize 按设计删除已交付碎片后，该版本 Proposal 里的 PB 引用
+    // 会悬空。已发布版本的 Proposal 是决策史，口径应与 scope 对账的已发布
+    // 豁免一致——否则每次发布收尾都会撞红。
+    final root = _fixture(releaseStatus: '已发布', releaseVersion: activeVersion);
+    addTearDown(() => Directory(root).deleteSync(recursive: true));
+    Directory(
+      '$root/docs/proposals/$activeVersion',
+    ).createSync(recursive: true);
+    File(
+      '$root/docs/proposals/$activeVersion/archived-refs.md',
+    ).writeAsStringSync('# 已交付方案\n\n> 状态：已接受\n\n关联：PB-999-01\n');
+
+    final result = runChecker(root);
+
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+  });
+
+  test('活跃版本的 Proposal 引用缺失条目仍判红', () {
+    final root = _fixture(releaseStatus: 'RC', releaseVersion: activeVersion);
+    addTearDown(() => Directory(root).deleteSync(recursive: true));
+    Directory(
+      '$root/docs/proposals/$activeVersion',
+    ).createSync(recursive: true);
+    File(
+      '$root/docs/proposals/$activeVersion/dangling-refs.md',
+    ).writeAsStringSync('# 活跃方案\n\n> 状态：已接受\n\n关联：PB-999-02\n');
+
+    final result = runChecker(root);
+
+    expect(result.exitCode, 1);
+    expect(
+      result.stderr,
+      contains('references missing backlog item PB-999-02'),
+    );
+  });
 }

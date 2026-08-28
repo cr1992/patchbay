@@ -279,6 +279,17 @@ void _validateProposalDirectory({
     if (status == null || !_allowedProposalStatuses.contains(status)) {
       failures.add('${file.path}: missing or unsupported Proposal status');
     }
+    // 已发布版本的 Proposal 是决策史：它引用的条目已由 release_finalize 按设计
+    // 从活跃 backlog 归档，缺 id 不是漂移。只对活跃版本与 future 的 Proposal
+    // 保持双向引用对账——口径与上方 scope 对账的已发布豁免一致。
+    final segments = file.uri.pathSegments;
+    final versionDirectory = segments.length >= 2
+        ? segments[segments.length - 2]
+        : '';
+    final versionRelease = File('docs/releases/$versionDirectory.md');
+    if (versionRelease.existsSync() && _isPublishedRelease(versionRelease)) {
+      continue;
+    }
     for (final id in _idsIn(content, _pbPattern)) {
       if (!pbIds.contains(id)) {
         failures.add('${file.path}: references missing backlog item $id');
