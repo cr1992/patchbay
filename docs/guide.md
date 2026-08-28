@@ -756,6 +756,12 @@ $ patchbay help <topic>                     # 帮助由声明生成
 多个滚动容器歧义时补 `--container <identifier>`；步数与时长有界，滚到底仍无目标或预算用尽都会
 以稳定码如实拒绝，不伪造成功。
 
+`reachability: pointer` 只是 Flutter 命中测试的结论，不等于「手势会被放行」——`ui gesture tap`
+还要另外过接入方注入的 gesture policy，被拒会以 `uiGestureDenied` 收场（并原样带回 policy 的
+`rejectionNotice`）。正确的分流因此是「`pointer` **且**落在 gesture policy 允许集内才走
+`ui gesture tap`，否则退回语义面的 `ui tap` / `ui action`」，不要把 `reachability: pointer`
+单独当成手势会成功的许可。
+
 `patchbay help` 的 topic 除了 CLI 路径（`ui wait`），还接受 catalog 里的协议名——手上拿着
 `navigation.go` 或响应里的 `ui.semantics.tap` 就能直接查，不必先反推 CLI 路径。多个 CLI 命令共用
 一个协议名（`ui.wait`、`blob.metadata`）时列出它们。`navigate` / `nav` / `wait` / `tap` / `text` /
