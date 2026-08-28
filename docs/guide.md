@@ -602,9 +602,13 @@ Git 目录则是 cwd 本身；同一 checkout 的子目录算同一个，共享 
 
 #### 自己起 App 的会话：register / unregister
 
-上面的记录由 `patchbay launch` 监督的子进程自己声明。**如果 App 不走 `patchbay launch`**——
-自有脚本 / IDE / 构建流水线起的——记录就没人写，于是每条命令都得再传一次 `--ws-uri`。这两条
-命令补上那一段，它们同样不连 App：
+**这是外部 launcher 集成命令，不是普通用户的首选连接方式。** 只连一次或偶尔查一条时，直接用
+[`--ws-uri`](#连接) 更简单，不必先注册再解除。它面向自己启动 App——自有脚本 / IDE / 构建
+流水线——且需要后续命令像 `patchbay launch` 起的会话一样自动发现的集成方，要求显式提供
+application/device/process 三段身份（外加可选的 session 名）。
+
+上面的记录由 `patchbay launch` 监督的子进程自己声明。**如果 App 不走 `patchbay launch`**，
+记录就没人写，于是每条命令都得再传一次 `--ws-uri`。这两条命令补上那一段，它们同样不连 App：
 
 ```console
 $ patchbay --json session register \
@@ -716,6 +720,19 @@ doctor 只读，不改会话目录、不删记录、不重连、不替你唤醒�
 
 ### 常用命令
 
+UI 写入口最容易混淆的是下面四套，先按需求选对入口，再看完整命令清单：
+
+| 需求 | 入口 | 身份域 | 何时用 |
+|---|---|---|---|
+| 操作接入方注册的目标（文本输入等） | `ui text set/enter` | target id（catalog `uiTargets`） | 目标是接入方用 `PatchbayKey` 显式登记的输入目标（如文本框），不是 Semantics 树上的可点控件时用它。 |
+| 执行辅助功能动作（点按等，走 `performAction`） | `ui action` / `ui tap` | Semantics identifier + generation（`ui tap` 的 generation 可选，`ui action` 必填） | 走无障碍语义树派发，跳过手势竞技场；`ui tap` 是「解析 + 点按」一步到位，`ui action` 覆盖 tap 之外的 focus / 四向 scroll / setText；接入方未注入 `PatchbaySemanticsActionPolicy` 时这组命令不进 catalog。 |
+| 模拟真实指针触摸（经命中测试与手势竞技场） | `ui gesture tap` 等 | Semantics identifier + generation，受接入方 gesture policy 约束 | 要验证贴近真机的触摸路径（遮挡判定、手势竞技场裁决）时用它；接入方未注入 gesture policy 时这组命令不进 catalog。 |
+| 滚动直到目标出现 | `ui reveal` | Semantics identifier，需接入方注入 `revealPolicy` | 目标可能因为不在可视区而未挂载，需要先滚动才能操作时用它；它本身是写操作，过门，不用在它之前接 `ui wait semantics-mounted`。 |
+
+四条入口的安全语义刻意不同：注册目标面是接入方显式开放的自动化面，语义面是「装成用户」按
+identifier 派发动作，指针面才是真实触摸事件、还要另过接入方自己的手势策略。按需求选对应入口
+即可，不必先弄懂全部分类再动手。
+
 ```console
 $ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查
 $ patchbay catalog                          # App 实际注册了什么（唯一真源）
@@ -756,7 +773,15 @@ $ patchbay help <topic>                     # 帮助由声明生成
 多个滚动容器歧义时补 `--container <identifier>`；步数与时长有界，滚到底仍无目标或预算用尽都会
 以稳定码如实拒绝，不伪造成功。
 
-`reachability: pointer` 只是 Flutter 命中测试的结论，不等于「手势会被放行」——`ui gesture tap`
+**`uiRevealNoScrollableContainer` 目前偏宽，一个码盖住三种不同情况：** 目标压根不存在（含
+identifier 拼错）、目标已挂载但被浮层遮挡、以及确实没有可授权的滚动容器，现在共用同一个拒绝码，
+不能仅凭它分辨是哪一种——遇到时先用 `ui tap` 或 `ui semantics tree` 对同一 identifier 核对是否
+被遮挡，再排查 `--container` 或 identifier 拼写；不要看到这个码就默认去找滚动容器（改进方向已登记
+[PB-050-35](backlog.d/PB-050-35.md)）。
+
+`reachability` 是这次请求终止帧上、一次固定采样命中测试的结论，不是「这个目标此刻及此后都能
+操作」的持续性证明——下一帧的遮挡、动画或布局变化都可能让它过期，真正的操作围栏是随后写操作携带
+的 `generation`。`reachability: pointer` 更进一步，只是 Flutter 命中测试的结论，不等于「手势会被放行」——`ui gesture tap`
 还要另外过接入方注入的 gesture policy，被拒会以 `uiGestureDenied` 收场（并原样带回 policy 的
 `rejectionNotice`）。正确的分流因此是「`pointer` **且**落在 gesture policy 允许集内才走
 `ui gesture tap`，否则退回语义面的 `ui tap` / `ui action`」，不要把 `reachability: pointer`
