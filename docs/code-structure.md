@@ -96,3 +96,38 @@ golden 按**公开 library** 记录：递归 `packages/<pkg>/lib/**.dart` 各一
 - `flutter_service_host` 的 `_uiCommandRegistry`（254 行）与 `command_codegen` 的
   `_render`（208 行）——声明式装配与模板拼装，控制流稀疏（前者 254 行只有 7 个 return、
   11 个 if），拆开不会更好读。
+
+## 0.5.0 RC 审计（2026-08-28）
+
+方案 b 口径修订后（体积警戒线是评审义务，不是机器阻断），对 RC 候选 `31a960b6` 上
+`tool/check_structure_ratchet.dart --verbose` 报告的全部 20 个 `grew` 警戒线文件（相对 M0
+基线变长）逐一给出判断，作为该口径修订的账本。已在上面「已复核，维持现状」出现过的文件直接
+复用既有结论，不重复裁决；已在「应当拆分」出现过的文件，其增长落在已判定应拆的函数本体上，
+同样复用既有判断，不重复裁决。
+
+| 文件 | 基线→当前 | 判断 | 依据 |
+|---|---|---|---|
+| `patchbay_flutter/example/lib/main.dart` | 620→1086 行 | 维持 | example 标准结构：`main()` + `PatchbayExampleHost` + 多个自成一体的 `Widget` 类；新增内容是新增 demo 场景对应的独立 Widget/命令注册，同构增量，未产生互不调用的两组主题（「不该拆分」第 1 条） |
+| `patchbay_cli/test/permission_platform_adapter_test.dart` | 872→1254 行 | 维持 | 单 `main()` + 17 个 `test()`，同构用例堆叠（新增设备/权限矩阵场景覆盖） |
+| `patchbay_cli/test/protocol_compat_test.dart` | 713→987 行 | 维持 | 单 `main()` + 6 个 `group()` + 31 个 `test()`，同构兼容性用例堆叠 |
+| `patchbay_flutter/lib/src/flutter_service_host.dart` | 680→949 行 | 维持 | 单一 host 类（`PatchbayFlutterServiceHost`）承载新增 UI command 方法，内聚同类操作；与本文件对 `_uiCommandRegistry` 的既有复核结论同源（「不该拆分」第 2 条） |
+| `patchbay_flutter/lib/src/semantics/semantics_bridge.dart` | 738→969 行 | 维持（复用既有结论） | 见上「已复核，维持现状」：长度来自同构成员集合与内聚类，属「不该拆分」第 1、2 条 |
+| `patchbay_cli/lib/src/android_permission_adapter.dart` | 606→787 行 | 维持 | 单一 adb 权限适配器类，10 个方法均服务同一驱动流程（探测能力 → 选设备 → 验证应用 → 查状态 → 变更后复核 → 归一化 → 重置 → 执行 → adb 调用封装）；IO 是适配器职责本体，不是「数据类挟带 IO」（「必须拆分」第 4 条不成立） |
+| `patchbay_transport/test/direct_transport_test.dart` | 749→908 行 | 维持 | 单 `main()` + 2 个 `group()` + 28 个 `test()`，同构传输层用例堆叠 |
+| `patchbay_cli/test/command_registry_test.dart` | 858→1016 行 | 维持 | 单 `main()` + 37 个 `test()`，同构 registry 解析用例堆叠；该文件已越过测试 1000 行长文件警戒线，继续增长时评审可考虑按主题拆多个 test 文件，但当前内容仍同构，不构成「必须拆分」 |
+| `patchbay_cli/lib/src/doctor/doctor_checks.dart` | 662→796 行 | 维持（复用既有结论） | 见上「已复核，维持现状」：同构 `_check*`/finding 家族与内聚类 |
+| `patchbay_flutter/example/lib/example_domain.dart` | 658→792 行 | 维持 | 同构声明式命令描述符、`PatchbayResponseSchema` 常量与小型 gateway/controller 类的线性累加（新增 `idempotentTouch`/`cooperativeWait`/`unresponsiveWait` 等 demo 命令），未产生互不调用的两组主题 |
+| `patchbay_cli/lib/src/cli.dart` | 712→798 行 | 待仓主复核 | 增长集中在入口函数 `runPatchbayCliWithSeams`（本次量得 418 行，未列入上表「应当拆分」）；观察到 parse → 校验 → friendly-target 分支 ×5 → REPL/单命令路由 → 连接 → 执行 → 错误渲染的多阶段结构，具备「函数串起多个阶段」的部分特征，但作为 CLI 唯一入口，拆分需要仔细核对分支间隐式依赖与错误路径等价性，本次审计未做全量核实，如实标待复核，不硬判 |
+| `patchbay_cli/lib/src/registry/friendly_command_registry.dart` | 639→695 行 | 该拆（复用既有结论） | 增长落在上表已判定「应当拆分」的 `resolve`（310+ 行）与同文件 `allowedOptions`（180 行）两个函数上，是既有应拆函数的边际累加，拆分工作按既有条目跟踪，不重复裁决 |
+| `patchbay/tool/src/release_prep/release_checker.dart` | 683→706 行 | 维持（复用既有结论） | 见上「已复核，维持现状」 |
+| `patchbay_cli/test/cross_process_test.dart` | 809→855 行 | 维持 | 单一真实跨进程集成场景，进程与连接状态需要在同一个 `test()` 内延续，拆分会破坏端到端语义或需要重复起真实进程；属集成测试的合理写法，不满足「必须拆分」标准 |
+| `patchbay_cli/test/launcher_supervision_test.dart` | 727→747 行 | 维持 | 单 `main()` + 19 个 `test()`，同构监督场景用例堆叠 |
+| `patchbay_flutter/lib/src/flutter_bridge.dart` | 606→624 行 | 维持 | 增量小（18 行），`part` 聚合入口新增同构 Key 工厂/`GlobalKey` 子类，未产生跨主题成员组 |
+| `patchbay_cli/lib/src/launcher.dart` | 648→658 行 | 该拆（复用既有结论） | 增长落在上表已判定「应当拆分」的 `run` 函数上，是既有应拆函数的边际累加，拆分工作按既有条目跟踪，不重复裁决 |
+| `patchbay_cli/test/doctor_test.dart` | 774→786 行 | 维持 | 单 `main()` + 8 个 `group()` + 35 个 `test()`，增量仅 12 行，同构诊断用例堆叠 |
+| `patchbay_cli/test/trace_test.dart` | 735→739 行 | 维持 | 单 `main()` + 2 个 `group()` + 17 个 `test()`，增量仅 4 行，同构用例堆叠 |
+| `patchbay_cli/test/snapshot_selector_test.dart` | 624→626 行 | 维持 | 单 `main()` + 4 个 `group()` + 23 个 `test()`，增量仅 2 行，同构用例堆叠 |
+
+汇总：17 维持（含 3 项复用既有「已复核」结论）、2 该拆（均是已在「应当拆分」表中判定的函数本体
+边际增长，不新增裁决）、1 待仓主复核（`cli.dart` 的 `runPatchbayCliWithSeams`，是否拆分留待仓主
+判断）。
