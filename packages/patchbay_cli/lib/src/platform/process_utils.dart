@@ -142,32 +142,47 @@ abstract final class PlatformProcessUtils {
 
   /// Liveness straight from procfs, or `null` when procfs cannot answer.
   ///
-  /// The guard is `<procRoot>/<our own pid>`, not `<procRoot>` and not
-  /// `<procRoot>/self`. Two different misconfigurations have to be caught,
-  /// and only the self-PID lookup catches both:
+  /// The guard is the `NSpid` row in `<procRoot>/self/status`, not the mere
+  /// existence of `<procRoot>/<our own numeric pid>`. Two different
+  /// misconfigurations have to be caught:
   ///
   /// * A chroot or sandbox with no procfs at all, or an empty `/proc`
   ///   directory — `<procRoot>` alone would look fine and every PID would
   ///   read as dead.
-  /// * A procfs belonging to a *different* PID namespace, bind-mounted in.
-  ///   `<procRoot>/self` still resolves there — it is a magic symlink that
-  ///   answers for whichever namespace owns the mount — so it proves nothing
-  ///   about whether the PIDs this process knows mean anything in it. Every
-  ///   `<procRoot>/<recorded pid>` lookup would then be answering a question
-  ///   about someone else's PID space, and `kill -0` (which does run in our
-  ///   namespace) would have got it right.
+  /// * A procfs belonging to an ancestor or otherwise different PID
+  ///   namespace, bind-mounted in. Numeric PIDs can collide — PID 1 is the
+  ///   obvious case — so finding our number there proves nothing. Linux
+  ///   exposes `NSpid` from the namespace that mounted this procfs through
+  ///   each nested namespace containing the caller. Exactly one value equal
+  ///   to Dart's [pid] proves this mount and the process use the same PID
+  ///   numbering; multiple values prove they do not.
   ///
-  /// Finding our own PID is a necessary condition, not a proof of namespace
-  /// identity: two namespaces can both contain the same PID number. It rules
-  /// out the misconfigurations above, which is what it is here to do; when it
-  /// fails, the tool-based probe takes over rather than anything being
-  /// declared dead.
+  /// Missing `NSpid` (including an old kernel), malformed status, or any I/O
+  /// failure is not evidence of death. The tool-based probe takes over.
   static bool? _procfsLiveness(int processId, String procRoot) {
     try {
-      if (!Directory('$procRoot/$pid').existsSync()) return null;
+      if (!_procfsUsesCurrentPidNamespace(procRoot)) return null;
       return Directory('$procRoot/$processId').existsSync();
     } on FileSystemException {
       return null;
+    }
+  }
+
+  /// Whether numeric PID paths in [procRoot] use this process's namespace.
+  static bool _procfsUsesCurrentPidNamespace(String procRoot) {
+    try {
+      final File status = File('$procRoot/self/status');
+      if (!status.existsSync()) return false;
+      for (final String line in status.readAsLinesSync()) {
+        if (!line.startsWith('NSpid:')) continue;
+        final String value = line.substring('NSpid:'.length).trim();
+        if (value.isEmpty) return false;
+        final List<String> namespacePids = value.split(RegExp(r'\s+'));
+        return namespacePids.length == 1 && namespacePids.single == '$pid';
+      }
+      return false;
+    } on FileSystemException {
+      return false;
     }
   }
 
@@ -229,7 +244,10 @@ abstract final class PlatformProcessUtils {
   ///    reissued at the same offset into a *later* boot would read as the
   ///    same launch. Costs no subprocess.
   /// 2. **`ps -o lstart= -p <pid>`**, run with [_stableFormattingEnvironment]
-  ///    pinned — for macOS and for a Linux host whose procfs cannot answer.
+  ///    pinned — for macOS and for a Linux host whose procfs namespace was
+  ///    proven but whose target stat/boot-id lookup could not answer. An
+  ///    unproven Linux procfs cannot use this fallback because GNU `ps` reads
+  ///    that same mount.
   /// 3. **PowerShell** `(Get-Process -Id <pid>).StartTime.ToUniversalTime().ToString("o")`
   ///    on Windows. `ToUniversalTime()` is what removes the local offset;
   ///    `"o"` is culture-invariant.
@@ -254,6 +272,13 @@ abstract final class PlatformProcessUtils {
   }) {
     final windows = isWindows ?? Platform.isWindows;
     if (!windows && (isLinux ?? Platform.isLinux)) {
+      // GNU `ps` reads the mounted procfs too. If that procfs belongs to an
+      // ancestor/foreign PID namespace, falling through to `ps` would ask the
+      // same wrong PID-space question through a subprocess. Liveness can
+      // safely fall back to the `kill(2)`-backed tool path; Linux launch time
+      // has no equivalent independent source, so inability to prove the
+      // namespace must remain `null` / identity-unverified.
+      if (!_procfsUsesCurrentPidNamespace(procRoot)) return null;
       final String? fromProcfs = _procfsStartTimeSignature(processId, procRoot);
       if (fromProcfs != null) return fromProcfs;
     }
@@ -282,9 +307,10 @@ abstract final class PlatformProcessUtils {
         ' ',
       );
       if (payload.isEmpty) return null;
-      return windows
-          ? '$windowsStartTimeScheme:$payload'
-          : '$posixStartTimeScheme:$payload';
+      return _encodeSignature(
+        windows ? windowsStartTimeScheme : posixStartTimeScheme,
+        payload,
+      );
     } on ProcessException {
       return null;
     }
@@ -292,13 +318,13 @@ abstract final class PlatformProcessUtils {
 
   /// The kernel's own answer, or `null` when procfs cannot give it.
   ///
-  /// The `<procRoot>/<our own pid>` guard is the one [_procfsLiveness]
-  /// documents, and for the same two reasons: an absent or empty procfs, and
-  /// a procfs bind-mounted in from a different PID namespace, in which every
-  /// recorded PID means something else entirely.
+  /// The caller has already established [_procfsUsesCurrentPidNamespace].
+  /// Keeping the proof outside this helper also matters for fallback: GNU
+  /// `ps` reads the mounted procfs, so an unproven namespace must return
+  /// `null` before the code reaches `ps`; other procfs failures may still use
+  /// that same-namespace fallback.
   static String? _procfsStartTimeSignature(int processId, String procRoot) {
     try {
-      if (!Directory('$procRoot/$pid').existsSync()) return null;
       final File statFile = File('$procRoot/$processId/stat');
       if (!statFile.existsSync()) return null;
       final String? ticks = _startTimeTicks(statFile.readAsStringSync());
@@ -316,8 +342,7 @@ abstract final class PlatformProcessUtils {
       // so persisting it would hand this host a signature that can only ever
       // compare `unverifiable` -- the PID-reuse guard silently gone for the
       // life of the record. `ps` may still be able to answer.
-      if (!_bootIdPattern.hasMatch(bootId)) return null;
-      return '$linuxStartTimeScheme:$bootId:$ticks';
+      return _encodeSignature(linuxStartTimeScheme, '$bootId:$ticks');
     } on FileSystemException {
       return null;
     }
@@ -344,7 +369,7 @@ abstract final class PlatformProcessUtils {
     const int startTimeIndex = 19;
     if (fields.length <= startTimeIndex) return null;
     final String ticks = fields[startTimeIndex];
-    return int.tryParse(ticks) == null ? null : ticks;
+    return _startTimeTicksPattern.hasMatch(ticks) ? ticks : null;
   }
 
   /// Compares a signature read off a record against one just probed.
@@ -429,16 +454,28 @@ abstract final class PlatformProcessUtils {
     final String scheme = signature.substring(0, separator);
     if (!knownStartTimeSchemes.contains(scheme)) return null;
     final String payload = signature.substring(separator + 1);
-    final bool wellFormed = switch (scheme) {
-      linuxStartTimeScheme => _isProcfsPayload(payload),
-      posixStartTimeScheme => _lstartPattern.hasMatch(payload),
-      windowsStartTimeScheme => _windowsInstantPattern.hasMatch(payload),
-      // A scheme listed in [knownStartTimeSchemes] with no payload contract
-      // here is unverifiable by construction rather than trusted by default.
-      _ => false,
-    };
+    final bool wellFormed = _isStartTimePayloadWellFormed(scheme, payload);
     return wellFormed ? (scheme: scheme, payload: payload) : null;
   }
+
+  /// The only writer for scheme-tagged signatures.
+  ///
+  /// Keeping this on the same predicate as [_parseSignature] makes it
+  /// impossible for this build to persist a value its reader will reject.
+  static String? _encodeSignature(String scheme, String payload) =>
+      knownStartTimeSchemes.contains(scheme) &&
+          _isStartTimePayloadWellFormed(scheme, payload)
+      ? '$scheme:$payload'
+      : null;
+
+  static bool _isStartTimePayloadWellFormed(String scheme, String payload) =>
+      switch (scheme) {
+        linuxStartTimeScheme => _isProcfsPayload(payload),
+        posixStartTimeScheme => _isPosixLstartPayload(payload),
+        windowsStartTimeScheme => _isWindowsInstantPayload(payload),
+        // A registered scheme without a payload contract remains unreadable.
+        _ => false,
+      };
 
   /// `<boot_id>:<ticks>` as [_procfsStartTimeSignature] assembles it.
   static bool _isProcfsPayload(String payload) {
@@ -452,15 +489,56 @@ abstract final class PlatformProcessUtils {
   /// the trim-and-collapse in [processStartTimeSignature]:
   /// `Www Mmm D HH:MM:SS YYYY`.
   ///
-  /// Asserting the shape is only sound because the locale that decides it is
-  /// pinned by the same code that reads the value — under `LC_ALL=C` BSD and
-  /// GNU `ps` were measured to render identically, and no other locale can
-  /// reach this field. The month and weekday are matched as three letters
-  /// rather than enumerated: the set is fixed, but enumerating it would judge
-  /// the calendar rather than the format.
+  /// The locale is pinned to C, so weekday and month are closed vocabularies.
   static final RegExp _lstartPattern = RegExp(
-    r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$',
+    r'^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) '
+    r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) '
+    r'(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$',
   );
+
+  static const List<String> _posixWeekdays = <String>[
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+    'Sun',
+  ];
+
+  static const List<String> _posixMonths = <String>[
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+
+  static bool _isPosixLstartPayload(String payload) {
+    final RegExpMatch? match = _lstartPattern.firstMatch(payload);
+    if (match == null) return false;
+    final int month = _posixMonths.indexOf(match.group(2)!) + 1;
+    final int day = int.parse(match.group(3)!);
+    final int hour = int.parse(match.group(4)!);
+    final int minute = int.parse(match.group(5)!);
+    final int second = int.parse(match.group(6)!);
+    final int year = int.parse(match.group(7)!);
+    if (!_isCalendarDate(year, month, day) ||
+        hour > 23 ||
+        minute > 59 ||
+        second > 60) {
+      return false;
+    }
+    final DateTime date = DateTime.utc(year, month, day);
+    return match.group(1) == _posixWeekdays[date.weekday - 1];
+  }
 
   /// The canonical rendering of `/proc/sys/kernel/random/boot_id`: a UUID,
   /// which is the only thing the kernel prints there. Hex case is not
@@ -486,8 +564,32 @@ abstract final class PlatformProcessUtils {
   /// none) was truncated after it was written; allowing it would let the
   /// truncated copy compare `different` against the intact one.
   static final RegExp _windowsInstantPattern = RegExp(
-    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$',
+    r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{7})Z$',
   );
+
+  static bool _isWindowsInstantPayload(String payload) {
+    final RegExpMatch? match = _windowsInstantPattern.firstMatch(payload);
+    if (match == null) return false;
+    final int year = int.parse(match.group(1)!);
+    final int month = int.parse(match.group(2)!);
+    final int day = int.parse(match.group(3)!);
+    final int hour = int.parse(match.group(4)!);
+    final int minute = int.parse(match.group(5)!);
+    final int second = int.parse(match.group(6)!);
+    return year >= 1 &&
+        _isCalendarDate(year, month, day) &&
+        hour <= 23 &&
+        minute <= 59 &&
+        second <= 59;
+  }
+
+  static bool _isCalendarDate(int year, int month, int day) {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+    final DateTime candidate = DateTime.utc(year, month, day);
+    return candidate.year == year &&
+        candidate.month == month &&
+        candidate.day == day;
+  }
 
   /// Creates [path] empty and owner-only (`0600` on POSIX) **before** any content is written.
   static File createRestrictedFileSync(

@@ -36,11 +36,11 @@ BUG-20260828-01 随即证明了缺少载体的实际代价：`compareStartTimeSi
 ### 非目标
 
 - 不改 `processStartTime` 的 JSON 形状：仍是可选字符串，缺失即缺失，读到非字符串或空串仍按记录非法拒绝。
-- 不改 PID 存活探测本身（`isProcessAlive` 的三态由 BUG-20260827-01 冻结），本文件只管签名。
-- 不做**任意来源的**写入侧兜底校验。写入侧只对自己拼装的字段负责：`boot_id` 不是 UUID 形态时按缺
-  `boot_id` 同款回退 `ps`（否则会持久化一条读取侧终身拒读、因而终身没有 PID 复用守卫的签名），
-  `ticks` 不是十进制数时同样返回 `null`；至于 `ps` / PowerShell 打印出的整串是否合形，仍交给读取侧的
-  payload 契约判定，写入侧不改写、不修补、不伪造。
+- 不改变 PID 存活三态本身（`isProcessAlive` 的三态由 BUG-20260827-01 冻结）；0.5.1 只补 procfs 回答
+  前的 namespace 证据。liveness 证据不足继续走独立的 `kill` 探测；Linux 启动签名不能回退同样读取该
+  procfs 的 GNU `ps`，只能返回 `null`。已证明同 namespace 后，单个目标文件/`boot_id` 失败仍可回退 `ps`。
+- 不修补或伪造平台探针给出的畸形载荷。写入侧与读取侧共用同一个 codec：载荷合契约才原样写入，
+  不合契约就返回 `null` 让上层按「采不到」降级；不做补零、截断、日期归一化等猜测。
 - 不承诺跨机器可比：签名只在**写它的那台主机**上有意义，记录本就带 workspace 与主机语义。
 
 ## 契约
@@ -54,34 +54,35 @@ BUG-20260828-01 随即证明了缺少载体的实际代价：`compareStartTimeSi
 
 | scheme | 来源 | payload 形态 | 为什么是它 |
 |---|---|---|---|
-| `v2-linux` | `/proc/<pid>/stat` 字段 22（`starttime`，自开机起的内核 tick 数）+ `/proc/sys/kernel/random/boot_id` | `<boot_id>:<ticks>`，boot_id 为 UUID 形态，ticks 为十进制数字串 | 内核原生整数，没有任何格式化环节可被时区/locale/DST 影响；boot_id 让 tick 数跨重启唯一；不派生子进程 |
-| `v2-posix` | `ps -o lstart= -p <pid>`，子进程环境钉 `TZ=UTC` 与 `LC_ALL=C` | 写入侧 trim + 空白折叠后的 `Www Mmm D HH:MM:SS YYYY`，即 `^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$` | macOS 与无 procfs 的 Linux 的唯一可用来源；两个变量各自都是独立的不稳定源，都必须钉 |
-| `v2-win` | PowerShell `(Get-Process -Id <pid>).StartTime.ToUniversalTime().ToString("o")` | `"o"` 往返格式的 UTC 瞬时，即 `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$` | `ToUniversalTime()` 去掉本地偏移，`"o"` 与 culture 无关且定宽 |
+| `v2-linux` | 先由 `/proc/self/status` 的 `NSpid` 证明该 procfs 与 CLI 使用同一 PID namespace，再取 `/proc/<pid>/stat` 字段 22（`starttime`）与 `boot_id` | `<boot_id>:<ticks>`，boot_id 为 UUID 形态，ticks 为十进制数字串 | 内核原生整数，不受时区/locale/DST 影响；boot_id 让 tick 数跨重启唯一；namespace 证明防同号外来 PID 被当成本地进程 |
+| `v2-posix` | `ps -o lstart= -p <pid>`，子进程环境钉 `TZ=UTC` 与 `LC_ALL=C` | trim + 空白折叠后的 `Www Mmm D HH:MM:SS YYYY`；星期/月为 C locale 枚举，日期、时间与星期关系有效 | macOS 与 procfs 不可证明时的回退；两个环境变量各自都是独立的不稳定源，都必须钉 |
+| `v2-win` | PowerShell `(Get-Process -Id <pid>).StartTime.ToUniversalTime().ToString("o")` | `"o"` 往返格式的 UTC 瞬时；年 1..9999、日期与时间字段有效、小数秒恰好七位并以 `Z` 结尾 | `ToUniversalTime()` 去掉本地偏移，`"o"` 与 culture 无关且定宽 |
 
-三个来源按 procfs → `ps` → PowerShell 的平台可用性选择；任一步问不到就返回 `null`，`null` 是「采不到」
-而不是「不是同一个进程」。
+来源按平台选择：Linux 先证明 procfs namespace 后取原生字段，证明已成立但目标 stat/`boot_id` 问不到时才
+回退 GNU `ps`；namespace 本身不可证明时直接返回 `null`，因为 GNU `ps` 仍读同一 procfs。其他 POSIX 走
+`ps`，Windows 走 PowerShell。`null` 是「采不到」而不是「不是同一个进程」。
 
 ### payload 契约
 
-payload 契约从写入侧代码反推：**同一份代码能写出的值必须全部合法，写不出的值必须全部不合法**。两个方向
-都有代价，所以两个方向都要收紧——放过一个畸形值可能删掉活会话的记录，拒掉一个合法值则让该记录终身
-比不出 `different`，静默失去 PID 复用守卫。契约只判「这是不是本代码写的形态」，不判值的语义对错：
+payload 契约由同一个 codec 同时服务写入与读取：**同一份代码能写出的值必须全部合法，写不出的值必须全部
+不合法**。两个方向都有代价，所以两个方向都要收紧——放过一个畸形值可能删掉活会话的记录，拒掉一个合法
+值则让该记录终身比不出 `different`，静默失去 PID 复用守卫：
 
 - `v2-linux`：恰好一个 `:`；左段匹配 UUID 形态（8-4-4-4-12 十六进制，不区分大小写）；右段是十进制数字
   串。**不要求为正**——PID 1 合法地从 tick 0 起算。`int.tryParse` 能接受的 `+7`、`-7`、` 7` 都不是字段 22
   能有的形态，因此不用它做判据。
-- `v2-posix`：`^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$`。**能够断言日期形状，正是因为
-  决定它的 locale 由同一份代码钉死**：`LC_ALL=C` 下 BSD 与 GNU `ps` 实测渲染同形，而这是本签名唯一被采集
-  的环境。日期是一到两位，因为 BSD 对个位数日期补第二个空格、写入侧折叠又把它收掉。此前以「BSD 与 GNU
-  渲染不同」为由不断言形状是**错误论证**：那个差异只在未钉 locale 时成立，而未钉 locale 的取值根本不会
-  产生——留下的缺口是 `v2-posix:launch-a` 这类不含日期的占位串会被当成可比身份。
-- `v2-win`：`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$`。必须以 `Z` 结尾——带本地偏移的值正是
-  PB-050-31 缺陷的 Windows 形态，两个时区的读者会为同一个活进程得出两个不等的字符串。小数秒**恰好七位**：
-  `"o"` 是定宽往返格式而非最短表示，三位或零位都是写完之后被截断的结果，放行它等于允许被截断的副本与它
-  自己的完好原件比出 `different`。
+- `v2-posix`：星期只取 `Sun`..`Sat`，月份只取 `Jan`..`Dec`；日历日期存在、星期与日期一致，小时
+  `00`..`23`、分钟 `00`..`59`、秒 `00`..`60`（保留 C/POSIX 的 leap-second 形态）。日期是一到两位，
+  因为 BSD 对个位数日期补第二个空格、写入侧折叠又把它收掉。仅用 `[A-Za-z]{3}` 与 `\d{2}` 检查宽度会
+  放过 `Xxx Yyy 99 99:99:99 0000`，那不是 writer 能产生的方言，而是无法解释的损坏。
+- `v2-win`：必须是 .NET `DateTime` 可表达的 UTC 日历瞬时：年 `0001`..`9999`、日期与时间字段有效，
+  小数秒**恰好七位**且以 `Z` 结尾。带本地偏移是 PB-050-31 缺陷的 Windows 形态；三位或零位小数秒是
+  写完之后被截断的结果；`2026-99-99T99:99:99.0000000Z` 只有宽度相似，同样不是合法瞬时。
 
-三条正则都必须带锚（`^`…`$`）且 `.` 必须转义——不带锚的匹配等于只要求「含有」该形态，`v2-win:xxx<合法
-时间戳>yyy` 会被放行；未转义的 `.` 会把 `.` 当任意字符，`0000000Z` 前面是什么都能过。
+正则只负责切字段且必须带锚（`^`…`$`）；字段枚举、范围、日历存在性与 POSIX 星期一致性由 codec 再验证。
+需要明确的能力边界是：一条损坏值若仍完整变成**另一个语义合法的启动瞬时**，它与真正的 PID 复用在现有
+线格式下不可区分；本补丁不增加 checksum 或新 scheme。会话文件采用 flush + 原子 rename，当前修复覆盖平台
+探针不可能写出的载荷，不声称检测任意同形篡改。
 
 判定方向不对称，且方向是刻意的：**判不准时一律 `unverifiable`**——它只让一条陈旧记录多留一会儿，而误判
 `different` 会删掉一条活会话的记录。
@@ -126,7 +127,10 @@ App 重启后自然写出新格式；也不提供「旧格式兼容比较」的�
   的键被忽略，其余字段照常读出（有复刻老 reader 的对照测试钉住）。
 - **新 reader + 老记录**：字段缺失 → `identityUnverified`，存活判定退回纯 PID，与 PB-050-18 之前完全一致；
   字段存在但无 scheme → 同样 `identityUnverified`，见上一节。
-- **同一主机换探测来源**：Linux 上 procfs 可用与否会改变 scheme，跨 scheme 一律 `unverifiable`，不判死。
+- **同一主机换探测来源**：Linux 上 `NSpid` 缺失/多段/不等于当前 PID 时，liveness 回退 `kill`，启动签名
+  返回 `null`——GNU `ps` 也读取同一外来 procfs，不能作为独立证据。namespace 已证明后，目标 stat 或
+  `boot_id` 不可读才可改走 `ps`；跨 scheme 一律 `unverifiable`，不判死。老内核无法提供 namespace 证据
+  只损失身份核实等级。
 - **VM Service ↔ direct**：签名采集与比较都在 CLI 侧，两条链路读同一份记录、走同一个函数，无分支差异。
 - `schemaVersion` 不变，wire 与命令 descriptor 不变，公共 API surface 零变化。
 
@@ -151,10 +155,11 @@ App 重启后自然写出新格式；也不提供「旧格式兼容比较」的�
 ## 验证
 
 - 单元/协议测试：三个 scheme 的采集（含 `comm` 含空格与括号的 `/proc/<pid>/stat` 解析、缺 `boot_id` 回退、
-  `boot_id` 非 UUID 形态回退、外来 PID namespace 的 procfs 拒信）；三态比较的全判定表；三个 scheme 各一组
+  `boot_id` 非 UUID 形态回退、带符号 ticks 回退、外来 PID namespace 与当前 PID 数字碰撞时仍拒信且不再
+  调 GNU `ps`）；三态比较的全判定表；三个 scheme 各一组
   畸形 payload 矩阵——除空载荷、错段数、控制字符外，必须包含**逐字段截断**（少一段、少一位、多一段、
   前后粘连）与占位串（`v2-posix:launch-a` 这类不含日期的值），覆盖畸形×合法（双向）、畸形×畸形（含逐
-  字节相等）、合法×合法三组。
+  字节相等）、合法×合法三组；POSIX/Windows 畸形矩阵包含宽度正确但枚举、范围、日历或星期关系非法的值。
 - 契约不过严的正向用例单列：写入侧真能写出的边界值（tick 0、个位数日期、零点整、大写十六进制 boot_id、
   七位全零小数秒）必须判 `same`。这一条与畸形矩阵互为对侧，缺任一侧都不足以证明契约取对了下限。
 - 真实往返：同一个从未退出的进程，在一个时区写、在另外三个时区读，得 `status=live` 且身份已核实；同一次
@@ -183,6 +188,17 @@ payload 校验并入判定表；不借追溯之机扩张范围，也不追认「
 授权口径同 DG-050-07 先例：仓主在会话中授权代理起草并按已裁决结论落文，授权与过程记录在对应 MR 中；
 本文件状态直接记为「已接受」，因为它冻结的是已经过实现、测试与真实往返验证的既成结论，不是待评估的新
 方案。
+
+### 0.5.1 增补裁决（2026-08-28，仓主裁决）
+
+发布后复审发现两处同型缺口：procfs 的 namespace guard 只查当前数字 PID 的目录是否存在，外来 namespace
+同号时会被误信；payload validator 只查字段宽度，仍接受平台 writer 不可能生成的日期，同时 procfs writer
+用 `int.tryParse` 接受了 reader 拒绝的带符号 ticks。仓主授权先纳入 `hotfix/0.5.1` 积攒、不立即发布。
+
+裁决不新增 scheme、不改变稳定 JSON 与三态表，只补足既有红线的证据前提：procfs 必须由 `NSpid` 单段等于
+当前 Dart PID 证明编号同域，否则 liveness 回退 `kill`、启动签名返回 `null`（GNU `ps` 不是独立来源）；
+writer 与 reader 改用同一 codec，平台不可能生成的载荷不得写入、
+读到时仍只降级。对另一个语义合法瞬时的同形篡改与真实 PID 复用不可区分，不在本 hotfix 承诺范围内。
 
 ## 被否决方案
 
