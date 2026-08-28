@@ -1,6 +1,7 @@
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
 
+import '../output/local_artifact.dart' show patchbayDefaultMaxInlineBytes;
 import '../rpc_timeout.dart';
 
 /// Constructs the CLI option parser with all supported flags and options.
@@ -86,6 +87,15 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Wait for a returned jobId to reach a terminal event.',
   )
   ..addFlag('json', defaultsTo: false, help: 'Print stable JSON.')
+  ..addOption(
+    'view',
+    allowed: <String>['full', 'brief'],
+    defaultsTo: 'full',
+    help:
+        'JSON view: full keeps every field, brief keeps the decision facts '
+        'and lists what it omitted. Requires --json (repl: overridable per '
+        'line).',
+  )
   ..addFlag(
     'keep-awake',
     defaultsTo: false,
@@ -110,9 +120,26 @@ ArgParser patchbayCliParser() => ArgParser()
   ..addOption('timeout-ms', help: 'Operation timeout in milliseconds.')
   ..addOption('cursor', help: 'Opaque structured-log cursor.')
   ..addOption(
+    'container',
+    help:
+        'ui reveal: Semantics identifier anchoring the scroll container to '
+        'drive. Name one whenever several candidate containers are mounted '
+        'and the target is not.',
+  )
+  ..addOption(
+    'max-steps',
+    help: 'ui reveal: scroll actions this call may dispatch (1..200).',
+  )
+  ..addOption(
     'direction',
-    allowed: const <String>['forward', 'backward'],
-    help: 'Structured-log traversal direction.',
+    // `both` 只属于 `ui reveal`。`logs query|export` 的 wire 枚举仍然只有
+    // forward/backward，传 both 会在请求解码时被类型化拒绝。
+    allowed: const <String>['forward', 'backward', 'both'],
+    help:
+        'logs query|export: structured-log traversal direction '
+        '(forward|backward). ui reveal: content order '
+        '(forward|backward|both) — forward moves toward maxScrollExtent, not '
+        'toward the bottom of the screen.',
   )
   ..addOption('limit', help: 'Maximum number of log records.')
   ..addOption('levels', help: 'Comma-separated log levels.')
@@ -144,6 +171,13 @@ ArgParser patchbayCliParser() => ArgParser()
     help: 'Capture after this many Patchbay-observed Flutter frames (1..120).',
   )
   ..addOption('output', help: 'Local artifact output path.')
+  ..addOption(
+    'max-inline-bytes',
+    help:
+        'Inline-size ceiling, in bytes of the stdout document, before a '
+        'tree command spills its unbounded member to a local artifact '
+        '(default $patchbayDefaultMaxInlineBytes; 0 disables spilling).',
+  )
   ..addOption('name', help: 'Human-readable local trace name.')
   ..addFlag(
     'activate',
@@ -177,6 +211,18 @@ ArgParser patchbayCliParser() => ArgParser()
   )
   ..addOption('device-id', help: 'Explicit platform device selection.')
   ..addOption('application-id', help: 'Explicit platform application ID.')
+  ..addOption(
+    'process-id',
+    help:
+        'session register: PID of the local process that owns the App '
+        'session; its liveness is what later marks the record stale.',
+  )
+  ..addOption(
+    'build-mode',
+    help:
+        'session register: build mode recorded on the session (default '
+        'debug).',
+  )
   ..addOption(
     'state',
     allowed: <String>[

@@ -110,11 +110,10 @@ final class PatchbayBindingInspectorSurface
 /// answer is `appRecorded` — the App's own record of what it set.
 final class PatchbayInspectBridge {
   PatchbayInspectBridge({
-    required PatchbayGateEvaluator gates,
+    required this._gates,
     PatchbayInspectPolicy policy = const PatchbayInspectPolicy(),
     PatchbayInspectorSurface? surface,
-  }) : _gates = gates,
-       _policy = policy,
+  }) : _policy = policy,
        _surface = surface ?? const PatchbayBindingInspectorSurface() {
     if (policy.defaultLease <= Duration.zero ||
         policy.maxLease <= Duration.zero ||

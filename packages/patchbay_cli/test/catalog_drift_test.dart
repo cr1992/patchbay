@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 /// The rejection envelope a host serves in place of a catalog it refuses.
@@ -83,7 +85,7 @@ final class _ViolatedCatalogClient implements PatchbayClient {
 Future<Map<String, Object?>> _runExec(PatchbayClient client) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     <String>['--json', 'exec', 'auth.tenant.switch'],
     connect: (_) async => client,
     output: out,

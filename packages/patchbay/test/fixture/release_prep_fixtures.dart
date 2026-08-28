@@ -98,6 +98,7 @@ String hostSurfaceFixture(String version) => jsonEncode(<String, Object?>{
 String releaseReadmeFixture(String version, {required bool chinese}) =>
     '''
 > **${chinese ? '项目状态：' : 'Project status:'}** `v$version`
+<img src="docs/assets/patchbay-cli-workflows.svg">
   patchbay_flutter: ^$version
 curl /releases/download/patchbay-v$version/patchbay-$version-macos-arm64
 \$ dart pub global activate patchbay_cli $version
@@ -109,14 +110,17 @@ Map<String, String> releaseDocumentsFixture(String version) => <String, String>{
   'docs/guide.md':
       '''
 # Guide
+<img src="assets/patchbay-cli-workflows.svg">
   patchbay_flutter: ^$version
 \$ dart pub global activate patchbay_cli $version
 curl /releases/download/patchbay-v$version/patchbay-$version-linux-x64
 ''',
   'packages/patchbay_cli/README.md':
-      '# CLI\n\n\$ dart pub global activate patchbay_cli $version\n',
+      '# CLI\n\n<img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg">\n'
+      '\$ dart pub global activate patchbay_cli $version\n',
   'packages/patchbay_cli/README.zh-CN.md':
-      '# CLI\n\n\$ dart pub global activate patchbay_cli $version\n',
+      '# CLI\n\n<img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg">\n'
+      '\$ dart pub global activate patchbay_cli $version\n',
   'packages/patchbay/README.md': '# Core\n',
   'packages/patchbay/README.zh-CN.md': '# Core\n',
   'packages/patchbay_transport/README.md': '# Transport\n',
@@ -132,6 +136,9 @@ curl /releases/download/patchbay-v$version/patchbay-$version-linux-x64
       '<svg><text>patchbay</text><text>patchbay_transport</text>'
       '<text>patchbay_cli</text><text>patchbay_flutter</text>'
       '<text>gesture / inspect / wait</text></svg>\n',
+  'docs/assets/patchbay-cli-workflows.svg':
+      '<svg><text>ONE-SHOT</text><text>REPL</text><text>LAUNCH</text>'
+      '<text>APP KEEPS RUNNING</text></svg>\n',
 };
 
 ReleaseInputs releaseInputsFixture({

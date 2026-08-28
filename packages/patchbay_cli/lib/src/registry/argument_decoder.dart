@@ -313,6 +313,65 @@ abstract final class ArgumentDecoder {
     return <String, Object?>{'sessionId': tail.single, 'clear': false};
   }
 
+  /// Decodes `session register`, which writes a record instead of reading one.
+  ///
+  /// Every field it collects already exists on `PatchbaySessionRecord`
+  /// (PB-050-27 adds no record field): the transport the caller already
+  /// obtained, the identity a later handshake is reconciled against, the device
+  /// and build mode a listing prints, and the local PID whose liveness decides
+  /// when the record goes stale. `sessionId` is optional so a cleanup trap can
+  /// be installed before the App is even started; omitted, the CLI names the
+  /// record and reports the name it chose.
+  static Map<String, Object?> sessionRegisterArguments(
+    List<String> tail,
+    ArgResults options,
+  ) {
+    if (tail.length > 1) {
+      throw const FormatException(
+        'session register accepts at most one <session-id>',
+      );
+    }
+    // Read in the order the usage line prints them, so a half-written command
+    // is told about its first missing option rather than its last.
+    final String wsUri = transportUri(requiredOption(options, 'ws-uri'));
+    final String applicationId = requiredOption(options, 'application-id');
+    final String deviceId = requiredOption(options, 'device-id');
+    final int? processId = int.tryParse(requiredOption(options, 'process-id'));
+    if (processId == null || processId <= 0) {
+      throw const FormatException('--process-id must be a positive integer');
+    }
+    final String buildMode = options.option('build-mode') ?? 'debug';
+    if (buildMode.isEmpty) {
+      throw const FormatException('--build-mode must not be empty');
+    }
+    final String? sessionId = tail.isEmpty ? null : tail.single;
+    return <String, Object?>{
+      'sessionId': ?sessionId,
+      'wsUri': wsUri,
+      'applicationId': applicationId,
+      'deviceId': deviceId,
+      'processId': processId,
+      'buildMode': buildMode,
+    };
+  }
+
+  /// Validates a transport URI the CLI records rather than dials.
+  ///
+  /// Checked here, at decode time, for the same reason the launcher refuses an
+  /// empty `wsUri`: a record carrying an unusable endpoint is discovered
+  /// normally and then fails on every later command, far away from the mistake.
+  static String transportUri(String raw) {
+    final Uri? uri = Uri.tryParse(raw);
+    if (uri == null ||
+        uri.host.isEmpty ||
+        !const <String>{'http', 'https', 'ws', 'wss'}.contains(uri.scheme)) {
+      throw const FormatException(
+        '--ws-uri must be an absolute http(s) or ws(s) URI',
+      );
+    }
+    return raw;
+  }
+
   static Map<String, Object?> logArguments(
     ArgResults options,
   ) => <String, Object?>{
@@ -401,10 +460,25 @@ abstract final class ArgumentDecoder {
     return build(tail);
   }
 
+  /// Reads `--$name` as a non-negative integer, or `null` when the option
+  /// was not passed.
+  ///
+  /// Every caller reaches this through an `options.option(name)` lookup, so
+  /// [name] is always a `--`-flag spelling here — unlike [parseNonNegative],
+  /// which a few call sites also use directly on a *positional* argument
+  /// name (`nodeId`, `generation`) where a `--` prefix would be wrong. This
+  /// method therefore builds its own message with the prefix rather than
+  /// delegating to [parseNonNegative], so it stays aligned with the sibling
+  /// `--$name must be positive` messages [positiveInt] and
+  /// [optionalPositiveInt] already produce for the same option.
   static int? optionalInt(ArgResults options, String name) {
     final String? value = options.option(name);
     if (value == null) return null;
-    return parseNonNegative(value, name);
+    final int? parsed = int.tryParse(value);
+    if (parsed == null || parsed < 0) {
+      throw FormatException('--$name must be a non-negative integer');
+    }
+    return parsed;
   }
 
   static int positiveInt(

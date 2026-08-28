@@ -8,9 +8,15 @@
 //
 // 「实现中」永远不接受批量延期：要延必须逐条 `--defer-item` 点名，
 // 避免一个开关把在做的事从版本里抹掉。
+//
+// 台账真源是 `docs/backlog.d/` 下每条目一个的碎片（见该目录 README）：归档
+// 即删除该条目的碎片文件，延期即改写它自己的 `target` / `status`——两种动作都
+// 只落在被点名条目自己的文件上，不再回写一张共享大表。
 import 'dart:io';
 
-/// backlog 状态列的取值。
+import 'backlog_store.dart';
+
+/// backlog 状态字段的取值。
 const String statusVerified = '已验证';
 const String statusEvidencePending = '待真机验收';
 const String statusInProgress = '实现中';
@@ -55,37 +61,35 @@ final class ReleaseFinalizer {
     bool allowEvidencePending = false,
     Set<String> deferItems = const <String>{},
   }) {
-    final backlogFile = File('$repoRoot/docs/backlog.md');
+    final fragmentDir = Directory('$repoRoot/$backlogFragmentDir');
     final releaseFile = File('$repoRoot/docs/releases/$version.md');
 
-    if (!backlogFile.existsSync() || !releaseFile.existsSync()) {
+    if (!fragmentDir.existsSync() || !releaseFile.existsSync()) {
       return ReleaseFinalizePlan(
         version: version,
         items: const <FinalizeItem>[],
         canApply: false,
         blockingReasons: <String>[
-          if (!backlogFile.existsSync()) 'docs/backlog.md does not exist',
+          if (!fragmentDir.existsSync()) '$backlogFragmentDir does not exist',
           if (!releaseFile.existsSync())
             'docs/releases/$version.md does not exist',
         ],
       );
     }
 
-    final lines = backlogFile.readAsLinesSync();
+    final backlog = loadBacklog(repoRoot);
     final items = <FinalizeItem>[];
-    final blockingReasons = <String>[];
+    final blockingReasons = <String>[
+      // 碎片解析不过就没有可信的分档输入，宁可阻断也不按半份台账收尾。
+      for (final error in backlog.errors) '台账碎片解析失败：$error',
+    ];
 
-    for (final line in lines) {
-      if (!line.startsWith('| PB-')) continue;
-      final parts = line.split('|').map((s) => s.trim()).toList();
-      if (parts.length < 7) continue;
+    for (final entry in backlog.ofKind(BacklogKind.feature)) {
+      final id = entry.id;
+      final title = entry.title;
+      final status = entry.status ?? '';
 
-      final id = parts[1];
-      final title = parts[2];
-      final targetVersion = parts[4];
-      final status = parts[5];
-
-      if (targetVersion != version) continue;
+      if (entry.target != version) continue;
 
       void add(String action, String reason, {String? blocking}) {
         items.add(
@@ -148,46 +152,24 @@ final class ReleaseFinalizer {
   }) {
     if (!plan.canApply) return false;
 
-    final backlogFile = File('$repoRoot/docs/backlog.md');
     final releaseFile = File('$repoRoot/docs/releases/${plan.version}.md');
 
-    // 1. Update backlog.md
-    final lines = backlogFile.readAsLinesSync();
-    final newLines = <String>[];
-    final archiveIds = plan.items
-        .where((item) => item.action == 'ARCHIVE')
-        .map((item) => item.id)
-        .toSet();
-    final deferIds = plan.items
-        .where((item) => item.action == 'DEFER')
-        .map((item) => item.id)
-        .toSet();
-
-    for (final line in lines) {
-      if (!line.startsWith('| PB-')) {
-        newLines.add(line);
-        continue;
-      }
-      final parts = line.split('|').map((s) => s.trim()).toList();
-      if (parts.length < 7) {
-        newLines.add(line);
-        continue;
-      }
-
-      final id = parts[1];
-      if (archiveIds.contains(id)) {
-        // Archived items removed from active backlog table
-        continue;
-      } else if (deferIds.contains(id)) {
-        // Clears target version to "待排期"
-        parts[4] = '-';
-        parts[5] = '待排期';
-        newLines.add('| ${parts.sublist(1, parts.length - 1).join(' | ')} |');
-      } else {
-        newLines.add(line);
+    // 1. 更新台账碎片：归档删文件，延期就地改自己的 target / status。
+    final byId = loadBacklog(repoRoot).byId();
+    for (final item in plan.items) {
+      final entry = byId[item.id];
+      if (entry == null) continue;
+      final file = File('$repoRoot/$backlogFragmentDir/${item.id}.md');
+      if (item.action == 'ARCHIVE') {
+        if (file.existsSync()) file.deleteSync();
+      } else if (item.action == 'DEFER') {
+        file.writeAsStringSync(
+          entry
+              .copyWith(target: unscheduledTarget, status: '待排期')
+              .renderFragment(),
+        );
       }
     }
-    backlogFile.writeAsStringSync('${newLines.join('\n')}\n');
 
     // 2. 冻结 releases/<version>.md 状态。仍有未结证据时不写「已发布」，
     //    否则版本文档会替未闭合的真机验收背书。

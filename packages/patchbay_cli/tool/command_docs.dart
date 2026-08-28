@@ -1,15 +1,16 @@
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
+import 'package:yaml/yaml.dart';
 
 const String commandReferenceStart =
     '<!-- PATCHBAY_COMMAND_REFERENCE:START -->';
 const String commandReferenceEnd = '<!-- PATCHBAY_COMMAND_REFERENCE:END -->';
+const String _managedSkillName = 'use-patchbay';
+const String _skillDocument = '../../skills/$_managedSkillName/SKILL.md';
 
 const List<({String path, bool chinese})> _documents =
     <({String path, bool chinese})>[
-      (path: '../../README.md', chinese: false),
-      (path: '../../README.zh-CN.md', chinese: true),
       (path: 'README.md', chinese: false),
       (path: 'README.zh-CN.md', chinese: true),
     ];
@@ -40,7 +41,7 @@ int runCommandDocs(
     for (final ({String path, bool chinese}) document in _documents) {
       final File file = File('${root.path}/${document.path}');
       if (!file.existsSync()) {
-        throw FormatException('managed README does not exist: ${file.path}');
+        throw FormatException('managed document does not exist: ${file.path}');
       }
       final String current = file.readAsStringSync();
       updates.add((
@@ -52,6 +53,28 @@ int runCommandDocs(
         ),
       ));
     }
+    final File skill = File('${root.path}/$_skillDocument');
+    if (!skill.existsSync()) {
+      throw FormatException('managed document does not exist: ${skill.path}');
+    }
+    final String currentSkill = skill.readAsStringSync();
+    validateSkillDocument(
+      currentSkill,
+      source: skill.path,
+      expectedName: _managedSkillName,
+    );
+    final File install = File('${skill.parent.path}/INSTALL.md');
+    if (!install.existsSync()) {
+      throw FormatException('managed document does not exist: ${install.path}');
+    }
+    updates.add((
+      file: skill,
+      updated: replaceCommandReferenceBlock(
+        currentSkill,
+        renderSkillStarterCommands(),
+        source: skill.path,
+      ),
+    ));
 
     final List<({File file, String updated})> drifted = updates
         .where(
@@ -133,6 +156,103 @@ String renderCommandReference({required bool chinese}) {
     );
   }
   return out.toString().trimRight();
+}
+
+String renderSkillStarterCommands() {
+  const List<String> starterNames = <String>[
+    'doctor',
+    'identity',
+    'catalog',
+    'snapshot',
+    'describe',
+  ];
+  final Map<String, PatchbayFriendlyCommandSpec> commands =
+      <String, PatchbayFriendlyCommandSpec>{
+        for (final PatchbayFriendlyCommandSpec command
+            in PatchbayFriendlyCommandRegistry.commands)
+          command.name: command,
+      };
+  final StringBuffer out = StringBuffer()
+    ..writeln('Run the smallest read-only sequence that can answer the task:');
+  for (final String name in starterNames) {
+    final PatchbayFriendlyCommandSpec? command = commands[name];
+    if (command == null) {
+      throw StateError('Skill starter command is not registered: $name');
+    }
+    final String syntax = <String>[
+      'patchbay',
+      ...command.path,
+      if (command.usageSuffix.isNotEmpty) command.usageSuffix,
+    ].join(' ');
+    out.writeln('- `${_escape(syntax)}` — ${command.summary}');
+  }
+  return out.toString().trimRight();
+}
+
+void validateSkillDocument(
+  String document, {
+  String source = 'SKILL.md',
+  String? expectedName,
+}) {
+  final RegExpMatch? match = RegExp(
+    r'^---\n([\s\S]*?)\n---(?:\n|$)',
+  ).firstMatch(document);
+  if (match == null) {
+    throw FormatException('$source must start with YAML frontmatter');
+  }
+
+  final Object? parsed;
+  try {
+    parsed = loadYaml(match.group(1)!);
+  } on YamlException catch (error) {
+    throw FormatException('$source has invalid YAML frontmatter: $error');
+  }
+  if (parsed is! YamlMap) {
+    throw FormatException('$source frontmatter must be a YAML map');
+  }
+
+  const Set<String> allowed = <String>{
+    'name',
+    'description',
+    'license',
+    'allowed-tools',
+    'metadata',
+  };
+  final Set<String> keys = parsed.keys.map((Object? key) => '$key').toSet();
+  final List<String> unexpected = keys.difference(allowed).toList()..sort();
+  if (unexpected.isNotEmpty) {
+    throw FormatException(
+      '$source has unsupported frontmatter keys: ${unexpected.join(', ')}',
+    );
+  }
+
+  final Object? rawName = parsed['name'];
+  final Object? rawDescription = parsed['description'];
+  if (rawName is! String ||
+      !RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$').hasMatch(rawName) ||
+      rawName.length > 64) {
+    throw FormatException('$source has an invalid skill name');
+  }
+  if (expectedName != null && rawName != expectedName) {
+    throw FormatException(
+      '$source has skill name "$rawName"; expected "$expectedName"',
+    );
+  }
+  if (rawDescription is! String ||
+      rawDescription.trim().isEmpty ||
+      rawDescription.length > 1024 ||
+      rawDescription.contains('<') ||
+      rawDescription.contains('>') ||
+      rawDescription.trimLeft().startsWith('[TODO:')) {
+    throw FormatException('$source has an invalid skill description');
+  }
+  final String body = document.substring(match.end);
+  if (RegExp(
+    r'^ {0,3}\[TODO:[^\n]*\][ \t]*$',
+    multiLine: true,
+  ).hasMatch(body)) {
+    throw FormatException('$source contains an unfinished TODO placeholder');
+  }
 }
 
 String replaceCommandReferenceBlock(

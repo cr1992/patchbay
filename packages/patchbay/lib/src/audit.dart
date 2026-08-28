@@ -38,6 +38,67 @@ typedef PatchbayAuditSinkErrorHandler =
       PatchbayAuditEvent event,
     );
 
+/// The terminal outcome of one host audit-delivery drain.
+enum PatchbayAuditDrainOutcome { drained, timedOut }
+
+/// Immutable accounting for the audit events accepted before the drain gate.
+final class PatchbayAuditDrainResult {
+  const PatchbayAuditDrainResult({
+    required this.outcome,
+    required this.settledCount,
+    required this.overflowDroppedCount,
+    required this.abandonedCount,
+  });
+
+  final PatchbayAuditDrainOutcome outcome;
+  final int settledCount;
+  final int overflowDroppedCount;
+  final int abandonedCount;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'outcome': outcome.name,
+    'settledCount': settledCount,
+    'overflowDroppedCount': overflowDroppedCount,
+    'abandonedCount': abandonedCount,
+  };
+}
+
+/// Reports one complete burst of audit events dropped by bounded delivery.
+///
+/// The error contains sequence accounting only. The matching redacted event is
+/// passed separately to [PatchbayAuditSinkErrorHandler].
+final class PatchbayAuditDeliveryOverflow implements Exception {
+  const PatchbayAuditDeliveryOverflow({
+    required this.droppedCount,
+    required this.firstSequence,
+    required this.lastSequence,
+    required this.capacity,
+  });
+
+  final int droppedCount;
+  final int firstSequence;
+  final int lastSequence;
+  final int capacity;
+
+  @override
+  String toString() =>
+      'PatchbayAuditDeliveryOverflow('
+      'droppedCount: $droppedCount, '
+      'firstSequence: $firstSequence, '
+      'lastSequence: $lastSequence, '
+      'capacity: $capacity)';
+}
+
+/// Reports a ledger event recorded after audit delivery was closed.
+final class PatchbayAuditDeliveryClosed implements Exception {
+  const PatchbayAuditDeliveryClosed({required this.sequence});
+
+  final int sequence;
+
+  @override
+  String toString() => 'PatchbayAuditDeliveryClosed(sequence: $sequence)';
+}
+
 /// The stable execution classification projected by both host audit and CLI
 /// trace consumers from one invocation response.
 ///

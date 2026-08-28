@@ -161,6 +161,9 @@ curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-macos-arm64
   patchbay_flutter: ^0.3.0
 \$ dart pub global activate patchbay_cli 0.3.0
 curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-linux-x64
+\$ shasum -a 256 patchbay-0.2.1-linux-x64
+\$ chmod +x patchbay-0.2.1-linux-x64
+\$ mv patchbay-0.2.1-linux-x64 patchbay
 ''';
       final String bumpedGuide = applyReleaseDocumentVersionReferences(
         'docs/guide.md',
@@ -170,6 +173,11 @@ curl /releases/download/patchbay-v0.3.0/patchbay-0.3.0-linux-x64
       expect(bumpedGuide, contains('patchbay_flutter: ^0.4.0'));
       expect(bumpedGuide, contains('activate patchbay_cli 0.4.0'));
       expect(bumpedGuide, contains('/patchbay-v0.4.0/patchbay-0.4.0-linux'));
+      expect(bumpedGuide, isNot(contains('patchbay-0.2.1-linux-x64')));
+      expect(
+        RegExp('patchbay-0.4.0-linux-x64').allMatches(bumpedGuide),
+        hasLength(4),
+      );
 
       const String cli = '\$ dart pub global activate patchbay_cli 0.3.0\n';
       expect(

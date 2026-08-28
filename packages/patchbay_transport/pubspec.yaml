@@ -1,10 +1,10 @@
 name: patchbay_transport
 description: 'Optional direct HTTP/JSON debug transport for Patchbay: explicitly started, loopback by default, short-lived bearer auth, fail-closed surface.'
 repository: https://github.com/cr1992/patchbay
-version: 0.4.1
+version: 0.5.0
 
 environment:
-  sdk: '>=3.11.0 <4.0.0'
+  sdk: '>=3.12.0 <4.0.0'
 
 dev_dependencies:
   lints: ^6.1.0

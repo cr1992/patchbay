@@ -8,22 +8,24 @@ import 'navigation_bridge.dart';
 import 'semantics_bridge.dart';
 
 /// Bounded Flutter observer for stable Semantics, navigation, and revisions.
+///
+/// PB-050-07 / DG-050-05 冻结的 cadence：立即 probe 一次；条件未满足时由帧观察器
+/// 请求并等待**恰好一个**下一帧，随后在该帧结束后再 probe。probe 自身在 owner
+/// 有效时不再请第二帧，所以一轮未满足 = 一帧（此前是两帧）。
+///
+/// owner 丢失时的恢复帧由 [PatchbaySemanticsBridge] 通过**同一个**
+/// [PatchbayFrameObserver] 驱动：它们计入同一份 `frameRevision`，也用调用方这一份
+/// 总 timeout，不额外延长预算。
 final class PatchbayUiWaitBridge {
   PatchbayUiWaitBridge({
-    required PatchbayGateEvaluator gates,
-    required PatchbaySemanticsBridge semantics,
-    required PatchbayFrameObserver frames,
-    required bool Function() isAppResumed,
-    required PatchbayLifecycleStateReader lifecycleState,
-    PatchbayNavigationBridge? navigation,
+    required this._gates,
+    required this._semantics,
+    required this._frames,
+    required this._isAppResumed,
+    required this._lifecycleState,
+    this._navigation,
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _semantics = semantics,
-       _frames = frames,
-       _isAppResumed = isAppResumed,
-       _lifecycleState = lifecycleState,
-       _navigation = navigation,
-       _newRequestId = newRequestId ?? _defaultRequestId;
+  }) : _newRequestId = newRequestId ?? _defaultRequestId;
 
   final PatchbayGateEvaluator _gates;
   final PatchbaySemanticsBridge _semantics;

@@ -1,0 +1,9 @@
+{
+  "source": "uiObserved",
+  "plane": "flutterDiagnostic",
+  "schema": "flutterSdkPassthrough",
+  "extension": "ext.flutter.inspector.getRootWidgetTree",
+  "format": "flutterInspectorJson",
+  "data": { "widget": "MaterialApp", "children": [] },
+  "warnings": ["Flutter diagnostic fields may change with the Flutter SDK."]
+}

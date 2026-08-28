@@ -122,6 +122,277 @@ print($1)
 "
 }
 
+# 路由命令的答复只证明导航请求已受理，不证明平台动画已经移除旧 route。
+# 读取当前 revision 后等待下一帧；不用 sleep 猜 iOS / Android 的动画时长。
+wait_next_frame() {
+  local revision
+  if ! example_session_cli --json ui wait frame-revision 0 >"$OUT" 2>&1; then
+    return 1
+  fi
+  revision="$(read_json "(doc.get('payload') or doc)['frameRevision']")"
+  example_session_cli --json ui wait frame-revision "$revision" \
+    --timeout-ms 5000 >"$OUT" 2>&1
+}
+
+# `navigation go` 在新 route 入栈后立即答复，旧 route 要到动画结束才释放。
+# 同一个 PatchbayKey 不能在旧 Home 尚未释放时交给新 Home；按 catalog 的 mounted
+# 状态逐帧等待真实释放，不把逻辑 destination 当成 widget 生命周期证据。
+check_catalog_target_unmounted() {
+  local name="$1" target_id="$2"
+  local attempt=1 max_attempts=30 actual=0 target_state=''
+  while [ "$attempt" -le "$max_attempts" ]; do
+    actual=0
+    example_session_cli --json catalog >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then
+      target_state='catalogFailed'; break
+    fi
+    target_state="$(read_json "next(('mounted' if t.get('mounted') else 'unmounted' for t in doc['uiTargets'] if t['id'] == '$target_id'), 'notFound')")"
+    if [ "$target_state" = unmounted ]; then
+      printf '  ✓ %-42s attempts=%s\n' "$name" "$attempt"
+      PASS=$((PASS + 1)); return 0
+    fi
+    if [ "$target_state" != mounted ] || [ "$attempt" = "$max_attempts" ]; then
+      break
+    fi
+    wait_next_frame
+    actual=$?
+    if [ "$actual" != 0 ]; then
+      target_state='uiWaitFrameFailed'; break
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf '  ✗ %-42s state=%s（%s 次尝试）\n' \
+    "$name" "${target_state:-unknown}" "$attempt"
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+}
+
+# capture 自己会跨一帧后二次解析 target。页面恰好处于 route 过渡时，第一次
+# catalog 可能读到即将卸载的 generation；bridge 必须 fail-closed，我们则推进
+# 一帧、重读 catalog 后有界重试。只放行这三种动态失效，其他拒绝立即失败。
+check_capture_target() {
+  local name="$1" target_id="$2" output_path="$3"
+  local attempt=1 max_attempts=5 actual=0 code='' target_state=''
+  while [ "$attempt" -le "$max_attempts" ]; do
+    actual=0
+    example_session_cli --json catalog >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then
+      code='catalogFailed'; break
+    fi
+    target_state="$(read_json "next((str(t['generation']) if t.get('mounted') and 'capture' in t.get('operations', []) else 'unmounted' if not t.get('mounted') else 'operationUnavailable' for t in doc['uiTargets'] if t['id'] == '$target_id'), 'notFound')")"
+    case "$target_state" in
+      notFound) code='uiTargetNotFound'; break ;;
+      operationUnavailable) code='uiOperationUnavailable'; break ;;
+      unmounted) code='uiTargetUnmounted'; actual=5 ;;
+      *)
+        actual=0
+        example_session_cli --json --output "$output_path" capture target \
+          "$target_id" "$target_state" >"$OUT" 2>&1 || actual=$?
+        if [ "$actual" = 0 ]; then
+          printf '  ✓ %-42s generation=%s attempts=%s\n' \
+            "$name" "$target_state" "$attempt"
+          PASS=$((PASS + 1)); return 0
+        fi
+        code="$(read_json "(doc.get('rejection') or {}).get('code', '')" 2>/dev/null || true)"
+        case "$code" in
+          uiTargetUnmounted|uiGenerationStale|captureTargetChanged) ;;
+          *) break ;;
+        esac
+        ;;
+    esac
+    if [ "$attempt" = "$max_attempts" ]; then
+      break
+    fi
+    wait_next_frame
+    actual=$?
+    if [ "$actual" != 0 ]; then
+      code='uiWaitFrameFailed'; break
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf '  ✗ %-42s 退出码 %s，code=%s（%s 次尝试）\n' \
+    "$name" "$actual" "${code:-unknown}" "$attempt"
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+}
+
+# 独立算一份文件的 SHA-256。回执自报 verified=true 没有证明力，能被外部复核才有。
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    sha256sum "$1" | awk '{print $1}'
+  fi
+}
+
+# PB-050-20：跑一条覆盖清单里的命令，证明超阈值时无界成员真的落到了本地文件。
+#
+# 三条断言，缺一不可：
+#   1. stdout 确实变短——漏斗的全部意义就在这里；基准是同一条命令加
+#      `--max-inline-bytes 0`，也就是 0.4.1 的输出形态；
+#   2. 回执里的 path 指向一个存在的文件，且长度与回执自报的一致；
+#   3. `shasum -a 256` 独立算出的摘要等于回执自报的 sha256。
+#
+# 阈值用 `--max-inline-bytes` 显式压小，而不是指望这台设备今天的界面恰好大过
+# 64 KiB 默认值：要证明的是这条链路成立，不是某次界面有多大。默认阈值本身由
+# 单元测试的三点边界用例锁定，不需要真机再赌一次。
+#
+# 只打印字节数与摘要前缀，不打印路径：那是本机绝对路径，不进任何可留存的输出。
+check_spill() {
+  local name=""
+  name="$1"
+  shift
+  local actual=0
+  local inline_bytes=0
+  local spilled_bytes=0
+  local artifact_path=""
+  local artifact_sha=""
+  local artifact_len=""
+  local disk_sha=""
+  local disk_len=""
+
+  example_session_cli --json --max-inline-bytes 0 "$@" >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-42s 内联基准退出码 %s\n' "$name" "$actual"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -3 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  inline_bytes="$(wc -c <"$OUT" | tr -d ' ')"
+
+  actual=0
+  example_session_cli --json --max-inline-bytes 512 "$@" >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-42s 落盘退出码 %s\n' "$name" "$actual"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -3 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  spilled_bytes="$(wc -c <"$OUT" | tr -d ' ')"
+  artifact_path="$(read_json "doc['localArtifact']['path']" 2>/dev/null || true)"
+  artifact_sha="$(read_json "doc['localArtifact']['sha256']" 2>/dev/null || true)"
+  artifact_len="$(read_json "doc['localArtifact']['length']" 2>/dev/null || true)"
+
+  if [ -z "$artifact_path" ] || [ ! -f "$artifact_path" ]; then
+    printf '  ✗ %-42s 回执没有指向一个存在的文件\n' "$name"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  if [ "$spilled_bytes" -ge "$inline_bytes" ]; then
+    printf '  ✗ %-42s stdout 没有变短（%s → %s 字节）\n' \
+      "$name" "$inline_bytes" "$spilled_bytes"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  disk_sha="$(sha256_of "$artifact_path")"
+  disk_len="$(wc -c <"$artifact_path" | tr -d ' ')"
+  if [ "$disk_sha" != "$artifact_sha" ]; then
+    printf '  ✗ %-42s shasum 与回执对不上（磁盘 %s… vs 回执 %s…）\n' \
+      "$name" "${disk_sha:0:12}" "${artifact_sha:0:12}"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  if [ "$disk_len" != "$artifact_len" ]; then
+    printf '  ✗ %-42s 长度与回执对不上（磁盘 %s vs 回执 %s）\n' \
+      "$name" "$disk_len" "$artifact_len"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+  fi
+  printf '  ✓ %-42s stdout %s→%s 字节，artifact %s 字节 sha=%s…\n' \
+    "$name" "$inline_bytes" "$spilled_bytes" "$disk_len" "${disk_sha:0:12}"
+  PASS=$((PASS + 1))
+}
+
+# PB-050-21：brief 只是少打印几个键。同一会话内 brief 的 nodeCount / treeRevision
+# 必须与 full 逐字相同，nodes 必须不在文档里、且被登记在 localView.omitted。
+#
+# 树会随界面变化，所以用 treeRevision 判断两次读取是否可比：不可比就再读一次，
+# 有界重试。不用 sleep 猜时序，也不把"界面动了"读成"brief 撒谎"。
+check_brief_semantics_parity() {
+  local name=""
+  name="$1"
+  local attempt=1
+  local max_attempts=3
+  local actual=0
+  local full_revision=""
+  local full_count=""
+  local brief_revision=""
+  local verdict=""
+
+  while [ "$attempt" -le "$max_attempts" ]; do
+    actual=0
+    example_session_cli --json ui semantics tree >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then verdict='fullFailed'; break; fi
+    full_revision="$(read_json "(doc.get('payload') or doc)['treeRevision']")"
+    full_count="$(read_json "(doc.get('payload') or doc)['nodeCount']")"
+
+    actual=0
+    example_session_cli --json --view brief ui semantics tree >"$OUT" 2>&1 || actual=$?
+    if [ "$actual" != 0 ]; then verdict='briefFailed'; break; fi
+    brief_revision="$(read_json "doc['payload']['treeRevision']")"
+    if [ "$brief_revision" != "$full_revision" ]; then
+      # 两次读取之间界面变了，这一轮不可比。
+      attempt=$((attempt + 1)); continue
+    fi
+    verdict="$(read_json "'ok' if (
+        doc['payload']['nodeCount'] == $full_count
+        and 'nodes' not in doc['payload']
+        and '\$.payload.nodes' in doc['localView']['omitted']
+        and doc['localView']['view'] == 'brief'
+        and doc['localView']['projection'] == 'ui.semantics.tree'
+    ) else 'mismatch'" 2>/dev/null || echo 'unreadable')"
+    if [ "$verdict" = ok ]; then
+      printf '  ✓ %-42s treeRevision=%s nodeCount=%s\n' \
+        "$name" "$full_revision" "$full_count"
+      PASS=$((PASS + 1)); return 0
+    fi
+    break
+  done
+  printf '  ✗ %-42s %s（%s 次尝试）\n' \
+    "$name" "${verdict:-treeRevisionUnstable}" "$attempt"
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
+}
+
+# PB-050-17：`ui reveal` 恰好派发一次，把它的 outcome/reachability 与紧接着
+# 该带的 generation 一起从**同一份**答复里取出来。
+#
+# reveal 是写命令，真的会滚动列表：像别处那样先 `check` 断言、再另起一次
+# `example_session_cli` 单独取字段，会让第二次调用从第一次滚完的位置起步，
+# 拿到的 generation 也就不再对应断言过的那次派发。这里只派发一次，成功时把
+# generation 存进 `REVEAL_GENERATION` 供调用方拼下一条 tap 命令，返回 0；
+# 失败时返回 1，调用方据此跳过后续依赖这次 reveal 的步骤。
+#
+# 是否有懒加载证据（`extentGrowthSteps > 0`）只在结果行里如实打印、不参与
+# PASS/FAIL：具体是哪一次 reveal（如果有）越过分页边界，取决于设备真实视口
+# 高度相对 `pageSize` 的比例——实测同一序列里可能两次都不越过（前一次已经把
+# 该越过的那段滚过去了）。这条机制已经由 `example_reveal_test.dart` 在固定
+# viewport 下钉死为硬断言；设备预检只需要证明 reveal → tap 这条链路在真机上
+# 确实通，不重复对一个视口相关的量做强断言。
+#
+# check_reveal <名称> <identifier> <期望 reachability> <reveal 的其余参数...>
+check_reveal() {
+  local name="$1" identifier="$2" expect_reachability="$3"
+  shift 3
+  local actual=0
+  REVEAL_GENERATION=""
+  example_session_cli --json ui reveal "$identifier" "$@" >"$OUT" 2>&1 || actual=$?
+  if [ "$actual" != 0 ]; then
+    printf '  ✗ %-42s 退出码 %s（期望 0）\n' "$name" "$actual"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -3 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 1
+  fi
+  if ! PATCHBAY_OUT="$OUT" python3 -c "
+import json, os, sys
+doc = json.load(open(os.environ['PATCHBAY_OUT'], encoding='utf-8'))
+payload = doc['payload']
+ok = (payload['outcome'] == 'revealed'
+      and payload['reachability'] == '$expect_reachability')
+sys.exit(0 if ok else 1)
+" 2>/dev/null; then
+    printf '  ✗ %-42s 断言不成立（outcome/reachability）\n' "$name"
+    sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -10 | sed 's/^/      /'
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 1
+  fi
+  REVEAL_GENERATION="$(read_json "doc['payload']['generation']")"
+  local grew
+  grew="$(read_json "'yes' if any(c.get('extentGrowthSteps', 0) > 0 for c in doc['payload']['containers']) else 'no'")"
+  printf '  ✓ %-42s generation=%s extentGrowth=%s\n' "$name" "$REVEAL_GENERATION" "$grew"
+  PASS=$((PASS + 1))
+  return 0
+}
+
 echo "== 启动 example =="
 if ! example_session_start "${1:-}"; then
   echo "预检未开始：会话启动失败（原因见上方 [session] 行）" >&2
@@ -181,6 +452,15 @@ check 'exec device.write unchanged' 0 \
 check 'describe device.write' 0 "'responseSchema' in json.dumps(doc)" \
   --json describe example.device.write
 
+# PB-050-06：timeoutMs 同时是 CLI 声明等待预算与 host monotonic deadline。
+# handler 在 cancellation callback 中完成停止证明；随后一条普通命令成功，证明
+# execution slot 已释放，而不是仅仅让调用方停止等待。
+check 'invocation deadline 可确认停止' 5 \
+  "doc['rejection']['code'] == 'invocationDeadlineExceeded'" \
+  --json exec example.invocation.cooperativeWait --args '{"timeoutMs":30}'
+check '确认停止后 execution slot 已释放' 0 \
+  "doc['payload']['counter'] >= 1" --json exec example.counter.increment
+
 echo
 echo "== job =="
 check 'exec job.run' 0 "'jobId' in json.dumps(doc)" \
@@ -196,6 +476,26 @@ echo
 echo "== UI 观察与操作 =="
 check 'ui semantics tree' 0 "'nodes' in json.dumps(doc)" --json ui semantics tree
 check 'ui tap increment' 0 "" --json ui tap example.counter.increment
+ACTION_GEN="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
+import json, sys
+doc = json.load(sys.stdin)
+payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
+print(next((n.get('generation') for n in payload.get('nodes', [])
+            if n.get('identifier') == 'example.identifier.action'), ''))
+")"
+if [ -n "$ACTION_GEN" ]; then
+  check 'ui action focus' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui action example.identifier.action "$ACTION_GEN" focus
+  check 'ui action scrollDown' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui action example.identifier.action "$ACTION_GEN" scrollDown
+  check 'ui action setText' 0 \
+    "doc['payload']['outcome'] == 'dispatched' and doc['payload']['length'] == 8" \
+    --json ui action example.identifier.action "$ACTION_GEN" setText precheck
+else
+  printf '  ✗ %-42s %s\n' 'identifier action generation' \
+    '未从 semantics 树解析到 example.identifier.action 的 generation'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('identifier action generation')
+fi
 check 'ui wait tree-revision' 0 "" --json ui wait tree-revision 1
 check 'ui widget-tree' 0 "" --json ui widget-tree
 check 'ui render-tree' 0 "" --json ui render-tree
@@ -225,13 +525,14 @@ doc = json.load(sys.stdin)
 payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
 gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
         if n.get('identifier') and n.get('generation') is not None}
-print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''), gens.get('example.gesture.nested', ''))
+print(gens.get('example.gesture.surface', ''), gens.get('example.gesture.list', ''), gens.get('example.gesture.nested', ''), gens.get('example.gesture.covered', ''))
 ")"
 SURFACE_GEN="$(echo "$GEN" | awk '{print $1}')"
 LIST_GEN="$(echo "$GEN" | awk '{print $2}')"
 NESTED_GEN="$(echo "$GEN" | awk '{print $3}')"
-if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ]; then
-  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN"
+COVERED_GEN="$(echo "$GEN" | awk '{print $4}')"
+if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ] && [ -n "$COVERED_GEN" ]; then
+  echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN covered=$COVERED_GEN"
   check 'gesture press-hold' 0 "doc['payload']['outcome'] == 'dispatched'" \
     --json ui gesture press-hold \
     example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
@@ -269,9 +570,21 @@ if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ]; then
     --json ui gesture fling \
     example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
+  # PB-050-15 锚定 tap（可达 + 遮挡两例）。可达例不止看 dispatched：手势面的
+  # onTap 会把 Semantics value 置为 'tap'，用有界等待把「App 真的收到了这次
+  # 点按」也钉住——reachability 分流（tap 前先证指针可达）正是这两步合起来。
+  check 'gesture tap 可达按压面' 0 "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui gesture tap example.gesture.surface "$SURFACE_GEN"
+  check 'gesture tap 后 App 侧观察到点按' 0 "" \
+    --json ui wait semantics-value example.gesture.surface tap --timeout-ms 5000
+  # 遮挡例：covered 探针被不透明装饰块盖住，policy 放行但 hit-test 必须拒绝。
+  # 断言 code 而不只是退出码——uiGestureDenied / uiGenerationStale 也退 5。
+  check 'gesture tap 被遮挡目标如实拒绝' 5 \
+    "doc['rejection']['code'] == 'uiGestureTargetObscured'" \
+    --json ui gesture tap example.gesture.covered "$COVERED_GEN"
 else
   printf '  ✗ %-42s %s\n' 'gesture target generation' \
-    '未从 semantics 树解析到 surface / list / nested 三个目标的 generation'
+    '未从 semantics 树解析到 surface / list / nested / covered 四个目标的 generation'
   echo '      手势是 P0 能力，取不到目标按失败计——跳过会让"全过"不等于"全覆盖"。'
   FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture target generation')
 fi
@@ -294,8 +607,39 @@ check 'ui wait destination' 0 "" --json ui wait destination example.details
 check 'navigation back' 0 "" --json navigation back
 check 'navigation go details' 0 "" --json navigation go example.details
 check 'ui wait destination details' 0 "" --json ui wait destination example.details
+check_catalog_target_unmounted 'catalog capture target released' \
+  example.card.capture
 check 'navigation go home' 0 "" --json navigation go example.home
 check 'ui wait destination home' 0 "" --json ui wait destination example.home
+
+echo
+echo "== reveal（identifier 锚定的 scroll-to-reveal，PB-050-17）=="
+check 'navigation go reveal' 0 "" --json navigation go example.reveal
+check 'ui wait destination reveal' 0 "" --json ui wait destination example.reveal
+
+# 语义可达的目标：合法的无障碍写法（Semantics(onTap:) 包 SizedBox），没有指针
+# 占位。reachability 必须落到 semanticsOnly，落地的 tap 也必须走语义 action
+# 通道——pointer tap 在它身上没有对应物。generation 取自这**同一次**派发的
+# 答复：reveal 是写命令，会真的滚动列表，重复调用不是同一份 generation。
+if check_reveal 'ui reveal 语义可达的目标' example.reveal.row.semanticsOnly \
+  semanticsOnly --max-steps 60 --timeout-ms 20000
+then
+  check 'reveal 之后按 semanticsOnly 分流走 ui action tap' 0 \
+    "doc['payload']['outcome'] == 'dispatched'" \
+    --json ui action example.reveal.row.semanticsOnly "$REVEAL_GENERATION" tap
+fi
+
+# 指针可达的目标挂在懒加载分页的更深处、还被一条固定底栏盖过：reveal 必须继续
+# 滚动直到底栏不再挡住它，reachability 落到 pointer，落地的 tap 走指针通道。
+if check_reveal 'ui reveal 指针可达的目标（懒加载 + 固定底栏）' example.reveal.row.far \
+  pointer --max-steps 60 --timeout-ms 20000
+then
+  check 'reveal 之后按 pointer 分流走 ui tap' 0 "" \
+    --json ui tap example.reveal.row.far --generation "$REVEAL_GENERATION"
+fi
+
+check 'navigation go home（reveal 收尾）' 0 "" --json navigation go example.home
+check 'ui wait destination home（reveal 收尾）' 0 "" --json ui wait destination example.home
 
 echo
 echo "== inspect / keep-awake =="
@@ -309,17 +653,13 @@ check 'ui keep-awake off' 0 "" --json ui keep-awake off
 echo
 echo "== capture / blob =="
 check 'capture root' 0 "" --output "$PRECHECK_TMP/capture.png" capture root
-# 导航往返会重新挂载页面并递增 target generation。这里不能复用启动时的
-# catalog，否则真机预检会把合法的 stale-generation 拒绝误判成 capture 失败。
-# capture target 不保证有独立 semantics 节点，因此通过 catalog 强制确认并读取。
+# 导航往返会重新挂载页面并递增 target generation。capture target 不保证有
+# 独立 semantics 节点，因此由 helper 在每次有界尝试前重读 catalog。
 check 'catalog capture target available' 0 \
   "any(t['id'] == 'example.card.capture' for t in doc['uiTargets'])" \
   --json catalog
-example_session_cli --json catalog >"$OUT" 2>&1
-CARD_CAPTURE_GEN="$(read_json "[t['generation'] for t in doc['uiTargets'] if t['id'] == 'example.card.capture'][0]")"
-echo "  capture target generation：card=$CARD_CAPTURE_GEN"
-check 'capture target' 0 "" --output "$PRECHECK_TMP/capture-target.png" \
-  capture target example.card.capture "$CARD_CAPTURE_GEN"
+check_capture_target 'capture target' example.card.capture \
+  "$PRECHECK_TMP/capture-target.png"
 example_session_cli --json --output "$PRECHECK_TMP/cap1.png" capture root >"$OUT" 2>&1
 BLOB1="$(read_json "doc['payload']['blob']['blobId']")"
 example_session_cli --json exec example.counter.increment >/dev/null 2>&1
@@ -371,6 +711,29 @@ check 'logs query' 0 "'records' in json.dumps(doc)" --json logs query
 check 'logs export' 0 "" --output "$PRECHECK_TMP/logs.ndjson" logs export
 
 echo
+echo "== 输出漏斗（PB-050-20 落盘 / PB-050-21 brief）=="
+# 落盘产物进预检自己的临时目录：既让本步骤可以断言"文件确实在那儿"，也不去动
+# 运行者真正的 $HOME/.patchbay/outputs/v1。cleanup 会连它一起删。
+export PATCHBAY_OUTPUT_DIR="$PRECHECK_TMP/outputs"
+mkdir -p "$PATCHBAY_OUTPUT_DIR"
+# 一棵 semantics 树 + 一棵 SDK 诊断树：两种无界成员形态各一条（JSON 数组与
+# 透传 data），也是两条不同的事实来源（host 应答与 VM Service 透传）。
+check_spill 'ui semantics tree 落盘并可复核' ui semantics tree
+check_spill 'ui widget-tree 落盘并可复核' ui widget-tree
+check_brief_semantics_parity 'ui semantics tree --view brief 与 full 对账'
+# catalog 的 brief 必须仍然可读：summary 是 describe 之前判断"这条命令是干什么的"
+# 的唯一线索，2026-08-25 的裁决把它留在了投影表之外。
+check 'catalog --view brief 保留 summary' 0 \
+  "(doc['localView']['view'] == 'brief'
+    and doc['localView']['projection'] == 'catalog'
+    and all(c.get('summary') for c in doc['commands'])
+    and '\$.commands[].summary' not in doc['localView']['omitted']
+    and any(p in doc['localView']['omitted'] for p in (
+      '\$.commands[].parameters', '\$.commands[].responseSchema',
+      '\$.commands[].executionContract', '\$.commands[].retryPolicy')))" \
+  --json --view brief catalog
+
+echo
 echo "== manifest =="
 check 'ui targets --emit-manifest' 0 "'coverage' in json.dumps(doc)" \
   --json ui targets --emit-manifest
@@ -395,6 +758,78 @@ check 'doctor' 0 "" --json doctor
 # 没装外部 companion driver 时，能力矩阵是类型化失败（6），不是 0——这正是 fail-closed。
 check_local 'permission capabilities 无 driver 时 fail-closed' 6 "" \
   --json permission capabilities
+
+echo
+echo "== 外部注册会话（PB-050-27）=="
+# 不经 `patchbay launch` 启动的 App 靠 `session register` 获得自动发现——这是
+# DG-050-07 裁决的接入方迁移路径，仓内预检在此复刻它的行为承诺：注册即本 checkout
+# 可自动发现、记录能承载真实连接、重名拒绝不覆盖、注销幂等且如实答复。
+#
+# 端点、PID、设备取自在跑会话的 live 记录：注册指向的是本预检真正跑着的 App，
+# `identity` 一步因此证明「注册的记录连得上」，而不是只证明文件写成功。这批步骤
+# 自带 --session-dir 指向隔离目录（随 PRECHECK_TMP 回收），不污染在跑会话的解析；
+# 与「本地面」段不同，其中 identity 一步会真实拨号。注意本段必须留在权限段之前：
+# Android 的 permission reset 会终止 App 进程。
+REGISTER_DIR="$PRECHECK_TMP/register-records"
+mkdir -p "$REGISTER_DIR"
+REGISTER_FIELDS="$(PATCHBAY_RECORDS="$PATCHBAY_SESSION_DIR" PATCHBAY_SID="$PATCHBAY_SESSION_ID" python3 -c "
+import json, os, pathlib
+for path in sorted(pathlib.Path(os.environ['PATCHBAY_RECORDS']).glob('*.json')):
+    try:
+        record = json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        continue
+    if record.get('sessionId') == os.environ['PATCHBAY_SID']:
+        print(record['wsUri'])
+        print(record['processId'])
+        print(record['deviceId'])
+        break
+" 2>/dev/null)"
+REGISTER_WS_URI="$(sed -n 1p <<<"$REGISTER_FIELDS")"
+REGISTER_PID="$(sed -n 2p <<<"$REGISTER_FIELDS")"
+REGISTER_DEVICE="$(sed -n 3p <<<"$REGISTER_FIELDS")"
+if [ -n "$REGISTER_WS_URI" ] && [ -n "$REGISTER_PID" ] && [ -n "$REGISTER_DEVICE" ]; then
+  check_local 'session register 写入外部记录' 0 \
+    "doc['session']['sessionId'] == 'precheck-external' and doc['session']['workspaceAffinity'] == 'current'" \
+    --json --session-dir "$REGISTER_DIR" session register precheck-external \
+    --ws-uri "$REGISTER_WS_URI" --application-id dev.patchbay.example \
+    --device-id "$REGISTER_DEVICE" --process-id "$REGISTER_PID"
+  # 注册记录的全部意义：本 checkout 内不带 --session、不带 --ws-uri 即可发现并连上真 App。
+  check_local 'register 记录承载自动发现连接' 0 \
+    "doc['applicationId'] == 'dev.patchbay.example'" \
+    --json --session-dir "$REGISTER_DIR" identity
+  # 已存在的 id 拒绝而不是覆盖；会话错误按 transport（3）退。这一步不能走
+  # check_local：它把 stderr 合进 stdout，而错误路径在 --json 下同时给 stderr 一行
+  # 人读诊断（成功路径 stderr 为空，所以其余步骤不受影响）。单独分流，只对 stdout
+  # 的信封断言。
+  REGISTER_DUP_CODE=0
+  "$PATCHBAY_CLI_BIN" --json --session-dir "$REGISTER_DIR" \
+    session register precheck-external \
+    --ws-uri "$REGISTER_WS_URI" --application-id dev.patchbay.example \
+    --device-id "$REGISTER_DEVICE" --process-id "$REGISTER_PID" \
+    >"$OUT" 2>/dev/null || REGISTER_DUP_CODE=$?
+  if [ "$REGISTER_DUP_CODE" = 3 ] && PATCHBAY_OUT="$OUT" python3 -c "
+import json, os, sys
+doc = json.load(open(os.environ['PATCHBAY_OUT'], encoding='utf-8'))
+sys.exit(0 if doc['error']['code'] == 'sessionAlreadyRegistered' else 1)
+" 2>/dev/null; then
+    printf '  ✓ %-42s\n' 'register 重名拒绝不覆盖'
+    PASS=$((PASS + 1))
+  else
+    printf '  ✗ %-42s 退出码 %s（期望 3），或信封 error.code 不是 sessionAlreadyRegistered\n' \
+      'register 重名拒绝不覆盖' "$REGISTER_DUP_CODE"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=('register 重名拒绝不覆盖')
+  fi
+  check_local 'session unregister 移除记录' 0 "doc['removed'] is True" \
+    --json --session-dir "$REGISTER_DIR" session unregister precheck-external
+  # 清理陷阱可能在记录已被清走之后才跑：幂等注销如实答复 removed=False，不报失败。
+  check_local 'unregister 幂等且如实' 0 "doc['removed'] is False" \
+    --json --session-dir "$REGISTER_DIR" session unregister precheck-external
+else
+  printf '  ✗ %-42s %s\n' 'session register 前置字段' \
+    '未从在跑会话记录解析到 wsUri/processId/deviceId'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('session register 前置字段')
+fi
 
 echo
 echo "== 权限真实路径 =="

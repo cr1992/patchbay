@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "applicationId": "dev.patchbay.fake",
+  "appInstanceId": "fake-instance",
+  "isolateId": "isolates/1",
+  "localView": {
+    "view": "brief",
+    "projection": null,
+    "omitted": [],
+    "expand": "--view full"
+  }
+}

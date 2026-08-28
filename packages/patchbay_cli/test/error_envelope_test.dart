@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -36,7 +39,7 @@ Future<_Run> _run(
 }) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     arguments,
     connect: connected ? (_) async => client ?? _client() : null,
     output: out,
@@ -130,6 +133,32 @@ void main() {
     // Same rule as the printed list: a choice label never carries a URI.
     expect(result.out, isNot(contains('ws://')));
     expect(result.err, contains('--session fixture-one'));
+  });
+
+  test('sessionDirectoryEmpty carries all three recovery paths', () async {
+    final Directory sessions = Directory.systemTemp.createTempSync(
+      'patchbay-empty-sessions-',
+    );
+    addTearDown(() => sessions.deleteSync(recursive: true));
+
+    final _Run result = await _run(<String>[
+      '--session-dir',
+      sessions.path,
+      '--json',
+      'identity',
+    ], connected: false);
+
+    expect(result.exitCode, PatchbayExitCode.transport);
+    expect(result.error['code'], 'sessionDirectoryEmpty');
+    expect(
+      result.details['hint'],
+      contains('patchbay launch -- <consumer command>'),
+    );
+    expect(result.details['hint'], contains('--ws-uri'));
+    expect(result.details['hint'], contains('patchbay session register'));
+    expect(result.err, contains('patchbay launch -- <consumer command>'));
+    expect(result.err, contains('--ws-uri'));
+    expect(result.err, contains('patchbay session register'));
   });
 
   test('a transport-class failure keeps its own stable code', () async {

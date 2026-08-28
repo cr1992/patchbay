@@ -4,18 +4,78 @@ import 'dart:math';
 
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
+import '../invocation_cancellation.dart';
 import '../snapshot.dart';
 
 typedef PatchbayCatalogSource = Future<Map<String, Object?>> Function();
 typedef PatchbaySnapshotSource = Future<Map<String, Object?>> Function();
+
+/// A snapshot source with an explicit, cheap content invalidation signal.
+///
+/// Additive by construction: [PatchbaySnapshotSource] keeps working unchanged
+/// and keeps reporting `revisionSource: hostObserved`. A host binds one form or
+/// the other when it is built; the two are not interchangeable at runtime,
+/// because a reader that saw `consumerReported` once must not have the meaning
+/// of the field change under it inside one App instance.
+typedef PatchbayVersionedSnapshotSource =
+    Future<PatchbaySnapshotSample> Function();
 typedef PatchbayInvocationSource =
     Future<Map<String, Object?>> Function(
       String command,
       Map<String, Object?> arguments,
       String requestId,
     );
+typedef PatchbayContextInvocationSource =
+    Future<Map<String, Object?>> Function(
+      String command,
+      Map<String, Object?> arguments,
+      String requestId,
+      PatchbayInvocationContext context,
+    );
 typedef PatchbayExtensionRegistrar =
     void Function(String method, ServiceExtensionHandler handler);
+
+/// A complete catalog observation bound to the commands revision it describes.
+final class PatchbayCatalogSample {
+  const PatchbayCatalogSample({
+    required this.commandsRevision,
+    required this.catalog,
+  });
+
+  final int commandsRevision;
+  final Map<String, Object?> catalog;
+}
+
+/// One snapshot observation bound to the content revision the App reports.
+///
+/// [contentRevision] is a **content** fact, not a host sequence number: equal
+/// values promise the body's JSON content is unchanged, and any content change
+/// must advance it. Advancing it while the content happens to be identical is
+/// allowed and is treated as a real commit — the App said it committed, and a
+/// caller watching commit cadence would be lied to if the host swallowed it.
+///
+/// The host never publishes this number as `snapshotRevision`; it keeps its own
+/// contiguous sequence and only labels the answer `revisionSource:
+/// consumerReported`. If an App mutates the body without advancing the
+/// revision, the host cannot detect it without redoing the canonical encoding
+/// the revision exists to avoid: that is a provider contract violation, and the
+/// stale answer it produces is the App's doing.
+final class PatchbaySnapshotSample {
+  const PatchbaySnapshotSample({
+    required this.contentRevision,
+    required this.body,
+  });
+
+  final int contentRevision;
+  final Map<String, Object?> body;
+}
+
+/// A catalog source with an explicit, cheap commands invalidation signal.
+abstract interface class PatchbayCatalogProvider {
+  int get commandsRevision;
+
+  Future<PatchbayCatalogSample> readCatalog();
+}
 
 final RegExp patchbayCommandNamePattern = RegExp(
   r'^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$',
@@ -90,11 +150,16 @@ final class PatchbaySnapshotRevision {
   const PatchbaySnapshotRevision({
     required this.revision,
     required this.canonical,
+    required this.canonicalBytes,
     required this.body,
   });
 
   final int revision;
   final String canonical;
+
+  /// Canonical UTF-8 length, counted while encoding rather than re-derived,
+  /// so the retained-byte total never disagrees with what was admitted.
+  final int canonicalBytes;
   final Map<String, Object?> body;
 }
 
@@ -160,19 +225,26 @@ final class PatchbayExternalInvocationRecord {
   PatchbayExternalInvocationRecord({
     required this.argumentDigest,
     required this.idempotent,
+    required this.ownerToken,
   });
 
   final String argumentDigest;
   final bool idempotent;
+  final String? ownerToken;
+  final Completer<Map<String, Object?>> servedResponse =
+      Completer<Map<String, Object?>>();
   late final Future<Map<String, Object?>> response;
   bool settled = false;
 }
 
-/// The catalog-declared argument policy the host enforces before dispatch.
+/// The catalog-declared argument and gate policy the host enforces before
+/// dispatch.
 final class PatchbayCommandPolicy {
   const PatchbayCommandPolicy({
     required this.sensitiveParameters,
     required this.retainsStdinProvenance,
+    required this.declaredGates,
+    required this.writesSideEffect,
   });
 
   factory PatchbayCommandPolicy.forCommand(
@@ -185,29 +257,75 @@ final class PatchbayCommandPolicy {
     }
     for (final Object? entry in commands) {
       if (entry is! Map<Object?, Object?> || entry['name'] != command) continue;
-      final Object? parameters = entry['parameters'];
-      return PatchbayCommandPolicy(
-        sensitiveParameters: <String>{
-          if (parameters is List<Object?>)
-            for (final Object? parameter in parameters)
-              if (parameter is Map<Object?, Object?> &&
-                  parameter['sensitive'] == true &&
-                  parameter['name'] is String)
-                parameter['name']! as String,
-        },
-        retainsStdinProvenance:
-            entry['plane'] == PatchbayPlaneWire.flutterUi.name,
-      );
+      return PatchbayCommandPolicy.fromCatalogRow(entry);
     }
     return const PatchbayCommandPolicy.undeclared();
   }
 
+  factory PatchbayCommandPolicy.fromCatalogRow(Map<Object?, Object?> command) {
+    final Object? parameters = command['parameters'];
+    return PatchbayCommandPolicy(
+      sensitiveParameters: Set<String>.unmodifiable(<String>{
+        if (parameters is List<Object?>)
+          for (final Object? parameter in parameters)
+            if (parameter is Map<Object?, Object?> &&
+                parameter['sensitive'] == true &&
+                parameter['name'] is String)
+              parameter['name']! as String,
+      }),
+      retainsStdinProvenance:
+          command['plane'] == PatchbayPlaneWire.flutterUi.name,
+      declaredGates: _declaredGates(command['gates']),
+      // Fail-closed: only a row that *says* `none` is treated as read-only.
+      // A missing key or a word outside the closed vocabulary can only come
+      // from a hand-written catalog row — `toJson()` always writes the field —
+      // and a host that cannot prove a command is read-only must not skip the
+      // admission gate for it.
+      writesSideEffect:
+          command['sideEffect'] != PatchbaySideEffectWire.none.name,
+    );
+  }
+
   const PatchbayCommandPolicy.undeclared()
     : sensitiveParameters = const <String>{},
-      retainsStdinProvenance = false;
+      retainsStdinProvenance = false,
+      declaredGates = const <String>{},
+      // "Not in the catalog" is not the same as "will not execute": the
+      // consumer adapter still sees the command, so it is admitted as a write.
+      writesSideEffect = true;
 
   final Set<String> sensitiveParameters;
   final bool retainsStdinProvenance;
+
+  /// The consumer gate IDs this catalog row declares, handed to the evaluator
+  /// unchanged. An absent or malformed declaration reads as the empty set,
+  /// which means "base gate only" — the same meaning it already has on the UI
+  /// plane.
+  final Set<String> declaredGates;
+
+  /// Whether this row must cross the admission gate before dispatch.
+  final bool writesSideEffect;
+
+  /// Whether [other] describes the same admission decision as this policy.
+  ///
+  /// A consumer gate may `await`, and a dynamic catalog provider can advance
+  /// its revision while it does. Only the two facts the gate decision was
+  /// taken from are compared: everything else about a row may change under a
+  /// call without making the authorization it already obtained wrong.
+  bool sameGatePolicy(PatchbayCommandPolicy other) =>
+      writesSideEffect == other.writesSideEffect &&
+      declaredGates.length == other.declaredGates.length &&
+      declaredGates.containsAll(other.declaredGates);
+
+  static Set<String> _declaredGates(Object? gates) {
+    if (gates is! List<Object?>) return const <String>{};
+    final Set<String> declared = <String>{};
+    for (final Object? gate in gates) {
+      if (gate is! String) return const <String>{};
+      declared.add(gate);
+    }
+    return Set<String>.unmodifiable(declared);
+  }
 
   List<String> sensitiveViolations(Map<String, Object?> arguments) {
     if (sensitiveParameters.isEmpty) return const <String>[];

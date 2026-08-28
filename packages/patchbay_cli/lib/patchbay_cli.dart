@@ -1,25 +1,15 @@
+/// The canonical `patchbay_cli` library: run one CLI invocation, read its exit
+/// code (PB-050-13, DG-050-07).
+///
+/// These two symbols are the entire public Dart surface of the CLI process.
+/// Everything a run needs is named on the command line, and everything a run
+/// answers is on stdout — `--json` prints a stable document, and a failure
+/// prints the stable error envelope there instead. Scripts read that JSON; they
+/// do not reach for the Dart classes behind it.
+///
+/// Embedding a Patchbay *connection* in Dart code is a different job with a
+/// different, opt-in entry point: `package:patchbay_cli/patchbay_client.dart`.
 library;
 
-export 'src/client.dart';
-export 'src/artifact_download.dart';
-export 'src/android_permission_adapter.dart';
-export 'src/cli.dart';
-export 'src/command_help.dart';
-export 'src/command_registry.dart';
-export 'src/direct_connection.dart';
-export 'src/doctor.dart';
-export 'src/permission_driver.dart';
-export 'src/permission_platform_adapter.dart';
-export 'src/permission_command.dart';
-export 'src/permission_recovery.dart';
-export 'src/ios_permission_adapter.dart';
-export 'src/launcher.dart';
-export 'src/keep_awake_policy.dart';
-export 'src/performance_profile.dart';
-export 'src/repl.dart';
-export 'src/result.dart';
-export 'src/rpc_timeout.dart';
-export 'src/session.dart';
-export 'src/sensitive_input.dart';
-export 'src/trace.dart';
-export 'src/ui_manifest.dart';
+export 'src/cli.dart' show runPatchbayCli;
+export 'src/result.dart' show PatchbayExitCode;

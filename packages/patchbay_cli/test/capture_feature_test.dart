@@ -1,7 +1,8 @@
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -20,7 +21,7 @@ Future<({Map<String, Object?> output, FakePatchbayClient client})> _runCapture({
     },
   );
   final StringBuffer output = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     const <String>[
       '--json',
       '--after-frames',
@@ -92,7 +93,7 @@ void main() {
         }),
       );
       final StringBuffer output = StringBuffer();
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         const <String>['--json', 'capture', 'diff', 'before', 'after'],
         connect: (_) async => client,
         output: output,

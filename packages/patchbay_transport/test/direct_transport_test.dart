@@ -59,7 +59,7 @@ void main() {
     test(
       'client covers identity, catalog, snapshot, and allowlisted invoke',
       () async {
-        expect(await client.identity(), identity.toJson());
+        expect(await client.identity(), identity.toIdentityResultJson());
         expect(await client.catalog(), <String, Object?>{
           'commands': <Object?>['probe.read'],
         });
@@ -84,7 +84,7 @@ void main() {
       () async {
         expect(await client.catalog(), isNotEmpty);
         expect(await client.snapshot(), isNotEmpty);
-        expect(await client.identity(), identity.toJson());
+        expect(await client.identity(), identity.toIdentityResultJson());
       },
     );
 
@@ -492,7 +492,7 @@ void main() {
     await host.stop();
   });
 
-  test('client deadline leaves transport headroom on the host', () async {
+  test('client deadline is distinct from local transport headroom', () async {
     const Map<String, Object?> typedTimeout = <String, Object?>{
       'schemaVersion': 1,
       'rejection': <String, Object?>{'code': 'snapshotWaitTimeout'},
@@ -504,7 +504,7 @@ void main() {
         maxRequestTimeout: const Duration(seconds: 1),
       ),
       snapshot: ([_]) => Future<Map<String, Object?>>.delayed(
-        const Duration(milliseconds: 120),
+        const Duration(milliseconds: 80),
         () => typedTimeout,
       ),
     );
@@ -514,9 +514,8 @@ void main() {
       timeout: const Duration(seconds: 1),
     );
 
-    // The operation is allowed to consume its entire declared deadline. The
-    // host therefore needs the same round-trip headroom the client gives its
-    // socket, or its HTTP 504 races the application-level timeout response.
+    // The 120ms caller budget is sent unchanged. The 1s client timeout remains
+    // local socket headroom and must not be written into the host header.
     expect(
       await client.snapshot(deadline: const Duration(milliseconds: 120)),
       typedTimeout,
@@ -546,6 +545,166 @@ void main() {
     elapsed.stop();
     expect(response.statusCode, HttpStatus.gatewayTimeout);
     expect(elapsed.elapsed, lessThan(const Duration(seconds: 10)));
+    await host.stop();
+  });
+
+  test('identity capabilities do not pollute strict runtime projection', () {
+    const PatchbayDirectIdentity capable = PatchbayDirectIdentity(
+      schemaVersion: 1,
+      applicationId: 'dev.patchbay.transport.test',
+      appInstanceId: 'instance-capable',
+      features: <String>['snapshotSelectors', 'invocationCancellation'],
+    );
+
+    expect(capable.toJson(), <String, Object?>{
+      'schemaVersion': 1,
+      'applicationId': 'dev.patchbay.transport.test',
+      'appInstanceId': 'instance-capable',
+    });
+    expect(capable.toIdentityResultJson()['features'], <String>[
+      'invocationCancellation',
+      'snapshotSelectors',
+    ]);
+  });
+
+  test(
+    'context invoke closes its response but retains the normal slot until lifecycle',
+    () async {
+      const String ownerToken = 'abcdefghijklmnopqrstuv';
+      final Completer<void> lifecycle = Completer<void>();
+      Duration? observedDeadline;
+      String? observedOwner;
+      final PatchbayDirectHost host = PatchbayDirectHost(
+        config: PatchbayDirectHostConfig(
+          requestTimeout: const Duration(seconds: 1),
+          maxRequestTimeout: const Duration(seconds: 1),
+        ),
+        handlers: PatchbayDirectHandlers(
+          identity: () async => identity,
+          catalog: () async => <String, Object?>{'commands': const <Object?>[]},
+          snapshot: ([_]) async => const <String, Object?>{},
+          invokeWithContext:
+              (
+                String _,
+                Map<String, Object?> _,
+                String requestId, {
+                String? ownerToken,
+                Duration? deadline,
+              }) {
+                observedDeadline = deadline;
+                observedOwner = ownerToken;
+                return PatchbayDirectInvocationHandle(
+                  response: Future<Map<String, Object?>>.value(
+                    <String, Object?>{'requestId': requestId},
+                  ),
+                  lifecycle: lifecycle.future,
+                );
+              },
+          cancelInvocation:
+              (
+                String command,
+                String requestId,
+                String token, {
+                required String reason,
+              }) async {
+                lifecycle.complete();
+                return <String, Object?>{
+                  'command': command,
+                  'requestId': requestId,
+                  'outcome': 'confirmed',
+                  'reason': reason,
+                };
+              },
+        ),
+      );
+      final PatchbayDirectSession session = await host.start();
+      final PatchbayDirectClient client = PatchbayDirectClient(
+        session: session,
+      );
+
+      expect(
+        await client.invoke(
+          command: 'device.wait',
+          arguments: const <String, Object?>{},
+          requestId: 'context-1',
+          deadline: const Duration(milliseconds: 400),
+          ownerToken: ownerToken,
+        ),
+        <String, Object?>{'requestId': 'context-1'},
+      );
+      expect(observedDeadline, const Duration(milliseconds: 400));
+      expect(observedOwner, ownerToken);
+      await expectLater(
+        client.catalog(),
+        throwsA(
+          isA<PatchbayDirectClientException>().having(
+            (PatchbayDirectClientException error) => error.code,
+            'code',
+            'busy',
+          ),
+        ),
+      );
+      expect(
+        await client.cancelInvocation(
+          command: 'device.wait',
+          requestId: 'context-1',
+          ownerToken: ownerToken,
+        ),
+        containsPair('outcome', 'confirmed'),
+      );
+      expect(await client.catalog(), contains('commands'));
+
+      client.close(force: true);
+      await host.stop();
+    },
+  );
+
+  test('cancel control has its own bounded slot', () async {
+    const String ownerToken = 'abcdefghijklmnopqrstuv';
+    final Completer<Map<String, Object?>> firstCancel =
+        Completer<Map<String, Object?>>();
+    final PatchbayDirectHost host = PatchbayDirectHost(
+      handlers: PatchbayDirectHandlers(
+        identity: () async => identity,
+        catalog: () async => const <String, Object?>{},
+        snapshot: ([_]) async => const <String, Object?>{},
+        invokeWithContext: (_, _, _, {ownerToken, deadline}) =>
+            PatchbayDirectInvocationHandle(
+              response: Future<Map<String, Object?>>.value(
+                const <String, Object?>{},
+              ),
+              lifecycle: Future<void>.value(),
+            ),
+        cancelInvocation: (_, _, _, {required reason}) => firstCancel.future,
+      ),
+    );
+    final PatchbayDirectSession session = await host.start();
+    final PatchbayDirectClient client = PatchbayDirectClient(session: session);
+    final Future<Map<String, Object?>> first = client.cancelInvocation(
+      command: 'device.wait',
+      requestId: 'cancel-1',
+      ownerToken: ownerToken,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    await expectLater(
+      client.cancelInvocation(
+        command: 'device.wait',
+        requestId: 'cancel-2',
+        ownerToken: ownerToken,
+      ),
+      throwsA(
+        isA<PatchbayDirectClientException>().having(
+          (PatchbayDirectClientException error) => error.code,
+          'code',
+          'busy',
+        ),
+      ),
+    );
+    firstCancel.complete(const <String, Object?>{'outcome': 'unknown'});
+    expect(await first, containsPair('outcome', 'unknown'));
+
+    client.close(force: true);
     await host.stop();
   });
 

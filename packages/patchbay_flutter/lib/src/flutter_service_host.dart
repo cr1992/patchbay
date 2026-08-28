@@ -3,6 +3,7 @@ import 'package:patchbay/patchbay.dart';
 import 'flutter_bridge.dart';
 import 'inspect_bridge.dart';
 import 'keep_awake_bridge.dart';
+import 'reveal_bridge.dart';
 import 'semantics_bridge.dart';
 
 /// Registers the Flutter UI catalog and operators on the generic host.
@@ -13,54 +14,159 @@ final class PatchbayFlutterServiceHost {
     PatchbayCatalogSource? domainCatalog,
     PatchbaySnapshotSource? snapshot,
     PatchbayInvocationSource? domainInvoke,
+    PatchbayContextInvocationSource? domainInvokeWithContext,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     PatchbayAuditSink? auditSink,
     PatchbayAuditSinkErrorHandler? onAuditSinkError,
-  }) : _host = PatchbayServiceHost(
+    int auditQueueCapacity = 256,
+    int maxConcurrentInvocations = 8,
+    Duration cancellationConfirmationTimeout = const Duration(seconds: 2),
+    PatchbayMonotonicClock? monotonicClock,
+  }) : _host = _buildHost(
          applicationId: applicationId,
+         bridge: bridge,
+         domainCatalog: domainCatalog,
+         snapshot: snapshot,
+         domainInvoke: domainInvoke,
+         domainInvokeWithContext: domainInvokeWithContext,
          appInstanceId: appInstanceId,
          registrar: registrar,
          auditSink: auditSink,
          onAuditSinkError: onAuditSinkError,
-         registry: PatchbayCommandRegistry.combine(<PatchbayCommandRegistry>[
-           _uiCommandRegistry(bridge),
-           if (bridge.artifacts case final PatchbayArtifactService artifacts)
-             artifacts.registry,
-         ]),
-         catalog: () async {
-           final Map<String, Object?> domain =
-               await domainCatalog?.call() ?? const <String, Object?>{};
-           return <String, Object?>{
-             ...domain,
-             'uiTargets': bridge
-                 .catalog()
-                 .map((PatchbayUiTargetDescriptor target) => target.toJson())
-                 .toList(growable: false),
-           };
-         },
-         snapshot: snapshot ?? () async => const <String, Object?>{},
-         invoke:
-             domainInvoke ??
-             (command, arguments, requestId) async =>
-                 PatchbayInvocation.rejected(
-                   requestId: requestId,
-                   rejection: PatchbayRejection(
-                     code: 'commandNotRegistered',
-                     details: <String, Object?>{'command': command},
-                   ),
-                 ).toJson(),
-         // The lifecycle gate lives in this package, so this is the layer that
-         // can promise a `*LifecycleNotResumed` rejection carries the engine
-         // state separating "wake the screen" from "click the window". A pure
-         // Dart host has no such gate and declares nothing, which is what lets
-         // a client tell "this host does not report it" apart from "this App
-         // reported unknown".
-         features: <PatchbayFeature>{
-           PatchbayFeature.lifecycleState,
-           if (bridge.capture != null) PatchbayFeature.captureAfterFrames,
-         },
+         auditQueueCapacity: auditQueueCapacity,
+         maxConcurrentInvocations: maxConcurrentInvocations,
+         cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+         monotonicClock: monotonicClock,
        );
+
+  PatchbayFlutterServiceHost.withDomainCatalogProvider({
+    required String applicationId,
+    required PatchbayFlutterBridge bridge,
+    required PatchbayCatalogProvider domainCatalogProvider,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayInvocationSource? domainInvoke,
+    PatchbayContextInvocationSource? domainInvokeWithContext,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
+    int maxConcurrentInvocations = 8,
+    Duration cancellationConfirmationTimeout = const Duration(seconds: 2),
+    PatchbayMonotonicClock? monotonicClock,
+  }) : _host = _buildHost(
+         applicationId: applicationId,
+         bridge: bridge,
+         domainCatalogProvider: domainCatalogProvider,
+         snapshot: snapshot,
+         domainInvoke: domainInvoke,
+         domainInvokeWithContext: domainInvokeWithContext,
+         appInstanceId: appInstanceId,
+         registrar: registrar,
+         auditSink: auditSink,
+         onAuditSinkError: onAuditSinkError,
+         auditQueueCapacity: auditQueueCapacity,
+         maxConcurrentInvocations: maxConcurrentInvocations,
+         cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+         monotonicClock: monotonicClock,
+       );
+
+  static PatchbayServiceHost _buildHost({
+    required String applicationId,
+    required PatchbayFlutterBridge bridge,
+    PatchbayCatalogSource? domainCatalog,
+    PatchbayCatalogProvider? domainCatalogProvider,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayInvocationSource? domainInvoke,
+    PatchbayContextInvocationSource? domainInvokeWithContext,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    required int auditQueueCapacity,
+    required int maxConcurrentInvocations,
+    required Duration cancellationConfirmationTimeout,
+    PatchbayMonotonicClock? monotonicClock,
+  }) {
+    assert((domainCatalog == null) || domainCatalogProvider == null);
+    final PatchbayCommandRegistry registry =
+        PatchbayCommandRegistry.combine(<PatchbayCommandRegistry>[
+          _uiCommandRegistry(bridge),
+          if (bridge.artifacts case final PatchbayArtifactService artifacts)
+            artifacts.registry,
+        ]);
+    final PatchbaySnapshotSource effectiveSnapshot =
+        snapshot ?? () async => const <String, Object?>{};
+    final PatchbayInvocationSource? effectiveInvoke =
+        domainInvoke == null && domainInvokeWithContext == null
+        ? (command, arguments, requestId) async => PatchbayInvocation.rejected(
+            requestId: requestId,
+            rejection: PatchbayRejection(
+              code: 'commandNotRegistered',
+              details: <String, Object?>{'command': command},
+            ),
+          ).toJson()
+        : domainInvoke;
+    final Set<PatchbayFeature> features = <PatchbayFeature>{
+      PatchbayFeature.lifecycleState,
+      if (bridge.capture != null) PatchbayFeature.captureAfterFrames,
+    };
+    if (domainCatalogProvider case final PatchbayCatalogProvider provider) {
+      return PatchbayServiceHost.withCatalogProvider(
+        applicationId: applicationId,
+        appInstanceId: appInstanceId,
+        registrar: registrar,
+        auditSink: auditSink,
+        onAuditSinkError: onAuditSinkError,
+        auditQueueCapacity: auditQueueCapacity,
+        maxConcurrentInvocations: maxConcurrentInvocations,
+        cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+        monotonicClock: monotonicClock,
+        registry: registry,
+        catalogProvider: _FlutterCatalogProvider(provider, bridge),
+        snapshot: effectiveSnapshot,
+        invoke: effectiveInvoke,
+        invokeWithContext: domainInvokeWithContext,
+        // The bridge's evaluator, not a second one: see `bridge.gates`.
+        domainGates: bridge.gates,
+        features: features,
+      );
+    }
+    return PatchbayServiceHost(
+      applicationId: applicationId,
+      appInstanceId: appInstanceId,
+      registrar: registrar,
+      auditSink: auditSink,
+      onAuditSinkError: onAuditSinkError,
+      auditQueueCapacity: auditQueueCapacity,
+      maxConcurrentInvocations: maxConcurrentInvocations,
+      cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+      monotonicClock: monotonicClock,
+      registry: registry,
+      catalog: () async => _withUiTargets(
+        await domainCatalog?.call() ?? const <String, Object?>{},
+        bridge,
+      ),
+      snapshot: effectiveSnapshot,
+      invoke: effectiveInvoke,
+      invokeWithContext: domainInvokeWithContext,
+      // The bridge's evaluator, not a second one: see `bridge.gates`.
+      domainGates: bridge.gates,
+      features: features,
+    );
+  }
+
+  static Map<String, Object?> _withUiTargets(
+    Map<String, Object?> domain,
+    PatchbayFlutterBridge bridge,
+  ) => <String, Object?>{
+    ...domain,
+    'uiTargets': bridge
+        .catalog()
+        .map((PatchbayUiTargetDescriptor target) => target.toJson())
+        .toList(growable: false),
+  };
 
   final PatchbayServiceHost _host;
 
@@ -72,6 +178,20 @@ final class PatchbayFlutterServiceHost {
 
   List<PatchbayAuditEvent> get auditEvents => _host.auditEvents;
 
+  Set<PatchbayFeature> get features => _host.features;
+
+  Future<PatchbayAuditDrainResult> drainAudit({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _host.drainAudit(timeout: timeout);
+
+  Future<void> dispose({
+    Duration invocationTimeout = const Duration(seconds: 2),
+    Duration auditTimeout = const Duration(seconds: 2),
+  }) => _host.dispose(
+    invocationTimeout: invocationTimeout,
+    auditTimeout: auditTimeout,
+  );
+
   Future<Map<String, Object?>> dispatchCatalog() => _host.dispatchCatalog();
 
   Future<Map<String, Object?>> dispatchSnapshot([
@@ -81,8 +201,47 @@ final class PatchbayFlutterServiceHost {
   Future<Map<String, Object?>> dispatchInvoke(
     String command,
     Map<String, Object?> arguments,
-    String requestId,
-  ) => _host.dispatchInvoke(command, arguments, requestId);
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) => _host.dispatchInvoke(
+    command,
+    arguments,
+    requestId,
+    ownerToken: ownerToken,
+    deadline: deadline,
+  );
+
+  PatchbayHostInvocationHandle dispatchInvokeHandle(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) => _host.dispatchInvokeHandle(
+    command,
+    arguments,
+    requestId,
+    ownerToken: ownerToken,
+    deadline: deadline,
+  );
+
+  Future<PatchbayInvocationCancellationResult> cancelInvocation({
+    required String command,
+    required String requestId,
+    required String ownerToken,
+    PatchbayInvocationCancellationReason reason =
+        PatchbayInvocationCancellationReason.explicitRequest,
+  }) => _host.cancelInvocation(
+    command: command,
+    requestId: requestId,
+    ownerToken: ownerToken,
+    reason: reason,
+  );
+
+  Future<PatchbayInvocationDrainResult> drainInvocations({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _host.drainInvocations(timeout: timeout);
 
   void register() => _host.register();
 
@@ -214,6 +373,20 @@ final class PatchbayFlutterServiceHost {
       ),
       _uiRegistration<Map<String, Object?>>(
         next(),
+        _decodeSemanticsIdentifierAction,
+        (request, requestId) async => (await bridge.semantics.invokeIdentifier(
+          identifier: request['identifier']! as String,
+          generation: request['generation']! as int,
+          action: request['decodedAction']! as PatchbaySemanticsAction,
+          text: request['text'] as String?,
+          inputWasStdin: request['inputWasStdin'] == true,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        available: bridge.semantics.actionsEnabled,
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
         _decodeSemanticsTap,
         (request, requestId) async => (await bridge.semantics.tapIdentifier(
           identifier: request['identifier']! as String,
@@ -266,6 +439,36 @@ final class PatchbayFlutterServiceHost {
         strictKeys: true,
         includeReason: true,
         available: bridge.gesture.enabled,
+      ),
+      _uiRegistration<Map<String, Object?>>(
+        next(),
+        (arguments) => _decodeGesture(arguments, PatchbayGestureKind.tap),
+        (request, requestId) async => (await bridge.gesture.tap(
+          identifier: request['identifier']! as String,
+          generation: request['generation']! as int,
+          start: request['start'] as Map<String, Object?>?,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.gesture.enabled,
+      ),
+      _uiRegistration<PatchbayRevealRequestWire>(
+        next(),
+        PatchbayRevealRequestWire.fromJson,
+        (request, requestId) async => (await bridge.reveal.reveal(
+          identifier: request.identifier,
+          container: request.container,
+          direction: request.direction == null
+              ? PatchbayRevealDirection.both
+              : PatchbayRevealDirection.fromWire(request.direction!),
+          maxSteps: request.maxSteps ?? 40,
+          timeoutMs: request.timeoutMs ?? 5000,
+          requestId: requestId,
+        )).toJson(),
+        strictKeys: true,
+        includeReason: true,
+        available: bridge.reveal.enabled,
       ),
       _uiRegistration<PatchbayUiWaitRequest>(
         next(),
@@ -473,22 +676,62 @@ final class PatchbayFlutterServiceHost {
     return arguments;
   }
 
+  static Map<String, Object?> _decodeSemanticsIdentifierAction(
+    Map<String, Object?> arguments,
+  ) {
+    _rejectUnexpected(arguments, const <String>{
+      'identifier',
+      'generation',
+      'action',
+      'text',
+      'inputWasStdin',
+    });
+    final Object? rawAction = arguments['action'];
+    final PatchbayParameterDescriptor actionParameter =
+        patchbayUiSemanticsActionByIdentifierCommandDescriptor.parameters
+            .singleWhere(
+              (PatchbayParameterDescriptor parameter) =>
+                  parameter.name == 'action',
+            );
+    final PatchbaySemanticsAction? action =
+        rawAction is String && actionParameter.allowedValues.contains(rawAction)
+        ? PatchbaySemanticsAction.fromWireName(rawAction)
+        : null;
+    if (arguments['identifier'] is! String ||
+        arguments['generation'] is! int ||
+        action == null ||
+        arguments['text'] != null && arguments['text'] is! String ||
+        arguments['inputWasStdin'] != null &&
+            arguments['inputWasStdin'] is! bool) {
+      throw const FormatException(
+        'invalid semantics identifier action arguments',
+      );
+    }
+    return <String, Object?>{...arguments, 'decodedAction': action};
+  }
+
   static Map<String, Object?> _decodeGesture(
     Map<String, Object?> arguments,
     PatchbayGestureKind kind,
   ) {
+    // tap 没有 `durationMs`：间隔是 bridge 内部常数，wire 里出现该 key 即按
+    // unknown key 拒绝。它的 `start` 也是家族里唯一可缺省的（默认目标中心，
+    // 由 descriptor 声明、bridge 落地）。
+    final bool isTap = kind == PatchbayGestureKind.tap;
     final Set<String> keys = <String>{
       'identifier',
       'generation',
       'start',
-      'durationMs',
+      if (!isTap) 'durationMs',
       if (kind == PatchbayGestureKind.drag) 'path',
       if (kind == PatchbayGestureKind.fling) 'velocity',
     };
     _rejectUnexpected(arguments, keys);
     if (arguments['identifier'] is! String ||
         arguments['generation'] is! int ||
-        arguments['start'] is! Map ||
+        (isTap
+            ? arguments['start'] != null && arguments['start'] is! Map
+            : arguments['start'] is! Map) ||
         arguments['durationMs'] != null && arguments['durationMs'] is! int ||
         kind == PatchbayGestureKind.drag && arguments['path'] is! List ||
         kind == PatchbayGestureKind.fling && arguments['velocity'] is! Map) {
@@ -496,7 +739,8 @@ final class PatchbayFlutterServiceHost {
     }
     return <String, Object?>{
       ...arguments,
-      'start': (arguments['start']! as Map).cast<String, Object?>(),
+      if (arguments['start'] case final Map start)
+        'start': start.cast<String, Object?>(),
       if (arguments['path'] case final List<Object?> path) 'path': path,
       if (arguments['velocity'] case final Map velocity)
         'velocity': velocity.cast<String, Object?>(),
@@ -571,10 +815,13 @@ final class PatchbayFlutterServiceHost {
     patchbayUiTextEnterCommandDescriptor,
     patchbayUiSemanticsTreeCommandDescriptor,
     patchbayUiSemanticsActionCommandDescriptor,
+    patchbayUiSemanticsActionByIdentifierCommandDescriptor,
     patchbayUiSemanticsTapCommandDescriptor,
     patchbayUiGesturePressHoldCommandDescriptor,
     patchbayUiGestureDragCommandDescriptor,
     patchbayUiGestureFlingCommandDescriptor,
+    patchbayUiGestureTapCommandDescriptor,
+    patchbayUiRevealCommandDescriptor,
     patchbayUiWaitCommandDescriptor,
     patchbayUiKeepAwakeSetCommandDescriptor.withRuntimeOverrides(
       gates: keepAwakeGates,
@@ -622,6 +869,28 @@ final class PatchbayFlutterServiceHost {
     patchbayNavigationPushCommandDescriptor,
     patchbayNavigationBackCommandDescriptor,
   ];
+}
+
+final class _FlutterCatalogProvider implements PatchbayCatalogProvider {
+  const _FlutterCatalogProvider(this.domain, this.bridge);
+
+  final PatchbayCatalogProvider domain;
+  final PatchbayFlutterBridge bridge;
+
+  @override
+  int get commandsRevision => domain.commandsRevision;
+
+  @override
+  Future<PatchbayCatalogSample> readCatalog() async {
+    final PatchbayCatalogSample sample = await domain.readCatalog();
+    return PatchbayCatalogSample(
+      commandsRevision: sample.commandsRevision,
+      catalog: PatchbayFlutterServiceHost._withUiTargets(
+        sample.catalog,
+        bridge,
+      ),
+    );
+  }
 }
 
 /// One command's declared parameters, reduced to what a rejection has to name.

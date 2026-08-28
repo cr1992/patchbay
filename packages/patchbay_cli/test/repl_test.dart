@@ -1,7 +1,11 @@
 import 'dart:convert';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/repl.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
 import 'package:test/test.dart';
 
 /// A client that counts how many times a session actually dials the App.
@@ -126,7 +130,7 @@ Future<_Session> _repl(
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
   var connects = 0;
-  final int code = await runPatchbayCli(
+  final int code = await runPatchbayCliWithSeams(
     arguments,
     connect: (_) async {
       connects += 1;
@@ -203,8 +207,51 @@ void main() {
       expect(session.client.invoked, isEmpty);
       expect(session.client.closed, isTrue);
       expect(session.err, contains('socketClosed'));
+      expect(
+        session.out,
+        '${jsonEncode(const PatchbayErrorEnvelope('socketClosed').toJson())}\n',
+      );
     },
   );
+
+  test('terminal failures keep the JSON repl stream line-delimited', () async {
+    final List<({Object failure, int exitCode, String code})> cases =
+        <({Object failure, int exitCode, String code})>[
+          (
+            failure: const PatchbayProtocolException(
+              'responseSchemaMismatch',
+              details: <String, Object?>{'field': 'payload'},
+            ),
+            exitCode: PatchbayExitCode.protocol,
+            code: 'responseSchemaMismatch',
+          ),
+          (
+            failure: const PatchbaySessionException('sessionIdentityMismatch'),
+            exitCode: PatchbayExitCode.protocol,
+            code: 'sessionIdentityMismatch',
+          ),
+        ];
+
+    for (final ({Object failure, int exitCode, String code}) testCase
+        in cases) {
+      final _Session session = await _repl(<String>[
+        'ui semantics tree',
+        'ui tap login.submit',
+      ], client: _FakeClient()..failNextWith = testCase.failure);
+
+      expect(session.exitCode, testCase.exitCode);
+      expect(session.out, endsWith('\n'));
+      expect(session.lines, hasLength(1));
+      expect(session.envelopes.single['error'], <String, Object?>{
+        'code': testCase.code,
+        'details': testCase.code == 'responseSchemaMismatch'
+            ? <String, Object?>{'field': 'payload'}
+            : <String, Object?>{},
+      });
+      expect(session.client.invoked, isEmpty);
+      expect(session.client.closed, isTrue);
+    }
+  });
 
   test('connection options are refused per line, never reconnected', () async {
     final _Session session = await _repl(<String>[
@@ -271,6 +318,26 @@ void main() {
     expect(session.connects, 1);
     expect(session.client.invoked, isEmpty);
   });
+
+  test(
+    'describe reads the live catalog without invoking the command',
+    () async {
+      final _Session session = await _repl(<String>[
+        'describe ui.semantics.tree',
+      ]);
+
+      expect(session.exitCode, PatchbayExitCode.accepted);
+      expect(session.envelopes, hasLength(1));
+      final Map<String, Object?> response =
+          session.envelopes.single['response']! as Map<String, Object?>;
+      expect(
+        (response['command']! as Map<String, Object?>)['name'],
+        'ui.semantics.tree',
+      );
+      expect(session.client.catalogReads, 1);
+      expect(session.client.invoked, isEmpty);
+    },
+  );
 
   test('without --json each line still reports its own exit code', () async {
     final _Session session = await _repl(

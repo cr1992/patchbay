@@ -135,6 +135,12 @@ abstract final class FriendlyCommandRegistryResolver {
           }),
         PatchbayFriendlyCommand.sessionUse =>
           ArgumentDecoder.sessionUseArguments(tail, options),
+        PatchbayFriendlyCommand.sessionRegister =>
+          ArgumentDecoder.sessionRegisterArguments(tail, options),
+        PatchbayFriendlyCommand.sessionUnregister => ArgumentDecoder.oneTail(
+          tail,
+          (String sessionId) => <String, Object?>{'sessionId': sessionId},
+        ),
         PatchbayFriendlyCommand.permissionStatus ||
         PatchbayFriendlyCommand.permissionReset => ArgumentDecoder.oneTail(
           tail,
@@ -300,15 +306,22 @@ abstract final class FriendlyCommandRegistryResolver {
         ),
       };
     }
-    final bool writesArtifact =
-        spec.artifact != PatchbayArtifactDisposition.none;
+    // `renderedMember` commands accept `--output` but never require it: below
+    // the inline threshold the CLI never touches disk, and above it the CLI
+    // picks an auto-named path itself. `payloadBlob`/`responseBlob` commands
+    // have no such fallback — the host artifact only exists at the path the
+    // caller names.
+    final bool requiresOutput =
+        spec.artifact == PatchbayArtifactDisposition.payloadBlob ||
+        spec.artifact == PatchbayArtifactDisposition.responseBlob;
+    final bool allowsOutput = spec.artifact != PatchbayArtifactDisposition.none;
     final bool writesTraceExport = spec == PatchbayFriendlyCommand.traceExport;
     final String? outputPath = options.option('output');
-    if ((writesArtifact || writesTraceExport) &&
+    if ((requiresOutput || writesTraceExport) &&
         (outputPath == null || outputPath.isEmpty)) {
       throw const FormatException('--output is required for this command');
     }
-    if (!writesArtifact && !writesTraceExport && outputPath != null) {
+    if (!allowsOutput && !writesTraceExport && outputPath != null) {
       throw const FormatException('--output is not valid for this command');
     }
     return PatchbayFriendlyInvocation(
@@ -373,6 +386,14 @@ abstract final class FriendlyCommandRegistryResolver {
           <String>['sessions', 'use'],
           <String>['session', 'use'],
         ),
+        const _PathAlias(
+          <String>['sessions', 'register'],
+          <String>['session', 'register'],
+        ),
+        const _PathAlias(
+          <String>['sessions', 'unregister'],
+          <String>['session', 'unregister'],
+        ),
         const _PathAlias(<String>['navigate'], <String>['navigation']),
         const _PathAlias(<String>['nav'], <String>['navigation']),
         const _PathAlias(<String>['wait'], <String>['ui', 'wait']),
@@ -431,6 +452,8 @@ abstract final class FriendlyCommandRegistryResolver {
       'duration-ms',
       'timeout-ms',
       'cursor',
+      'container',
+      'max-steps',
       'direction',
       'limit',
       'levels',
@@ -447,6 +470,8 @@ abstract final class FriendlyCommandRegistryResolver {
       'permission-driver',
       'device-id',
       'application-id',
+      'process-id',
+      'build-mode',
       'state',
       'decision',
       'confirm-system-permission',
@@ -462,6 +487,7 @@ abstract final class FriendlyCommandRegistryResolver {
       'dry-run',
       'include-artifacts',
       'sample-limit',
+      'max-inline-bytes',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
@@ -494,8 +520,18 @@ abstract final class FriendlyCommandRegistryResolver {
         if (syntax.stdinParameter != null ||
             syntax.inputMode == PatchbayCliInputMode.mergedJsonObject)
           'stdin',
-        if (syntax.artifactDisposition !=
-            PatchbayCliArtifactDisposition.none) ...<String>{'output', 'force'},
+        // `spec.artifact`, not the wire-declared `syntax.artifactDisposition`:
+        // PB-050-20's `renderedMember` override on `ui semantics tree` (see
+        // `GeneratedProtocolCommand.artifact`) is a CLI-only decision the
+        // descriptor never expresses, and `--output`/`--force` must become
+        // legal for it the same way they did for the plain friendly
+        // declarations of the other three covered commands.
+        if (spec.artifact != PatchbayArtifactDisposition.none) ...<String>{
+          'output',
+          'force',
+        },
+        if (spec.artifact == PatchbayArtifactDisposition.renderedMember)
+          'max-inline-bytes',
       };
     }
     return switch (spec) {
@@ -504,9 +540,6 @@ abstract final class FriendlyCommandRegistryResolver {
       PatchbayFriendlyCommand.describe ||
       PatchbayFriendlyCommand.jobGet ||
       PatchbayFriendlyCommand.jobCancel ||
-      PatchbayFriendlyCommand.uiWidgetTree ||
-      PatchbayFriendlyCommand.uiRenderTree ||
-      PatchbayFriendlyCommand.uiFocusTree ||
       PatchbayFriendlyCommand.networkProfile ||
       PatchbayFriendlyCommand.captureDiff ||
       PatchbayFriendlyCommand.uiInspectOff ||
@@ -578,8 +611,31 @@ abstract final class FriendlyCommandRegistryResolver {
       },
       PatchbayFriendlyCommand.snapshotDiff => const <String>{'from'},
       PatchbayFriendlyCommand.sessionUse => const <String>{'clear'},
+      // `--ws-uri` is a *recorded* value here, not a dialled one: the whole
+      // command is a local write to the session directory. It is deliberately
+      // absent from `friendlyOptions` below, because that list is a
+      // reject-everywhere-else list and `--ws-uri` is legal on every command
+      // that actually connects.
+      PatchbayFriendlyCommand.sessionRegister => const <String>{
+        'ws-uri',
+        'application-id',
+        'device-id',
+        'process-id',
+        'build-mode',
+      },
+      PatchbayFriendlyCommand.sessionUnregister => const <String>{},
+      // `uiSemanticsTree` is never matched (see the comment on its
+      // declaration in friendly_commands.dart); `exec`'s options cover the
+      // stub too so a future un-deprecation would not need to change this.
       PatchbayFriendlyCommand.exec || PatchbayFriendlyCommand.uiSemanticsTree =>
         const <String>{'args', 'stdin'},
+      PatchbayFriendlyCommand.uiWidgetTree ||
+      PatchbayFriendlyCommand.uiRenderTree ||
+      PatchbayFriendlyCommand.uiFocusTree => const <String>{
+        'output',
+        'force',
+        'max-inline-bytes',
+      },
       PatchbayFriendlyCommand.uiTextSet ||
       PatchbayFriendlyCommand.uiTextEnter ||
       PatchbayFriendlyCommand.uiSemanticsAction => const <String>{'stdin'},

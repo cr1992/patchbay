@@ -1,0 +1,38 @@
+{
+  "commands": [
+    {
+      "name": "ui.semantics.tree",
+      "plane": "ui",
+      "mode": "query",
+      "sideEffect": "none",
+      "summary": "Read the Patchbay semantics tree.",
+      "parameters": [],
+      "factSources": ["uiObserved"],
+      "gates": []
+    },
+    {
+      "name": "ui.semantics.tap",
+      "plane": "ui",
+      "mode": "mutate",
+      "sideEffect": "gesture",
+      "summary": "Resolve a semantics identifier and tap it in one request.",
+      "factSources": ["uiObserved"],
+      "gates": ["requiresMounted"]
+    }
+  ],
+  "uiTargets": [
+    { "identifier": "login.submit", "mounted": true, "generation": 1 }
+  ],
+  "catalogDigest": "cat-digest-1",
+  "localView": {
+    "view": "brief",
+    "projection": "catalog",
+    "omitted": [
+      "$.commands[].parameters",
+      "$.commands[].responseSchema",
+      "$.commands[].executionContract",
+      "$.commands[].retryPolicy"
+    ],
+    "expand": "--view full"
+  }
+}

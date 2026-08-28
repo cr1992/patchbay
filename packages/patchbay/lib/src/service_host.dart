@@ -4,46 +4,166 @@ import 'dart:developer';
 import 'audit.dart';
 import 'command_registry.dart';
 import 'features.dart';
+import 'gates.dart';
 import 'host/host_catalog.dart';
 import 'host/host_invoker.dart';
 import 'host/host_models.dart';
 import 'host/host_snapshot.dart';
 import 'host/host_vm_service.dart';
+import 'invocation_cancellation.dart';
+import 'snapshot.dart';
 
 export 'host/host_models.dart'
     show
+        PatchbayCatalogProvider,
+        PatchbayCatalogSample,
         PatchbayCatalogSource,
+        PatchbaySnapshotSample,
         PatchbaySnapshotSource,
+        PatchbayVersionedSnapshotSource,
         PatchbayInvocationSource,
+        PatchbayContextInvocationSource,
         PatchbayExtensionRegistrar;
 
 /// Generic VM Service extension host. It has no Flutter or consumer imports.
+///
+/// `domainGates` is the evaluator consumer-owned write commands cross before
+/// they reach `invoke`. A command is admitted through it when the registry does
+/// not serve it and its catalog row does not declare `sideEffect: none`; the
+/// row's `gates` are handed to the evaluator unchanged, so an empty set still
+/// runs the non-optional base gate. Leaving it null keeps gate-free commands
+/// exactly as they were, but a row that declares gates no evaluator can run is
+/// then refused rather than silently admitted.
 final class PatchbayServiceHost {
-  PatchbayServiceHost({
-    required this.applicationId,
+  factory PatchbayServiceHost({
+    required String applicationId,
     required PatchbayCatalogSource catalog,
-    required PatchbaySnapshotSource snapshot,
-    required PatchbayInvocationSource invoke,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayVersionedSnapshotSource? versionedSnapshot,
+    PatchbaySnapshotRetentionLimits snapshotRetention =
+        PatchbaySnapshotRetentionLimits.production,
+    PatchbayInvocationSource? invoke,
+    PatchbayContextInvocationSource? invokeWithContext,
     PatchbayCommandRegistry? registry,
     String? appInstanceId,
     PatchbayExtensionRegistrar? registrar,
     Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayGateEvaluator? domainGates,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
+    int maxConcurrentInvocations = 8,
+    Duration cancellationConfirmationTimeout = const Duration(seconds: 2),
+    PatchbayMonotonicClock? monotonicClock,
+  }) => PatchbayServiceHost._(
+    applicationId: applicationId,
+    catalogSource: catalog,
+    snapshot: snapshot,
+    versionedSnapshot: versionedSnapshot,
+    snapshotRetention: snapshotRetention,
+    invoke: invoke,
+    invokeWithContext: invokeWithContext,
+    registry: registry,
+    appInstanceId: appInstanceId,
+    registrar: registrar,
+    features: features,
+    domainGates: domainGates,
+    auditSink: auditSink,
+    onAuditSinkError: onAuditSinkError,
+    auditQueueCapacity: auditQueueCapacity,
+    maxConcurrentInvocations: maxConcurrentInvocations,
+    cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+    monotonicClock: monotonicClock,
+  );
+
+  factory PatchbayServiceHost.withCatalogProvider({
+    required String applicationId,
+    required PatchbayCatalogProvider catalogProvider,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayVersionedSnapshotSource? versionedSnapshot,
+    PatchbaySnapshotRetentionLimits snapshotRetention =
+        PatchbaySnapshotRetentionLimits.production,
+    PatchbayInvocationSource? invoke,
+    PatchbayContextInvocationSource? invokeWithContext,
+    PatchbayCommandRegistry? registry,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayGateEvaluator? domainGates,
+    PatchbayAuditSink? auditSink,
+    PatchbayAuditSinkErrorHandler? onAuditSinkError,
+    int auditQueueCapacity = 256,
+    int maxConcurrentInvocations = 8,
+    Duration cancellationConfirmationTimeout = const Duration(seconds: 2),
+    PatchbayMonotonicClock? monotonicClock,
+  }) => PatchbayServiceHost._(
+    applicationId: applicationId,
+    catalogProvider: catalogProvider,
+    snapshot: snapshot,
+    versionedSnapshot: versionedSnapshot,
+    snapshotRetention: snapshotRetention,
+    invoke: invoke,
+    invokeWithContext: invokeWithContext,
+    registry: registry,
+    appInstanceId: appInstanceId,
+    registrar: registrar,
+    features: features,
+    domainGates: domainGates,
+    auditSink: auditSink,
+    onAuditSinkError: onAuditSinkError,
+    auditQueueCapacity: auditQueueCapacity,
+    maxConcurrentInvocations: maxConcurrentInvocations,
+    cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+    monotonicClock: monotonicClock,
+  );
+
+  PatchbayServiceHost._({
+    required this.applicationId,
+    PatchbayCatalogSource? catalogSource,
+    PatchbayCatalogProvider? catalogProvider,
+    PatchbaySnapshotSource? snapshot,
+    PatchbayVersionedSnapshotSource? versionedSnapshot,
+    PatchbaySnapshotRetentionLimits snapshotRetention =
+        PatchbaySnapshotRetentionLimits.production,
+    PatchbayInvocationSource? invoke,
+    PatchbayContextInvocationSource? invokeWithContext,
+    PatchbayCommandRegistry? registry,
+    String? appInstanceId,
+    PatchbayExtensionRegistrar? registrar,
+    Set<PatchbayFeature> features = const <PatchbayFeature>{},
+    PatchbayGateEvaluator? domainGates,
     this.auditSink,
     this.onAuditSinkError,
-  }) : appInstanceId = appInstanceId ?? patchbayGenerateNonce(),
+    required this.auditQueueCapacity,
+    required int maxConcurrentInvocations,
+    required Duration cancellationConfirmationTimeout,
+    PatchbayMonotonicClock? monotonicClock,
+  }) : assert((catalogSource == null) != (catalogProvider == null)),
+       appInstanceId = appInstanceId ?? patchbayGenerateNonce(),
        _registry = registry ?? PatchbayCommandRegistry(const []),
        _declaredFeatures = features {
     _catalogHandler = HostCatalogHandler(
-      catalogSource: catalog,
+      catalogSource: catalogSource,
+      catalogProvider: catalogProvider,
       registry: _registry,
     );
-    _snapshotHandler = HostSnapshotHandler(snapshotSource: snapshot);
+    _snapshotHandler = HostSnapshotHandler(
+      snapshotSource: snapshot,
+      versionedSnapshotSource: versionedSnapshot,
+      retention: snapshotRetention,
+    );
     _invokerHandler = HostInvokerHandler(
       invokeSource: invoke,
+      invokeWithContext: invokeWithContext,
       registry: _registry,
       catalogHandler: _catalogHandler,
+      domainGates: domainGates,
       auditSink: auditSink,
       onAuditSinkError: onAuditSinkError,
+      auditQueueCapacity: auditQueueCapacity,
+      maxConcurrentInvocations: maxConcurrentInvocations,
+      cancellationConfirmationTimeout: cancellationConfirmationTimeout,
+      monotonicClock: monotonicClock,
     );
     _vmServiceRegistrar = HostVmServiceRegistrar(
       applicationId: applicationId,
@@ -61,6 +181,8 @@ final class PatchbayServiceHost {
   static const String catalogMethod = HostVmServiceRegistrar.catalogMethod;
   static const String snapshotMethod = HostVmServiceRegistrar.snapshotMethod;
   static const String invokeMethod = HostVmServiceRegistrar.invokeMethod;
+  static const String cancelInvocationMethod =
+      HostVmServiceRegistrar.cancelInvocationMethod;
   static const String stdinProvenanceKey = 'inputWasStdin';
   static const String snapshotRequestKey =
       HostVmServiceRegistrar.snapshotRequestKey;
@@ -77,6 +199,9 @@ final class PatchbayServiceHost {
   final Set<PatchbayFeature> _declaredFeatures;
   final PatchbayAuditSink? auditSink;
   final PatchbayAuditSinkErrorHandler? onAuditSinkError;
+  final int auditQueueCapacity;
+
+  Future<void>? _disposeFuture;
 
   late final HostCatalogHandler _catalogHandler;
   late final HostSnapshotHandler _snapshotHandler;
@@ -85,6 +210,26 @@ final class PatchbayServiceHost {
 
   /// The newest 256 redacted command facts, in dispatch completion order.
   List<PatchbayAuditEvent> get auditEvents => _invokerHandler.auditEvents;
+
+  /// Stops accepting audit deliveries and waits for the accepted prefix.
+  ///
+  /// The first call freezes [timeout]. Later calls return the same terminal
+  /// future and ignore their timeout argument.
+  Future<PatchbayAuditDrainResult> drainAudit({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _invokerHandler.drainAudit(timeout: timeout);
+
+  /// Drains host-owned resources. Repeated calls return the same future.
+  Future<void> dispose({
+    Duration invocationTimeout = const Duration(seconds: 2),
+    Duration auditTimeout = const Duration(seconds: 2),
+  }) {
+    final Future<void>? existing = _disposeFuture;
+    if (existing != null) return existing;
+    return _disposeFuture = drainInvocations(
+      timeout: invocationTimeout,
+    ).then((_) => drainAudit(timeout: auditTimeout)).then<void>((_) {});
+  }
 
   /// Capabilities this host declares on the identity plane.
   Set<PatchbayFeature> get features => <PatchbayFeature>{
@@ -97,6 +242,7 @@ final class PatchbayServiceHost {
     PatchbayFeature.catalogDigest,
     PatchbayFeature.snapshotSelectors,
     PatchbayFeature.snapshotRevisionDiff,
+    PatchbayFeature.invocationCancellation,
   };
 
   /// Transport-neutral dispatch seam used by alternate, explicitly enabled
@@ -114,8 +260,47 @@ final class PatchbayServiceHost {
   Future<Map<String, Object?>> dispatchInvoke(
     String command,
     Map<String, Object?> arguments,
-    String requestId,
-  ) => _invokerHandler.dispatchInvoke(command, arguments, requestId);
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) => _invokerHandler.dispatchInvoke(
+    command,
+    arguments,
+    requestId,
+    ownerToken: ownerToken,
+    deadline: deadline,
+  );
+
+  PatchbayHostInvocationHandle dispatchInvokeHandle(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId, {
+    String? ownerToken,
+    Duration? deadline,
+  }) => _invokerHandler.dispatchInvokeHandle(
+    command,
+    arguments,
+    requestId,
+    ownerToken: ownerToken,
+    deadline: deadline,
+  );
+
+  Future<PatchbayInvocationCancellationResult> cancelInvocation({
+    required String command,
+    required String requestId,
+    required String ownerToken,
+    PatchbayInvocationCancellationReason reason =
+        PatchbayInvocationCancellationReason.explicitRequest,
+  }) => _invokerHandler.cancelInvocation(
+    command: command,
+    requestId: requestId,
+    ownerToken: ownerToken,
+    reason: reason,
+  );
+
+  Future<PatchbayInvocationDrainResult> drainInvocations({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _invokerHandler.drainInvocations(timeout: timeout);
 
   void register() => _vmServiceRegistrar.register();
 
@@ -141,4 +326,9 @@ final class PatchbayServiceHost {
     String method,
     Map<String, String> parameters,
   ) => _vmServiceRegistrar.handleInvoke(method, parameters);
+
+  Future<ServiceExtensionResponse> handleCancelInvocation(
+    String method,
+    Map<String, String> parameters,
+  ) => _vmServiceRegistrar.handleCancelInvocation(method, parameters);
 }

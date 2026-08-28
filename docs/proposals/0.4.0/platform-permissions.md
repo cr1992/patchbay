@@ -2,7 +2,9 @@
 
 > 状态：已接受
 >
-> 关联：PB-040-25、PB-040-26、PB-040-27、PB-040-33、PB-040-34、PB-040-35、PB-040-36、PB-040-37
+> 关联：PB-040-27、PB-040-33、PB-040-34、PB-040-35、PB-040-36、PB-040-37；Android adb 权限编排与
+> iOS XCUITest reference runner 已随 0.4.0 发布，见
+> [CHANGELOG.md 0.4.0 段](../../../CHANGELOG.md#040---2026-08-20)
 >
 > 设计闸门：DG-040-07
 
@@ -214,8 +216,8 @@ AI 未显式选择时默认 `fail`；项目级调试配置可以把特定权限�
 - scenario 免确认的前提是该 scenario 文件在 workspace 内，且其指纹被记入 `permission.preflight`
   事件。否则“已评审”是一句事后无法验证的话。
 
-这套确认模型继续约束 PB-040-26 的目标实现。0.4.0 因未交付 `permission.preflight` 写入契约，不把
-scenario 免确认路径列为受支持能力；显式外部 runner 也不能绕过临时命令的确认 flag。
+这套确认模型继续约束系统弹窗 runner 的完整目标实现。0.4.0 因未交付 `permission.preflight` 写入契约，
+不把 scenario 免确认路径列为受支持能力；显式外部 runner 也不能绕过临时命令的确认 flag。
 
 ### P0 权限集合
 
@@ -322,15 +324,15 @@ TTL。
 
 ## Trace 与审计
 
-PB-040-26 恢复时，Debug Trace 再增加：`permission.preflight`、`permission.transition`、
+系统弹窗 runner 的 trace 集成完整落地时，Debug Trace 再增加：`permission.preflight`、`permission.transition`、
 `systemUi.detected`、`systemUi.handled`、`app.resumeObserved`。写入侧事件类型是封闭表，必须先修订并验收
 trace 契约，不能把未知类型直接接入 sink。事件记录 before/after、decision、driver、factSource、耗时和
 稳定 code；不保存设备配对凭据、Apple 签名材料、stdin sensitive 值或系统弹窗截图中的个人内容。
 
 0.4.0 不声明上述五类专用事件可用；本版权限命令仍通过 CLI 稳定 JSON、退出码与设备复核结果提供证据。
 
-audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 属于高风险动作，PB-040-26 恢复为受支持
-能力前必须在 trace 中可追踪。
+audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 属于高风险动作，纳入受支持能力前必须
+在 trace 中可追踪。
 
 ## 兼容、发布与安装
 
@@ -349,7 +351,8 @@ audit 只保留权限名、动作、调用者和结果摘要；`exercise allow` 
 - driver protocol major 不匹配时拒绝执行的单测。
 - CLI fake-driver golden 覆盖 normalize/exercise/fail、非预期弹窗、App 未恢复和 session 变化。
 - 断言非 TTY 下缺 `--confirm-system-permission` 的 `exercise allow` 被拒绝。
-- PB-040-26 恢复时再断言 `permission.preflight` 事件带 scenario 指纹，使免确认路径可事后核对。
+- 系统弹窗 runner 的 trace 集成完整落地时再断言 `permission.preflight` 事件带 scenario 指纹，使免确认
+  路径可事后核对。
 - Android emulator + 真机覆盖 P0 四项权限的 status、normalize granted、reset、幂等与不可达状态先拒绝
   不写设备；capability 必须来自逐权限逐 decision 的设备探测。
 - iOS Simulator reset 继续做 adapter 回归；真机以接入方 App 验证 camera/microphone 的 allow/deny、

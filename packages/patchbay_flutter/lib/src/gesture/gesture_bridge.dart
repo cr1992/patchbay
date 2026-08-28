@@ -4,10 +4,12 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay.dart';
 
 import '../lifecycle.dart';
+import '../occlusion/occlusion_probe.dart';
 import '../semantics/semantics_bridge.dart';
 import '../semantics/semantics_models.dart';
 import 'gesture_models.dart';
@@ -15,18 +17,15 @@ import 'gesture_models.dart';
 /// Identifier-anchored synthetic pointer gestures for debug builds.
 final class PatchbayGestureBridge {
   PatchbayGestureBridge({
-    required PatchbayGateEvaluator gates,
-    required PatchbaySemanticsBridge semantics,
-    PatchbayGesturePolicy? policy,
+    required this._gates,
+    required this._semantics,
+    this._policy,
     PatchbayPointerEventDispatcher? pointerDispatcher,
     PatchbayGestureDelay? delay,
     bool Function()? isAppResumed,
     PatchbayLifecycleStateReader? lifecycleState,
     String Function()? newRequestId,
-  }) : _gates = gates,
-       _semantics = semantics,
-       _policy = policy,
-       _dispatchPointer =
+  }) : _dispatchPointer =
            pointerDispatcher ??
            ((PointerEvent event) {
              GestureBinding.instance.handlePointerEvent(event);
@@ -46,6 +45,14 @@ final class PatchbayGestureBridge {
   static const int maxDurationMs = 30000;
   static const int maxPathPoints = 64;
   static const double maxVelocity = 20;
+
+  /// tap 的 down→up 间隔。实现细节：不进 wire、CLI 与 payload，调用方与
+  /// 接入方都改不了它（DG-050-08 复核改判）。取值远低于框架默认
+  /// `kLongPressTimeout`（500 ms），把"被默认长按识别器认走"压到工程余量之下；
+  /// 但对接入方自定义的更短阈值 recognizer 不做任何担保——那是指针真实性的
+  /// 固有属性。它仍受 policy 的 `maxDurationMs` 预算约束，收紧到 50 以下即
+  /// 整体拒绝，不因常数不进 wire 就绕过 policy。
+  static const int _tapDownUpDelayMs = 50;
   static int _nextPointer = 1000;
 
   final PatchbayGateEvaluator _gates;
@@ -73,6 +80,30 @@ final class PatchbayGestureBridge {
         start: _point(start),
         durationMs: durationMs,
         kind: PatchbayGestureKind.pressHold,
+        requestId: requestId,
+      );
+    } on FormatException {
+      return Future<PatchbayInvocation>.value(
+        _rejected(requestId ?? _newRequestId(), 'invalidUiArguments'),
+      );
+    }
+  }
+
+  /// 按下即抬起的最短固定序列；要按住用 [pressHold]，语义写在命令名上而不是
+  /// 数值里。`start` 缺省即目标中心，与 descriptor 声明的默认一致。
+  Future<PatchbayInvocation> tap({
+    required String identifier,
+    required int generation,
+    Map<String, Object?>? start,
+    String? requestId,
+  }) {
+    try {
+      return _run(
+        identifier: identifier,
+        generation: generation,
+        start: _point(start ?? const <String, Object?>{'x': 0.5, 'y': 0.5}),
+        durationMs: _tapDownUpDelayMs,
+        kind: PatchbayGestureKind.tap,
         requestId: requestId,
       );
     } on FormatException {
@@ -165,7 +196,14 @@ final class PatchbayGestureBridge {
     final PatchbayGesturePolicy? policy = _policy;
     if (policy == null) return _rejected(id, 'uiGesturesDisabled');
     if (!_isAppResumed()) return _lifecycleRejected(id);
-    GestureTargetResolution target = await _resolveTarget(identifier);
+    // tap 在第一次 resolve 就核对调用方 generation（与 PB-050-10 对齐）：
+    // 内部 pin 防不住"调用方上次观察之后、本次命令开始之前 identifier 已被
+    // 新节点复用"那个窗口，只有调用方手里的 generation 能关上它。既有三条
+    // 维持只在门后核对，拒绝时机不动。
+    GestureTargetResolution target = await _resolveTarget(
+      identifier,
+      expectedGeneration: kind == PatchbayGestureKind.tap ? generation : null,
+    );
     if (!target.resolved) return _targetRejected(id, target);
     final PatchbayGateRejection? baseGate = await _gates.evaluate(
       const <String>{},
@@ -209,12 +247,14 @@ final class PatchbayGestureBridge {
       velocity: velocity,
       durationMs: durationMs,
     )) {
-      if (!resolution.visible(point, resolution.global(point))) {
+      if (!resolution.visible(point)) {
         return PatchbayInvocation.rejected(
           requestId: id,
           rejection: const PatchbayRejection(
             code: 'uiGestureTargetObscured',
-            details: <String, Object?>{'reason': 'hitTestOrClip'},
+            details: <String, Object?>{
+              'reason': PatchbayOcclusionReason.hitTestOrClip,
+            },
           ),
         );
       }
@@ -289,7 +329,11 @@ final class PatchbayGestureBridge {
       );
       downDispatched = true;
       switch (kind) {
+        // tap 与 pressHold 的序列同构（down → 延时 → up），差别只在延时来源：
+        // pressHold 是调用方参数，tap 是 `_tapDownUpDelayMs`（已在入口写进
+        // durationMs）。两者都不发 move：任何位移都会进 touch slop 判定。
         case PatchbayGestureKind.pressHold:
+        case PatchbayGestureKind.tap:
           await _delay(Duration(milliseconds: durationMs));
           break;
         case PatchbayGestureKind.drag:
@@ -411,46 +455,17 @@ final class PatchbayGestureBridge {
     if (node.isInvisible || node.areUserActionsBlocked) {
       return const GestureResolution.rejected('uiGestureTargetObscured');
     }
-    final RenderView? view = RendererBinding.instance.renderViews
-        .cast<RenderView?>()
-        .firstWhere(
-          (RenderView? candidate) =>
-              identical(candidate?.owner?.semanticsOwner, target.owner),
-          orElse: () => null,
-        );
-    if (view == null) {
-      return const GestureResolution.rejected(
+    final PatchbayOcclusionResolution geometry =
+        patchbayResolveOcclusionGeometry(owner: target.owner!, node: node);
+    if (!geometry.resolved) {
+      return GestureResolution.rejected(
         'uiGestureTargetObscured',
-        details: <String, Object?>{'reason': 'viewUnavailable'},
-      );
-    }
-    final RenderObject? anchor = _semanticRenderObject(view, node);
-    if (anchor == null) {
-      return const GestureResolution.rejected(
-        'uiGestureTargetObscured',
-        details: <String, Object?>{'reason': 'renderAnchorUnavailable'},
-      );
-    }
-    final double devicePixelRatio = view.flutterView.devicePixelRatio;
-    final Matrix4 transform = Matrix4.diagonal3Values(
-      1 / devicePixelRatio,
-      1 / devicePixelRatio,
-      1,
-    )..multiply(_transformToRoot(node));
-    final Rect globalRect = MatrixUtils.transformRect(transform, node.rect);
-    if (globalRect.isEmpty || !globalRect.isFinite) {
-      return const GestureResolution.rejected(
-        'uiGestureTargetObscured',
-        details: <String, Object?>{'reason': 'emptyBounds'},
+        details: <String, Object?>{'reason': geometry.reason},
       );
     }
     return GestureResolution.resolved(
-      node: node,
+      geometry: geometry.geometry!,
       target: target.target!,
-      transform: transform,
-      globalRect: globalRect,
-      anchor: anchor,
-      viewId: view.flutterView.viewId,
     );
   }
 
@@ -459,6 +474,20 @@ final class PatchbayGestureBridge {
     int generation,
     Rect beforeRect,
   ) async {
+    // 手势的**自身效果观察**：注入过程中被标脏的布局要先提交，终止比较才有意义。
+    //
+    // PB-050-07 之前这一帧是 `ensureOwner()` 的副产品；DG-050-05 结论 1 之后
+    // probe 不再请帧，于是把它显式化——语义与预算完全照旧（同样一帧、同样最多
+    // 等 2 秒、同样不计入 `frameRevision`），只是不再依赖别人的副作用。这与
+    // `ui.semantics.action` 派发后那一帧同类：它不是 probe，是写操作的观察。
+    try {
+      SchedulerBinding.instance.scheduleFrame();
+      await SchedulerBinding.instance.endOfFrame.timeout(
+        const Duration(seconds: 2),
+      );
+    } on TimeoutException {
+      // 等不到帧就按当前已提交的树比较：宁可少报一次布局变化，也不挂住答复。
+    }
     final GestureTargetResolution target = await _resolveTarget(
       identifier,
       expectedGeneration: generation,
@@ -466,45 +495,6 @@ final class PatchbayGestureBridge {
     if (!target.resolved) return true;
     final GestureResolution geometry = _resolveGeometry(target);
     return !geometry.resolved || geometry.globalRect != beforeRect;
-  }
-
-  static RenderObject? _semanticRenderObject(
-    RenderObject root,
-    SemanticsNode node,
-  ) {
-    for (
-      SemanticsNode? candidate = node;
-      candidate != null;
-      candidate = candidate.parent
-    ) {
-      RenderObject? match;
-      void visit(RenderObject renderObject) {
-        if (match != null) return;
-        if (identical(renderObject.debugSemantics, candidate)) {
-          match = renderObject;
-          return;
-        }
-        renderObject.visitChildren(visit);
-      }
-
-      visit(root);
-      if (match != null) return match;
-    }
-    return null;
-  }
-
-  static Matrix4 _transformToRoot(SemanticsNode node) {
-    var result = Matrix4.identity();
-    for (
-      SemanticsNode? current = node;
-      current != null;
-      current = current.parent
-    ) {
-      if (current.transform case final Matrix4 transform) {
-        result = Matrix4.copy(transform)..multiply(result);
-      }
-    }
-    return result;
   }
 
   PatchbayInvocation? _decisionRejection(
@@ -655,7 +645,8 @@ final class PatchbayGestureBridge {
     required GesturePoint? velocity,
     required int durationMs,
   }) => switch (kind) {
-    PatchbayGestureKind.pressHold => <GesturePoint>[start],
+    PatchbayGestureKind.pressHold ||
+    PatchbayGestureKind.tap => <GesturePoint>[start],
     PatchbayGestureKind.drag => <GesturePoint>[
       start,
       for (final GesturePathPoint point in path) point.point,

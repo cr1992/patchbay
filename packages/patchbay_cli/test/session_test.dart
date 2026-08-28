@@ -1,7 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_resolver.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -19,12 +23,28 @@ void main() {
 
   test('empty session directory fails with a stable type', () async {
     await expectLater(
-      PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
-        identityProbe: (_) async => _identity('instance-1'),
-      ).resolve(),
-      throwsA(_sessionError('sessionDirectoryEmpty')),
+      _resolver(store).resolve(),
+      throwsA(
+        allOf(
+          _sessionError('sessionDirectoryEmpty'),
+          isA<PatchbaySessionException>()
+              .having(
+                (PatchbaySessionException error) => error.hint,
+                'hint',
+                contains('patchbay launch -- <consumer command>'),
+              )
+              .having(
+                (PatchbaySessionException error) => error.hint,
+                'hint',
+                contains('--ws-uri'),
+              )
+              .having(
+                (PatchbaySessionException error) => error.hint,
+                'hint',
+                contains('patchbay session register'),
+              ),
+        ),
+      ),
     );
   });
 
@@ -33,11 +53,7 @@ void main() {
     () async {
       store.write(_record('one'));
 
-      final resolved = await PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
-        identityProbe: (_) async => _identity('instance-1'),
-      ).resolve();
+      final resolved = await _resolver(store).resolve();
 
       expect(resolved.record.appInstanceId, 'instance-1');
       expect(resolved.record.isolateId, 'isolates/1');
@@ -57,11 +73,7 @@ void main() {
       );
 
       await expectLater(
-        PatchbaySessionResolver(
-          store: store,
-          pidProbe: (_) => false,
-          identityProbe: (_) async => _identity('instance-1'),
-        ).resolve(),
+        _resolver(store, alive: false).resolve(),
         throwsA(_sessionError('sessionStaleProcess')),
       );
       expect(store.readAll(), isEmpty);
@@ -109,9 +121,8 @@ void main() {
 
     Object? failure;
     try {
-      await PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
+      await _resolver(
+        store,
         identityProbe: (_) async => throw StateError('socket $secret'),
       ).resolve();
     } on Object catch (error) {
@@ -129,9 +140,8 @@ void main() {
     store.write(_record('old', appInstanceId: 'before-restart'));
 
     await expectLater(
-      PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
+      _resolver(
+        store,
         identityProbe: (_) async => const PatchbayRuntimeIdentity(
           schemaVersion: 1,
           applicationId: 'dev.patchbay.other',
@@ -153,9 +163,8 @@ void main() {
       ),
     );
 
-    final PatchbayDiscoveredSession resolved = await PatchbaySessionResolver(
-      store: store,
-      pidProbe: (_) => true,
+    final PatchbayDiscoveredSession resolved = await _resolver(
+      store,
       identityProbe: (_) async => _identity('after-restart'),
     ).resolve();
 
@@ -178,9 +187,8 @@ void main() {
       );
       store.write(_record('restart'));
 
-      final resolved = await PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
+      final resolved = await _resolver(
+        store,
         identityProbe: (_) async => _identity('after-restart'),
       ).resolve();
 
@@ -188,14 +196,12 @@ void main() {
     },
   );
 
-  test('multiple worktree sessions fail closed with selectable IDs', () async {
-    store.write(_record('worktree-a', workspacePath: '/repo/a'));
-    store.write(_record('worktree-b', workspacePath: '/repo/b'));
-    final resolver = PatchbaySessionResolver(
-      store: store,
-      pidProbe: (_) => true,
-      identityProbe: (_) async => _identity('instance-1'),
-    );
+  test('multiple sessions in one checkout fail closed with IDs', () async {
+    // Two devices, one checkout: workspace affinity does not narrow this
+    // down, so the pre-existing ambiguity chain still has to answer.
+    store.write(_record('worktree-a'));
+    store.write(_record('worktree-b'));
+    final resolver = _resolver(store);
 
     await expectLater(
       resolver.resolve(),
@@ -220,9 +226,9 @@ void main() {
     // pinned down separately: a bug that collapses two of them still looks
     // correct from the third.
     test('an explicit --session outranks the pinned session', () async {
-      store.write(_record('worktree-a', workspacePath: '/repo/a'));
-      store.write(_record('worktree-b', workspacePath: '/repo/b'));
-      store.writeSelection('worktree-b');
+      store.write(_record('worktree-a'));
+      store.write(_record('worktree-b'));
+      store.writeSelectionFor(_workspace, 'worktree-b');
 
       final PatchbayDiscoveredSession resolved = await _resolver(
         store,
@@ -230,15 +236,15 @@ void main() {
 
       expect(resolved.record.sessionId, 'worktree-a');
       // Naming one session for one command must not re-pin anything.
-      expect(store.readSelection(), 'worktree-b');
+      expect(store.readSelectionFor(_workspace), 'worktree-b');
     });
 
     test(
       'the pinned session decides what would otherwise be ambiguous',
       () async {
-        store.write(_record('worktree-a', workspacePath: '/repo/a'));
-        store.write(_record('worktree-b', workspacePath: '/repo/b'));
-        store.writeSelection('worktree-b');
+        store.write(_record('worktree-a'));
+        store.write(_record('worktree-b'));
+        store.writeSelectionFor(_workspace, 'worktree-b');
 
         final PatchbayDiscoveredSession resolved = await _resolver(
           store,
@@ -251,16 +257,16 @@ void main() {
     test('a single session still resolves with nothing pinned', () async {
       store.write(_record('only'));
 
-      expect(store.readSelection(), isNull);
+      expect(store.readSelectionFor(_workspace), isNull);
       expect((await _resolver(store).resolve()).record.sessionId, 'only');
     });
 
     test(
       'a pin with no record left fails closed instead of guessing',
       () async {
-        store.write(_record('worktree-a', workspacePath: '/repo/a'));
-        store.write(_record('worktree-b', workspacePath: '/repo/b'));
-        store.writeSelection('worktree-gone');
+        store.write(_record('worktree-a'));
+        store.write(_record('worktree-b'));
+        store.writeSelectionFor(_workspace, 'worktree-gone');
 
         await expectLater(
           _resolver(store).resolve(),
@@ -272,21 +278,17 @@ void main() {
         );
         // Neither live session was silently substituted, and the pin is still
         // there: clearing it here would make the *next* command guess instead.
-        expect(store.readSelection(), 'worktree-gone');
+        expect(store.readSelectionFor(_workspace), 'worktree-gone');
       },
     );
 
     test('a pinned session whose process died fails closed', () async {
-      store.write(_record('alive', workspacePath: '/repo/a'));
-      store.write(_record('dead', workspacePath: '/repo/b', processId: 4243));
-      store.writeSelection('dead');
+      store.write(_record('alive'));
+      store.write(_record('dead', processId: 4243));
+      store.writeSelectionFor(_workspace, 'dead');
 
       await expectLater(
-        PatchbaySessionResolver(
-          store: store,
-          pidProbe: (int processId) => processId != 4243,
-          identityProbe: (_) async => _identity('instance-1'),
-        ).resolve(),
+        _resolver(store, pidProbe: (int p) => p != 4243).resolve(),
         throwsA(
           isA<PatchbaySessionException>()
               .having((error) => error.code, 'code', 'sessionStaleProcess')
@@ -297,8 +299,8 @@ void main() {
     });
 
     test('ambiguity points at the command that would fix it', () async {
-      store.write(_record('worktree-a', workspacePath: '/repo/a'));
-      store.write(_record('worktree-b', workspacePath: '/repo/b'));
+      store.write(_record('worktree-a'));
+      store.write(_record('worktree-b'));
 
       await expectLater(
         _resolver(store).resolve(),
@@ -313,24 +315,25 @@ void main() {
     test('a corrupt selection is discarded rather than obeyed', () {
       store.write(_record('only'));
       final File selection = File(
-        '${directory.path}${Platform.pathSeparator}selected-session',
+        '${directory.path}${Platform.pathSeparator}'
+        'selected-session-${_workspace.digest}',
       )..writeAsStringSync('{"schemaVersion": 1, "sessionId": 42}');
 
-      expect(store.readSelection(), isNull);
+      expect(store.readSelectionFor(_workspace), isNull);
       // Discarded, not left to be re-read as something else next time.
       expect(selection.existsSync(), isFalse);
     });
 
     test('the selection file is not mistaken for a session record', () {
       store.write(_record('only'));
-      store.writeSelection('only');
+      store.writeSelectionFor(_workspace, 'only');
 
       // `readAll` deletes every `.json` file it cannot parse as a record, so a
       // selection stored under that extension would erase itself on first read.
       expect(store.readAll().map((record) => record.sessionId), <String>[
         'only',
       ]);
-      expect(store.readSelection(), 'only');
+      expect(store.readSelectionFor(_workspace), 'only');
     });
   });
 
@@ -367,39 +370,40 @@ void main() {
     test('prune removes dead records and keeps live ones', () {
       store.write(_record('alive'));
       store.write(_record('dead', processId: 4243));
-      store.writeSelection('alive');
+      store.writeSelectionFor(_workspace, 'alive');
 
-      final PatchbaySessionPruneResult result = PatchbaySessionResolver(
-        store: store,
-        pidProbe: (int processId) => processId != 4243,
+      final PatchbaySessionPruneResult result = _resolver(
+        store,
+        pidProbe: (int p) => p != 4243,
       ).prune();
 
       expect(result.removed, <String>['dead']);
       expect(result.remaining.single.record.sessionId, 'alive');
       expect(result.selectionCleared, isFalse);
-      expect(store.readSelection(), 'alive');
+      expect(store.readSelectionFor(_workspace), 'alive');
     });
 
     test('prune unpins only when it removed the pinned record', () {
       store.write(_record('alive'));
       store.write(_record('dead', processId: 4243));
-      store.writeSelection('dead');
+      store.writeSelectionFor(_workspace, 'dead');
 
-      final PatchbaySessionPruneResult result = PatchbaySessionResolver(
-        store: store,
-        pidProbe: (int processId) => processId != 4243,
+      final PatchbaySessionPruneResult result = _resolver(
+        store,
+        pidProbe: (int p) => p != 4243,
       ).prune();
 
       expect(result.selectionCleared, isTrue);
-      expect(store.readSelection(), isNull);
+      expect(store.readSelectionFor(_workspace), isNull);
     });
 
     test('prune deterministically removes an expired pending record', () {
       final DateTime now = DateTime.utc(2026, 8, 18);
-      const PatchbayLaunchContext context = PatchbayLaunchContext(
+      final PatchbayLaunchContext context = PatchbayLaunchContext(
         sessionDirectory: '/unused',
         launchId: 'launch-expired',
         ownerPid: 4242,
+        workspace: _workspace,
       );
       store.write(
         context.pendingRecord(
@@ -408,21 +412,19 @@ void main() {
           processId: 4242,
           buildMode: 'debug',
           createdAt: now.subtract(const Duration(minutes: 6)),
-          workspacePath: '/repo/worktree',
           deviceId: 'device-1',
         ),
       );
-      store.writeSelection('expired');
+      store.writeSelectionFor(_workspace, 'expired');
 
-      final PatchbaySessionPruneResult result = PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
+      final PatchbaySessionPruneResult result = _resolver(
+        store,
         clock: () => now,
       ).prune();
 
       expect(result.removed, <String>['expired']);
       expect(result.selectionCleared, isTrue);
-      expect(store.readSelection(), isNull);
+      expect(store.readSelectionFor(_workspace), isNull);
     });
 
     test('use refuses an id that has no record', () {
@@ -432,20 +434,17 @@ void main() {
         () => _resolver(store).select('worktree-z'),
         throwsA(_sessionError('sessionNotFound')),
       );
-      expect(store.readSelection(), isNull);
+      expect(store.readSelectionFor(_workspace), isNull);
     });
 
     test('use refuses to pin a record whose process is gone', () {
       store.write(_record('dead', processId: 4243));
 
       expect(
-        () => PatchbaySessionResolver(
-          store: store,
-          pidProbe: (int processId) => processId != 4243,
-        ).select('dead'),
+        () => _resolver(store, pidProbe: (int p) => p != 4243).select('dead'),
         throwsA(_sessionError('sessionStaleProcess')),
       );
-      expect(store.readSelection(), isNull);
+      expect(store.readSelectionFor(_workspace), isNull);
     });
   });
 
@@ -453,11 +452,7 @@ void main() {
     store.write(_record('pending', wsUri: null));
 
     await expectLater(
-      PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
-        identityProbe: (_) async => _identity('instance-1'),
-      ).resolve(),
+      _resolver(store).resolve(),
       throwsA(_sessionError('sessionPending')),
     );
   });
@@ -467,11 +462,7 @@ void main() {
     store.write(_record('starting', wsUri: null));
 
     await expectLater(
-      PatchbaySessionResolver(
-        store: store,
-        pidProbe: (_) => true,
-        identityProbe: (_) async => _identity('instance-1'),
-      ).resolve(),
+      _resolver(store).resolve(),
       throwsA(_sessionError('sessionAmbiguous')),
     );
   });
@@ -485,13 +476,30 @@ String _mode(String path) {
   return result.stdout.toString().trim();
 }
 
-/// A resolver whose probes both answer "alive and the same App".
-PatchbaySessionResolver _resolver(PatchbaySessionStore store) =>
-    PatchbaySessionResolver(
-      store: store,
-      pidProbe: (_) => true,
-      identityProbe: (_) async => _identity('instance-1'),
-    );
+/// A resolver whose probes both answer "alive and the same App", speaking for
+/// one fixed workspace so implicit selection has a checkout to belong to.
+PatchbaySessionResolver _resolver(
+  PatchbaySessionStore store, {
+  bool alive = true,
+  PatchbayPidProbe? pidProbe,
+  PatchbayIdentityProbe? identityProbe,
+  PatchbaySessionClock? clock,
+}) => PatchbaySessionResolver(
+  store: store,
+  pidProbe: pidProbe ?? (_) => alive,
+  identityProbe: identityProbe ?? (_) async => _identity('instance-1'),
+  clock: clock,
+  workspaceProbe: () => _workspace,
+  workspaceIdentityAt: (_) => null,
+);
+
+/// The checkout every record in this file belongs to. Cross-workspace
+/// behaviour lives in workspace_affinity_test.dart; here the point is that the
+/// rest of the selection chain still behaves as before *within* one checkout.
+final PatchbayWorkspaceIdentity _workspace = PatchbayWorkspaceIdentity.of(
+  kind: PatchbayWorkspaceKind.gitWorktree,
+  canonicalRoot: '/repo/worktree',
+)!;
 
 Matcher _sessionError(String code) =>
     isA<PatchbaySessionException>().having((error) => error.code, 'code', code);
@@ -508,7 +516,6 @@ PatchbaySessionRecord _record(
   String? appInstanceId,
   String? isolateId,
   String? wsUri = 'ws://127.0.0.1:1234/auth/ws',
-  String workspacePath = '/repo/worktree',
   int processId = 4242,
 }) => PatchbaySessionRecord(
   sessionId: id,
@@ -519,6 +526,6 @@ PatchbaySessionRecord _record(
   wsUri: wsUri,
   buildMode: 'debug',
   createdAt: DateTime.utc(2026, 8, 12),
-  workspacePath: workspacePath,
+  workspacePath: _workspace.canonicalRoot,
   deviceId: 'device-1',
-);
+).withWorkspace(_workspace);

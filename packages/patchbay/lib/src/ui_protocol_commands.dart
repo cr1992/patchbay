@@ -152,6 +152,48 @@ final patchbayUiSemanticsActionCommandDescriptor = _ui(
   ],
 );
 
+final patchbayUiSemanticsActionByIdentifierCommandDescriptor = _ui(
+  'ui.semantics.actionByIdentifier',
+  'Resolve a stable Semantics identifier and invoke an allowed action.',
+  parameters: <PatchbayParameterDescriptor>[
+    _p('identifier', PatchbayParameterType.string, required: true),
+    _p('generation', PatchbayParameterType.integer, required: true),
+    _p(
+      'action',
+      PatchbayParameterType.enumeration,
+      required: true,
+      allowedValues: const <String>[
+        'tap',
+        'focus',
+        'scrollUp',
+        'scrollDown',
+        'scrollLeft',
+        'scrollRight',
+        'setText',
+      ],
+    ),
+    _p('text', PatchbayParameterType.string),
+    _p('inputWasStdin', PatchbayParameterType.boolean),
+  ],
+  cliSyntax: const <PatchbayCliSyntax>[
+    PatchbayCliSyntax(
+      id: 'uiAction',
+      path: <String>['ui', 'action'],
+      summary: 'Resolve an identifier and dispatch a semantics action.',
+      usageSuffix: '<identifier> <generation> <action> [text]',
+      positionalParameters: <String>['identifier', 'generation', 'action'],
+      nonNegativeParameters: <String>{'generation'},
+      trailingParameter: 'text',
+      stdinParameter: 'text',
+      stdinMarkerParameter: 'inputWasStdin',
+      trailingWhen: PatchbayCliEqualsCondition(
+        parameter: 'action',
+        value: 'setText',
+      ),
+    ),
+  ],
+);
+
 final patchbayUiSemanticsTapCommandDescriptor = _ui(
   'ui.semantics.tap',
   'Resolve a stable Semantics identifier and tap it in one request.',
@@ -223,6 +265,26 @@ final patchbayUiGestureFlingCommandDescriptor = _gesture(
       '[--duration-ms <ms>]',
 );
 
+/// tap 是家族里唯一没有 `durationMs` 的成员：down→up 间隔是实现内部常数，
+/// 不进 wire（DG-050-08 复核改判）。它的 `start` 也因此从"路径起点"退化为
+/// "唯一那个点"，可缺省到目标中心——默认值必须进 descriptor 而不是只写在
+/// 实现里，catalog 是调用方唯一读得到的声明面。两处形状开关都带默认值，
+/// 既有三条 descriptor 的字节因此一位不变。
+final patchbayUiGestureTapCommandDescriptor = _gesture(
+  'ui.gesture.tap',
+  'Tap inside a Semantics identifier target through the real pointer '
+      'pipeline.',
+  'uiGestureTap',
+  'tap',
+  'Tap an anchored target through the real pointer pipeline.',
+  extraParameters: const <PatchbayParameterDescriptor>[],
+  extraOptions: const <String, String>{},
+  usageSuffix: '<identifier> <generation> [--start <json>]',
+  startRequired: false,
+  startDefault: const <String, Object?>{'x': 0.5, 'y': 0.5},
+  positiveParameters: const <String>{},
+);
+
 PatchbayCommandDescriptor _gesture(
   String name,
   String summary,
@@ -232,13 +294,21 @@ PatchbayCommandDescriptor _gesture(
   required List<PatchbayParameterDescriptor> extraParameters,
   required Map<String, String> extraOptions,
   required String usageSuffix,
+  bool startRequired = true,
+  Object? startDefault,
+  Set<String> positiveParameters = const <String>{'durationMs'},
 }) => _ui(
   name,
   summary,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
-    _p('start', PatchbayParameterType.json, required: true),
+    _p(
+      'start',
+      PatchbayParameterType.json,
+      required: startRequired,
+      defaultValue: startDefault,
+    ),
     ...extraParameters,
   ],
   cliSyntax: <PatchbayCliSyntax>[
@@ -249,8 +319,95 @@ PatchbayCommandDescriptor _gesture(
       usageSuffix: usageSuffix,
       positionalParameters: const <String>['identifier', 'generation'],
       optionParameters: <String, String>{'start': 'start', ...extraOptions},
-      positiveParameters: const <String>{'durationMs'},
+      positiveParameters: positiveParameters,
       nonNegativeParameters: const <String>{'generation'},
+    ),
+  ],
+);
+
+/// PB-050-17 / DG-050-10：identifier 锚定的 scroll-to-reveal。
+///
+/// 独立顶层命令，不进 `ui.gesture.*`（那族已冻结为「合成指针事件序列」）也不进
+/// `ui.semantics.*`（那族的形状是「派发一个 allowlist 内的 action，返回
+/// dispatched」）。它是写操作，因此也不是 `ui.wait` 的一个 condition。
+///
+/// `direction` 说的是**内容序**而不是屏幕方向：`forward` = 朝 `maxScrollExtent`
+/// 前进。落到哪个 `SemanticsAction` 由容器当前暴露的 action 与观察到的位移符号
+/// 确定，不由参数字面指定——否则 reverse 列表和横向列表就要求调用方先知道布局
+/// 方向。**不存在任何坐标入参**（design.md 非目标红线在本命令上的落点）。
+final patchbayUiRevealCommandDescriptor = _ui(
+  'ui.reveal',
+  'Drive a scroll container until a Semantics identifier is mounted and '
+      'exposed.',
+  parameters: <PatchbayParameterDescriptor>[
+    const PatchbayParameterDescriptor(
+      name: 'identifier',
+      type: PatchbayParameterType.string,
+      required: true,
+      summary:
+          'Stable Semantics identifier of the target. It does not have to be '
+          'mounted yet — that is what this command is for. Do not follow a '
+          'reveal with ui.wait semanticsMounted: mounting and exposure both '
+          'happen inside this one request, and semanticsMounted is the weaker '
+          'of the two checks, so it cannot vouch for a reveal. Success means '
+          'Patchbay observed the target exposed under a fixed five-point '
+          'sample on the terminating frame; it is not a proof of reachability '
+          'and says nothing about the next frame — that is what the returned '
+          'generation is for.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'container',
+      type: PatchbayParameterType.string,
+      summary:
+          'Semantics identifier anchoring the scroll container to drive. Omit '
+          'it only when exactly one candidate container is resolvable.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'direction',
+      type: PatchbayParameterType.enumeration,
+      defaultValue: 'both',
+      allowedValues: <String>['forward', 'backward', 'both'],
+      summary:
+          'Content order, not screen direction: forward moves toward '
+          'maxScrollExtent. An explicit direction may spend one reverse probe '
+          'step when the container is not resting at either end.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'maxSteps',
+      type: PatchbayParameterType.integer,
+      defaultValue: 40,
+      summary:
+          'Scroll actions this call may dispatch in total (1..200). It is the '
+          'only hard ceiling: lazy-loaded growth resets the stall counter but '
+          'never extends this budget.',
+    ),
+    const PatchbayParameterDescriptor(
+      name: 'timeoutMs',
+      type: PatchbayParameterType.integer,
+      defaultValue: 5000,
+      summary:
+          'One deadline for the whole call (1..120000), frozen at admission '
+          'and never rewritten while escalating outward.',
+    ),
+  ],
+  cliSyntax: const <PatchbayCliSyntax>[
+    PatchbayCliSyntax(
+      id: 'uiReveal',
+      path: <String>['ui', 'reveal'],
+      summary:
+          'Scroll an identifier into view and report how to reach it next.',
+      usageSuffix:
+          '<identifier> [--container <identifier>] '
+          '[--direction <forward|backward|both>] [--max-steps <n>] '
+          '[--timeout-ms <ms>]',
+      positionalParameters: <String>['identifier'],
+      optionParameters: <String, String>{
+        'container': 'container',
+        'direction': 'direction',
+        'maxSteps': 'max-steps',
+        'timeoutMs': 'timeout-ms',
+      },
+      positiveParameters: <String>{'maxSteps', 'timeoutMs'},
     ),
   ],
 );
@@ -540,10 +697,13 @@ final List<PatchbayCommandDescriptor> patchbayUiProtocolCliCommandDescriptors =
       patchbayUiTextEnterCommandDescriptor,
       patchbayUiSemanticsTreeCommandDescriptor,
       patchbayUiSemanticsActionCommandDescriptor,
+      patchbayUiSemanticsActionByIdentifierCommandDescriptor,
       patchbayUiSemanticsTapCommandDescriptor,
       patchbayUiGesturePressHoldCommandDescriptor,
       patchbayUiGestureDragCommandDescriptor,
       patchbayUiGestureFlingCommandDescriptor,
+      patchbayUiGestureTapCommandDescriptor,
+      patchbayUiRevealCommandDescriptor,
       patchbayUiWaitCommandDescriptor,
       patchbayUiKeepAwakeSetCommandDescriptor,
       patchbayUiKeepAwakeStatusCommandDescriptor,

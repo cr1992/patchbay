@@ -184,9 +184,9 @@ $ (cd packages/patchbay && PUB_HOSTED_URL=https://pub.dev dart pub publish)
 
 ## 10. 人工项：发布收尾（finalize）
 
-**必须在四包实际发布之后执行。** finalize 会把版本计划标为已发布并删除 backlog 行——在包还没上
-pub.dev 时执行等于替未发生的事实背书；而四包是按依赖顺序逐个推、可能中途被拒的，先删行再发布
-会留下 backlog 已清空、版本却没发出去且无处回滚的悬空状态。
+**必须在四包实际发布之后执行。** finalize 会把版本计划标为已发布，并删除已完成条目在
+`docs/backlog.d/` 下的碎片——在包还没上 pub.dev 时执行等于替未发生的事实背书；而四包是按依赖顺序
+逐个推、可能中途被拒的，先删碎片再发布会留下台账已清空、版本却没发出去且无处回滚的悬空状态。
 
 - [ ] 先出计划（只读，不写盘）：
 
@@ -195,11 +195,11 @@ dart run tool/release_finalize.dart X.Y.Z
 ```
 
 - [ ] 逐条核对三档分类：
-      - `ARCHIVE`（`已验证`）：确实随本版发布，可从 backlog 删行；
-      - `EVIDENCE_PENDING`（`待真机验收`）：实现已完成但真机 / 接入方证据未闭合，**保留在 backlog
-        不删**，需显式 `--allow-evidence-pending` 才放行；
-      - `DEFER`：延期条目，清空目标版本退回 `待排期`。`实现中` 不接受批量延期，必须逐条
-        `--defer-item PB-XXX-XX` 点名。
+      - `ARCHIVE`（`已验证`）：确实随本版发布，可删除该条目的碎片；
+      - `EVIDENCE_PENDING`（`待真机验收`）：实现已完成但真机 / 接入方证据未闭合，**碎片保留不删**，
+        需显式 `--allow-evidence-pending` 才放行；
+      - `DEFER`：延期条目，碎片的 `target` 清成 `—`、`status` 退回 `待排期`。`实现中` 不接受批量
+        延期，必须逐条 `--defer-item PB-XXX-XX` 点名。
 - [ ] 核对无误后执行：
 
 ```console

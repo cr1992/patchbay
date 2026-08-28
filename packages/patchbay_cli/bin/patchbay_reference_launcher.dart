@@ -1,4 +1,12 @@
-// 宿主侧会话声明器的参考实现。仓内 example 用它，接入方可以照抄。
+// 宿主侧会话声明器的参考实现，仓内 example 预检用它。
+//
+// **接入方不要照抄本文件。** 它写的是「被 `patchbay launch` 监督的子进程如何声明自己」，
+// 依赖 launch context 注入的 launchId / ownerPid / workspace，并且直接用了包内 `src/`
+// 实现——PB-050-13 之后 `src/` 不是公共 API，外部包 import 它属于 implementation import。
+// 自己起 App、不走 `patchbay launch` 的接入方改用 CLI 命令登记会话（PB-050-27）：
+//   patchbay session register --ws-uri <uri> --application-id <id> \
+//     --device-id <id> --process-id <pid> [<session-id>]
+//   patchbay session unregister <session-id>   # 退出路径上清理
 //
 // 为什么需要它：权限写操作（`normalize` / `exercise` / `fail`）只接受 `--session`，也就是
 // 必须存在 launcher 会话库里的一条活动记录；而记录**由被 `patchbay launch` 监督的子进程
@@ -16,7 +24,10 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/platform/process_utils.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 
 Future<int> main(List<String> arguments) async {
   final Map<String, String> options = _parse(arguments);
@@ -95,6 +106,10 @@ Future<int> main(List<String> arguments) async {
   // 先声明一条 pending 记录，再去等 URI。顺序不能颠倒：`patchbay launch` 有自己的
   // 声明窗口，等 App 起来再声明会让它在子进程还在构建时就判 `sessionNotDeclared` 失败。
   // 显式 pending 状态就是为这段"还没有传输"的时间存在的——不用空 URI 去暗示启动中。
+  // workspace 归属由 `patchbay launch` 在启动本进程前算好，经 launch context 注入；
+  // 本程序不自己推断，也不用 `--project` 覆盖它——子进程改 cwd 不该改变会话归属。
+  // 老 launcher（不注入 workspace）下 context.workspace 为 null，这里照旧写 legacy
+  // 记录，不伪造身份。
   final PatchbaySessionRecord pending = PatchbaySessionRecord(
     sessionId: sessionId,
     applicationId: applicationId,
@@ -106,12 +121,19 @@ Future<int> main(List<String> arguments) async {
     wsUri: null,
     buildMode: buildMode,
     createdAt: DateTime.now().toUtc(),
-    workspacePath: project.path,
+    workspacePath: context.workspace?.canonicalRoot ?? project.path,
     deviceId: device,
     state: PatchbaySessionStatus.pending,
     ownerPid: context.ownerPid,
     launchId: context.launchId,
     observedAtMs: DateTime.now().millisecondsSinceEpoch,
+    // 启动身份在记录创建时采集一次；采集不到保持 null（老记录语义，纯 PID 判定）。
+    processStartTime: PlatformProcessUtils.processStartTimeSignature(app.pid),
+    workspaceIdentityVersion: context.workspace == null
+        ? null
+        : patchbayWorkspaceIdentityVersion,
+    workspaceKind: context.workspace?.kind,
+    workspaceId: context.workspace?.workspaceId,
   );
   store.write(pending);
   declared = true;

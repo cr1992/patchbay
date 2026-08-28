@@ -45,10 +45,13 @@ void main() {
     'patchbay.job.wait',
     'ui.semantics.tree',
     'ui.semantics.action',
+    'ui.semantics.actionByIdentifier',
     'ui.semantics.tap',
     'ui.gesture.pressHold',
     'ui.gesture.drag',
     'ui.gesture.fling',
+    'ui.gesture.tap',
+    'ui.reveal',
     'ui.text.set',
     'ui.text.enter',
     'navigation.catalog',
@@ -304,6 +307,14 @@ void main() {
                   'arguments': args,
                 },
               ).toJson(),
+              'ui.semantics.actionByIdentifier' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'dispatched',
+                  'source': 'uiObserved',
+                  'arguments': args,
+                },
+              ).toJson(),
               // Both arms exist so the cross-process test can prove the CLI
               // carries an identifier through and surfaces a rejection's
               // details instead of flattening it to a bare code.
@@ -338,11 +349,40 @@ void main() {
               ).toJson(),
               'ui.gesture.pressHold' ||
               'ui.gesture.drag' ||
-              'ui.gesture.fling' => PatchbayInvocation.accepted(
+              'ui.gesture.fling' ||
+              'ui.gesture.tap' => PatchbayInvocation.accepted(
                 requestId: requestId,
                 payload: <String, Object?>{
                   'outcome': 'dispatched',
                   'source': 'uiObserved',
+                  'arguments': args,
+                },
+              ).toJson(),
+              // PB-050-17：回一个形状正确的 revealed payload，让跨进程测试能
+              // 断言 CLI 把 identifier 与预算参数原样带过去，并把 `containers`
+              // 这个复数字段完整透出。
+              'ui.reveal' => PatchbayInvocation.accepted(
+                requestId: requestId,
+                payload: <String, Object?>{
+                  'outcome': 'revealed',
+                  'source': 'uiObserved',
+                  'identifier': args['identifier'],
+                  'steps': 1,
+                  'elapsedMs': 3,
+                  'containers': const <Object?>[
+                    <String, Object?>{
+                      'nodeId': 7,
+                      'generation': 2,
+                      'steps': 1,
+                      'direction': 'forward',
+                      'extentGrowthSteps': 0,
+                    },
+                  ],
+                  'nodeId': 11,
+                  'generation': 4,
+                  'reachability': 'pointer',
+                  'beforeTreeRevision': 1,
+                  'afterTreeRevision': 2,
                   'arguments': args,
                 },
               ).toJson(),

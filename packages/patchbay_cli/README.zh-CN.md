@@ -13,17 +13,52 @@
 从 pub.dev 安装 CLI，并与 App 侧使用的版本保持一致：
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.1
+$ dart pub global activate patchbay_cli 0.5.0
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```
 
-三种安装形态的取舍（含 Release 预编译二进制、启动耗时对比，以及「在接入方仓目录里
+三种安装形态的取舍（含 Release 预编译二进制、运行时要求，以及「在接入方仓目录里
 `dart run patchbay_cli:patchbay` 会解析到该仓 pin 的版本」这个坑）见
 [使用指南的安装节](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)。改 CLI 本身时，`dart run tool/build_cli.dart`
 把当前工作树编成 AOT 可执行文件，产物落在 `build/`。
 
 以下示例统一写 `dart run bin/patchbay.dart`（包内开发姿势）；全局安装后可等价替换为 `patchbay`。
+
+## 进程模型与工作流选择
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Patchbay CLI 的一次性命令、repl 与 launch 生命周期">
+</p>
+
+App 与 CLI 是两个生命周期：普通命令请求一次后退出，App 继续运行；`repl` 只复用连接；`launch`
+只负责启动、发现和监督 App/session。`launch` 与 `repl` 可以配合，`logs tail` 也是有界长轮询，
+不是无限 `tail -f`。
+
+选择、退出条件和双终端示例以
+[使用指南的「先选工作流」](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流)为唯一事实源；
+本包 README 不再复制一份容易漂移的表格。
+
+## Dart 入口
+
+驱动 Patchbay 的稳定方式是可执行文件加 `--json`。只有在进程边界确实碍事时才需要下面两个小
+library，它们合起来就是本包**全部**的公共源码面——其余实现都在 `lib/src/` 下，属于随时可变的
+实现细节。
+
+```dart
+// 在进程内跑一次 CLI 调用，读它的退出码。
+import 'package:patchbay_cli/patchbay_cli.dart'; // runPatchbayCli, PatchbayExitCode
+
+// 需要从 Dart 里持有一条连接，而不是每条命令起一次进程时。
+import 'package:patchbay_cli/patchbay_client.dart';
+// PatchbayClient, PatchbaySnapshotDiffClient, PatchbayRuntimeIdentity,
+// PatchbayProtocolException, PatchbayTransportException, PatchbaySnapshotRequest,
+// connectPatchbayVmService, connectPatchbayDirect
+```
+
+launcher、session、trace、doctor、repl、manifest 与权限 driver 的实现不可 import：请走 CLI 命令
+与它们的稳定 JSON。不经 `patchbay launch` 启动的 App 用 `patchbay session register` 登记会话，
+而不是自己写会话记录。
 
 ## 命令速查
 
@@ -83,6 +118,8 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay permission reset <permission>` | local 显式声明 | — |
 | `patchbay permission status <permission>` | local 显式声明 | — |
 | `patchbay repl` | client 显式声明 | — |
+| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local 显式声明 | — |
+| `patchbay session unregister <session-id>` | local 显式声明 | — |
 | `patchbay session use <session-id> \| --clear` | local 显式声明 | — |
 | `patchbay sessions list` | local 显式声明 | — |
 | `patchbay sessions prune` | local 显式声明 | — |
@@ -96,19 +133,22 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay trace show <trace-id>` | local 显式声明 | — |
 | `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — |
 | `patchbay trace stop [trace-id]` | local 显式声明 | — |
-| `patchbay ui focus-tree` | client 显式声明 | — |
+| `patchbay ui action <identifier> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.actionByIdentifier` |
+| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
 | `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` |
+| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | 协议 descriptor | `ui.gesture.tap` |
 | `patchbay ui inspect off` | 协议 descriptor | `ui.inspect.select` |
 | `patchbay ui inspect on [--ttl-ms <ms>]` | 协议 descriptor | `ui.inspect.select` |
 | `patchbay ui inspect status` | 协议 descriptor | `ui.inspect.status` |
 | `patchbay ui keep-awake off` | 协议 descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake on [--lease-ms <ms>]` | 协议 descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree` | client 显式声明 | — |
+| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
+| `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | 协议 descriptor | `ui.reveal` |
 | `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree` | 协议 descriptor | `ui.semantics.tree` |
+| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | 协议 descriptor | `ui.semantics.tree` |
 | `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` |
 | `patchbay ui targets --emit-manifest` | local 显式声明 | — |
 | `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` |
@@ -120,7 +160,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay ui wait semantics-unmounted <identifier>` | 协议 descriptor | `ui.wait` |
 | `patchbay ui wait semantics-value <identifier> <value>` | 协议 descriptor | `ui.wait` |
 | `patchbay ui wait tree-revision <revision>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui widget-tree` | client 显式声明 | — |
+| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
 <!-- PATCHBAY_COMMAND_REFERENCE:END -->
 
 由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：
@@ -220,6 +260,10 @@ stream 每批 timeline event 到达即汇总，触顶马上取消订阅；原始
 过期都是带 details 的稳定拒绝（分别给出已挂载 identifier 清单、候选列表、expected/current），不会用
 空拒绝把调用方推回全树 dump。
 
+`ui action <identifier> <generation> <action> [text]` 为其他公开 Semantics action 提供相同的一步式解析；
+这里 generation 必填，App 在 policy/gate 前后核对同一代际。它只接受 tap、focus、四向 scroll 与
+setText，不接受 `latest` 或自动重试；敏感 setText 使用全局 `--stdin`。
+
 ### UI 目标声明对账
 
 `ui verify-manifest <file>` 读一份接入方维护的 JSON 或 YAML manifest：`catalogTarget` 与 catalog 的
@@ -249,6 +293,7 @@ fail-closed。能力缺失、tree 截断、payload 不完整分别有稳定 prot
 ```text
 dart run bin/patchbay.dart --ws-uri <uri> --json repl <<'EOF'
 identity
+describe ui.capture
 ui semantics tree
 ui tap login.submit
 EOF
@@ -257,6 +302,7 @@ EOF
 repl 建一次连接，然后逐行执行 typed 命令，语法与一次性调用完全相同。每行输出自带 `exitCode`
 （`--json` 下是一行一个 JSON 信封，否则是 `[n] exit=<code> <摘要>`）：进程退出码承载不了逐条结果，
 会话码只描述会话本身——干净跑完是 `0`，被错误终止则是该错误的类别。
+`describe <service-command>` 可直接在会话内读取 live catalog；它不会调用所描述的命令。
 
 被拒绝或类型化失败的行不终止会话；transport / protocol / session 错误终止，因为它们说明复用的连接或
 对端已经不是操作者选定的那个，CLI 不会悄悄重连。
@@ -422,5 +468,7 @@ navigation、wait、capture、结构化日志与 direct 仅在运行时 catalog/
 不通过 ADB、坐标点击或 Widget 文本猜测补齐缺失能力，也不会替 App 自动启动 direct listener 或分发
 bearer。日志是 consumer 已脱敏的 App 记录；capture 只证明 Flutter repaint boundary 的合成结果，不含
 系统权限弹窗，PlatformView 也可能缺失。
+系统权限编排只通过显式外部 driver opt-in；设备、runner、签名或语言条件不满足时 fail-closed。详见
+[平台权限 driver](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md)。
 三树与 action 的稳定命令、passthrough 边界和退出条件见
 [`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。

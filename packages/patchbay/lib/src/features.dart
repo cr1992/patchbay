@@ -58,4 +58,7 @@ enum PatchbayFeature {
   /// label the result as a legacy immediate capture. It must not infer support
   /// from an `invalidArguments` response because that shape has other causes.
   captureAfterFrames,
+
+  /// Invocation supports deadline signals, owner tokens and explicit cancel.
+  invocationCancellation,
 }

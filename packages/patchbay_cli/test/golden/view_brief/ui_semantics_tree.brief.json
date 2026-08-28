@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "requestId": "req-semantics-1",
+  "admission": "accepted",
+  "payload": {
+    "outcome": "observed",
+    "source": "uiObserved",
+    "treeRevision": 87,
+    "rootNodeId": 1,
+    "truncated": false,
+    "nodeCount": 2
+  },
+  "localView": {
+    "view": "brief",
+    "projection": "ui.semantics.tree",
+    "omitted": ["$.notice", "$.payload.nodes"],
+    "expand": "--view full"
+  }
+}

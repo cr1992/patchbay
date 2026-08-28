@@ -153,8 +153,10 @@ final class PatchbayLauncherSupervisor {
     PatchbayLaunchDeadlineFactory? deadlineFactory,
     PatchbayLaunchKeepAwakeRequest? keepAwakeRequest,
     PatchbayLaunchRandom? random,
+    PatchbayWorkspaceIdentityProbe? workspaceProbe,
     this.budget = patchbayLaunchDefaultBudget,
-  }) : _startChild = startChild ?? _startProcess,
+  }) : _workspaceProbe = workspaceProbe ?? PatchbayWorkspaceIdentity.current,
+       _startChild = startChild ?? _startProcess,
        _identityProbe = identityProbe ?? _probeIdentity,
        _clock = clock ?? DateTime.now,
        _sleep = sleep ?? Future<void>.delayed,
@@ -174,6 +176,7 @@ final class PatchbayLauncherSupervisor {
   final PatchbayLaunchDeadlineFactory _deadlineFactory;
   final PatchbayLaunchKeepAwakeRequest _keepAwakeRequest;
   final PatchbayLaunchRandom _random;
+  final PatchbayWorkspaceIdentityProbe _workspaceProbe;
   final Duration budget;
 
   Future<PatchbayLaunchResult> run({
@@ -225,6 +228,12 @@ final class PatchbayLauncherSupervisor {
     }
 
     emit('starting');
+    // Computed once, here, before the child exists: the workspace a session
+    // belongs to is decided by where `patchbay launch` was run, so a child
+    // that changes its own working directory cannot change its answer. An
+    // unavailable identity is not fatal -- the child then declares a legacy
+    // record, exactly as an older launcher would.
+    final PatchbayWorkspaceIdentity? workspace = _workspaceProbe();
     final PatchbayLaunchChild child;
     try {
       child = await _startChild(command, <String, String>{
@@ -232,6 +241,7 @@ final class PatchbayLauncherSupervisor {
         PatchbayLaunchContext.sessionDirectoryKey: store.directory.path,
         PatchbayLaunchContext.launchIdKey: launchId,
         PatchbayLaunchContext.ownerPidKey: '$ownerPid',
+        if (workspace != null) ...workspace.toEnvironment(),
       });
     } on Object {
       final frame = emit('failed', reasonCode: 'childStartFailed');

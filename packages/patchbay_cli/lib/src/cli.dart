@@ -18,9 +18,12 @@ import 'doctor.dart';
 import 'keep_awake_policy.dart';
 import 'launcher.dart';
 import 'legacy_payload_confirmation.dart';
+import 'output/brief_view.dart';
+import 'output/local_artifact.dart';
 import 'output/output_formatter.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
+import 'registry/argument_decoder.dart';
 import 'repl.dart';
 import 'result.dart';
 import 'rpc_timeout.dart';
@@ -30,18 +33,23 @@ import 'trace.dart';
 import 'trace/trace_context.dart';
 import 'ui_manifest.dart';
 
-export 'commands/command_parser.dart';
-// 拆分把这个常量从 cli.dart 挪进了 runners/，若不再导出就会从公共面消失——
-// 那是补丁版不能接受的移除。
-export 'runners/snapshot_runner.dart'
-    show patchbaySnapshotSelectorUnsupportedCode;
-
 /// Runs one CLI invocation.
+///
+/// With [PatchbayExitCode] this is the whole public Dart surface of the CLI
+/// (PB-050-13): an embedder hands over an argument vector and reads back the
+/// process exit code. Everything else a run needs — transports, session
+/// records, permission drivers — is named on the command line.
+Future<int> runPatchbayCli(List<String> arguments) =>
+    runPatchbayCliWithSeams(arguments);
+
+/// The seam-carrying entry point, internal to this package.
 ///
 /// [connect], [replInput], [output] and [errorOutput] are test seams. They let
 /// a test observe how many times a session actually dials the App and drive a
-/// repl without a terminal; production callers pass none of them.
-Future<int> runPatchbayCli(
+/// repl without a terminal; production callers pass none of them. DG-050-07
+/// froze the public library at two symbols, so this entry point is deliberately
+/// not exported and its shape carries no compatibility promise.
+Future<int> runPatchbayCliWithSeams(
   List<String> arguments, {
   Future<PatchbayClient> Function(ArgResults options)? connect,
   Stream<String>? replInput,
@@ -79,6 +87,10 @@ Future<int> runPatchbayCli(
   }
 
   final bool json = parsed.flag('json');
+  final bool repl = _isRepl(parsed);
+  final String sessionView = parsed.option('view') ?? patchbayViewFull;
+  final PatchbayLocalArtifactWriter outputWriter =
+      PatchbayLocalArtifactWriter();
   PatchbayKeepAwakePolicy? keepAwakePolicy;
   PatchbayKeepAwakePolicy resolveKeepAwakePolicy() =>
       keepAwakePolicy ??= PatchbayKeepAwakePolicy.resolve(
@@ -94,6 +106,11 @@ Future<int> runPatchbayCli(
       return PatchbayExitCode.accepted;
     }
     PatchbayConnector.validateGlobalShape(parsed);
+    if (sessionView == patchbayViewBrief && !json) {
+      // Human summaries are not brief's other rendering: silently ignoring
+      // this would let an operator believe they got the thinned view.
+      throw const FormatException('--view brief requires --json');
+    }
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
     }
@@ -199,7 +216,6 @@ Future<int> runPatchbayCli(
       );
       return outcome.exitCode;
     }
-    final bool repl = _isRepl(parsed);
     if (repl) {
       PatchbayFriendlyCommandRegistry.resolve(parsed.rest, parsed);
       _validateReplShape(parsed);
@@ -216,6 +232,14 @@ Future<int> runPatchbayCli(
       rpcTimeout: rpcTimeout,
     );
     if (repl) {
+      // The run a line opened stays open until that line has been rendered:
+      // PB-050-20 spills at render time, so closing the run inside `execute`
+      // would put `command.finished` ahead of the line's own
+      // `artifact.attached`. The session calls `onLineRendered` once the line
+      // is genuinely done.
+      PatchbayTraceRecorder? lineTrace;
+      String? lineRunId;
+      var lineExitCode = PatchbayExitCode.accepted;
       return await PatchbayReplSession(
         parser: parser,
         execute: (ArgResults line) async {
@@ -235,26 +259,58 @@ Future<int> runPatchbayCli(
             await _executeOnce(connection, line),
             resolveKeepAwakePolicy(),
           );
-          if (runId != null) trace!.commandFinished(runId, outcome.exitCode);
+          lineTrace = trace;
+          lineRunId = runId;
+          lineExitCode = outcome.exitCode;
           return PatchbayReplOutcome(outcome.response, outcome.exitCode);
+        },
+        onLineRendered: () {
+          final String? runId = lineRunId;
+          lineRunId = null;
+          if (runId != null) lineTrace!.commandFinished(runId, lineExitCode);
         },
         out: out,
         err: error,
         json: json,
+        outputWriter: outputWriter,
+        sessionView: sessionView,
+        environment: environment,
       ).run(
         replInput ??
             stdin.transform(utf8.decoder).transform(const LineSplitter()),
       );
     }
+    // F6 (PB-050-20 follow-up): a malformed --max-inline-bytes must fail
+    // before the RPC it would only ever matter for is sent. Parsing it only
+    // at render time, after `_executeOnce` had already invoked the App, let
+    // a bad value dispatch the command anyway and report a usage failure on
+    // a side effect that had already happened.
+    ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes');
     final Outcome outcome = await _renewKeepAwakeAfterSuccess(
       connection,
       parsed,
       await _executeOnce(connection, parsed, manifest: manifest),
       resolveKeepAwakePolicy(),
     );
+    final Map<String, Object?> rendered = await _finishRendering(
+      writer: outputWriter,
+      spec: PatchbayFriendlyCommandRegistry.specFor(parsed.rest),
+      response: outcome.response,
+      exitCode: outcome.exitCode,
+      outputPath: parsed.option('output'),
+      force: parsed.flag('force'),
+      maxInlineBytes:
+          ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes') ??
+          patchbayDefaultMaxInlineBytes,
+      view: sessionView,
+      renderDocument: (Map<String, Object?> candidate) => json
+          ? const JsonEncoder.withIndent('  ').convert(candidate)
+          : (outcome.summary ?? patchbayResponseSummary(candidate)),
+      environment: environment,
+    );
     OutputFormatter.writeOutput(
       out,
-      outcome.response,
+      rendered,
       json: json,
       summary: outcome.summary,
     );
@@ -264,6 +320,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: failure.message,
       envelope: _usageEnvelope(failure),
       exitCode: PatchbayExitCode.usage,
@@ -273,6 +330,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay protocol error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code),
       exitCode: PatchbayExitCode.protocol,
@@ -282,6 +340,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay protocol error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.protocol,
@@ -292,6 +351,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: unresponsive
           ? 'patchbay transport error: ${failure.code}\n'
                 '  $patchbayAppUnresponsiveHint'
@@ -299,8 +359,11 @@ Future<int> runPatchbayCli(
       envelope: PatchbayErrorEnvelope(
         failure.code,
         details: unresponsive
-            ? const <String, Object?>{'hint': patchbayAppUnresponsiveHint}
-            : const <String, Object?>{},
+            ? <String, Object?>{
+                'hint': patchbayAppUnresponsiveHint,
+                ...failure.details,
+              }
+            : failure.details,
       ),
       exitCode: PatchbayExitCode.transport,
     );
@@ -316,6 +379,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: message.toString(),
       envelope: PatchbayErrorEnvelope(
         failure.code,
@@ -333,6 +397,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay job failed: waitTimeout',
       envelope: PatchbayErrorEnvelope(
         'waitTimeout',
@@ -345,6 +410,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: failure.sentence,
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.usage,
@@ -354,6 +420,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay sensitive input error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code),
       exitCode: PatchbayExitCode.usage,
@@ -366,6 +433,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay permission driver error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: failure.code == 'permissionTimeoutInvalid'
@@ -377,6 +445,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay trace error: ${failure.code}',
       envelope: PatchbayErrorEnvelope(failure.code, details: failure.details),
       exitCode: PatchbayExitCode.protocol,
@@ -386,6 +455,7 @@ Future<int> runPatchbayCli(
       out,
       error,
       json: json,
+      compactJson: repl,
       message: 'patchbay transport error: ${failure.runtimeType}',
       envelope: PatchbayErrorEnvelope(
         'transportError',
@@ -435,7 +505,7 @@ Future<int> _runPatchbayCliWithTrace(
       );
     }
     return runZoned(
-      () => runPatchbayCli(
+      () => runPatchbayCliWithSeams(
         arguments,
         connect: connect,
         replInput: replInput,
@@ -460,7 +530,7 @@ Future<int> _runPatchbayCliWithTrace(
     final String? traceId = store.resolve(parsed.option('trace'));
     if (traceId == null) {
       return runZoned(
-        () => runPatchbayCli(
+        () => runPatchbayCliWithSeams(
           arguments,
           connect: connect,
           replInput: replInput,
@@ -480,11 +550,12 @@ Future<int> _runPatchbayCliWithTrace(
       spec.path.join(' '),
       transport: _traceTransport(parsed),
     );
-    if (_traceSessionRef(parsed) case final Map<String, Object?> sessionRef) {
+    if (patchbayTraceSessionRef(parsed)
+        case final Map<String, Object?> sessionRef) {
       recorder.sessionObserved(sessionRef);
     }
     final int exitCode = await runZoned(
-      () => runPatchbayCli(
+      () => runPatchbayCliWithSeams(
         arguments,
         connect: connect,
         replInput: replInput,
@@ -642,41 +713,6 @@ String _traceTransport(ArgResults parsed) {
   return 'vmService';
 }
 
-Map<String, Object?>? _traceSessionRef(ArgResults parsed) {
-  if (parsed.option('direct-endpoint') != null) {
-    return <String, Object?>{
-      'mode': 'direct',
-      'applicationId': parsed.option('direct-application-id'),
-      'appInstanceId': parsed.option('direct-app-instance-id'),
-    };
-  }
-  if (parsed.option('session') case final String sessionId) {
-    return <String, Object?>{'mode': 'launcher', 'sessionId': sessionId};
-  }
-  if (parsed.option('ws-uri') != null) {
-    return const <String, Object?>{'mode': 'explicitVmService'};
-  }
-  final PatchbaySessionStore sessions = PatchbaySessionStore(
-    parsed.option('session-dir'),
-  );
-  final List<PatchbaySessionRecord> records = sessions.readAll();
-  final String? selected = sessions.readSelection();
-  PatchbaySessionRecord? record;
-  for (final PatchbaySessionRecord candidate in records) {
-    if (candidate.sessionId == selected) record = candidate;
-  }
-  record ??= records.length == 1 ? records.single : null;
-  if (record == null) return null;
-  return <String, Object?>{
-    'mode': 'launcher',
-    'sessionId': record.sessionId,
-    'applicationId': record.applicationId,
-    'appInstanceId': record.appInstanceId,
-    'deviceId': record.deviceId,
-    'buildMode': record.buildMode,
-  };
-}
-
 ArgResults? _tryParseForTrace(List<String> arguments) {
   try {
     return patchbayCliParser().parse(arguments);
@@ -699,15 +735,60 @@ int _fail(
   StringSink out,
   StringSink error, {
   required bool json,
+  bool compactJson = false,
   required String message,
   required PatchbayErrorEnvelope envelope,
   required int exitCode,
 }) {
   error.writeln(message);
   if (json) {
-    out.writeln(const JsonEncoder.withIndent('  ').convert(envelope.toJson()));
+    out.writeln(
+      compactJson
+          ? jsonEncode(envelope.toJson())
+          : const JsonEncoder.withIndent('  ').convert(envelope.toJson()),
+    );
   }
   return exitCode;
+}
+
+/// The shared PB-050-20 / PB-050-21 render-time seam: spill first, project
+/// second — the order both proposals' Proposals freeze.
+///
+/// [renderDocument] must render exactly the document this call's rendering
+/// mode would print, unspilled, so the PB-050-20 threshold measures what the
+/// operator would actually have seen (one-shot pretty JSON, one-shot human
+/// summary, repl compact line, or repl human line all measure differently).
+Future<Map<String, Object?>> _finishRendering({
+  required PatchbayLocalArtifactWriter writer,
+  required PatchbayFriendlyCommandSpec? spec,
+  required Map<String, Object?> response,
+  required int exitCode,
+  required String? outputPath,
+  required bool force,
+  required int maxInlineBytes,
+  required String view,
+  required String Function(Map<String, Object?> response) renderDocument,
+  required Map<String, String>? environment,
+}) async {
+  final PatchbayRenderedMemberSpillResult spilled =
+      await maybeSpillRenderedMember(
+        writer: writer,
+        spec: spec,
+        response: response,
+        exitCode: exitCode,
+        explicitOutputPath: outputPath,
+        force: force,
+        maxInlineBytes: maxInlineBytes,
+        renderDocument: renderDocument,
+        environment: environment,
+      );
+  attachSpilledArtifactToTrace(spilled.artifact);
+  if (view != patchbayViewBrief) return spilled.response;
+  return projectPatchbayBriefView(
+    spec: spec,
+    response: spilled.response,
+    exitCode: exitCode,
+  );
 }
 
 PatchbayErrorEnvelope _usageEnvelope(FormatException failure) =>

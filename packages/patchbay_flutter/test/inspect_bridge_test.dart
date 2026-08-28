@@ -701,8 +701,7 @@ Map<String, Object?> _rejection(Map<String, Object?> response) =>
 
 /// A surface with no build mode and no binding, so the rules can be tested.
 final class _FakeInspectorSurface implements PatchbayInspectorSurface {
-  _FakeInspectorSurface({bool selectMode = false, this.unavailableReason})
-    : _selectMode = selectMode;
+  _FakeInspectorSurface({this._selectMode = false, this.unavailableReason});
 
   bool _selectMode;
 

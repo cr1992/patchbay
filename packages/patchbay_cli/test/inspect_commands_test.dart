@@ -1,6 +1,9 @@
 import 'dart:convert';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/command_help.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -60,7 +63,7 @@ _run(List<String> arguments, {FakePatchbayClient? client}) async {
   final FakePatchbayClient connection = client ?? _client();
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     arguments,
     connect: (_) async => connection,
     output: out,

@@ -7,6 +7,11 @@ import 'package:vm_service/vm_service_io.dart';
 import 'request_id.dart';
 import 'performance_profile.dart';
 
+/// The App answered, and the answer broke the protocol.
+///
+/// Distinct from [PatchbayTransportException] on purpose: this one means the
+/// peer was reached and said something the contract does not allow, so a retry
+/// on the same host reproduces it.
 final class PatchbayProtocolException implements Exception {
   const PatchbayProtocolException(
     this.code, {
@@ -23,12 +28,24 @@ final class PatchbayProtocolException implements Exception {
   final Map<String, Object?> details;
 }
 
+/// The App could not be reached, or stopped answering mid-request.
+///
+/// The code names the failure class and never the transport: URIs, tokens and
+/// endpoints must not reach it, for the same reason they never reach stderr.
 final class PatchbayTransportException implements Exception {
-  const PatchbayTransportException(this.code);
+  const PatchbayTransportException(
+    this.code, {
+    this.details = const <String, Object?>{},
+  });
 
   final String code;
+  final Map<String, Object?> details;
 }
 
+/// One host's answer to the identity handshake.
+///
+/// A caller compares it field by field to decide whether the connection it
+/// just opened is the App it meant to reach.
 final class PatchbayRuntimeIdentity {
   const PatchbayRuntimeIdentity({
     required this.schemaVersion,
@@ -119,6 +136,11 @@ Set<String>? patchbayDeclaredFeatures(Map<String, Object?> identity) {
   return <String>{for (final Object? name in value) name! as String};
 }
 
+/// One open connection to a running App, whatever transport reached it.
+///
+/// Every method answers with the decoded Patchbay response document; nothing
+/// here classifies a response into a verdict — that belongs to the caller, and
+/// to the CLI's exit codes.
 abstract interface class PatchbayClient {
   Future<Map<String, Object?>> identity();
   Future<Map<String, Object?>> catalog();
@@ -149,11 +171,39 @@ abstract interface class PatchbaySnapshotDiffClient {
   Future<Map<String, Object?>> snapshotDiff({required int fromRevision});
 }
 
+/// One invocation plus its optional protocol-owned cancellation operation.
+final class PatchbayClientInvocationHandle {
+  PatchbayClientInvocationHandle({
+    required this.response,
+    this.requestCancellation,
+    bool Function()? cancellationSupported,
+  }) : _cancellationSupported =
+           cancellationSupported ?? (() => requestCancellation != null);
+
+  final Future<Map<String, Object?>> response;
+  final Future<Map<String, Object?>> Function()? requestCancellation;
+  final bool Function() _cancellationSupported;
+
+  bool get cancellationSupported => _cancellationSupported();
+}
+
+/// Optional surface used by the timeout wrapper when a feature-aware host
+/// stops answering before an invocation returned a terminal envelope.
+abstract interface class PatchbayCancelableInvocationClient {
+  PatchbayClientInvocationHandle beginInvocation({
+    required String command,
+    required Map<String, Object?> arguments,
+    String? requestId,
+    Duration? deadline,
+  });
+}
+
 final class PatchbayConnection
     implements
         PatchbayClient,
         PatchbayProfilingClient,
-        PatchbaySnapshotDiffClient {
+        PatchbaySnapshotDiffClient,
+        PatchbayCancelableInvocationClient {
   PatchbayConnection._(
     this._service,
     this.isolateId,
@@ -165,6 +215,8 @@ final class PatchbayConnection
   final String isolateId;
   final Set<String> _extensionRPCs;
   final PatchbayRuntimeIdentity runtimeIdentity;
+  final Map<(String, String), _InvocationOwnerTokenLease> _ownerTokens =
+      <(String, String), _InvocationOwnerTokenLease>{};
 
   static const String _inspectorTreeExtension =
       'ext.flutter.inspector.getRootWidgetTree';
@@ -354,23 +406,108 @@ final class PatchbayConnection
     // The VM Service connection has no per-request teardown to protect against,
     // so a declared wait budget changes nothing here.
     Duration? deadline,
-  }) async {
+  }) async => beginInvocation(
+    command: command,
+    arguments: arguments,
+    requestId: requestId,
+    deadline: deadline,
+  ).response;
+
+  @override
+  PatchbayClientInvocationHandle beginInvocation({
+    required String command,
+    required Map<String, Object?> arguments,
+    String? requestId,
+    Duration? deadline,
+  }) {
     if (requestId != null && requestId.isEmpty) {
       throw const PatchbayProtocolException('requestIdValidationFailed');
     }
     final String id = requestId ?? patchbayCliRequestId('vm');
-    final Map<String, Object?> result = await _call(
-      PatchbayServiceHost.invokeMethod,
-      arguments: <String, Object?>{
-        'command': command,
-        'args': jsonEncode(arguments),
-        'requestId': id,
-      },
+    final bool cooperative =
+        runtimeIdentity.features?.contains(
+          PatchbayFeature.invocationCancellation.name,
+        ) ??
+        false;
+    final _InvocationOwnerTokenLease? lease = cooperative
+        ? _acquireOwnerToken(command, id)
+        : null;
+    final Future<Map<String, Object?>> response = () async {
+      var succeeded = false;
+      late final Map<String, Object?> result;
+      try {
+        result = await _call(
+          PatchbayServiceHost.invokeMethod,
+          arguments: <String, Object?>{
+            'command': command,
+            'args': jsonEncode(arguments),
+            'requestId': id,
+            if (cooperative && deadline != null)
+              'deadlineMs': deadline.inMilliseconds,
+            if (lease != null) 'ownerToken': lease.token,
+          },
+        );
+        succeeded = true;
+      } finally {
+        if (lease != null) _releaseOwnerToken(command, id, lease, succeeded);
+      }
+      if (result['requestId'] != id) {
+        throw const PatchbayProtocolException('requestIdMismatch');
+      }
+      return result;
+    }();
+    return PatchbayClientInvocationHandle(
+      response: response,
+      requestCancellation: lease == null
+          ? null
+          : () => _call(
+              PatchbayServiceHost.cancelInvocationMethod,
+              arguments: <String, Object?>{
+                'command': command,
+                'requestId': id,
+                'ownerToken': lease.token,
+              },
+            ),
     );
-    if (result['requestId'] != id) {
-      throw const PatchbayProtocolException('requestIdMismatch');
+  }
+
+  _InvocationOwnerTokenLease _acquireOwnerToken(
+    String command,
+    String requestId,
+  ) {
+    final (String, String) key = (command, requestId);
+    final _InvocationOwnerTokenLease? existing = _ownerTokens[key];
+    if (existing != null) {
+      existing.users += 1;
+      return existing;
     }
-    return result;
+    if (_ownerTokens.length >= 256) {
+      (String, String)? evicted;
+      for (final MapEntry<(String, String), _InvocationOwnerTokenLease> entry
+          in _ownerTokens.entries) {
+        if (entry.value.users != 0) continue;
+        evicted = entry.key;
+        break;
+      }
+      if (evicted != null) _ownerTokens.remove(evicted);
+    }
+    final _InvocationOwnerTokenLease created = _InvocationOwnerTokenLease(
+      patchbayGenerateOwnerToken(),
+    );
+    _ownerTokens[key] = created;
+    return created;
+  }
+
+  void _releaseOwnerToken(
+    String command,
+    String requestId,
+    _InvocationOwnerTokenLease lease,
+    bool succeeded,
+  ) {
+    lease.users -= 1;
+    if (succeeded && lease.users == 0) {
+      _ownerTokens.remove((command, requestId));
+    }
   }
 
   Future<Map<String, Object?>> _call(
@@ -460,4 +597,11 @@ final class PatchbayConnection
       path: path,
     );
   }
+}
+
+final class _InvocationOwnerTokenLease {
+  _InvocationOwnerTokenLease(this.token);
+
+  final String token;
+  int users = 1;
 }

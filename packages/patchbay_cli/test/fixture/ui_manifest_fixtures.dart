@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
 import 'package:test/test.dart';
 
 import 'fake_client.dart';
@@ -128,7 +128,7 @@ Future<CliRun> runManifestCli(
     ..writeAsStringSync(manifest);
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     <String>[if (json) '--json', 'ui', 'verify-manifest', file.path],
     connect: (_) async => client,
     output: out,
@@ -143,7 +143,7 @@ Future<CliRun> emitManifestCli(
 }) async {
   final StringBuffer out = StringBuffer();
   final StringBuffer err = StringBuffer();
-  final int exitCode = await runPatchbayCli(
+  final int exitCode = await runPatchbayCliWithSeams(
     <String>[if (json) '--json', 'ui', 'targets', '--emit-manifest'],
     connect: (_) async => client,
     output: out,

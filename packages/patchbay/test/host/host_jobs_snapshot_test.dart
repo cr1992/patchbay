@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:patchbay/patchbay.dart';
 import 'package:test/test.dart';
 
@@ -219,58 +220,80 @@ void main() {
     },
   );
 
-  test('cancelAll converges per job instead of serialising timeouts', () async {
-    const Duration timeout = Duration(milliseconds: 300);
-    final PatchbayJobRegistry jobs = PatchbayJobRegistry(
-      cancellationTimeout: timeout,
-    );
-    final Completer<Map<String, Object?>> bodies =
-        Completer<Map<String, Object?>>();
-    final Completer<void> neverConfirms = Completer<void>();
-    final String stuckFirst = jobs.start(
-      source: PatchbayFactSource.appRecorded,
-      body: () => bodies.future,
-      cancel: () => neverConfirms.future,
-    );
-    final String stuckSecond = jobs.start(
-      source: PatchbayFactSource.appRecorded,
-      body: () => bodies.future,
-      cancel: () => neverConfirms.future,
-    );
-    final String confirming = jobs.start(
-      source: PatchbayFactSource.appRecorded,
-      body: () => bodies.future,
-      cancel: () {},
-    );
-    final String uncancellable = jobs.start(
-      source: PatchbayFactSource.appRecorded,
-      body: () => bodies.future,
-    );
+  test('cancelAll converges per job instead of serialising timeouts', () {
+    // 逻辑时钟而不是墙钟：cancelAll 的超时走 Zone 计时器（Future.timeout），
+    // 在 FakeAsync 里恰好推进一个 cancellationTimeout 就必须收敛——并行收敛在
+    // 逻辑时刻 300ms 完成，串行则要到 600ms 才可能完成，鉴别力比原来的
+    // 「Stopwatch < timeout*2」严格，且不再随 CI runner 负载漂移（sdk_floor lane
+    // 首跑 Linux 时曾因冷环境把 845ms 的真实耗时打穿 600ms 的墙钟断言）。
+    FakeAsync().run((FakeAsync async) {
+      const Duration timeout = Duration(milliseconds: 300);
+      final PatchbayJobRegistry jobs = PatchbayJobRegistry(
+        cancellationTimeout: timeout,
+      );
+      final Completer<Map<String, Object?>> bodies =
+          Completer<Map<String, Object?>>();
+      final Completer<void> neverConfirms = Completer<void>();
+      final String stuckFirst = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+        cancel: () => neverConfirms.future,
+      );
+      final String stuckSecond = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+        cancel: () => neverConfirms.future,
+      );
+      final String confirming = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+        cancel: () {},
+      );
+      final String uncancellable = jobs.start(
+        source: PatchbayFactSource.appRecorded,
+        body: () => bodies.future,
+      );
 
-    final Stopwatch elapsed = Stopwatch()..start();
-    final Map<String, PatchbayJobCancelOutcome> outcomes = await jobs.cancelAll(
-      reason: 'sessionClosed',
-    );
-    elapsed.stop();
+      Map<String, PatchbayJobCancelOutcome>? outcomes;
+      unawaited(
+        jobs.cancelAll(reason: 'sessionClosed').then((
+          Map<String, PatchbayJobCancelOutcome> value,
+        ) {
+          outcomes = value;
+        }),
+      );
 
-    expect(elapsed.elapsed, lessThan(timeout * 2));
-    expect(outcomes, <String, PatchbayJobCancelOutcome>{
-      stuckFirst: PatchbayJobCancelOutcome.timedOut,
-      stuckSecond: PatchbayJobCancelOutcome.timedOut,
-      confirming: PatchbayJobCancelOutcome.cancelled,
-      uncancellable: PatchbayJobCancelOutcome.notCancellable,
+      // 差一个 microtask 都不该提前完成；推满一个 timeout 后必须已完成。
+      async.elapse(timeout - const Duration(milliseconds: 1));
+      expect(outcomes, isNull, reason: 'cancelAll 不应早于 cancellationTimeout 完成');
+      async.elapse(const Duration(milliseconds: 1));
+      expect(
+        outcomes,
+        isNotNull,
+        reason:
+            '并行收敛应在恰好一个 cancellationTimeout 的逻辑时刻完成；'
+            '串行化会需要每个卡死 job 各占一个 timeout',
+      );
+
+      expect(outcomes, <String, PatchbayJobCancelOutcome>{
+        stuckFirst: PatchbayJobCancelOutcome.timedOut,
+        stuckSecond: PatchbayJobCancelOutcome.timedOut,
+        confirming: PatchbayJobCancelOutcome.cancelled,
+        uncancellable: PatchbayJobCancelOutcome.notCancellable,
+      });
+      expect(jobs.snapshot(stuckFirst)?.terminal, isFalse);
+      expect(jobs.snapshot(stuckSecond)?.terminal, isFalse);
+      expect(jobs.snapshot(uncancellable)?.terminal, isFalse);
+      expect(
+        jobs.snapshot(confirming)?.events.last.phase,
+        PatchbayJobPhase.cancelled,
+      );
+      expect(jobs.runningJobs, 3);
+
+      neverConfirms.complete();
+      bodies.complete(const <String, Object?>{});
+      async.flushMicrotasks();
     });
-    expect(jobs.snapshot(stuckFirst)?.terminal, isFalse);
-    expect(jobs.snapshot(stuckSecond)?.terminal, isFalse);
-    expect(jobs.snapshot(uncancellable)?.terminal, isFalse);
-    expect(
-      jobs.snapshot(confirming)?.events.last.phase,
-      PatchbayJobPhase.cancelled,
-    );
-    expect(jobs.runningJobs, 3);
-
-    neverConfirms.complete();
-    bodies.complete(const <String, Object?>{});
   });
 
   test(

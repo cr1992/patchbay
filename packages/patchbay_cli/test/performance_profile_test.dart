@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/direct_connection.dart';
+import 'package:patchbay_cli/src/performance_profile.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
 
@@ -350,7 +354,7 @@ void main() {
       },
     );
     final StringBuffer out = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>[
         '--json',
         '--duration-ms',
@@ -379,7 +383,7 @@ void main() {
       handle: (_, _) async => fakeCommandNotRegistered(),
     );
     final StringBuffer out = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>['--json', '--duration-ms', '1', 'perf', 'profile'],
       connect: (_) async => fake,
       output: out,
@@ -437,7 +441,7 @@ void main() {
         handle: (_, _) async => fail('net profile must not invoke the App'),
       );
       final StringBuffer out = StringBuffer();
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>['--json', 'net', 'profile'],
         connect: (_) async => fake,
         output: out,

@@ -2,9 +2,13 @@ import 'dart:convert';
 
 import 'package:args/args.dart';
 
+import 'artifact_download.dart';
 import 'command_help.dart';
 import 'command_registry.dart';
 import 'doctor.dart';
+import 'output/brief_view.dart';
+import 'output/local_artifact.dart';
+import 'registry/argument_decoder.dart';
 import 'result.dart';
 import 'ui_manifest.dart';
 
@@ -105,17 +109,45 @@ final class PatchbayReplSession {
     required StringSink out,
     required StringSink err,
     required bool json,
+    required PatchbayLocalArtifactWriter outputWriter,
+    String sessionView = patchbayViewFull,
+    Map<String, String>? environment,
+    void Function()? onLineRendered,
   }) : _parser = parser,
        _execute = execute,
        _out = out,
        _err = err,
-       _json = json;
+       _json = json,
+       _outputWriter = outputWriter,
+       _sessionView = sessionView,
+       _environment = environment,
+       _onLineRendered = onLineRendered;
 
   final ArgParser _parser;
   final PatchbayReplCommand _execute;
   final StringSink _out;
   final StringSink _err;
   final bool _json;
+  final PatchbayLocalArtifactWriter _outputWriter;
+
+  /// Called once a line has been fully rendered, including any PB-050-20
+  /// spill the rendering triggered.
+  ///
+  /// A repl line's trace run cannot be closed by [_execute] itself: spilling
+  /// happens at render time, which is after [_execute] has returned, so a
+  /// `command.finished` written inside the closure would land *before* the
+  /// `artifact.attached` event belonging to that same line — and the
+  /// attachment would then read as the first thing the next line did. The
+  /// caller therefore hands the run's closing step here, where "this line is
+  /// done" is actually true.
+  final void Function()? _onLineRendered;
+
+  /// The view `patchbay --json --view brief ... repl` opened the session
+  /// with; a line's own `--view` overrides it for that line only (PB-050-21
+  /// section 6 — this is the only per-line override `--view` gets, and it
+  /// deliberately does not reconnect).
+  final String _sessionView;
+  final Map<String, String>? _environment;
 
   /// Whether this session has already explained a non-resumed App.
   ///
@@ -138,6 +170,15 @@ final class PatchbayReplSession {
         words = tokenizePatchbayReplLine(line);
         parsed = _parser.parse(words);
         _rejectSessionScopedOptions(parsed);
+        if (_resolvedView(parsed) == patchbayViewBrief && !_json) {
+          throw const FormatException('--view brief requires --json');
+        }
+        // F6 (PB-050-20 follow-up): validate this line's --max-inline-bytes
+        // before it ever reaches `_execute` below — the render-time parse in
+        // `_finishReplRendering` ran after the line's own RPC had already
+        // gone out, so a malformed value used to dispatch the command anyway
+        // and fail only once rendering tried to use it.
+        ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes');
       } on FormatException catch (error) {
         _writeFailure(
           number,
@@ -173,7 +214,15 @@ final class PatchbayReplSession {
 
       try {
         final PatchbayReplOutcome outcome = await _execute(parsed);
-        _writeResult(number, parsed.rest, outcome);
+        try {
+          await _writeResult(number, parsed, outcome);
+        } finally {
+          // Even a line whose rendering threw (an `--output` that already
+          // exists, say) ran to completion as far as the trace is concerned:
+          // the run must be closed, or the next line's events would be read
+          // as belonging to this one.
+          _onLineRendered?.call();
+        }
       } on FormatException catch (error) {
         _writeFailure(
           number,
@@ -197,6 +246,29 @@ final class PatchbayReplSession {
           parsed.rest,
           PatchbayExitCode.usage,
           error.sentence,
+        );
+      } on PatchbayArtifactDownloadException catch (error) {
+        // A local disk failure — writing PB-050-20's spilled member, or the
+        // existing blob download path a `capture --output` line also runs
+        // inside `_execute` — says nothing about whether the connection this
+        // session is reusing is still good, unlike the
+        // PatchbayProtocolException / PatchbaySessionException /
+        // PatchbayTransportException cases below (not caught here; they fall
+        // through and end the session on purpose, because there the peer
+        // itself is no longer trustworthy). So this line reports and the
+        // session keeps consuming the lines after it, the same way a usage
+        // error does — where "session-level" would have used
+        // `PatchbayErrorEnvelope(failure.code)` and exit code `protocol`
+        // (see cli.dart's own `on PatchbayArtifactDownloadException` catch),
+        // this per-line failure carries the identical `{code, details}`
+        // shape and exit code, just wrapped in the per-line envelope instead
+        // of ending the process.
+        _writeFailure(
+          number,
+          parsed.rest,
+          PatchbayExitCode.protocol,
+          'patchbay protocol error: ${error.code}',
+          envelope: PatchbayErrorEnvelope(error.code),
         );
       }
     }
@@ -257,28 +329,87 @@ final class PatchbayReplSession {
     }
   }
 
-  void _writeResult(
+  Future<void> _writeResult(
     int number,
-    List<String> command,
+    ArgResults parsed,
     PatchbayReplOutcome outcome,
-  ) {
+  ) async {
     _explainLifecycleOnce(outcome.response);
+    final List<String> command = parsed.rest;
+    final PatchbayFriendlyCommandSpec? spec =
+        PatchbayFriendlyCommandRegistry.specFor(command);
+    final Map<String, Object?> response = await _finishReplRendering(
+      spec: spec,
+      parsed: parsed,
+      outcome: outcome,
+      number: number,
+      command: command,
+    );
     if (_json) {
       _out.writeln(
         jsonEncode(<String, Object?>{
           'line': number,
           'command': command,
           'exitCode': outcome.exitCode,
-          'response': outcome.response,
+          'response': response,
         }),
       );
       return;
     }
     _out.writeln(
       '[$number] exit=${outcome.exitCode} '
-      '${patchbayResponseSummary(outcome.response)}',
+      '${patchbayResponseSummary(response)}',
     );
   }
+
+  /// The PB-050-20 / PB-050-21 render-time seam for one repl line: spill
+  /// first, project second, matching the one-shot path in `cli.dart`.
+  ///
+  /// The `renderDocument` closures below reproduce exactly what `_json`/
+  /// human rendering below would print unspilled, so the PB-050-20
+  /// threshold measures the real per-line document — compact JSON or a
+  /// human summary line — not the one-shot shape.
+  Future<Map<String, Object?>> _finishReplRendering({
+    required PatchbayFriendlyCommandSpec? spec,
+    required ArgResults parsed,
+    required PatchbayReplOutcome outcome,
+    required int number,
+    required List<String> command,
+  }) async {
+    final int maxInlineBytes =
+        ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes') ??
+        patchbayDefaultMaxInlineBytes;
+    final PatchbayRenderedMemberSpillResult spilled =
+        await maybeSpillRenderedMember(
+          writer: _outputWriter,
+          spec: spec,
+          response: outcome.response,
+          exitCode: outcome.exitCode,
+          explicitOutputPath: parsed.option('output'),
+          force: parsed.flag('force'),
+          maxInlineBytes: maxInlineBytes,
+          renderDocument: (Map<String, Object?> candidate) => _json
+              ? jsonEncode(<String, Object?>{
+                  'line': number,
+                  'command': command,
+                  'exitCode': outcome.exitCode,
+                  'response': candidate,
+                })
+              : '[$number] exit=${outcome.exitCode} '
+                    '${patchbayResponseSummary(candidate)}',
+          environment: _environment,
+        );
+    attachSpilledArtifactToTrace(spilled.artifact);
+    if (_resolvedView(parsed) != patchbayViewBrief) return spilled.response;
+    return projectPatchbayBriefView(
+      spec: spec,
+      response: spilled.response,
+      exitCode: outcome.exitCode,
+    );
+  }
+
+  String _resolvedView(ArgResults parsed) =>
+      parsed.wasParsed('view') ? parsed.option('view')! : _sessionView;
 
   /// Prints the lifecycle remedies the first time a line proves they apply.
   ///
@@ -300,19 +431,33 @@ final class PatchbayReplSession {
     }
   }
 
+  /// Writes one line's failure inside the per-line envelope
+  /// (`{line, command, exitCode, error}`) every result — success or
+  /// failure — uses, so a JSON consumer never has to special-case a
+  /// terminated-vs-continuing line by shape.
+  ///
+  /// [envelope], when given, replaces the plain-string `error` value with
+  /// the same `{code, details}` shape `PatchbayErrorEnvelope.toJson()['error']`
+  /// produces at session level for the identical exception — the failure
+  /// class this line hit is the same one the session-ending catches in
+  /// `cli.dart` report, so a consumer parsing `error.code` should not have to
+  /// know whether this particular failure happened to end the session or
+  /// not. Every other caller here still passes a human [message] alone,
+  /// unchanged from before this parameter existed.
   void _writeFailure(
     int number,
     List<String> command,
     int exitCode,
-    String message,
-  ) {
+    String message, {
+    PatchbayErrorEnvelope? envelope,
+  }) {
     if (_json) {
       _out.writeln(
         jsonEncode(<String, Object?>{
           'line': number,
           'command': command,
           'exitCode': exitCode,
-          'error': message,
+          'error': envelope == null ? message : envelope.toJson()['error'],
         }),
       );
       return;

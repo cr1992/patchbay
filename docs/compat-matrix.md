@@ -8,6 +8,7 @@
 
 | patchbay tag | commit SHA | wire schemaVersion | Flutter（CI 验证） | Flutter（文档最低支持） | 已知 consumer |
 |---|---|---|---|---|---|
+| `patchbay-v0.5.0` | `待回填` | 1 | 3.44.9 | `>=3.44.0` | 待确认 |
 | `patchbay-v0.4.1` | `9ef468d48f6c40857b01955a647ce6e29110e0a1` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×2（0.4.1 pin MR 均已提交且接入门禁通过；候选版真机已验） |
 | `patchbay-v0.4.0` | `fc3cf06dc8e12b36332a2c37d38d4fd69cdd2c27` | 1 | 3.44.9 | `>=3.38.0` | 内部接入方 ×1（0.4.0 pin MR 已提交，L0 全绿，真机待验） |
 | `patchbay-v0.3.0` | `89574d2a5d28a33caf57b3505100b56dd5276d0a` | 1 | 3.44.9 | `>=3.38.0` | 未上报（本仓不持有该口径，待 consumer 仓核实后补记） |
@@ -25,10 +26,14 @@
   `schemaVersionMismatch`），不是仅文档层面的约定。
 - **Flutter（CI 验证）**：`.github/workflows/ci.yml` 的 `FLUTTER_VERSION`；GitLab 侧 CI 镜像
   与之对齐。
-- **Flutter（文档最低支持）**：`docs/guide.md` 第 9 行「使用 UI 能力时需要 Flutter `>=3.38.0`」，
-  与根 `README.md` 第 26–27 行项目状态声明一致。两个 Flutter 数字不是同一件事：CI 验证版本是
-  当前门禁实际跑过的版本，最低支持版本是文档承诺的下限，二者之间未逐版本回归，出现兼容问题以
-  CI 验证版本为准。
+- **Flutter（文档最低支持）**：唯一真源是 `packages/patchbay_flutter/pubspec.yaml` 的
+  `environment.flutter`（`release_prep` 按它生成本表新行）；`docs/guide.md` 的「前置条件」与根
+  `README.md` / `README.zh-CN.md` 的项目状态声明同步它。两个 Flutter 数字不是同一件事：CI 验证
+  版本是上界门禁实际跑过的版本（`FLUTTER_VERSION`，当前 3.44.9），最低支持版本是声明承诺的下限
+  （当前 `>=3.44.0`）。**自 0.5.0 起下限本身也有门禁**：`sdk_floor` lane 就跑这个下限版本且已转为
+  阻断（见 [SDK 下限提升](proposals/0.5.0/sdk-floor-raise.md)），因此下限不再是「只写在文档里、
+  未被验证」的数字。两者之间的中间版本仍未逐版本回归，出现兼容问题以 CI 验证版本为准。
+  **历史行不回填**：`patchbay-v0.4.1` 及更早的 `>=3.38.0` 是那些 tag 发布时的声明事实，保留原值。
 - **已知 consumer**：patchbay 仓不持有 consumer 侧 pin 配置，无法在本仓验证；新增或变更
   consumer 记录前先向对应 consumer 仓核实。记「未上报」表示 tag 已发布但尚无 consumer 仓回报
   切版结果，与未打 tag 时的占位符 `待确认` 不是一回事——前者是已定状态，后者会被

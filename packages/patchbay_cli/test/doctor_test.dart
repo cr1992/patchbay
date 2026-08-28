@@ -3,7 +3,15 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/doctor/doctor_checks.dart';
+import 'package:patchbay_cli/src/doctor/doctor_models.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/rpc_timeout.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -64,7 +72,7 @@ void main() {
   }) async {
     final StringBuffer out = StringBuffer();
     final StringBuffer err = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>['--session-dir', directory.path, ...arguments],
       connect:
           connect ?? (_) async => fail('this run must not need a connection'),
@@ -94,7 +102,7 @@ void main() {
     test('several selectable sessions warn instead of failing', () async {
       store
         ..write(_record('worktree-a'))
-        ..write(_record('worktree-b', workspacePath: '/repo/b'));
+        ..write(_record('worktree-b'));
 
       final _Run result = await run(<String>[
         '--json',
@@ -127,7 +135,7 @@ void main() {
       () async {
         store
           ..write(_record('worktree-a'))
-          ..writeSelection('worktree-deleted');
+          ..writeSelectionFor(_workspace, 'worktree-deleted');
 
         final _Run result = await run(<String>['--json', 'doctor']);
 
@@ -163,7 +171,7 @@ void main() {
     test('a printed record never carries the auth token', () async {
       store
         ..write(_record('worktree-a'))
-        ..write(_record('worktree-b', workspacePath: '/repo/b'));
+        ..write(_record('worktree-b'));
 
       final _Run text = await run(<String>[
         'doctor',
@@ -542,7 +550,7 @@ void main() {
       final StringBuffer out = StringBuffer();
       final StringBuffer err = StringBuffer();
 
-      await runPatchbayCli(
+      await runPatchbayCliWithSeams(
         <String>['--session-dir', directory.path, 'repl'],
         connect: (_) async => _healthyClient(),
         replInput: Stream<String>.fromIterable(<String>['doctor']),
@@ -568,7 +576,7 @@ void main() {
       store.write(_record('worktree-a'));
       final StringBuffer out = StringBuffer();
       final StringBuffer err = StringBuffer();
-      final int exitCode = await runPatchbayCli(
+      final int exitCode = await runPatchbayCliWithSeams(
         <String>['--session-dir', directory.path, '--json', 'repl'],
         connect: (_) async => client,
         replInput: Stream<String>.fromIterable(lines),
@@ -754,10 +762,14 @@ final class _RefusedCatalogClient implements PatchbayClient {
   Future<void> close() async {}
 }
 
+/// The checkout this test process is actually running in: doctor drives the
+/// real CLI, so its own workspace probe decides which records count as ours.
+final PatchbayWorkspaceIdentity _workspace =
+    PatchbayWorkspaceIdentity.current()!;
+
 PatchbaySessionRecord _record(
   String id, {
   int? processId,
-  String workspacePath = '/repo/a',
   String deviceId = 'device-1',
 }) => PatchbaySessionRecord(
   sessionId: id,
@@ -769,6 +781,6 @@ PatchbaySessionRecord _record(
   wsUri: 'ws://127.0.0.1:1234/$_token=/ws',
   buildMode: 'debug',
   createdAt: DateTime.utc(2026, 8, 14),
-  workspacePath: workspacePath,
+  workspacePath: _workspace.canonicalRoot,
   deviceId: deviceId,
-);
+).withWorkspace(_workspace);

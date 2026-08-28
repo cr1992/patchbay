@@ -2,7 +2,7 @@
 
 > 状态：已接受
 >
-> 关联：PB-040-01
+> 关联：已随 0.4.0 发布，见 [CHANGELOG.md 0.4.0 段](../../../CHANGELOG.md#040---2026-08-20)
 >
 > 设计闸门：DG-040-01、DG-040-04
 
@@ -80,8 +80,8 @@ catalog 时当场 `FormatException`。目标侧需要暴露的手势能力走既
 ### 遮挡：冻结行为契约，算法由实现举证
 
 目标可能被滚动裁剪、被 overlay 或被系统弹窗盖住。此时注入指针会打到别的东西上，所以**遮挡必须
-fail-closed**，稳定 code 为 `uiGestureTargetObscured`。这一条与 PB-040-26 的系统弹窗遮挡是同一个失败
-面，两份提案共用该 code；分工是：App 内可观测的遮挡报这一个，外部 driver 观测到的系统窗口报
+fail-closed**，稳定 code 为 `uiGestureTargetObscured`。这一条与 [平台权限](platform-permissions.md)
+的系统弹窗遮挡是同一个失败面，两份提案共用该 code；分工是：App 内可观测的遮挡报这一个，外部 driver 观测到的系统窗口报
 `systemUiUnexpected`，两者可同时出现，轨迹里要能看出先后。
 
 **判定算法不是公共契约。** “hit-test 最顶命中必须落在目标子树内”这条朴素规则会误拒 custom paint、

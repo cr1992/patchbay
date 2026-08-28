@@ -4,50 +4,134 @@ import '../client.dart';
 import '../platform/process_utils.dart';
 import 'session_models.dart';
 import 'session_store.dart';
+import 'workspace_identity.dart';
+import 'workspace_selection.dart';
+
+/// What to tell the operator when the pinned session will not resolve *and*
+/// this host cannot establish whether its process is alive.
+///
+/// Deliberately never issues the imperative "run `patchbay sessions prune`".
+/// Where the PID probe can never answer — no `kill`/`tasklist` on `PATH` and
+/// no usable procfs — prune cannot retire this record: it asks
+/// [PatchbaySessionResolver._statusFor], which reads an unverifiable process
+/// as alive, and the pending-TTL branch that would otherwise expire the
+/// record only fires when there is no `wsUri`. Sending the operator there
+/// spends the one command they were told would fix it and changes nothing.
+/// It still *names* prune, because that is the next thing they would reach
+/// for anyway and they are better off being told why it will not work.
+///
+/// Private, and here rather than beside the other hints in session_models:
+/// this one has a single use site, and keeping it off the library's exported
+/// surface keeps the API golden untouched.
+const String _selectionUnverifiableHint =
+    'the pinned session will not resolve, and this host cannot tell whether '
+    'its process is still alive (no usable `kill`/`tasklist`/procfs), so '
+    '`patchbay sessions prune` cannot retire the record: run `patchbay '
+    'session use --clear`, then connect explicitly with `--ws-uri <uri>` or '
+    'start the App again under `patchbay launch`';
 
 final class PatchbaySessionResolver {
   PatchbaySessionResolver({
     PatchbaySessionStore? store,
     PatchbayIdentityProbe? identityProbe,
     PatchbayPidProbe? pidProbe,
+    String? Function(int processId)? processStartTimeProbe,
     PatchbaySessionClock? clock,
+    PatchbayWorkspaceIdentityProbe? workspaceProbe,
+    PatchbayWorkspaceIdentityAt? workspaceIdentityAt,
   }) : store = store ?? PatchbaySessionStore(),
        _identityProbe = identityProbe ?? _probeIdentity,
        _pidProbe = pidProbe ?? _isProcessAlive,
-       _clock = clock ?? DateTime.now;
+       _processStartTimeProbe = processStartTimeProbe ?? _probeProcessStartTime,
+       _clock = clock ?? DateTime.now,
+       _workspaceProbe = workspaceProbe ?? PatchbayWorkspaceIdentity.current,
+       _workspaceIdentityAt =
+           workspaceIdentityAt ?? PatchbayWorkspaceIdentity.at;
 
   final PatchbaySessionStore store;
   final PatchbayIdentityProbe _identityProbe;
   final PatchbayPidProbe _pidProbe;
+  final String? Function(int processId) _processStartTimeProbe;
   final PatchbaySessionClock _clock;
+  final PatchbayWorkspaceIdentityProbe _workspaceProbe;
+  final PatchbayWorkspaceIdentityAt _workspaceIdentityAt;
 
-  /// The pinned session id, or `null` when nothing is pinned.
-  String? get selection => store.readSelection();
+  PatchbayWorkspaceIdentity? _workspace;
+  bool _workspaceProbed = false;
+  bool _legacyPinMigrated = false;
+
+  /// The workspace this resolver speaks for, computed at most once.
+  ///
+  /// One probe per command: the Git call behind it is cheap but it is still a
+  /// subprocess, and re-deriving it mid-command would also let a command that
+  /// changes directory change which sessions it may see.
+  PatchbayWorkspaceIdentity? get workspace {
+    if (!_workspaceProbed) {
+      _workspaceProbed = true;
+      _workspace = _workspaceProbe();
+    }
+    return _workspace;
+  }
+
+  /// The scoped pin that applies here, or `null` when nothing is pinned.
+  ///
+  /// Never another workspace's pin, and never the retired global one.
+  String? get selection {
+    final PatchbayWorkspaceIdentity? identity = workspace;
+    if (identity == null) return null;
+    _migrateLegacyPinOnce(identity);
+    return store.readSelectionFor(identity);
+  }
+
+  /// The whole directory, classified once for this workspace.
+  ///
+  /// This is the shared kernel input every surface uses -- resolver, local
+  /// session commands, doctor and trace -- so none of them re-derives
+  /// "who counts as ours" on its own.
+  PatchbayWorkspaceScope scope() => PatchbayWorkspaceSelectionKernel.scope(
+    records: store.readAll(),
+    identity: workspace,
+    scopedSelection: selection,
+    identityAt: _workspaceIdentityAt,
+  );
 
   /// Every record, with the local judgement of what state it is in.
   List<PatchbaySessionListing> inventory() {
-    final String? selected = store.readSelection();
-    return <PatchbaySessionListing>[
-      for (final PatchbaySessionRecord record in store.readAll())
+    final PatchbayWorkspaceScope scope = this.scope();
+    final String? selected = scope.scopedSelection;
+    final List<PatchbaySessionListing> listings = <PatchbaySessionListing>[];
+    for (final PatchbayWorkspaceCandidate candidate in scope.candidates) {
+      final PatchbaySessionRecord record = candidate.record;
+      final _ProcessIdentityCheck check = _checkProcessIdentity(record);
+      listings.add(
         PatchbaySessionListing(
           record: record,
-          status: statusOf(record),
-          selected: record.sessionId == selected,
+          status: _statusFor(record, check),
+          // A pin only marks the record it names *in this workspace*: a
+          // foreign record with the same id is still not what a command here
+          // would use.
+          selected: record.sessionId == selected && candidate.isCurrent,
+          identityUnverified: check.identityUnverified,
+          workspaceAffinity: candidate.affinity,
         ),
-    ];
+      );
+    }
+    return listings;
   }
 
   /// Removes records whose process is gone, without dialling anything.
   PatchbaySessionPruneResult prune() {
+    final String? pinnedHere = selection;
     final List<String> removed = <String>[];
     for (final PatchbaySessionListing listing in inventory()) {
       if (listing.status != PatchbaySessionStatus.stale) continue;
       store.remove(listing.record.sessionId);
       removed.add(listing.record.sessionId);
     }
-    final String? selected = store.readSelection();
-    final bool cleared = selected != null && removed.contains(selected);
-    if (cleared) store.clearSelection();
+    // Pins are cleaned by record existence, machine-wide: a checkout whose
+    // App died does not have to run `prune` itself to stop pointing at it.
+    store.pruneScopedSelections();
+    final bool cleared = pinnedHere != null && removed.contains(pinnedHere);
     return PatchbaySessionPruneResult(
       removed: removed,
       remaining: inventory(),
@@ -57,20 +141,15 @@ final class PatchbaySessionResolver {
 
   /// Pins [sessionId] for later commands that pass no `--session`.
   PatchbaySessionListing select(String sessionId) {
-    final List<PatchbaySessionRecord> all = store.readAll();
-    final PatchbaySessionRecord? record = all
-        .where((PatchbaySessionRecord record) => record.sessionId == sessionId)
-        .firstOrNull;
-    if (record == null) {
-      throw PatchbaySessionException(
-        'sessionNotFound',
-        choices: <String>[
-          for (final PatchbaySessionRecord candidate in all)
-            candidate.choiceLabel,
-        ],
-      );
+    final PatchbayWorkspaceScope scope = this.scope();
+    final PatchbayWorkspaceSelectionPlan plan =
+        PatchbayWorkspaceSelectionKernel.pin(scope, sessionId);
+    if (plan.refusal case final PatchbaySessionException refusal) {
+      throw refusal;
     }
-    final PatchbaySessionStatus status = statusOf(record);
+    final PatchbaySessionRecord record = plan.records.single;
+    final _ProcessIdentityCheck check = _checkProcessIdentity(record);
+    final PatchbaySessionStatus status = _statusFor(record, check);
     if (status == PatchbaySessionStatus.stale) {
       store.remove(sessionId);
       throw const PatchbaySessionException(
@@ -80,18 +159,77 @@ final class PatchbaySessionResolver {
             '`patchbay sessions list` and select from what is left',
       );
     }
-    store.writeSelection(sessionId);
+    store.writeSelectionFor(scope.identity!, sessionId);
     return PatchbaySessionListing(
       record: record,
       status: status,
       selected: true,
+      identityUnverified: check.identityUnverified,
+      workspaceAffinity: PatchbayWorkspaceAffinity.current,
     );
   }
 
-  void clearSelection() => store.clearSelection();
+  /// Removes the pin that applies here.
+  ///
+  /// Refuses with `sessionWorkspaceUnavailable` when the workspace cannot be
+  /// established, exactly like [select]. Returning quietly instead would be
+  /// the worst of both: `session use --clear` would report "no session was
+  /// pinned" while a scoped pin sits untouched on disk, still aiming every
+  /// later command at a device the operator believes they have unpinned.
+  void clearSelection() {
+    final PatchbayWorkspaceIdentity? identity = workspace;
+    if (identity == null) {
+      throw const PatchbaySessionException(
+        'sessionWorkspaceUnavailable',
+        hint: patchbaySessionWorkspaceUnavailableHint,
+      );
+    }
+    store.clearSelectionFor(identity);
+  }
 
-  PatchbaySessionStatus statusOf(PatchbaySessionRecord record) {
-    if (!_pidProbe(record.processId)) return PatchbaySessionStatus.stale;
+  /// Retires the pre-PB-050-14 global pin, once per process.
+  ///
+  /// Conservative on purpose: the old file only becomes this workspace's
+  /// scoped pin when the record it names can be *proven* to live here.
+  /// Everything else -- foreign, missing, or an unprovable legacy path --
+  /// simply loses the pin. That costs one `session use`; the alternative
+  /// costs a write command sent to another checkout's device.
+  void _migrateLegacyPinOnce(PatchbayWorkspaceIdentity identity) {
+    if (_legacyPinMigrated) return;
+    _legacyPinMigrated = true;
+    store.migrateLegacyGlobalSelection(
+      identity,
+      adoptable: (String sessionId) {
+        final PatchbaySessionRecord? record = store
+            .readAll()
+            .where(
+              (PatchbaySessionRecord record) => record.sessionId == sessionId,
+            )
+            .firstOrNull;
+        if (record == null) return false;
+        return PatchbayWorkspaceSelectionKernel.classify(
+              record,
+              identity,
+              identityAt: _workspaceIdentityAt,
+            ) ==
+            PatchbayWorkspaceAffinity.current;
+      },
+    );
+  }
+
+  PatchbaySessionStatus statusOf(PatchbaySessionRecord record) =>
+      _statusFor(record, _checkProcessIdentity(record));
+
+  /// The wsUri/TTL half of status classification, given an already-computed
+  /// process-identity verdict. Split out so [inventory], [select] and
+  /// [statusOf] all derive status from exactly one probe round-trip per
+  /// record instead of three call sites each dialling `ps`/`tasklist` (and,
+  /// now, the start-time probe) on their own.
+  PatchbaySessionStatus _statusFor(
+    PatchbaySessionRecord record,
+    _ProcessIdentityCheck check,
+  ) {
+    if (!check.alive) return PatchbaySessionStatus.stale;
     final int? expiresAtMs = record.expiresAtMs;
     if (record.wsUri == null &&
         expiresAtMs != null &&
@@ -103,31 +241,127 @@ final class PatchbaySessionResolver {
         : PatchbaySessionStatus.live;
   }
 
-  /// Selects one session: explicit id first, then the pin, then uniqueness.
-  Future<PatchbayDiscoveredSession> resolve({String? sessionId}) async {
-    final all = store.readAll();
-    if (all.isEmpty) {
-      throw const PatchbaySessionException('sessionDirectoryEmpty');
+  /// Checks whether [record]'s process is still alive and, when the record
+  /// captured a launch-time signature (PB-050-18), still the same process.
+  ///
+  /// A record with no captured signature (written before PB-050-18) is
+  /// judged on the PID alone, exactly as before this change, and flagged
+  /// [_ProcessIdentityCheck.identityUnverified] for diagnostics only. The
+  /// same degrade applies when the OS declines to answer the current probe:
+  /// this never fails closed and kills a session it merely could not verify.
+  ///
+  /// The PID probe itself gets that same treatment. It is a three-state
+  /// answer ([PatchbayPidProbe]), and "the OS was never asked" -- no `kill`
+  /// or `tasklist` on `PATH`, which is the normal state of a slim container
+  /// image -- must degrade to unverified, not to dead. Reading it as dead is
+  /// what made every session on such a host report `sessionStaleProcess` and
+  /// lose its record.
+  _ProcessIdentityCheck _checkProcessIdentity(PatchbaySessionRecord record) {
+    final bool? running = _pidProbe(record.processId);
+    if (running == false) {
+      return const _ProcessIdentityCheck(
+        alive: false,
+        identityUnverified: false,
+      );
     }
-    final String? pinned = sessionId == null ? store.readSelection() : null;
-    final String? wanted = sessionId ?? pinned;
-    final candidates = wanted == null
-        ? all
-        : all.where((record) => record.sessionId == wanted).toList();
-    if (candidates.isEmpty) {
-      throw pinned == null
-          ? const PatchbaySessionException('sessionNotFound')
-          : const PatchbaySessionException(
-              'sessionSelectionStale',
-              hint: patchbaySessionSelectionStaleHint,
-            );
+    if (running == null) {
+      // Nothing was learned about the PID, so nothing can be concluded about
+      // the launch identity sitting on top of it either.
+      return const _ProcessIdentityCheck(
+        alive: true,
+        identityUnverified: true,
+        livenessUnverified: true,
+      );
+    }
+    final String? expected = record.processStartTime;
+    if (expected == null) {
+      return const _ProcessIdentityCheck(alive: true, identityUnverified: true);
+    }
+    final String? current = _processStartTimeProbe(record.processId);
+    if (current == null) {
+      return const _ProcessIdentityCheck(alive: true, identityUnverified: true);
+    }
+    // Never `current == expected`. PB-050-31: a signature carries a scheme
+    // tag precisely so that "I cannot interpret what this record holds" and
+    // "this is a different launch" stay two answers rather than one `false`.
+    return switch (PlatformProcessUtils.compareStartTimeSignatures(
+      expected,
+      current,
+    )) {
+      // A live PID whose current launch signature no longer matches what this
+      // record captured is not this record's process any more -- the OS has
+      // recycled the PID for something else, and the original App is gone.
+      PatchbayStartTimeMatch.different => const _ProcessIdentityCheck(
+        alive: false,
+        identityUnverified: false,
+      ),
+      PatchbayStartTimeMatch.same => const _ProcessIdentityCheck(
+        alive: true,
+        identityUnverified: false,
+      ),
+      // Records written during 0.5.0 development carry an unprefixed `ps`
+      // string, and a Linux host can legitimately produce a `v2-posix` probe
+      // for a `v2-linux` record when procfs stops answering. Neither is
+      // evidence of anything, so neither may retire a record.
+      PatchbayStartTimeMatch.unverifiable => const _ProcessIdentityCheck(
+        alive: true,
+        identityUnverified: true,
+      ),
+    };
+  }
+
+  /// Selects one session.
+  ///
+  /// Two shapes, and only two. An explicit [sessionId] is the single sanctioned
+  /// way to reach across checkouts: it matches on the global inventory, still
+  /// completes every liveness and runtime-identity check, and writes no pin.
+  /// Everything else goes through the workspace kernel, which will refuse
+  /// before it will guess.
+  Future<PatchbayDiscoveredSession> resolve({String? sessionId}) async {
+    final List<PatchbaySessionRecord> candidates;
+    final bool pinned;
+    if (sessionId != null) {
+      final List<PatchbaySessionRecord> all = store.readAll();
+      if (all.isEmpty) {
+        throw const PatchbaySessionException(
+          'sessionDirectoryEmpty',
+          hint:
+              'start the App under `patchbay launch -- <consumer command>`, '
+              'connect explicitly with `--ws-uri <uri>`, or if the App '
+              'already started on its own, register it with '
+              '`patchbay session register`',
+        );
+      }
+      candidates = all
+          .where(
+            (PatchbaySessionRecord record) => record.sessionId == sessionId,
+          )
+          .toList();
+      if (candidates.isEmpty) {
+        throw const PatchbaySessionException('sessionNotFound');
+      }
+      pinned = false;
+    } else {
+      final PatchbayWorkspaceSelectionPlan plan =
+          PatchbayWorkspaceSelectionKernel.implicit(scope());
+      if (plan.refusal case final PatchbaySessionException refusal) {
+        throw refusal;
+      }
+      candidates = plan.records;
+      pinned = plan.fromScopedPin;
     }
 
     final valid = <PatchbayDiscoveredSession>[];
     final pending = <PatchbaySessionRecord>[];
     String? lastStaleCode;
+    // Set only for a record that survives this loop *and* whose process could
+    // not be liveness-verified. That is the one shape for which the ordinary
+    // "run `sessions prune`" advice is a dead end -- see the hint choice at
+    // the end of this method.
+    bool unverifiableSurvivor = false;
     for (final record in candidates) {
-      if (!_pidProbe(record.processId)) {
+      final _ProcessIdentityCheck check = _checkProcessIdentity(record);
+      if (!check.alive) {
         store.remove(record.sessionId);
         lastStaleCode = 'sessionStaleProcess';
         continue;
@@ -156,7 +390,11 @@ final class PatchbaySessionResolver {
         lastStaleCode = 'sessionIdentityMismatch';
         continue;
       } on Object {
+        // The record stays on disk: an unreachable endpoint is not proof the
+        // App is gone. When the PID could not be verified either, nothing in
+        // this process can ever retire this record on its own.
         lastStaleCode = 'sessionUnreachable';
+        unverifiableSurvivor |= check.livenessUnverified;
         continue;
       }
       if (identity.schemaVersion != PatchbayServiceHost.schemaVersion ||
@@ -171,7 +409,7 @@ final class PatchbaySessionResolver {
               identity.isolateId != record.isolateId)) {
         lastStaleCode = 'sessionRuntimeRestarted';
       }
-      final completed = record.completedWith(identity);
+      final completed = _upgradedWorkspace(record.completedWith(identity));
       store.write(completed);
       valid.add(
         PatchbayDiscoveredSession(record: completed, identity: identity),
@@ -194,8 +432,33 @@ final class PatchbaySessionResolver {
     }
     throw PatchbaySessionException(
       lastStaleCode ?? 'sessionNotFound',
-      hint: pinned == null ? null : patchbaySessionSelectionStaleHint,
+      hint: pinned
+          ? (unverifiableSurvivor
+                ? _selectionUnverifiableHint
+                : patchbaySessionSelectionStaleHint)
+          : null,
     );
+  }
+
+  /// Backfills the workspace triple onto a legacy record that just proved,
+  /// through a completed handshake, that it belongs here.
+  ///
+  /// Only ever an upgrade, never a re-assignment: a record that already names
+  /// a workspace keeps it, and one whose membership is unproven is left
+  /// exactly as it was for an explicit `--session` to reach.
+  PatchbaySessionRecord _upgradedWorkspace(PatchbaySessionRecord record) {
+    if (record.hasWorkspaceIdentity) return record;
+    final PatchbayWorkspaceIdentity? identity = workspace;
+    if (identity == null) return record;
+    if (PatchbayWorkspaceSelectionKernel.classify(
+          record,
+          identity,
+          identityAt: _workspaceIdentityAt,
+        ) !=
+        PatchbayWorkspaceAffinity.current) {
+      return record;
+    }
+    return record.withWorkspace(identity);
   }
 
   static Future<PatchbayRuntimeIdentity> _probeIdentity(Uri uri) async {
@@ -207,6 +470,39 @@ final class PatchbaySessionResolver {
     }
   }
 
-  static bool _isProcessAlive(int processId) =>
+  static bool? _isProcessAlive(int processId) =>
       PlatformProcessUtils.isProcessAlive(processId);
+
+  static String? _probeProcessStartTime(int processId) =>
+      PlatformProcessUtils.processStartTimeSignature(processId);
+}
+
+/// One record's process-liveness verdict, split from the wsUri/TTL logic in
+/// [PatchbaySessionResolver._statusFor] so every caller pays for exactly one
+/// PID probe (and, when applicable, one start-time probe) per record.
+final class _ProcessIdentityCheck {
+  const _ProcessIdentityCheck({
+    required this.alive,
+    required this.identityUnverified,
+    this.livenessUnverified = false,
+  });
+
+  /// `false` means this record's process is gone -- either the PID has no
+  /// running process, or a live PID's current launch signature no longer
+  /// matches what the record captured (a PID-reuse collision).
+  final bool alive;
+
+  /// See [PatchbaySessionListing.identityUnverified].
+  final bool identityUnverified;
+
+  /// `true` only when the PID probe itself returned no verdict, so [alive]
+  /// is a fail-open default rather than an observation.
+  ///
+  /// Narrower than [identityUnverified], which is also set for a legacy
+  /// record with no captured signature and for a start-time probe that
+  /// declined -- in both of those the PID *was* observed. Kept separate
+  /// because the operator-facing hint claims this host cannot answer the
+  /// liveness question at all, and that has to be literally true when it is
+  /// printed.
+  final bool livenessUnverified;
 }

@@ -5,9 +5,49 @@
 
 ## 前置条件
 
-- Dart `>=3.11.0 <4.0.0`；
-- 使用 UI 能力时需要 Flutter `>=3.38.0`；
+- Dart `>=3.12.0 <4.0.0`；
+- 使用 UI 能力时需要 Flutter `>=3.44.0`；
 - App 必须以 debug 或 profile 构建运行。
+
+## 先选工作流
+
+<!-- 本节是 launch / repl / one-shot 生命周期的唯一详细事实源；其他 README 只摘要并链接到这里。 -->
+
+<p align="center">
+  <img src="assets/patchbay-cli-workflows.svg" width="100%" alt="Patchbay CLI 三种工作流：一次性命令、repl 连续执行、launch 启动与监督">
+</p>
+
+先把 App 的生命周期和 CLI 的生命周期分开看：App 由 `flutter run` 或接入方自己的工具保持运行；
+普通 Patchbay 命令连接这个 App，完成一次请求后退出。退出 CLI 不会关闭 App，下一条命令会重新连接。
+
+| 你的场景 | App 侧 | CLI 侧 | 退出行为 |
+|---|---|---|---|
+| 第一次跑通、偶尔查一条 | `flutter run` | 带 `--ws-uri` 的普通命令 | 每条命令输出后退出；App 继续运行 |
+| 连续执行很多条 | App 已经运行 | `patchbay ... repl` | 复用一次连接，直到 `exit` / `quit`、stdin 关闭或连接类错误 |
+| 自动发现、hot restart、长会话 | `patchbay launch -- flutter run ...` | 另一个终端执行普通命令或 `patchbay repl` | launcher 跟随 child；命令进程保持各自生命周期 |
+| 连接或能力异常 | App 保持现场 | `patchbay doctor` | 检查完 session、connection、catalog、lifecycle 后退出 |
+
+最短路径只需要第一行，不必先接 launcher。VM Service URI 通常含认证信息，只用于当前可信调试会话，
+不要写进脚本、日志或提交物。最小接入完成后，`identity` 应返回接入时声明的 `applicationId`；随后
+三条命令都以 `0` 退出（`--json` 输出没有 `error` 信封），就表示只读链路已经跑通。
+
+需要自动发现时，`launch` 与 `repl` 可以这样配合：
+
+```console
+# 终端 A：启动并监督 App；需要先完成第 6 节的 session 声明接入
+$ patchbay launch -- flutter run --vmservice-out-file .dart_tool/patchbay/vmservice.txt
+
+# 终端 B：对已发现的 App 发一次性命令，或进入连续命令会话
+$ patchbay identity
+$ patchbay repl
+```
+
+两者不是二选一：`launch` 负责 App/session 生命周期、断线恢复和 hot restart 重锚；`repl` 只负责在
+已经选定的 App 上复用连接、连续发命令，它不会启动或监督 App。`logs tail` 也不是常驻 daemon：它在
+一次有界等待内逐行输出日志，收到结果或本次等待结束后退出。
+
+阅读路线也按这个顺序：先用根 README 跑通只读链路；需要自动发现时读第 6 节；连接异常看
+`doctor`；需要连续执行时再读 CLI 手册的 `repl`，不必为了普通一次性命令先理解所有高级入口。
 
 ## 安装
 
@@ -15,21 +55,18 @@
 
 ```yaml
 dependencies:
-  patchbay_flutter: ^0.4.1
+  patchbay_flutter: ^0.5.0
 ```
 
 ### CLI
 
-CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什么形态直接决定手感。三种形态：
+CLI 每条命令起一个进程，启动开销**按条计费**，所以安装形态会直接影响交互手感：
 
-| 形态 | 任意目录可用 | 启动 + 一次 `catalog` 往返 | 适用 |
+| 形态 | 任意目录可用 | 运行时要求 | 适用 |
 |---|---|---|---|
-| Release 预编译二进制 | 是 | ~45 ms | 只用 CLI；机器上不必有 Dart SDK |
-| `dart pub global activate` app snapshot | 是 | ~160 ms | 需要 Dart SDK 的兼容形态 |
-| 仓内 `dart run bin/patchbay.dart` | 要写全路径 | ~540 ms | 改 CLI 本身 |
-
-> 数字是 macOS arm64 对同一个 example host 各连 8 次的中位数，同机同链路，只用于比较量级；
-> 真机跨 USB 时连接本身的耗时会盖过这段差距。
+| Release 预编译二进制 | 是 | 无需 Dart SDK | 日常使用与 CI，默认推荐 |
+| `dart pub global activate` app snapshot | 是 | 需要 Dart SDK | 兼容形态 |
+| 仓内 `dart run bin/patchbay.dart` | 要写全路径 | 需要 Dart SDK；每次重新编译 | 只用于修改 CLI 本身 |
 
 > **坑：在接入方仓目录里 `dart run patchbay_cli:patchbay` 解析到的是该仓 pin 的版本。**
 > `<包名>:<可执行文件>` 形式按**当前目录所属的包**解析，在接入方仓里那是它 pin 的 tag，不是你
@@ -40,7 +77,7 @@ CLI 每条命令起一个进程，启动开销**按条计费**，所以装成什
 #### pub global app snapshot（兼容形态）
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.1
+$ dart pub global activate patchbay_cli 0.5.0
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # 装进这里，但它默认不在 PATH 上
 $ patchbay --help
 ```
@@ -61,11 +98,11 @@ $ patchbay --help
 **目标机器上不需要 Dart SDK**，这是给「只用 CLI、不写 Dart」的人和 CI 镜像准备的形态：
 
 ```console
-$ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.1/patchbay-0.4.1-macos-arm64
-$ shasum -a 256 patchbay-0.4.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
-$ chmod +x patchbay-0.4.0-macos-arm64
+$ curl -fL -O https://github.com/cr1992/patchbay/releases/download/patchbay-v0.5.0/patchbay-0.5.0-macos-arm64
+$ shasum -a 256 patchbay-0.5.0-macos-arm64      # 与同一 Release 的 checksums.txt 对照
+$ chmod +x patchbay-0.5.0-macos-arm64
 $ mkdir -p ~/.local/bin
-$ mv patchbay-0.4.0-macos-arm64 ~/.local/bin/patchbay
+$ mv patchbay-0.5.0-macos-arm64 ~/.local/bin/patchbay
 ```
 
 Release 资产不携带可执行位，`chmod +x` 是必需的一步。用**浏览器**下载的 macOS 产物还会被
@@ -83,11 +120,10 @@ Gatekeeper 隔离，`xattr -d com.apple.quarantine <文件>` 解除；用 `curl`
 $ cd packages/patchbay_cli && dart run bin/patchbay.dart --help
 ```
 
-嫌每条命令等半秒，就把当前工作树编成 AOT 可执行文件（约 1.6 秒编一次，产物 7 MiB）：
+需要连续复用当前工作树时，把 CLI 编成一次 AOT 可执行文件：
 
 ```console
 $ dart run packages/patchbay_cli/tool/build_cli.dart   # 仓根或包内调用均可
-Built …/packages/patchbay_cli/build/patchbay (7.3 MiB)
 ```
 
 产物落在 `packages/patchbay_cli/build/`（已 gitignore），放到 PATH 上即可任意目录直跑。它是
@@ -162,6 +198,11 @@ PatchbayCommandDescriptor(
 ```
 
 规则：
+- **写命令（`sideEffect` 非 `none`）必须声明门**：`gates` 自 0.5.0 起在 host 受理段强制求值，
+  不再只是目录展示。host 侧的门评估器经 `PatchbayServiceHost(domainGates: ...)` 注入；
+  `PatchbayFlutterServiceHost` 自动复用你交给 bridge 的同一个 evaluator。声明了门但 host 没有
+  evaluator 时，该命令会以 `consumerGateRejected`（`reason: gateEvaluatorUnavailable`）稳定拒绝——
+  上面示例里的 `my.domain.ready` 要能通过，接入方的声明门里必须真的有这个 gateId；
 - 长流程用 `job` 模式——受理即返回 `jobId`，别让 CLI 干等；
 - 敏感参数标 `sensitive: true`——值只能走 `--stdin`（不回显），强制由 host 完成，见下一节；
 - handler 复用你既有的 controller / 并发约束，**不要**为 CLI 另建一套状态机。
@@ -180,8 +221,35 @@ App 拒绝、协议错误和 provider 已返回的结果都不重试。host 在�
 
 用 `patchbay describe <namespace.command>` 可只读检查 catalog 行、response schema 模式与
 `retryEligibility`，不会调用命令。需要把调试调用接入审计时，在 host 注入 `auditSink`；host 会先保留
-最近 256 条脱敏事实，再 best-effort 投递 sink。事件只含参数的递归类型、键结构和长度档位，不含标量值；
-sink 失败默认隔离，也可用 `onAuditSinkError` 上报，不能改写已经发生的命令结果。
+最近 256 条脱敏事实，再由单消费者按账本顺序投递 sink。active Future 与 waiting 事件共同受
+`auditQueueCapacity` 有界约束（默认 256）；溢出、关闸后的事件和 sink failure 都由
+`onAuditSinkError` 隔离上报，不能改写已经发生的命令结果。host 终止时调用 `drainAudit()` 可得到
+settled / overflow / abandoned 统计，`dispose()` 会执行同一有预算 drain。事件只含参数的递归类型、
+键结构和长度档位，不含标量值。
+
+#### 长调用采用 cooperative cancellation
+
+普通 `invoke` 仍兼容；它遇到 deadline、显式 cancel 或 host dispose 时会返回类型化拒绝，但因为无法证明
+底层已停止，容量要等原 handler settle 才释放。需要提前安全释放容量的 adapter 改用
+`invokeWithContext`，并在确实停止底层工作后完成一次 confirmation callback：
+
+```dart
+PatchbayServiceHost(
+  // catalog / snapshot 省略
+  invokeWithContext: (command, arguments, requestId, context) async {
+    context.registerCancellationConfirmation((reason) async {
+      await controller.stopAndConfirm();
+    });
+    return controller.invoke(command, arguments, requestId);
+  },
+  maxConcurrentInvocations: 8, // registry + external 共用，范围 1..256
+);
+```
+
+`context.cancellation.isRequested`、`reason`、`whenRequested` 与 monotonic `deadline.remaining` 只提供事实，不会强停 Dart
+`Future`。confirmation 成功只表示 consumer 证明底层不再产生副作用；callback 缺失、抛错或超时都不会
+提前释放 slot。每条 invocation 只能注册一次 callback。host 退出用 `dispose()`：它先关闭并 drain
+invocation，再 drain audit；这套生命周期与已受理 job 的 `PatchbayJobRegistry` cancel 契约彼此独立。
 
 #### 敏感参数由 host 强制，adapter 不用配合
 
@@ -202,7 +270,7 @@ stdin」，而这个键是**协议元数据，不是命令参数**。host 在把
 catalog 是这条策略的唯一真源，host 读不到 catalog 时 fail-closed：带参数的调用以
 `providerProtocolViolation`（`reason: catalogUnavailable`）拒绝，不会把未校验的参数交给 adapter。
 
-**从旧版本升级：两步，都要做。**
+**已有 adapter 迁移：两步，都要做。**
 
 1. 删掉 arguments 白名单里对 `inputWasStdin` 的豁免——host 不再传这个键，留着只是死代码
    （**不删无害**）；
@@ -224,8 +292,8 @@ final jobs = PatchbayJobRegistry(
 
 声明了 `responseSchema.terminal` 的 job 命令要把**同一份** `PatchbayCommandRegistry` 绑定到账本。
 handler 在 registry 的 dispatch scope 内调用 `start()` 时不用再传命令名：账本会捕获当前正在执行的
-exact registration identity，而不是相信 handler 提供的字符串。这是 0.4 新增的可选接入，旧 job 不改也
-继续走 `legacyUnvalidated`：
+exact registration identity，而不是相信 handler 提供的字符串。这条严格校验路径是可选接入；
+尚未迁移的 job 继续走 `legacyUnvalidated`：
 
 ```dart
 late final PatchbayJobRegistry jobs;
@@ -250,7 +318,7 @@ dispatch scope 跟随 async handler，嵌套或并发 dispatch 不会串用 desc
 `start(command: ...)` 在 dispatch 外会拒绝，避免一个裸字符串冒充来源。账本在启动时深冻结该 descriptor
 的终态 schema，不在任务完成时重新读取可变 catalog。终态 payload 若漏字段、类型错误、变体或额外字段
 违规，会在写 ledger **之前**被替换成不含原值的 `providerProtocolViolation`。未绑定
-`commandRegistry` 且不声明 command 的旧 job 继续保留 0.3 free-payload 行为。
+`commandRegistry` 且不声明 command 的兼容 job 继续保留 free-payload 行为。
 
 需要表达设备执行结果的命令还要在 payload 中使用统一的 `execution` 对象。descriptor 按实际能力声明
 `confirmationBudgetMs`（`1..120000`）、`unchangedEvidenceMaxAgeMs`（`1..300000`）以及默认关闭的
@@ -278,7 +346,7 @@ final payload = <String, Object?>{
 
 四种 classification 只有 `notSent`、`sentUnconfirmed`、`unchanged`、`deviceConfirmed`。job 终态中前两种
 默认只能落 `failed`，后两种只能落 `completed`；只有显式开启弱确认时 `sentUnconfirmed` 才能 completed。
-0.4 中 `deviceConfirmed` 的 factSource 只能是 `deviceReported`，`uiObserved` 不能升级成设备确认。
+`deviceConfirmed` 的 factSource 只能是 `deviceReported`，`uiObserved` 不能升级成设备确认。
 `reasonCode` 若非空，必须在 `responseSchema` 的 string `allowedValues` 中封闭声明。新 `execution` 与旧
 `dispatched` 冲突时以新证据为准，并在响应 `details.legacyDispatchedConflict` 留痕；退出码仍按 job 终态，
 不会把“已发送”当成“已完成”。
@@ -487,7 +555,7 @@ shell history 或提交物。
 ### 会话选择
 
 双设备并连（Android + iOS 同时跑）时会话不唯一，逐条命令敲长 `--session <id>` 很费。会话目录
-本身有三条命令，它们**不连 App、不读 catalog**，只读写本地记录，因此在「CLI 选不出会话」时照样能用：
+本身有一组命令，它们**不连 App、不读 catalog**，只读写本地记录，因此在「CLI 选不出会话」时照样能用：
 
 ```console
 $ patchbay sessions list                  # 有哪些记录，* 标记已固定的那条
@@ -504,6 +572,20 @@ $ patchbay sessions prune                 # 删掉进程已经没了的记录
 2. 已固定的会话 —— 有它就用它，即使目录里还有别的会话；
 3. 都没有 —— 唯一会话直接用，多个会话以 `sessionAmbiguous` 拒绝并列出候选。
 
+**第 2、3 级只在当前 checkout 内发生。** 会话记录带工作区身份（Git worktree 顶层，非
+Git 目录则是 cwd 本身；同一 checkout 的子目录算同一个，共享 common dir 的两个 worktree
+算不同），固定项也按 checkout 分开保存：在 A 目录 `session use` 不影响 B 目录，B 目录里
+不带 `--session` 的命令永远不会打到 A 的 App。当前 checkout 没有会话时以
+`sessionWorkspaceEmpty` 拒绝（不会去用别处那条），判不出自己在哪个 checkout 时以
+`sessionWorkspaceUnavailable` 拒绝，`session use` 固定别处的记录以
+`sessionWorkspaceMismatch` 拒绝。**跨区只有一个入口：对单条命令显式传 `--session <id>`**
+——它照常做完探活与 identity 握手，且不改写任何一边的固定项。`sessions list` 仍列出本机
+全部记录，每条多一个 `workspaceAffinity`（`current` / `foreign` / `legacyUnverified`）。
+
+升级说明：这条保证由 CLI 提供，**0.4.x 的旧 CLI 没有它**——旧二进制看不到新的按 checkout
+固定项，仍按全局规则选择。旧记录不会被删：能证明它记录的路径就是当前 checkout 时照常可
+用（并在握手后补写身份），证明不了时只能用显式 `--session` 选。
+
 **固定项失效不回退。** 被固定的会话记录不见了、进程已死、或连不上时，命令以自己的稳定 code
 失败（`sessionSelectionStale` / `sessionStaleProcess` / `sessionUnreachable`）并附一句处置提示，
 **不会改用目录里另一条会话**——在双设备台上那意味着命令打到了另一台设备。固定项也不会被 CLI
@@ -517,6 +599,40 @@ $ patchbay sessions prune                 # 删掉进程已经没了的记录
 路径一律不出（`--json` 的 `endpoint` 字段同样已打码）。
 
 会话选择是「下一个进程连哪」的事，repl 里因此不可用：那条连接已经选定了。
+
+#### 自己起 App 的会话：register / unregister
+
+**这是外部 launcher 集成命令，不是普通用户的首选连接方式。** 只连一次或偶尔查一条时，直接用
+[`--ws-uri`](#连接) 更简单，不必先注册再解除。它面向自己启动 App——自有脚本 / IDE / 构建
+流水线——且需要后续命令像 `patchbay launch` 起的会话一样自动发现的集成方，要求显式提供
+application/device/process 三段身份（外加可选的 session 名）。
+
+上面的记录由 `patchbay launch` 监督的子进程自己声明。**如果 App 不走 `patchbay launch`**，
+记录就没人写，于是每条命令都得再传一次 `--ws-uri`。这两条命令补上那一段，它们同样不连 App：
+
+```console
+$ patchbay --json session register \
+    --ws-uri "$uri" \
+    --application-id com.example.app \
+    --device-id emulator-5554 \
+    --process-id $$ \
+    [my-session]                          # 省略则由 CLI 命名，并在输出里报出来
+$ patchbay session unregister my-session  # 退出时清理
+```
+
+- `--process-id` 是**本机持有这个会话的进程**（起 App 的那个脚本 / `flutter run` 进程），
+  不是设备上的 App 进程号：`sessions list` 的 `status` 与 `sessions prune` 都按它的存活判定，
+  所以它一死，记录就该消失。
+- 记录在**执行这条命令的 checkout** 名下，因此同一 checkout 里后续命令不带 `--session`
+  就能选中它，别的 checkout 看不见（同上一节的亲和性规则）。
+- 复用既有 pending 记录语义：`applicationId` 不在这里握手核对，而是像 launcher 声明的记录
+  一样，等第一条真正连上的命令去对账，不一致就按 `sessionIdentityMismatch` 删掉记录。
+- 同名记录已存在时以 `sessionAlreadyRegistered` 拒绝，不覆盖。`unregister` 在记录已经不在时
+  正常退出并报 `removed: false`——它是 cleanup trap 的一半，`sessions prune` 先一步删掉不算错。
+- 输出走既有 JSON 信封，不新增记录字段：`register` 回一个 `session` 对象（就是 `sessions list`
+  里那条），`unregister` 回 `{"sessionId": …, "removed": …}`。
+
+会话记录带认证 URI，务必在退出路径上 `unregister`（shell 里配 `trap`），不要留给下一次运行。
 
 ### 体检（doctor）
 
@@ -553,7 +669,7 @@ $ patchbay --json doctor | jq '.doctor.checks[] | select(.check=="connection").d
   "applicationId": "com.example.app",
   "appInstanceId": "a1b2c3",
   "schemaVersion": 1,
-  "serverVersion": "0.2.1",
+  "serverVersion": "<host-version>",
   "features": ["catalogDigest", "lifecycleState"]
 }
 ```
@@ -604,6 +720,19 @@ doctor 只读，不改会话目录、不删记录、不重连、不替你唤醒�
 
 ### 常用命令
 
+UI 写入口最容易混淆的是下面四套，先按需求选对入口，再看完整命令清单：
+
+| 需求 | 入口 | 身份域 | 何时用 |
+|---|---|---|---|
+| 操作接入方注册的目标（文本输入等） | `ui text set/enter` | target id（catalog `uiTargets`） | 目标是接入方用 `PatchbayKey` 显式登记的输入目标（如文本框），不是 Semantics 树上的可点控件时用它。 |
+| 执行辅助功能动作（点按等，走 `performAction`） | `ui action` / `ui tap` | Semantics identifier + generation（`ui tap` 的 generation 可选，`ui action` 必填） | 走无障碍语义树派发，跳过手势竞技场；`ui tap` 是「解析 + 点按」一步到位，`ui action` 覆盖 tap 之外的 focus / 四向 scroll / setText；接入方未注入 `PatchbaySemanticsActionPolicy` 时这组命令不进 catalog。 |
+| 模拟真实指针触摸（经命中测试与手势竞技场） | `ui gesture tap` 等 | Semantics identifier + generation，受接入方 gesture policy 约束 | 要验证贴近真机的触摸路径（遮挡判定、手势竞技场裁决）时用它；接入方未注入 gesture policy 时这组命令不进 catalog。 |
+| 滚动直到目标出现 | `ui reveal` | Semantics identifier，需接入方注入 `revealPolicy` | 目标可能因为不在可视区而未挂载，需要先滚动才能操作时用它；它本身是写操作，过门，不用在它之前接 `ui wait semantics-mounted`。 |
+
+四条入口的安全语义刻意不同：注册目标面是接入方显式开放的自动化面，语义面是「装成用户」按
+identifier 派发动作，指针面才是真实触摸事件、还要另过接入方自己的手势策略。按需求选对应入口
+即可，不必先弄懂全部分类再动手。
+
 ```console
 $ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查
 $ patchbay catalog                          # App 实际注册了什么（唯一真源）
@@ -615,9 +744,15 @@ $ patchbay --wait exec <ns.command>         # job 命令等终态
 $ patchbay job get|cancel <job-id>
 $ patchbay sessions list|prune               # 本地会话记录，不连 App
 $ patchbay session use <id>|--clear          # 固定 / 取消固定会话
+$ patchbay session register --ws-uri <uri> --application-id <id> \
+      --device-id <id> --process-id <pid> [<session-id>]  # 自己起的 App 登记一条记录
+$ patchbay session unregister <session-id>   # 退出时清理那条记录
 $ patchbay ui text set|enter <id> <gen> <text…>
 $ patchbay ui semantics tree|action …
-$ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发
+$ patchbay ui tap <identifier>                # 一步：解析 + 代际校验 + 派发（语义通道）
+$ patchbay ui gesture tap <identifier> <gen>  # 真指针点按：经 hit-test 与手势竞技场
+$ patchbay ui action <identifier> <gen> <action> [text] # 通用 identifier action，generation 必填
+$ patchbay ui reveal <identifier>             # 驱动滚动容器直到目标露出，返回 reachability
 $ patchbay ui verify-manifest <file>        # 声明 ↔ 运行时挂载对账
 $ patchbay ui inspect on|off|status         # 设备端 widget inspector 选择模式（带租约，自动还原）
 $ patchbay ui widget-tree|render-tree|focus-tree
@@ -631,6 +766,26 @@ $ patchbay help <topic>                     # 帮助由声明生成
 
 `<gen>` 是 catalog 返回的 UI target generation。控件重新挂载后 generation 会变化；写操作必须携带
 最近观察到的值，否则会以 `uiGenerationStale` 拒绝。
+
+`ui reveal` 是写操作，同写类命令一样过门，目标不必已挂载——挂载与露出都发生在这一次请求内，
+不要在它后面接 `ui wait semantics-mounted`。成功返回的 `reachability` 告诉你下一步走哪条通道：
+`pointer` 用 `ui gesture tap`（真指针，防误击首选），`semanticsOnly` 用 `ui tap`（语义派发）。
+多个滚动容器歧义时补 `--container <identifier>`；步数与时长有界，滚到底仍无目标或预算用尽都会
+以稳定码如实拒绝，不伪造成功。
+
+**`uiRevealNoScrollableContainer` 目前偏宽，一个码盖住三种不同情况：** 目标压根不存在（含
+identifier 拼错）、目标已挂载但被浮层遮挡、以及确实没有可授权的滚动容器，现在共用同一个拒绝码，
+不能仅凭它分辨是哪一种——遇到时先用 `ui tap` 或 `ui semantics tree` 对同一 identifier 核对是否
+被遮挡，再排查 `--container` 或 identifier 拼写；不要看到这个码就默认去找滚动容器（改进方向已登记
+[PB-050-35](backlog.d/PB-050-35.md)）。
+
+`reachability` 是这次请求终止帧上、一次固定采样命中测试的结论，不是「这个目标此刻及此后都能
+操作」的持续性证明——下一帧的遮挡、动画或布局变化都可能让它过期，真正的操作围栏是随后写操作携带
+的 `generation`。`reachability: pointer` 更进一步，只是 Flutter 命中测试的结论，不等于「手势会被放行」——`ui gesture tap`
+还要另外过接入方注入的 gesture policy，被拒会以 `uiGestureDenied` 收场（并原样带回 policy 的
+`rejectionNotice`）。正确的分流因此是「`pointer` **且**落在 gesture policy 允许集内才走
+`ui gesture tap`，否则退回语义面的 `ui tap` / `ui action`」，不要把 `reachability: pointer`
+单独当成手势会成功的许可。
 
 `patchbay help` 的 topic 除了 CLI 路径（`ui wait`），还接受 catalog 里的协议名——手上拿着
 `navigation.go` 或响应里的 `ui.semantics.tap` 就能直接查，不必先反推 CLI 路径。多个 CLI 命令共用
@@ -793,8 +948,12 @@ App 的 snapshot 回调自己抛错时，答复是 `providerProtocolViolation` +
 校验都在 App 侧完成。`--generation` 可选，传了是你自己的前置围栏；不传时围栏由桥在过门前 pin 的
 generation 提供。同 identifier 挂载多个实例、identifier 不存在、代际过期都是带 details 的稳定拒绝。
 
-> `ui tap` 与 `ui semantics action` 需要 App 侧注入 `PatchbaySemanticsActionPolicy` 才会进 catalog
-> ——默认 deny，没注入时这两条命令根本不出现在 `patchbay catalog` 里，调用得到
+非 tap 动作用 `ui action <identifier> <generation> <action> [text]`。generation 必须来自先前的 Semantics
+观察；App 会在过门前后各解析一次并核对同一代际。允许的 action 仅为 `tap`、`focus`、四向 scroll 与
+`setText`，不会接受 `latest`、自动重试或未公开 action；敏感 `setText` 继续用全局 `--stdin`。
+
+> `ui tap`、`ui action` 与 `ui semantics action` 需要 App 侧注入 `PatchbaySemanticsActionPolicy` 才会进
+> catalog——默认 deny，没注入时这些命令根本不出现在 `patchbay catalog` 里，调用得到
 > `commandNotRegistered`（只读的 `ui semantics tree` 不受影响）。接法与 policy 语义见
 > [`patchbay_flutter/doc/ui-inspection-and-actions.md`](../packages/patchbay_flutter/doc/ui-inspection-and-actions.md)。
 
@@ -1019,6 +1178,7 @@ descriptor 标了 `sensitive: true` 的参数只能走 stdin：它出现在 `--a
 
 ```console
 $ patchbay --json repl <<'EOF'
+describe ui.capture
 ui wait semantics-mounted app.settings
 ui tap app.settings.save
 ui semantics tree
@@ -1028,6 +1188,7 @@ EOF
 repl 只做「连一次、连续执行」，命令语法与一次性调用完全相同；它不是宏系统，不做脚本录制、回放
 或变量。每行结果自带 `exitCode`，进程退出码只描述会话本身（干净跑完 `0`，被错误终止则是该错误的
 类别）。被拒绝或失败的行不终止会话，连接类错误终止——CLI 不会替你悄悄换一条连接。
+`describe <service-command>` 也能直接写在会话里：它只读本次连接的 live catalog，不调用所描述的命令。
 
 连接类参数、`--json` 与 `--stdin` 在 repl 内逐行 fail-closed；敏感输入请用一次性调用。direct HTTP
 不支持 repl（bearer token 会与命令流抢同一个 stdin）。`doctor` 在 repl 内也不可用：它诊断的是
@@ -1093,9 +1254,9 @@ lifecycle `5`），只有 warning 时是 `0`。
   注册的 inspector 服务扩展。反过来，`perf profile` 在 debug 下的帧耗时与 jank 不代表真实表现
   （JIT + 断言开启），要可信数字必须用 `--profile` 跑。所以：**日常联调用 debug、测性能时才切 profile**，
   并在报告里写清模式——否则「这条命令不可用」和「这个数字不可信」会被读成同一类问题。
-- **CLI 建议用原生 AOT 可执行，而不是 `dart run`。** `dart run bin/patchbay.dart` 每次调用都重新编译，
-  脚本化场景里单步几秒；`dart compile exe` 一次即可复用，单步降到毫秒级，且与 GitHub Release 上的产物
-  同形态。注意 `dart pub global activate` 装的是 app snapshot 而非原生 AOT，不要用它测启动耗时。
+- **CLI 建议用原生 AOT 可执行，而不是 `dart run`。** `dart run bin/patchbay.dart` 每次调用都重新编译；
+  `dart compile exe` 一次即可复用，且与 GitHub Release 上的产物同形态。注意
+  `dart pub global activate` 装的是 app snapshot 而非原生 AOT，不要用它测原生 AOT 启动耗时。
   唯一要留意的是产物过期：改了 CLI 源码就要重编，否则会拿到一个不报错但过时的答案。
   不必担心"AOT 出问题不好查"：未捕获异常的栈在 AOT 下仍带函数名与行号（只少列号），而 `--json` 的
   `error.code` 与退出码在两种模式下完全一致——本 CLI 的诊断面是类型化答复，不是栈回溯。`assert` 在
@@ -1127,8 +1288,10 @@ lifecycle `5`），只有 warning 时是 `0`。
     （已实测）。`patchbay doctor` 的 lifecycle 解法里同时给这两条。
 - 截图只证明 Flutter 合成树；系统弹窗、PlatformView 可能缺失，结果附能力警告。
 - 系统权限弹窗不在 Flutter UI 树内。Patchbay 四个 package 不直接操作它；`permission exercise` 通过
-  显式配置的外部 driver 调用平台官方测试工具。Android 0.4.0 只承诺 adb 状态/规范化路径；iOS 随仓提供
-  XCUITest reference runner 源码，真机可处理 camera、microphone、locationWhenInUse 的预期弹窗：
+  显式配置的外部 driver 调用平台官方测试工具。Android 的基础面由 adb 提供
+  `status` / `normalize` / `reset` / `fail`，只有显式配置且目标设备发现 runner 时才开放 `exercise`；
+  iOS 随仓提供 XCUITest reference runner 源码，真机可处理 camera、microphone、
+  locationWhenInUse 的预期弹窗：
   App 先用自己的 debug/domain 命令发起权限请求，runner 再按 accessibility identity 与唯一 decision
   操作，之后 CLI 等待 resumed、重连并刷新 catalog。它不使用坐标或截图识别。
   iOS runner 需要本机 Xcode、设备授权与签名 `.xctestrun`；物理真机 `status/normalize`、notifications

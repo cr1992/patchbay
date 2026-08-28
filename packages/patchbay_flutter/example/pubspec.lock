@@ -142,21 +142,21 @@ packages:
       path: "../../patchbay"
       relative: true
     source: path
-    version: "0.4.1"
+    version: "0.5.0"
   patchbay_flutter:
     dependency: "direct main"
     description:
       path: ".."
       relative: true
     source: path
-    version: "0.4.1"
+    version: "0.5.0"
   patchbay_transport:
     dependency: "direct main"
     description:
       path: "../../patchbay_transport"
       relative: true
     source: path
-    version: "0.4.1"
+    version: "0.5.0"
   path:
     dependency: transitive
     description:
@@ -294,10 +294,10 @@ packages:
     dependency: transitive
     description:
       name: vm_service
-      sha256: "0016aef94fc66495ac78af5859181e3f3bf2026bd8eecc72b9565601e19ab360"
+      sha256: "5f37239c4851efcef929cea7824e76df7f2f0970aef85d66bbc430afa40e72f0"
       url: "https://pub.flutter-io.cn"
     source: hosted
-    version: "15.2.0"
+    version: "15.3.0"
   web:
     dependency: transitive
     description:
@@ -315,5 +315,5 @@ packages:
     source: hosted
     version: "3.1.3"
 sdks:
-  dart: ">=3.11.0 <4.0.0"
-  flutter: ">=3.38.0"
+  dart: ">=3.12.0 <4.0.0"
+  flutter: ">=3.44.0"

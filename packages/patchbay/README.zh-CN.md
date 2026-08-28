@@ -26,7 +26,7 @@ App，读取 runtime identity、catalog 和 snapshot，并调用 App 明确注�
 
 ## 核心能力
 
-- `PatchbayServiceHost`：注册 identity、catalog、snapshot 和 invoke 四个稳定入口；
+- `PatchbayServiceHost`：注册 identity、catalog、snapshot、invoke 与 invocation cancel；
 - `PatchbayCommandDescriptor`：声明命令参数、模式、门禁、副作用和允许的事实来源；
 - `PatchbayGateEvaluator`：按固定顺序执行基础门和命令声明门；
 - `PatchbayInvocation`：区分“受理 / 拒绝”和业务执行结果；
@@ -62,7 +62,7 @@ adapter 复用 App 现有 controller 和状态机。Patchbay 负责协议与边�
 
 ## Service extension
 
-`PatchbayServiceHost` 注册四个稳定 RPC：
+`PatchbayServiceHost` 注册五个稳定 RPC：
 
 | RPC | 含义 |
 |---|---|
@@ -70,6 +70,7 @@ adapter 复用 App 现有 controller 和状态机。Patchbay 负责协议与边�
 | `ext.patchbay.catalog` | 当前实际注册的命令和动态 UI target |
 | `ext.patchbay.snapshot` | 接入方提供的只读 runtime 快照 |
 | `ext.patchbay.invoke` | 调用 catalog 中存在的命令 |
+| `ext.patchbay.cancelInvocation` | 用准确 owner token 取消一条 invocation |
 
 所有载荷带 `schemaVersion`。`appInstanceId` 在同一 isolate 内稳定，hot restart 后必须变化。客户端连接后
 会重新校验 schema、isolate 和 App 实例，不能只凭 PID 或旧 URI 判断会话仍有效。
@@ -158,8 +159,17 @@ direct HTTP 上都变不成回复，调用方只会看到挂起：
 为 `duplicateRequestId`。registry 命令不经过这条 external 去重边界，因此不能声明该策略。
 
 `PatchbayServiceHost` 可注入 `auditSink` 与 `onAuditSinkError`。host 先在 `auditEvents` 中保留最近 256 条
-脱敏 `PatchbayAuditEvent`，再 best-effort 投递 sink。参数形状只暴露递归 JSON 类型、对象键和粗粒度长度
-档位；标量值和内部参数摘要绝不离开 host。sink 失败不能改变调用结果。
+脱敏 `PatchbayAuditEvent`，再由一个 FIFO 消费者顺序投递 sink。投递队列把 active Future 与 waiting 事件
+一起计入 `auditQueueCapacity`（默认 256，范围 1–4096）；overflow 与关闸后的事件分别通过
+`PatchbayAuditDeliveryOverflow`、`PatchbayAuditDeliveryClosed` 交给 `onAuditSinkError`，均不改变调用结果。
+终止时可显式调用 `drainAudit()` 取得统计，或调用 `dispose()` 完成同一有界 drain。参数形状只暴露递归
+JSON 类型、对象键和粗粒度长度档位；标量值和内部参数摘要绝不离开 host。
+
+registry 与 external invocation 共用 `maxConcurrentInvocations`（默认 8，范围 1～256）。既有 `invoke`
+handler 保持可用；取消会返回类型化拒绝，但容量仍等到 handler settle 才释放。能够证明底层工作已停止的
+consumer 可改用 `invokeWithContext`，在 `PatchbayInvocationContext` 上注册一次 cancellation confirmation；
+callback 成功后即可释放容量。deadline、断连、显式 cancel 与 host dispose 保持为不同 reason。`dispose()`
+先 drain invocation、再 drain audit；这些规则不改变 `PatchbayJobRegistry` 的 job cancel 语义。
 
 `sensitive: true` 的强制由 host 完成，不由接入方 handler 完成。客户端用 `inputWasStdin` 标记值来自
 无回显 stdin；host 在 dispatch 之前按 catalog 声明校验，并把这个元键从 arguments 中剥掉，因此
@@ -181,14 +191,29 @@ catalog 是这条策略的唯一真源。host 读不到**可用**的 catalog 时
 
 ```dart
 final gates = PatchbayGateEvaluator(
+  // 没有任何参数会传进这个门，所以它保持放行——只读命令因此不需要任何
+  // 额外接线。
   baseGate: () => const PatchbayGateDecision.allow(),
-  consumerGate: (id) => evaluateConsumerGate(id),
+  // 每声明一个 gate ID 就会跑一次。出厂安全默认是：没有被显式放行的一律
+  // 拒绝：
+  consumerGate: (id) => PatchbayGateDecision.reject(
+    code: 'unknownConsumerGate',
+    notice: '没有叫 "$id" 的 consumer gate——这是出厂安全默认：写操作在'
+        '这里被显式放行之前一律保持关闭。',
+  ),
+  // 需要为可信的驱动放行某个写门时，把上面的函数体换成类似这样：
+  //   consumerGate: (id) => id == 'app.write'
+  //       ? const PatchbayGateDecision.allow()
+  //       : PatchbayGateDecision.reject(
+  //           code: 'unknownConsumerGate',
+  //           notice: '没有叫 "$id" 的 consumer gate。',
+  //         ),
 );
 ```
 
-基础门不会替 App 猜测登录、隐私同意、依赖就绪或设备状态。会触发网络、文件、权限或外部设备动作的
-命令，必须显式声明相应门禁。service extension 没有对称注销能力，所以状态撤回后 handler 仍需逐次
-fail-closed。
+最短接入默认先开放只读诊断，写操作必须显式声明并通过门。基础门不会替 App 猜测登录、隐私同意、
+依赖就绪或设备状态。会触发网络、文件、权限或外部设备动作的命令，必须显式声明相应门禁。
+service extension 没有对称注销能力，所以状态撤回后 handler 仍需逐次 fail-closed。
 
 ## 长任务
 

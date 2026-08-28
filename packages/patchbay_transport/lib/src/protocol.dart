@@ -6,16 +6,25 @@ final class PatchbayDirectIdentity {
     required this.schemaVersion,
     required this.applicationId,
     required this.appInstanceId,
+    this.features = const <String>[],
   });
 
   final int schemaVersion;
   final String applicationId;
   final String appInstanceId;
+  final List<String> features;
 
+  /// Strict runtime projection used in request bodies and response envelopes.
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
     'applicationId': applicationId,
     'appInstanceId': appInstanceId,
+  };
+
+  /// Capability-bearing result served only by the identity operation.
+  Map<String, Object?> toIdentityResultJson() => <String, Object?>{
+    ...toJson(),
+    'features': <String>[...features]..sort(),
   };
 
   bool hasSameRuntimeAs(PatchbayDirectIdentity other) =>
@@ -42,6 +51,43 @@ typedef PatchbayDirectInvocationSource =
       Map<String, Object?> arguments,
       String requestId,
     );
+
+/// A direct response may close before the host invocation releases capacity.
+final class PatchbayDirectInvocationHandle {
+  const PatchbayDirectInvocationHandle({
+    required this.response,
+    required this.lifecycle,
+  });
+
+  factory PatchbayDirectInvocationHandle.legacy(
+    Future<Map<String, Object?>> invocation,
+  ) => PatchbayDirectInvocationHandle(
+    response: invocation,
+    lifecycle: invocation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    ),
+  );
+
+  final Future<Map<String, Object?>> response;
+  final Future<void> lifecycle;
+}
+
+typedef PatchbayDirectContextInvocationSource =
+    PatchbayDirectInvocationHandle Function(
+      String command,
+      Map<String, Object?> arguments,
+      String requestId, {
+      String? ownerToken,
+      Duration? deadline,
+    });
+typedef PatchbayDirectCancellationSource =
+    Future<Map<String, Object?>> Function(
+      String command,
+      String requestId,
+      String ownerToken, {
+      required String reason,
+    });
 typedef PatchbayDirectClock = DateTime Function();
 typedef PatchbayDirectExpiryCancellation = void Function();
 typedef PatchbayDirectExpiryScheduler =
@@ -58,13 +104,24 @@ final class PatchbayDirectHandlers {
     required this.identity,
     required this.catalog,
     required this.snapshot,
-    required this.invoke,
-  });
+    this.invoke,
+    this.invokeWithContext,
+    this.cancelInvocation,
+  }) : assert(
+         (invoke == null) != (invokeWithContext == null),
+         'provide exactly one of invoke or invokeWithContext',
+       ),
+       assert(
+         invokeWithContext == null || cancelInvocation != null,
+         'context-aware invoke requires cancelInvocation',
+       );
 
   final PatchbayDirectIdentitySource identity;
   final PatchbayDirectCatalogSource catalog;
   final PatchbayDirectSnapshotSource snapshot;
-  final PatchbayDirectInvocationSource invoke;
+  final PatchbayDirectInvocationSource? invoke;
+  final PatchbayDirectContextInvocationSource? invokeWithContext;
+  final PatchbayDirectCancellationSource? cancelInvocation;
 }
 
 /// LAN is cleartext and provides authentication but not confidentiality.
@@ -81,6 +138,7 @@ final class PatchbayDirectHostConfig {
     this.maxRequestBodyBytes = 64 * 1024,
     this.maxResponseBodyBytes = 1024 * 1024,
     this.maxConcurrentRequests = 1,
+    this.maxConcurrentCancellationRequests = 1,
   }) : bindAddress = bindAddress ?? InternetAddress.loopbackIPv4 {
     if (!this.bindAddress.isLoopback &&
         lanExposure != PatchbayLanExposure.experimentalSameTrustedNetworkOnly) {
@@ -125,6 +183,12 @@ final class PatchbayDirectHostConfig {
         PatchbayDirectConfigurationError.invalidConcurrencyLimit,
       );
     }
+    if (maxConcurrentCancellationRequests < 1 ||
+        maxConcurrentCancellationRequests > 8) {
+      throw const PatchbayDirectConfigurationException(
+        PatchbayDirectConfigurationError.invalidConcurrencyLimit,
+      );
+    }
   }
 
   final InternetAddress bindAddress;
@@ -149,6 +213,9 @@ final class PatchbayDirectHostConfig {
   /// A hard upper bound, not an adaptive pool. The default is one client
   /// request at a time and each response closes its HTTP connection.
   final int maxConcurrentRequests;
+
+  /// Dedicated capacity for protocol-owned cancellation requests.
+  final int maxConcurrentCancellationRequests;
 }
 
 enum PatchbayDirectConfigurationError {

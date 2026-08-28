@@ -29,8 +29,7 @@ business conclusions from free text, widget state, or command names.
 
 ## Core Capabilities
 
-- `PatchbayServiceHost` — registers the four stable entry points: identity, catalog, snapshot, and
-  invoke;
+- `PatchbayServiceHost` — registers identity, catalog, snapshot, invoke, and invocation cancel;
 - `PatchbayCommandDescriptor` — declares a command's parameters, mode, gates, side effects, and
   permitted fact sources;
 - `PatchbayGateEvaluator` — runs the base gate and the declared command gates in a fixed order;
@@ -70,7 +69,7 @@ and the boundaries; it does not reimplement business logic for the CLI's benefit
 
 ## Service Extension
 
-`PatchbayServiceHost` registers four stable RPCs:
+`PatchbayServiceHost` registers five stable RPCs:
 
 | RPC | Meaning |
 |---|---|
@@ -78,6 +77,7 @@ and the boundaries; it does not reimplement business logic for the CLI's benefit
 | `ext.patchbay.catalog` | The commands and dynamic UI targets actually registered right now |
 | `ext.patchbay.snapshot` | The read-only runtime snapshot supplied by the consumer |
 | `ext.patchbay.invoke` | Invoke a command present in the catalog |
+| `ext.patchbay.cancelInvocation` | Cancel one invocation by its exact owner token |
 
 Every successful snapshot read now carries `snapshotRevision`,
 `revisionSource: hostObserved`, `factSource`, and `observedAt`. The revision is
@@ -188,10 +188,22 @@ rejected as `requestIdConflict`, and a duplicate ID on a command without the opt
 through that external de-duplication boundary.
 
 `PatchbayServiceHost` may receive an `auditSink` and `onAuditSinkError`. It first retains the newest
-256 redacted `PatchbayAuditEvent`s in `auditEvents`, then delivers each event to the sink on a
-best-effort basis. Parameter shapes expose only recursive JSON types, object keys, and coarse
-length buckets; scalar values and the internal argument digest never leave the host. Sink failures
-cannot change an invocation result.
+256 redacted `PatchbayAuditEvent`s in `auditEvents`, then delivers them to the sink through one FIFO
+consumer. The delivery queue counts the active Future plus waiting events and is bounded by
+`auditQueueCapacity` (default 256, range 1–4096). Overflow and delivery after close are reported to
+`onAuditSinkError` as `PatchbayAuditDeliveryOverflow` and `PatchbayAuditDeliveryClosed`; neither
+condition changes an invocation result. Call `drainAudit()` for terminal accounting, or `dispose()`
+to perform the same bounded drain while closing the host-owned delivery resource. Parameter shapes
+expose only recursive JSON types, object keys, and coarse length buckets; scalar values and the
+internal argument digest never leave the host.
+
+All registry and external invocations share `maxConcurrentInvocations` (default 8, range 1–256).
+Existing `invoke` handlers remain valid; cancellation returns a typed rejection but keeps capacity
+until that handler settles. A consumer that can prove its underlying work stopped may instead use
+`invokeWithContext`, register one cancellation-confirmation callback on
+`PatchbayInvocationContext`, and release capacity when that callback succeeds. Deadline,
+disconnect, explicit cancel, and host disposal remain distinct reasons. `dispose()` drains
+invocations before audit, and none of these rules changes `PatchbayJobRegistry` cancellation.
 
 Enforcement of `sensitive: true` is done by the host, not by the consumer's handler. The client
 marks a value as coming from no-echo stdin with `inputWasStdin`; the host validates against the
@@ -221,14 +233,32 @@ descriptor:
 
 ```dart
 final gates = PatchbayGateEvaluator(
+  // No argument reaches this gate, so it stays open — that is what lets
+  // read-only commands work with zero extra wiring.
   baseGate: () => const PatchbayGateDecision.allow(),
-  consumerGate: (id) => evaluateConsumerGate(id),
+  // Runs once per gate ID a command declares. The factory-safe default is
+  // to reject everything until it is explicitly authorized:
+  consumerGate: (id) => PatchbayGateDecision.reject(
+    code: 'unknownConsumerGate',
+    notice: 'No consumer gate named "$id" — this is a factory-safe '
+        'default: write commands stay closed until the host authorizes '
+        'them here.',
+  ),
+  // To open one write gate for a trusted driver, replace the body above
+  // with something like:
+  //   consumerGate: (id) => id == 'app.write'
+  //       ? const PatchbayGateDecision.allow()
+  //       : PatchbayGateDecision.reject(
+  //           code: 'unknownConsumerGate',
+  //           notice: 'No consumer gate named "$id".',
+  //         ),
 );
 ```
 
-The base gate does not guess login, privacy consent, dependency readiness, or device state on the
-app's behalf. Commands that trigger network, file, permission, or external device actions must
-declare the corresponding gates explicitly. Service extensions have no symmetric deregistration,
+The shortest possible integration opens read-only diagnostics by default; every write must be
+declared and pass through a gate explicitly. The base gate does not guess login, privacy consent,
+dependency readiness, or device state on the app's behalf. Commands that trigger network, file,
+permission, or external device actions must declare the corresponding gates explicitly. Service extensions have no symmetric deregistration,
 so handlers must still fail closed on every call once state has been revoked.
 
 ## Long-Running Work
@@ -292,7 +322,7 @@ so a bare string cannot masquerade as provenance.
 The terminal schema is deeply frozen when the job starts and checked before its event enters the
 ledger. An invalid provider payload is replaced with a value-free `providerProtocolViolation`; the
 invalid payload itself is never retained. A registry constructed without `commandRegistry` and a
-job started without `command` keep the 0.3 free-payload behavior.
+job started without `command` keep the compatibility free-payload behavior.
 
 Commands that publish device execution evidence use the closed `execution.classification` values
 `notSent`, `sentUnconfirmed`, `unchanged`, and `deviceConfirmed`. Configure confirmation and stale

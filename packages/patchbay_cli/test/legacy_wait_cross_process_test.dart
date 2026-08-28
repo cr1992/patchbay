@@ -60,6 +60,14 @@ void main() {
       // top level of a `--wait` result, whichever way the CLI waited.
       expect(output['jobId'], 'legacy-job');
     },
-    timeout: const Timeout(Duration(seconds: 20)),
+    // Real host boot + one real `dart run bin/patchbay.dart` compile, same
+    // real-subprocess-under-contention class as `cross_process_test.dart`'s
+    // 120s ceiling. Not exercising a timeout mechanism -- just headroom for
+    // two real cold starts to land. 20s measured ~20.0s wall-clock failures
+    // (dart:test's own ceiling firing, not this test's logic) under a local
+    // `--cpus=1 --memory=4g` container repro run concurrently with the other
+    // heavy cross-process test files, even though an isolated run typically
+    // finishes in ~6s; widened with real margin rather than trimmed further.
+    timeout: const Timeout(Duration(seconds: 60)),
   );
 }

@@ -3,7 +3,11 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/trace/trace_models.dart';
+import 'package:patchbay_cli/src/trace/trace_recorder.dart';
+import 'package:patchbay_cli/src/trace/trace_store.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -538,7 +542,7 @@ void main() {
       final String traceRoot = '${sandbox.path}/traces';
       final StringBuffer startOut = StringBuffer();
       expect(
-        await runPatchbayCli(
+        await runPatchbayCliWithSeams(
           <String>[
             '--trace-dir',
             traceRoot,
@@ -563,7 +567,7 @@ void main() {
         handle: (_, _) async => fakeCommandNotRegistered(),
       );
       expect(
-        await runPatchbayCli(
+        await runPatchbayCliWithSeams(
           <String>['--trace-dir', traceRoot, '--json', 'identity'],
           connect: (_) async => client,
           output: StringBuffer(),
@@ -571,13 +575,13 @@ void main() {
         ),
         PatchbayExitCode.accepted,
       );
-      await runPatchbayCli(
+      await runPatchbayCliWithSeams(
         <String>['--trace-dir', traceRoot, 'trace', 'mark', 'UI', 'changed'],
         output: StringBuffer(),
         errorOutput: StringBuffer(),
       );
       final StringBuffer showOut = StringBuffer();
-      await runPatchbayCli(
+      await runPatchbayCliWithSeams(
         <String>['--trace-dir', traceRoot, '--json', 'trace', 'show', traceId],
         output: showOut,
         errorOutput: StringBuffer(),
@@ -586,7 +590,7 @@ void main() {
       expect(showOut.toString(), contains('command.finished'));
       expect(showOut.toString(), contains('note.added'));
       expect(
-        await runPatchbayCli(
+        await runPatchbayCliWithSeams(
           <String>['--trace-dir', traceRoot, 'trace', 'stop'],
           output: StringBuffer(),
           errorOutput: StringBuffer(),
@@ -626,7 +630,7 @@ void main() {
           }),
         );
 
-        final int exitCode = await runPatchbayCli(
+        final int exitCode = await runPatchbayCliWithSeams(
           <String>[
             '--trace-dir',
             store.root.path,
@@ -674,7 +678,7 @@ void main() {
       );
       final StringBuffer error = StringBuffer();
 
-      final int result = await runPatchbayCli(
+      final int result = await runPatchbayCliWithSeams(
         <String>[
           '--trace-dir',
           store.root.path,
@@ -709,7 +713,7 @@ void main() {
       );
       final StringBuffer error = StringBuffer();
 
-      final int result = await runPatchbayCli(
+      final int result = await runPatchbayCliWithSeams(
         <String>[
           '--trace-dir',
           store.root.path,

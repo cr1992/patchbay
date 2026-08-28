@@ -172,16 +172,65 @@ final class PatchbayTimeoutClient
     required Map<String, Object?> arguments,
     String? requestId,
     Duration? deadline,
-  }) => awaitPatchbayRpc(
-    _inner.invoke(
-      command: command,
-      arguments: arguments,
-      requestId: requestId,
-      deadline: deadline,
-    ),
-    rpcTimeout: rpcTimeout,
-    deadline: deadline,
-  );
+  }) async {
+    final PatchbayClient inner = _inner;
+    if (inner is PatchbayCancelableInvocationClient) {
+      final PatchbayCancelableInvocationClient cancelable =
+          inner as PatchbayCancelableInvocationClient;
+      final PatchbayClientInvocationHandle handle = cancelable.beginInvocation(
+        command: command,
+        arguments: arguments,
+        requestId: requestId,
+        deadline: deadline,
+      );
+      try {
+        return await awaitPatchbayRpc(
+          handle.response,
+          rpcTimeout: rpcTimeout,
+          deadline: deadline,
+        );
+      } on PatchbayTransportException catch (error) {
+        final Future<Map<String, Object?>> Function()? cancel =
+            handle.requestCancellation;
+        final bool supportsCancellation =
+            error.code == patchbayAppUnresponsiveCode &&
+            handle.cancellationSupported;
+        if (supportsCancellation && cancel != null) {
+          unawaited(
+            cancel().then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+          );
+        }
+        if (error.code == patchbayAppUnresponsiveCode &&
+            !supportsCancellation) {
+          throw const PatchbayTransportException(
+            patchbayAppUnresponsiveCode,
+            details: <String, Object?>{'cancellationMode': 'legacyWaitOnly'},
+          );
+        }
+        rethrow;
+      }
+    }
+    try {
+      return await awaitPatchbayRpc(
+        inner.invoke(
+          command: command,
+          arguments: arguments,
+          requestId: requestId,
+          deadline: deadline,
+        ),
+        rpcTimeout: rpcTimeout,
+        deadline: deadline,
+      );
+    } on PatchbayTransportException catch (error) {
+      if (error.code == patchbayAppUnresponsiveCode) {
+        throw const PatchbayTransportException(
+          patchbayAppUnresponsiveCode,
+          details: <String, Object?>{'cancellationMode': 'legacyWaitOnly'},
+        );
+      }
+      rethrow;
+    }
+  }
 
   @override
   Future<Map<String, Object?>> widgetTree() =>

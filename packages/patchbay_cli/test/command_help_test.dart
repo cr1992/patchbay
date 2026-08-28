@@ -1,12 +1,28 @@
 import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/command_help.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
+import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
 /// Matches the root help's "Friendly command groups" listing row for [group].
 Matcher _listsGroup(String group) =>
     matches(RegExp('^  $group +\\d+ commands?\$', multiLine: true));
+
+// Real `dart run bin/patchbay.dart` spawns are real subprocesses, each a full
+// cold JIT compile from source -- the same real-subprocess-under-contention
+// class `cross_process_test.dart`'s 120s ceiling already accounts for. These
+// three tests aren't exercising a timeout mechanism; they just need enough
+// wall-clock headroom for several real compiles to land before the implicit
+// `dart test` default (30s) lapses. A local `--cpus=1 --memory=4g` container
+// repro run alongside the other heavy cross-process test files measured the
+// ten-spawn test at ~36s wall-clock -- already past the implicit default --
+// even though the lighter one- and three-spawn tests here typically finish
+// in a couple of seconds; widened uniformly for all three rather than tuned
+// per test.
+const Timeout _cliSpawnBudget = Timeout(Duration(seconds: 90));
 
 void main() {
   test('launcher help exposes the local keep-awake override pair', () {
@@ -63,6 +79,33 @@ Availability is still decided by the running App catalog.
       }
     },
   );
+
+  test('F8: ui semantics tree advertises the PB-050-20 spill options in its '
+      'usage line, matching its renderedMember siblings', () {
+    final ArgParser parser = patchbayCliParser();
+    const String expectedSuffix =
+        '[--output <path>] [--force] [--max-inline-bytes <n>]';
+    final String semanticsTreeHelp = PatchbayCommandHelp.render(
+      parser,
+      <String>['ui', 'semantics', 'tree'],
+    );
+    expect(
+      semanticsTreeHelp,
+      contains('Usage: patchbay ui semantics tree $expectedSuffix'),
+    );
+    // Exactly the same wording as the three plain renderedMember
+    // declarations — this is a CLI-only rendering decision mirrored onto
+    // the generated protocol command, not a new spelling of its own.
+    for (final List<String> path in <List<String>>[
+      <String>['ui', 'widget-tree'],
+      <String>['ui', 'render-tree'],
+      <String>['ui', 'focus-tree'],
+    ]) {
+      final PatchbayFriendlyCommandSpec spec =
+          PatchbayFriendlyCommandRegistry.specFor(path)!;
+      expect(spec.usageSuffix, expectedSuffix, reason: path.join(' '));
+    }
+  });
 
   test('every dispatch target is claimed by at least one declaration', () {
     // `runPatchbayCli` switches over `PatchbayCommandTarget` with no default
@@ -169,59 +212,66 @@ Availability is still decided by the running App catalog.
         );
       }
     },
+    timeout: _cliSpawnBudget,
   );
 
-  test('help covers every command the CLI can dispatch, end to end', () async {
-    // Process-level because the regression was reachable only through argv:
-    // `patchbay help job` and `patchbay ui widget-tree --help` both exited 64
-    // while the same commands executed fine.
-    Future<ProcessResult> run(List<String> arguments) => Process.run(
-      Platform.resolvedExecutable,
-      <String>['run', 'bin/patchbay.dart', ...arguments],
-      workingDirectory: Directory.current.path,
-    );
+  test(
+    'help covers every command the CLI can dispatch, end to end',
+    () async {
+      // Process-level because the regression was reachable only through argv:
+      // `patchbay help job` and `patchbay ui widget-tree --help` both exited 64
+      // while the same commands executed fine.
+      //
+      // (See `_cliSpawnBudget` above -- three real `dart run` spawns below.)
+      Future<ProcessResult> run(List<String> arguments) => Process.run(
+        Platform.resolvedExecutable,
+        <String>['run', 'bin/patchbay.dart', ...arguments],
+        workingDirectory: Directory.current.path,
+      );
 
-    final ProcessResult root = await run(<String>['--help']);
-    expect(root.exitCode, 0, reason: root.stderr.toString());
-    for (final String group in <String>[
-      'identity',
-      'catalog',
-      'snapshot',
-      'exec',
-      'job',
-      'session',
-      'sessions',
-      'navigation',
-      'ui',
-      'logs',
-      'capture',
-      'blob',
-      'perf',
-      'net',
-    ]) {
-      expect(root.stdout, _listsGroup(group), reason: group);
-    }
+      final ProcessResult root = await run(<String>['--help']);
+      expect(root.exitCode, 0, reason: root.stderr.toString());
+      for (final String group in <String>[
+        'identity',
+        'catalog',
+        'snapshot',
+        'exec',
+        'job',
+        'session',
+        'sessions',
+        'navigation',
+        'ui',
+        'logs',
+        'capture',
+        'blob',
+        'perf',
+        'net',
+      ]) {
+        expect(root.stdout, _listsGroup(group), reason: group);
+      }
 
-    final ProcessResult job = await run(<String>['help', 'job']);
-    expect(job.exitCode, 0, reason: job.stderr.toString());
-    expect(job.stdout, contains('job get <job-id>'));
-    expect(job.stdout, contains('job cancel <job-id>'));
+      final ProcessResult job = await run(<String>['help', 'job']);
+      expect(job.exitCode, 0, reason: job.stderr.toString());
+      expect(job.stdout, contains('job get <job-id>'));
+      expect(job.stdout, contains('job cancel <job-id>'));
 
-    final ProcessResult ui = await run(<String>['help', 'ui']);
-    expect(ui.exitCode, 0, reason: ui.stderr.toString());
-    for (final String command in <String>[
-      'ui widget-tree',
-      'ui render-tree',
-      'ui focus-tree',
-      'ui semantics tree',
-      'ui semantics action',
-      'ui text set',
-      'ui text enter',
-      'ui wait semantics-mounted',
-    ]) {
-      expect(ui.stdout, contains(command), reason: command);
-    }
-  });
+      final ProcessResult ui = await run(<String>['help', 'ui']);
+      expect(ui.exitCode, 0, reason: ui.stderr.toString());
+      for (final String command in <String>[
+        'ui widget-tree',
+        'ui render-tree',
+        'ui focus-tree',
+        'ui semantics tree',
+        'ui semantics action',
+        'ui text set',
+        'ui text enter',
+        'ui wait semantics-mounted',
+      ]) {
+        expect(ui.stdout, contains(command), reason: command);
+      }
+    },
+    timeout: _cliSpawnBudget,
+  );
 
   test('a catalog command name is a help topic', () {
     final ArgParser parser = patchbayCliParser();
@@ -253,6 +303,69 @@ Availability is still decided by the running App catalog.
     expect(
       PatchbayCommandHelp.render(parser, <String>['blob.metadata']),
       contains('Service command: blob.metadata'),
+    );
+  });
+
+  test('raw artifact help points to verified download commands', () {
+    final ArgParser parser = patchbayCliParser();
+    final String capture = PatchbayCommandHelp.render(parser, <String>[
+      'ui.capture',
+    ]);
+    expect(capture, contains('capture root --output <path>'));
+    expect(
+      capture,
+      contains('capture target <target-id> <generation> --output <path>'),
+    );
+
+    final String blob = PatchbayCommandHelp.render(parser, <String>[
+      'blob.read',
+    ]);
+    expect(blob, contains('blob get <blob-id> --output <path>'));
+    expect(blob, contains('request `limit`'));
+    expect(blob, contains('response `length`'));
+  });
+
+  test('text help distinguishes target and Semantics identities', () {
+    final ArgParser parser = patchbayCliParser();
+    final String set = PatchbayCommandHelp.render(parser, <String>[
+      'ui.text.set',
+    ]);
+    expect(set, contains('does not run input formatters or `onChanged`'));
+    expect(set, contains('catalog target `id`'));
+    expect(set, contains('Semantics `identifier`'));
+
+    final String enter = PatchbayCommandHelp.render(parser, <String>[
+      'ui.text.enter',
+    ]);
+    expect(enter, contains('runs input formatters'));
+    expect(enter, contains('calls `onChanged`'));
+  });
+
+  test('the two tap paths cross-reference each other by calling purpose', () {
+    final ArgParser parser = patchbayCliParser();
+    final String semantics = PatchbayCommandHelp.render(parser, <String>[
+      'ui',
+      'tap',
+    ]);
+    expect(semantics, contains('ui gesture tap'));
+    expect(semantics, contains('hit-testing'));
+
+    final String pointer = PatchbayCommandHelp.render(parser, <String>[
+      'ui',
+      'gesture',
+      'tap',
+    ]);
+    expect(pointer, contains('Usage: patchbay ui gesture tap'));
+    expect(pointer, contains('`ui tap`'));
+    expect(pointer, contains('prove'));
+    // 按调用目的互相指路，不设默认优劣；tap 没有时长旋钮。
+    expect(pointer, isNot(contains('--duration-ms')));
+  });
+
+  test('repl help shows live describe as an in-session example', () {
+    expect(
+      PatchbayCommandHelp.render(patchbayCliParser(), <String>['repl']),
+      contains('describe <service-command>'),
     );
   });
 
@@ -314,16 +427,20 @@ Availability is still decided by the running App catalog.
     );
   });
 
-  test('unknown help topic is a usage error without connecting', () async {
-    final ProcessResult result = await Process.run(
-      Platform.resolvedExecutable,
-      <String>['run', 'bin/patchbay.dart', 'help', 'not-a-group'],
-      workingDirectory: Directory.current.path,
-    );
-    expect(result.exitCode, PatchbayExitCode.usage);
-    expect(result.stderr, contains('unknown help topic'));
-    expect(result.stderr, isNot(contains('session')));
-  });
+  test(
+    'unknown help topic is a usage error without connecting',
+    () async {
+      final ProcessResult result = await Process.run(
+        Platform.resolvedExecutable,
+        <String>['run', 'bin/patchbay.dart', 'help', 'not-a-group'],
+        workingDirectory: Directory.current.path,
+      );
+      expect(result.exitCode, PatchbayExitCode.usage);
+      expect(result.stderr, contains('unknown help topic'));
+      expect(result.stderr, isNot(contains('session')));
+    },
+    timeout: _cliSpawnBudget,
+  );
 
   test('an unknown protocol name is still an unknown topic', () {
     // The catalog-name lookup must not become a wildcard: a name no

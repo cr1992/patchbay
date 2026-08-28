@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/artifact_download.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -45,6 +45,39 @@ void main() {
       );
     },
   );
+
+  test('the hostBlob receipt is exactly the frozen seven-key shape, in '
+      'order', () async {
+    // PB-050-20 adds `origin` to *both* receipt shapes so one reader has one
+    // judgement (`tree-artifact-output.md`: "`origin` 对既有 blob 路径同样
+    // 写入"). That makes the existing download path's receipt part of this
+    // MR's compatibility surface, so its key set is pinned here rather than
+    // left to whatever a future edit happens to emit: nothing may be dropped
+    // or renamed, and `blobId` stays present on this side because a host
+    // blob is exactly what it points at.
+    final File output = File('${directory.path}/capture.png');
+    final PatchbayDownloadedArtifact result = await PatchbayArtifactDownloader(
+      invoke: _reader(bytes, metadata),
+    ).download(metadataJson: metadata, outputPath: output.path, force: false);
+    final Map<String, Object?> receipt = result.toJson();
+
+    expect(receipt.keys.toList(), <String>[
+      'path',
+      'blobId',
+      'length',
+      'sha256',
+      'contentType',
+      'origin',
+      'verified',
+    ]);
+    expect(receipt['origin'], 'hostBlob');
+    expect(receipt['blobId'], 'fixture-blob');
+    expect(receipt['verified'], true);
+    expect(receipt['path'], output.path);
+    expect(receipt['length'], bytes.length);
+    expect(receipt['sha256'], sha256.convert(bytes).toString());
+    expect(receipt['contentType'], 'application/octet-stream');
+  });
 
   test('does not replace an existing file without force', () async {
     final File output = File('${directory.path}/logs.ndjson')

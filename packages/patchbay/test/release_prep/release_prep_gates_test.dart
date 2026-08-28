@@ -245,6 +245,32 @@ sdks:
         expect(check.detail, contains('非中性命令示例'));
         expect(check.detail, contains('gesture / inspect / wait'));
       });
+
+      test('工作流 SVG、稳定概念和各入口引用漂移会阻断', () {
+        final Map<String, String> documents = releaseDocumentsFixture('0.3.0');
+        final ReleaseCheck check = checkOf(
+          evaluateRelease(
+            version: '0.3.0',
+            inputs: releaseInputsFixture(
+              released: true,
+              documentOverrides: <String, String>{
+                'README.zh-CN.md': documents['README.zh-CN.md']!.replaceFirst(
+                  '<img src="docs/assets/patchbay-cli-workflows.svg">',
+                  '',
+                ),
+                'docs/assets/patchbay-cli-workflows.svg':
+                    documents['docs/assets/patchbay-cli-workflows.svg']!
+                        .replaceFirst('APP KEEPS RUNNING', 'APP'),
+              },
+            ),
+            resolveTag: (_) => null,
+          ),
+          'documentation-current',
+        );
+        expect(check.status, ReleaseCheckStatus.failed);
+        expect(check.detail, contains('README.zh-CN.md'));
+        expect(check.detail, contains('APP KEEPS RUNNING'));
+      });
     });
 
     test('四件套补齐后转绿', () {

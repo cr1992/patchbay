@@ -15,13 +15,13 @@ For the protocol, lifecycle, and transport boundaries see
 Install the CLI from pub.dev and pin the version used by the app:
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.1
+$ dart pub global activate patchbay_cli 0.5.0
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # it installs here, but that is not on PATH by default
 $ patchbay --help
 ```
 
 For the trade-offs between the three installation forms — including prebuilt release binaries,
-a startup-time comparison, and the trap that running
+their runtime requirements, and the trap that running
 `dart run patchbay_cli:patchbay` inside a consumer's repository directory resolves to the version
 that repo pins — see [the installation section of the usage guide](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#安装)
 (currently in Chinese). When changing the CLI itself, `dart run tool/build_cli.dart` compiles the
@@ -29,6 +29,44 @@ current working tree into an AOT executable, with the output landing in `build/`
 
 The examples below consistently write `dart run bin/patchbay.dart` (the in-package development
 form); after a global install, substitute `patchbay` for it.
+
+## Process Model and Workflow Choice
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cr1992/patchbay/main/docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Lifecycle of Patchbay one-shot commands, repl, and launch">
+</p>
+
+The app and CLI have separate lifecycles: ordinary commands make one request and exit while the app
+keeps running; `repl` only reuses a connection; `launch` only starts, discovers, and supervises the
+app/session. `launch` and `repl` are complementary. `logs tail` is also a bounded long-poll, not an
+endless `tail -f`.
+
+The exact choices, exit conditions, and two-terminal example have one source of truth:
+[Choose a workflow](https://github.com/cr1992/patchbay/blob/main/docs/guide.md#先选工作流).
+This package README deliberately does not duplicate that table.
+
+## Dart Entry Points
+
+The stable way to drive Patchbay is the executable plus `--json`. Two small Dart libraries exist
+for the cases where a process boundary is genuinely in the way, and together they are the whole
+public source surface of this package — everything else lives under `lib/src/` and is an
+implementation detail that changes without notice.
+
+```dart
+// Run one CLI invocation in-process and read its exit code.
+import 'package:patchbay_cli/patchbay_cli.dart'; // runPatchbayCli, PatchbayExitCode
+
+// Hold a connection open from Dart instead of shelling out per command.
+import 'package:patchbay_cli/patchbay_client.dart';
+// PatchbayClient, PatchbaySnapshotDiffClient, PatchbayRuntimeIdentity,
+// PatchbayProtocolException, PatchbayTransportException, PatchbaySnapshotRequest,
+// connectPatchbayVmService, connectPatchbayDirect
+```
+
+Launcher, session, trace, doctor, repl, manifest and permission-driver implementations are not
+importable: drive them through CLI commands and their stable JSON. An app started outside
+`patchbay launch` registers its session with `patchbay session register` instead of writing the
+session record itself.
 
 ## Command Reference
 
@@ -89,6 +127,8 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay permission reset <permission>` | local CLI declaration | — |
 | `patchbay permission status <permission>` | local CLI declaration | — |
 | `patchbay repl` | client CLI declaration | — |
+| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local CLI declaration | — |
+| `patchbay session unregister <session-id>` | local CLI declaration | — |
 | `patchbay session use <session-id> \| --clear` | local CLI declaration | — |
 | `patchbay sessions list` | local CLI declaration | — |
 | `patchbay sessions prune` | local CLI declaration | — |
@@ -102,19 +142,22 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay trace show <trace-id>` | local CLI declaration | — |
 | `patchbay trace start --name <name> [--activate] [--pin]` | local CLI declaration | — |
 | `patchbay trace stop [trace-id]` | local CLI declaration | — |
-| `patchbay ui focus-tree` | client CLI declaration | — |
+| `patchbay ui action <identifier> <generation> <action> [text]` | protocol descriptor | `ui.semantics.actionByIdentifier` |
+| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
 | `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` |
 | `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` |
 | `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.pressHold` |
+| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | protocol descriptor | `ui.gesture.tap` |
 | `patchbay ui inspect off` | protocol descriptor | `ui.inspect.select` |
 | `patchbay ui inspect on [--ttl-ms <ms>]` | protocol descriptor | `ui.inspect.select` |
 | `patchbay ui inspect status` | protocol descriptor | `ui.inspect.status` |
 | `patchbay ui keep-awake off` | protocol descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake on [--lease-ms <ms>]` | protocol descriptor | `ui.keepAwake.set` |
 | `patchbay ui keep-awake status` | protocol descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree` | client CLI declaration | — |
+| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
+| `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | protocol descriptor | `ui.reveal` |
 | `patchbay ui semantics action <node-id> <generation> <action> [text]` | protocol descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree` | protocol descriptor | `ui.semantics.tree` |
+| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | protocol descriptor | `ui.semantics.tree` |
 | `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` |
 | `patchbay ui targets --emit-manifest` | local CLI declaration | — |
 | `patchbay ui text enter <target-id> <generation> [text]` | protocol descriptor | `ui.text.enter` |
@@ -126,7 +169,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay ui wait semantics-unmounted <identifier>` | protocol descriptor | `ui.wait` |
 | `patchbay ui wait semantics-value <identifier> <value>` | protocol descriptor | `ui.wait` |
 | `patchbay ui wait tree-revision <revision>` | protocol descriptor | `ui.wait` |
-| `patchbay ui widget-tree` | client CLI declaration | — |
+| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
 <!-- PATCHBAY_COMMAND_REFERENCE:END -->
 
 Once the app is launched by the `flutter run --machine` launcher, the CLI discovers the unique
@@ -246,6 +289,12 @@ bridge pins before the gates. Misses, ambiguity, and stale generations are all s
 with details (respectively: the list of mounted identifiers, the candidate list, and
 expected/current), so an empty rejection never pushes the caller back to a whole-tree dump.
 
+`ui action <identifier> <generation> <action> [text]` provides the same one-request resolution for
+the other public Semantics actions. Here the caller generation is required and is checked before
+and after policy/gate evaluation. The command exposes only tap, focus, four-direction scroll, and
+setText; it never accepts `latest` or retries against a replacement node. Sensitive setText input
+uses the global `--stdin` flag.
+
 ### UI Target Declaration Reconciliation
 
 `ui verify-manifest <file>` reads a JSON or YAML manifest maintained by the consumer and reconciles
@@ -295,6 +344,7 @@ cross-namespace IDs instead of inventing a representative.
 ```text
 dart run bin/patchbay.dart --ws-uri <uri> --json repl <<'EOF'
 identity
+describe ui.capture
 ui semantics tree
 ui tap login.submit
 EOF
@@ -305,6 +355,8 @@ syntax as one-shot invocations. Each line's output carries its own `exitCode` (u
 JSON envelope per line; otherwise `[n] exit=<code> <summary>`): a process exit code cannot carry
 per-line results, so the session code describes only the session itself — `0` for a clean run, or
 the category of the error that terminated it.
+`describe <service-command>` can run inside the session to read the live catalog row without
+invoking the command it describes.
 
 A rejected or typed-failure line does not end the session; transport / protocol / session errors
 do, because they mean the reused connection or the peer is no longer the one the operator selected,
@@ -522,11 +574,9 @@ distribute a bearer on the app's behalf. Logs are app records the consumer has a
 capture proves only the composited result of Flutter repaint boundaries, excludes system permission
 dialogs, and may be missing PlatformViews.
 
-System permission orchestration uses an explicit external driver. Android 0.4.0 release-gates adb
-status/normalize/reset. The source repository also includes a buildable iOS XCUITest runner for
-physical-device camera, microphone, and location reset/exercise; the App must initiate its own
-permission request, and unsupported status/normalize, notification reset, signing or language
-conditions fail closed. See [platform permission drivers](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md).
+System permission orchestration is opt-in through an explicit external driver; unsupported device,
+runner, signing, and language conditions fail closed. See
+[platform permission drivers](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_cli/doc/platform-permission-drivers.md).
 For the stable commands, passthrough boundaries, and exit conditions of the three trees and
 actions, see
 [`../patchbay_flutter/doc/ui-inspection-and-actions.md`](https://github.com/cr1992/patchbay/blob/main/packages/patchbay_flutter/doc/ui-inspection-and-actions.md)

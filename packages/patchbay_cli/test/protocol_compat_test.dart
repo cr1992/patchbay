@@ -20,7 +20,15 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/artifact_download.dart';
+import 'package:patchbay_cli/src/cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/doctor/doctor_checks.dart';
+import 'package:patchbay_cli/src/doctor/doctor_models.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 import 'fixture/fake_client.dart';
@@ -188,6 +196,9 @@ final class _Run {
   ];
 }
 
+final PatchbayWorkspaceIdentity _workspace =
+    PatchbayWorkspaceIdentity.current()!;
+
 void main() {
   late Directory directory;
   late PatchbaySessionStore store;
@@ -204,7 +215,7 @@ void main() {
   Future<_Run> runDoctor(PatchbayClient client) async {
     final StringBuffer out = StringBuffer();
     final StringBuffer err = StringBuffer();
-    final int exitCode = await runPatchbayCli(
+    final int exitCode = await runPatchbayCliWithSeams(
       <String>['--session-dir', directory.path, '--json', 'doctor'],
       connect: (ArgResults _) async => client,
       output: out,
@@ -223,9 +234,11 @@ void main() {
     wsUri: 'ws://127.0.0.1:1234/token=/ws',
     buildMode: 'debug',
     createdAt: DateTime.utc(2026, 8, 14),
-    workspacePath: '/repo/a',
+    // doctor 走真 CLI，会话归属按 CLI 自己的 workspace 探测判定（PB-050-14），
+    // 因此这条记录必须落在当前 checkout 内，否则本组测的是"选不出会话"而不是兼容性。
+    workspacePath: _workspace.canonicalRoot,
     deviceId: 'device-1',
-  );
+  ).withWorkspace(_workspace);
 
   group('新 CLI ↔ 老 host（冻结的 v0.2.0 语料）', () {
     FakePatchbayClient legacyClient() => FakePatchbayClient(
@@ -505,6 +518,267 @@ void main() {
       expect(_readInvocationTheOldWay(response)?.payload, <String, Object?>{
         'ok': true,
       });
+    });
+  });
+
+  group('0.4.1 reader ↔ 含 ui.reveal 的新 catalog 与新 payload（PB-050-17）', () {
+    // reveal 是 0.5.0 才新增的顶层命令，0.4.1 的读法完全不认识它——这条锁的
+    // 正是「不认识」不等于「读不下去」：catalog 的命令表逐键读，多一行不影响
+    // 老读法认出既有命令；invocation 只逐键取 admission / payload 两个顶层
+    // 键，payload 内部再冒出 containers / reachability 这类新字段一样被忽略。
+    test('老读法从新 catalog 里也能读出 ui.reveal，既有命令不受影响', () async {
+      final PatchbayServiceHost host = PatchbayServiceHost(
+        applicationId: 'dev.patchbay.reveal-compat',
+        registrar: (_, _) {},
+        catalog: () async => <String, Object?>{
+          'commands': <Object?>[
+            <String, Object?>{'name': 'ui.semantics.tree', 'summary': 'tree'},
+            <String, Object?>{
+              'name': 'ui.reveal',
+              'summary': 'identifier 锚定的 scroll-to-reveal',
+            },
+          ],
+          'uiTargets': const <Object?>[],
+        },
+        snapshot: () async => const <String, Object?>{},
+        invoke: (_, _, requestId) async => PatchbayInvocation.rejected(
+          requestId: requestId,
+          rejection: const PatchbayRejection(code: 'notRegistered'),
+        ).toJson(),
+      );
+
+      final Map<String, Object?> catalog = await host.dispatchCatalog();
+
+      expect(_readCommandsTheOldWay(catalog), <String>[
+        'ui.semantics.tree',
+        'ui.reveal',
+      ]);
+    });
+
+    Map<String, Object?> revealResponse(PatchbayRevealResultWire payload) =>
+        PatchbayInvocation.accepted(
+          requestId: 'reveal-compat',
+          payload: payload.toJson(),
+        ).toJson();
+
+    test('老读法读 revealed payload：拿到 admission/payload，多出来的 '
+        'containers/reachability 等新字段被忽略、不报错', () {
+      final Map<String, Object?> response = revealResponse(
+        const PatchbayRevealResultWire(
+          outcome: 'revealed',
+          source: PatchbayFactSourceWire.uiObserved,
+          identifier: 'row.42',
+          steps: 3,
+          elapsedMs: 120,
+          containers: <PatchbayRevealContainerWire>[
+            PatchbayRevealContainerWire(
+              nodeId: 7,
+              generation: 1,
+              steps: 3,
+              direction: PatchbayRevealDirectionWire.forward,
+              extentGrowthSteps: 0,
+            ),
+          ],
+          nodeId: 42,
+          generation: 2,
+          reachability: PatchbayRevealReachabilityWire.pointer,
+          beforeTreeRevision: 1,
+          afterTreeRevision: 2,
+          reason: null,
+          failureType: null,
+          gateId: null,
+          gateCode: null,
+        ),
+      );
+
+      final read = _readInvocationTheOldWay(response);
+      expect(read, isNotNull);
+      expect(read!.admission, 'accepted');
+      expect(read.payload['outcome'], 'revealed');
+      expect(read.payload['steps'], 3);
+      expect(
+        read.payload.containsKey('containers'),
+        isTrue,
+        reason: '老 reader 逐键取值时看得见这个键，只是不认识、用不上它',
+      );
+    });
+
+    test('老 CLI 对 reveal 的 outcome: failed 得 typedFailure 退出码', () {
+      final Map<String, Object?> response = revealResponse(
+        const PatchbayRevealResultWire(
+          outcome: 'failed',
+          source: PatchbayFactSourceWire.uiObserved,
+          identifier: 'row.42',
+          steps: 40,
+          elapsedMs: 900,
+          containers: <PatchbayRevealContainerWire>[
+            PatchbayRevealContainerWire(
+              nodeId: 7,
+              generation: 1,
+              steps: 40,
+              direction: PatchbayRevealDirectionWire.forward,
+              extentGrowthSteps: 0,
+            ),
+          ],
+          nodeId: null,
+          generation: null,
+          reachability: null,
+          beforeTreeRevision: 1,
+          afterTreeRevision: 3,
+          reason: 'scrollExhausted',
+          failureType: null,
+          gateId: null,
+          gateCode: null,
+        ),
+      );
+
+      // patchbayExitCodeFor 是通用分类器：它按字段名走，不认命令名，所以老
+      // CLI 未经任何改动就正确分类了一个它从未见过的命令的失败态。
+      expect(patchbayExitCodeFor(response), PatchbayExitCode.typedFailure);
+      expect(_readInvocationTheOldWay(response)?.payload['outcome'], 'failed');
+    });
+
+    test('rejected 的 reveal（如 uiRevealNoScrollableContainer）走既有 '
+        'rejected 分支，不落进 typedFailure', () {
+      final Map<String, Object?> response = PatchbayInvocation.rejected(
+        requestId: 'reveal-compat-rejected',
+        rejection: const PatchbayRejection(
+          code: 'uiRevealNoScrollableContainer',
+          details: <String, Object?>{'identifier': 'row.42'},
+        ),
+      ).toJson();
+
+      expect(patchbayExitCodeFor(response), PatchbayExitCode.rejected);
+    });
+  });
+
+  group('0.4.1 reader ↔ 带 origin 的新 localArtifact 回执', () {
+    // PB-050-20 给回执加了 `origin`，并且**对既有 blob 路径同样写入**——
+    // `capture` / `blob get` / `logs export` 的回执从此多一个键。多加一个键
+    // 是不是 additive，取决于当年那份 reader 会不会因为看见没见过的键而失败；
+    // 这里按仓内惯例**复刻**当年的读法，而不是 import 今天的实现。
+    //
+    // 0.4.1 的读法有两处：`patchbayResponseSummary` 逐键取 `path` / `length`
+    // 并把 `verified` 当常量印出来；机器消费方按 `--json` 逐键取自己要的那几个。
+    // 两者都不做键集合校验，这正是 additive 成立的全部依据。
+    ({String path, int length, String sha256, String? blobId})?
+    readLocalArtifactThe041Way(Map<String, Object?> response) {
+      final Object? artifact = response['localArtifact'];
+      if (artifact is! Map<Object?, Object?>) return null;
+      final Object? path = artifact['path'];
+      final Object? length = artifact['length'];
+      final Object? digest = artifact['sha256'];
+      if (path is! String || length is! int || digest is! String) return null;
+      return (
+        path: path,
+        length: length,
+        sha256: digest,
+        blobId: artifact['blobId'] as String?,
+      );
+    }
+
+    String summariseThe041Way(Map<String, Object?> response) {
+      final Object? artifact = response['localArtifact'];
+      if (artifact is! Map<Object?, Object?>) return '';
+      return 'artifact=${artifact['path']} length=${artifact['length']} '
+          'verified=true';
+    }
+
+    Map<String, Object?> responseWith(Map<String, Object?> receipt) =>
+        <String, Object?>{
+          'schemaVersion': 1,
+          'requestId': 'compat-request',
+          'admission': 'accepted',
+          'payload': <String, Object?>{
+            'blob': <String, Object?>{'blobId': 'blob-1'},
+          },
+          'localArtifact': receipt,
+        };
+
+    const String digestA =
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const String digestB =
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const String digestC =
+        'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+
+    test('老读法读今天的 hostBlob 回执：新增的 origin 键被忽略', () {
+      final Map<String, Object?> response = responseWith(
+        const PatchbayDownloadedArtifact(
+          path: '/tmp/capture.png',
+          blobId: 'blob-1',
+          length: 12,
+          sha256: digestA,
+          contentType: 'image/png',
+          origin: 'hostBlob',
+        ).toJson(),
+      );
+
+      expect(
+        (response['localArtifact']! as Map<String, Object?>).keys,
+        contains('origin'),
+        reason: '前提：新回执确实带上了这个老 reader 没见过的键',
+      );
+      final read = readLocalArtifactThe041Way(response);
+      expect(read, isNotNull);
+      expect(read!.path, '/tmp/capture.png');
+      expect(read.length, 12);
+      expect(read.blobId, 'blob-1');
+      expect(
+        summariseThe041Way(response),
+        'artifact=/tmp/capture.png length=12 verified=true',
+        reason: '0.4.1 的人读行逐字不变',
+      );
+    });
+
+    test('老读法读 cliRendered 回执：没有 blobId 也不炸，只是读不到 blob', () {
+      // 老 reader 没有 `cliRendered` 这个概念，但它对回执的用法是「按路径取
+      // 文件」，而这条路径同样是本机绝对路径、同样已按 sha256 校验过。缺
+      // `blobId` 只影响「回头再向 host 要一次」这类用法，那是 blob 路径独有的；
+      // 树类载荷本来就没有 host blob 可要——不编造一个正是这条的用意。
+      final Map<String, Object?> response = responseWith(
+        const PatchbayDownloadedArtifact(
+          path: '/tmp/ui-semantics-tree.json',
+          blobId: null,
+          length: 812345,
+          sha256: digestB,
+          contentType: 'application/json',
+          origin: 'cliRendered',
+        ).toJson(),
+      );
+
+      final read = readLocalArtifactThe041Way(response);
+      expect(read, isNotNull);
+      expect(read!.path, '/tmp/ui-semantics-tree.json');
+      expect(read.length, 812345);
+      expect(read.blobId, isNull);
+      expect(
+        summariseThe041Way(response),
+        'artifact=/tmp/ui-semantics-tree.json length=812345 verified=true',
+      );
+    });
+
+    test('additive 的另一半：既有键的值一个都没被改动', () {
+      const PatchbayDownloadedArtifact artifact = PatchbayDownloadedArtifact(
+        path: '/tmp/logs.ndjson',
+        blobId: 'blob-2',
+        length: 7,
+        sha256: digestC,
+        contentType: 'application/x-ndjson',
+        origin: 'hostBlob',
+      );
+      final Map<String, Object?> withoutOrigin = <String, Object?>{
+        ...artifact.toJson(),
+      }..remove('origin');
+
+      expect(withoutOrigin, <String, Object?>{
+        'path': '/tmp/logs.ndjson',
+        'blobId': 'blob-2',
+        'length': 7,
+        'sha256': digestC,
+        'contentType': 'application/x-ndjson',
+        'verified': true,
+      }, reason: '去掉 origin 之后必须与 0.4.1 的回执逐键相同');
     });
   });
 

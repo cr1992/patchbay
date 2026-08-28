@@ -1,7 +1,8 @@
 // ignore_for_file: deprecated_member_use_from_same_package
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/command_registry.dart';
+import 'package:patchbay_cli/src/commands/command_parser.dart';
 import 'package:test/test.dart';
 
 /// Resolves [argv] with an injected sensitive reader so the shapes that accept
@@ -209,7 +210,8 @@ void main() {
           PatchbayFriendlyCommand.uiTap => <String>['login.submit'],
           PatchbayFriendlyCommand.snapshotWait => <String>['call.session'],
           PatchbayFriendlyCommand.snapshotDiff => const <String>[],
-          PatchbayFriendlyCommand.sessionUse => <String>['worktree-a'],
+          PatchbayFriendlyCommand.sessionUse ||
+          PatchbayFriendlyCommand.sessionUnregister => <String>['worktree-a'],
           PatchbayFriendlyCommand.permissionStatus ||
           PatchbayFriendlyCommand.permissionReset ||
           PatchbayFriendlyCommand.permissionNormalize ||
@@ -228,11 +230,18 @@ void main() {
           _ when spec.name == 'uiTextSet' || spec.name == 'uiTextEnter' =>
             <String>['field.id', '3', 'hello'],
           _ when spec.name == 'uiSemanticsAction' => <String>['42', '7', 'tap'],
+          _ when spec.name == 'uiAction' => <String>[
+            'profile.action',
+            '7',
+            'tap',
+          ],
           _ when spec.name == 'uiTap' => <String>['login.submit'],
+          _ when spec.name == 'uiReveal' => <String>['row.42'],
           _
               when spec.name == 'uiGesturePressHold' ||
                   spec.name == 'uiGestureDrag' ||
-                  spec.name == 'uiGestureFling' =>
+                  spec.name == 'uiGestureFling' ||
+                  spec.name == 'uiGestureTap' =>
             <String>['gesture.target', '1'],
           _
               when spec.name == 'uiWaitSemanticsMounted' ||
@@ -305,6 +314,16 @@ void main() {
           '--decision',
           'deny',
         ],
+        if (spec == PatchbayFriendlyCommand.sessionRegister) ...<String>[
+          '--ws-uri',
+          'ws://127.0.0.1:1/ws',
+          '--application-id',
+          'com.example.app',
+          '--device-id',
+          'fixture-device',
+          '--process-id',
+          '4242',
+        ],
         if (spec == PatchbayFriendlyCommand.uiTargets) '--emit-manifest',
         if (spec == PatchbayFriendlyCommand.traceStart) ...<String>[
           '--name',
@@ -370,6 +389,35 @@ void main() {
         reason: spec.name,
       );
     }
+  });
+
+  test('F7: renderedMember (PB-050-20 spill) coverage is exactly the four '
+      'tree-shaped commands, enumerated from the live registry', () {
+    // The actual set is derived from `PatchbayFriendlyCommandRegistry
+    // .commands` — the same table `resolve`/`specFor` dispatch against —
+    // never re-declared here, so this only breaks when the registry's own
+    // `artifact` dispositions actually change. `ui semantics tree` is a
+    // `GeneratedProtocolCommand` (its renderedMember override lives in
+    // `command_spec.dart`); the other three are plain
+    // `PatchbayFriendlyCommand` declarations in `friendly_commands.dart`.
+    final Set<String> actual = PatchbayFriendlyCommandRegistry.commands
+        .where(
+          (PatchbayFriendlyCommandSpec spec) =>
+              spec.artifact == PatchbayArtifactDisposition.renderedMember,
+        )
+        .map((PatchbayFriendlyCommandSpec spec) => spec.path.join(' '))
+        .toSet();
+    // The frozen expectation (tree-artifact-output.md's four covered
+    // commands) — a ratchet, not a mirror of production code: adding a
+    // fifth renderedMember command, or dropping/renaming one of these
+    // four, must fail this test rather than pass silently.
+    const Set<String> expected = <String>{
+      'ui semantics tree',
+      'ui widget-tree',
+      'ui render-tree',
+      'ui focus-tree',
+    };
+    expect(actual, expected);
   });
 
   test('ui text keeps the variadic trailing text and generation parsing', () {
@@ -479,6 +527,60 @@ void main() {
     );
     expect(
       () => _resolve(<String>['ui', 'tap', 'a.b', 'c.d']),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('ui action requires generation and preserves stdin provenance', () {
+    final PatchbayFriendlyInvocation action = _resolve(<String>[
+      'ui',
+      'action',
+      'profile.name',
+      '7',
+      'setText',
+    ], stdin: () => 'private value');
+    expect(action.serviceCommand, 'ui.semantics.actionByIdentifier');
+    expect(action.arguments, <String, Object?>{
+      'identifier': 'profile.name',
+      'generation': 7,
+      'action': 'setText',
+      'text': '',
+      'inputWasStdin': false,
+    });
+
+    final PatchbayFriendlyInvocation fromStdin = _resolve(<String>[
+      '--stdin',
+      'ui',
+      'action',
+      'profile.name',
+      '7',
+      'setText',
+    ], stdin: () => 'private value');
+    expect(fromStdin.arguments, <String, Object?>{
+      'identifier': 'profile.name',
+      'generation': 7,
+      'action': 'setText',
+      'text': 'private value',
+      'inputWasStdin': true,
+    });
+
+    expect(
+      () => _resolve(<String>['ui', 'action', 'profile.name', 'tap']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>['ui', 'action', 'profile.name', '-1', 'tap']),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => _resolve(<String>[
+        'ui',
+        'action',
+        'profile.name',
+        '7',
+        'tap',
+        'unexpected',
+      ]),
       throwsA(isA<FormatException>()),
     );
   });
@@ -845,6 +947,62 @@ void main() {
       );
     },
   );
+
+  test('generated tap syntax decodes the declared centre default and an '
+      'explicit start offset', () {
+    final PatchbayFriendlyInvocation bare = _resolve(<String>[
+      'ui',
+      'gesture',
+      'tap',
+      'wheel',
+      '4',
+    ]);
+    expect(bare.serviceCommand, 'ui.gesture.tap');
+    // start 缺省时 CLI 落 descriptor 声明的目标中心默认；tap 的 wire 上
+    // 没有 durationMs——间隔是 host 侧内部常数。
+    expect(bare.arguments, <String, Object?>{
+      'identifier': 'wheel',
+      'generation': 4,
+      'start': <String, Object?>{'x': 0.5, 'y': 0.5},
+    });
+
+    final PatchbayFriendlyInvocation offset = _resolve(<String>[
+      '--start',
+      '{"x":0.2,"y":0.8}',
+      'ui',
+      'gesture',
+      'tap',
+      'wheel',
+      '4',
+    ]);
+    expect(offset.arguments['start'], <String, Object?>{'x': 0.2, 'y': 0.8});
+    expect(offset.arguments.containsKey('durationMs'), isFalse);
+  });
+
+  test('tap refuses the family duration option, a missing generation and a '
+      'negative generation', () {
+    expect(
+      () => _resolve(<String>[
+        '--duration-ms',
+        '50',
+        'ui',
+        'gesture',
+        'tap',
+        'wheel',
+        '4',
+      ]),
+      throwsA(isA<FormatException>()),
+    );
+    // 少一个位置参数是 usage 错误，不静默补齐。
+    expect(
+      () => _resolve(<String>['ui', 'gesture', 'tap', 'wheel']),
+      throwsA(isA<Exception>()),
+    );
+    expect(
+      () => _resolve(<String>['ui', 'gesture', 'tap', 'wheel', '-1']),
+      throwsA(isA<Exception>()),
+    );
+  });
 
   test('parser has no direct token argv option', () {
     expect(

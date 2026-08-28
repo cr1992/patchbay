@@ -3,7 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay_cli/patchbay_cli.dart';
+import 'package:patchbay_cli/src/client.dart';
+import 'package:patchbay_cli/src/result.dart';
+import 'package:patchbay_cli/src/session/session_models.dart';
+import 'package:patchbay_cli/src/session/session_store.dart';
+import 'package:patchbay_cli/src/session/workspace_identity.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -115,6 +119,9 @@ void main() {
       );
       expect(sessionStore.readAll().single.appInstanceId, 'fixture-instance');
 
+      // PB-050-14, proven across real processes: a record belonging to another
+      // checkout is inventory, not a candidate. Adding it must not make the
+      // implicit path ambiguous -- that is the whole isolation guarantee.
       sessionStore.write(
         PatchbaySessionRecord(
           sessionId: 'fixture-other-worktree',
@@ -127,6 +134,40 @@ void main() {
           createdAt: DateTime.now().toUtc(),
           workspacePath: '${Directory.current.path}/other-worktree',
           deviceId: 'local-vm',
+        ).withWorkspace(
+          PatchbayWorkspaceIdentity.of(
+            kind: PatchbayWorkspaceKind.gitWorktree,
+            canonicalRoot: '${Directory.current.path}/other-worktree',
+          )!,
+        ),
+      );
+      final ProcessResult isolatedCli = await Process.run(
+        Platform.resolvedExecutable,
+        <String>[
+          'run',
+          'bin/patchbay.dart',
+          '--session-dir',
+          sessions.path,
+          'identity',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      expect(isolatedCli.exitCode, 0, reason: isolatedCli.stderr.toString());
+
+      // Two records in *this* checkout is still the case the operator has to
+      // settle: affinity narrows the field, it does not replace the chain.
+      sessionStore.write(
+        PatchbaySessionRecord(
+          sessionId: 'fixture-second',
+          applicationId: 'dev.patchbay.fixture',
+          appInstanceId: null,
+          isolateId: null,
+          processId: host.pid,
+          wsUri: uri.toString(),
+          buildMode: 'debug',
+          createdAt: DateTime.now().toUtc(),
+          workspacePath: Directory.current.path,
+          deviceId: 'local-vm-2',
         ),
       );
       final ProcessResult ambiguousCli = await Process.run(
@@ -143,6 +184,11 @@ void main() {
       expect(ambiguousCli.exitCode, PatchbayExitCode.transport);
       expect(ambiguousCli.stderr.toString(), contains('sessionAmbiguous'));
       expect(ambiguousCli.stderr.toString(), contains('fixture-current'));
+      // The foreign record is never offered as something to pin.
+      expect(
+        ambiguousCli.stderr.toString(),
+        isNot(contains('fixture-other-worktree')),
+      );
       expect(ambiguousCli.stderr.toString(), isNot(contains(uri.toString())));
       // The refusal names the command that settles it, and that command runs
       // without dialling anything.

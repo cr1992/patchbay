@@ -27,8 +27,8 @@ Patchbay 是一条伸进 Flutter runtime 的类型化控制通道：从终端连
 adb 站在系统外面看设备；Patchbay 站在 App 里面看 runtime。对 iOS 来说，它补上了
 系统工具无法提供的 App 内部调试面。
 
-> **项目状态：** `v0.4.1`；需要 Dart `>=3.11.0`，Flutter UI 能力需要
-> Flutter `>=3.38.0`。控制面仅在 debug / profile 启用；package 可以参与 release 编译，但接入方
+> **项目状态：** `v0.5.0`；需要 Dart `>=3.12.0`，Flutter UI 能力需要
+> Flutter `>=3.44.0`。控制面仅在 debug / profile 启用；package 可以参与 release 编译，但接入方
 > 必须在组合根通过编译期分支让 host 与 adapter 保持不可达。
 
 ## 适合解决什么问题
@@ -54,7 +54,7 @@ Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架；
 
 ```yaml
 dependencies:
-  patchbay_flutter: ^0.4.1
+  patchbay_flutter: ^0.5.0
 ```
 
 `patchbay_flutter` 已导出 core API；纯 Dart 接入可改用 `packages/patchbay`。
@@ -66,7 +66,7 @@ dependencies:
 
 ```console
 $ mkdir -p ~/.local/bin
-$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.4.1/patchbay-0.4.1-macos-arm64 \
+$ curl -fL https://github.com/cr1992/patchbay/releases/download/patchbay-v0.5.0/patchbay-0.5.0-macos-arm64 \
     -o ~/.local/bin/patchbay
 $ chmod +x ~/.local/bin/patchbay
 $ patchbay --help
@@ -74,10 +74,10 @@ $ patchbay --help
 
 确保 `~/.local/bin` 在 `PATH`。`dart pub global activate patchbay_cli` 安装的是由 Dart runtime
 加载的 app snapshot，并非独立原生 AOT；它可以作为兼容形态使用，但不应拿它验证 AOT 启动耗时。
-需要该兼容形态时按同一 package 版本固定安装：
+需要该兼容形态时，按同一 package 版本固定安装：
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.1
+$ dart pub global activate patchbay_cli 0.5.0
 ```
 
 ### 3. 在组合根注册
@@ -90,10 +90,12 @@ import 'package:patchbay_flutter/patchbay_flutter.dart';
 void main() {
   if (!kReleaseMode) {
     final gates = PatchbayGateEvaluator(
+      // 开放最小只读面。
       baseGate: () => const PatchbayGateDecision.allow(),
+      // 写操作会声明 consumer gate；未知门保持关闭。
       consumerGate: (id) => PatchbayGateDecision.reject(
         code: 'unknownConsumerGate',
-        notice: 'No consumer gate named $id.',
+        notice: '没有叫 "$id" 的 consumer gate。',
       ),
     );
 
@@ -107,21 +109,8 @@ void main() {
 }
 ```
 
-这段最小接入已能提供 identity、catalog、空 snapshot、Semantics 只读观察和 `ui.wait`。
-Semantics action 默认拒绝；领域命令、截图、日志和导航都需要 App 显式注入对应能力。
-
-需要稳定文本目标时，用 `PatchbayKey` 替换现有 Key。它是 `GlobalKey`，必须像普通
-`GlobalKey` 一样缓存，不能在 `build()` 中每次重新构造：
-
-```dart
-late final PatchbayKey phoneKey = PatchbayKey.text('login.phone');
-
-@override
-Widget build(BuildContext context) => TextField(
-  key: phoneKey,
-  controller: phoneController,
-);
-```
+这会开放只读诊断；写操作在 App 声明并授权对应 gate 前保持关闭。领域命令、稳定 UI 目标、截图、
+日志和导航都是[接入指南](docs/guide.md#app-接入)里的可选增量。
 
 ### 4. 连接运行中的 App
 
@@ -134,18 +123,27 @@ $ patchbay --ws-uri '<VM Service URI>' catalog
 $ patchbay --ws-uri '<VM Service URI>' --json snapshot
 ```
 
+`identity` 返回与你接入时一致的 `applicationId`，且三条命令都以 `0` 退出（`--json` 输出没有
+`error` 信封），就表示最小只读链路已经跑通。普通 Patchbay 命令都是一次性进程：完成连接、请求和
+输出后立即按结果退出，App 继续运行；下一条命令会重新连接同一个 App。
+
 VM Service URI 通常包含认证信息，不要把它写入脚本、日志或提交物。接入 launcher 后可以把
 `--ws-uri` 省略，详见[会话自动发现](docs/guide.md#6-会话自动发现可选)。多台设备同时连着时用
 `patchbay sessions list` 看有哪些会话、`patchbay session use <session-id>` 固定一个，之后的命令
 不必再逐条敲 `--session`，详见[会话选择](docs/guide.md#会话选择)。
 
-catalog 中的 UI target 会返回当前 `generation`。声明了调用方代际围栏的写操作（如文本输入）
-必须携带这个值，防止迟到的命令打到重挂载后的同名控件；`ui tap` 可以省略 generation，host 会在
-解析 identifier 后钉住本次操作的代际：
+#### 日常工作流怎么选
 
-```console
-$ patchbay --ws-uri '<VM Service URI>' ui text set login.phone <generation> '13800000000'
-```
+<p align="center">
+  <img src="docs/assets/patchbay-cli-workflows.svg" width="100%" alt="Patchbay CLI 三种工作流：普通命令一次执行后退出，repl 复用连接连续执行，launch 启动并监督 App 会话">
+</p>
+
+- **默认：** 保持 `flutter run` 运行，偶尔查一条就用一次性命令。
+- **连续执行：** App 已经运行时进入 `repl`；它复用连接，不负责启动 App。
+- **自动发现：** 接好 session 声明后，终端 A 用 `launch` 监督 App，终端 B 跑普通命令或 `repl`。
+
+`launch` 与 `repl` 可以配合，并非二选一；连接异常先跑 `patchbay doctor`。完整退出条件和双终端示例
+只在[使用指南的「先选工作流」](docs/guide.md#先选工作流)维护。
 
 ## 能做什么
 
@@ -170,81 +168,8 @@ $ patchbay logs tail
 $ patchbay repl < commands.txt
 ```
 
-<!-- PATCHBAY_COMMAND_REFERENCE:START -->
-下表只描述当前 CLI 随包发布的语法。协议命令行来自仓内 descriptor；client / local 行仍来自 CLI 的显式声明。它不是运行时 capability catalog，实际可用性请以 `patchbay catalog` 为准。
-
-| CLI 语法 | 声明来源 | 协议命令 |
-|---|---|---|
-| `patchbay blob get <blob-id> --output <path>` | client 显式声明 | `blob.metadata` |
-| `patchbay blob metadata <blob-id>` | client 显式声明 | `blob.metadata` |
-| `patchbay capture diff <before-blob-id> <after-blob-id>` | client 显式声明 | `ui.capture.diff` |
-| `patchbay capture root --output <path>` | 协议 descriptor | `ui.capture` |
-| `patchbay capture target <target-id> <generation> --output <path>` | 协议 descriptor | `ui.capture` |
-| `patchbay catalog` | client 显式声明 | — |
-| `patchbay describe <service-command>` | local 显式声明 | — |
-| `patchbay doctor` | local 显式声明 | — |
-| `patchbay doctor permission` | local 显式声明 | — |
-| `patchbay exec <service-command>` | client 显式声明 | — |
-| `patchbay identity` | client 显式声明 | — |
-| `patchbay job cancel <job-id>` | client 显式声明 | `patchbay.job.cancel` |
-| `patchbay job get <job-id>` | client 显式声明 | `patchbay.job.get` |
-| `patchbay launch -- <consumer command>` | local 显式声明 | — |
-| `patchbay logs export --output <path>` | client 显式声明 | `logs.export` |
-| `patchbay logs query` | client 显式声明 | `logs.query` |
-| `patchbay logs tail` | client 显式声明 | `logs.tail` |
-| `patchbay navigation back [--revision <revision>]` | 协议 descriptor | `navigation.back` |
-| `patchbay navigation catalog` | 协议 descriptor | `navigation.catalog` |
-| `patchbay navigation current` | 协议 descriptor | `navigation.current` |
-| `patchbay navigation go <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.go` |
-| `patchbay navigation push <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.push` |
-| `patchbay net profile` | client 显式声明 | — |
-| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client 显式声明 | — |
-| `patchbay permission capabilities` | local 显式声明 | — |
-| `patchbay permission exercise <permission> --decision <decision>` | local 显式声明 | — |
-| `patchbay permission fail <permission> --state <state>` | local 显式声明 | — |
-| `patchbay permission normalize <permission> --state <state>` | local 显式声明 | — |
-| `patchbay permission reset <permission>` | local 显式声明 | — |
-| `patchbay permission status <permission>` | local 显式声明 | — |
-| `patchbay repl` | client 显式声明 | — |
-| `patchbay session use <session-id> \| --clear` | local 显式声明 | — |
-| `patchbay sessions list` | local 显式声明 | — |
-| `patchbay sessions prune` | local 显式声明 | — |
-| `patchbay snapshot [--path <dot.path>]` | client 显式声明 | — |
-| `patchbay snapshot diff --from <revision>` | client 显式声明 | — |
-| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client 显式声明 | — |
-| `patchbay trace diff <before-trace-id> <after-trace-id>` | local 显式声明 | — |
-| `patchbay trace export <trace-id> --output <directory>` | local 显式声明 | — |
-| `patchbay trace mark <note>` | local 显式声明 | — |
-| `patchbay trace prune [--dry-run]` | local 显式声明 | — |
-| `patchbay trace show <trace-id>` | local 显式声明 | — |
-| `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — |
-| `patchbay trace stop [trace-id]` | local 显式声明 | — |
-| `patchbay ui focus-tree` | client 显式声明 | — |
-| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
-| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
-| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` |
-| `patchbay ui inspect off` | 协议 descriptor | `ui.inspect.select` |
-| `patchbay ui inspect on [--ttl-ms <ms>]` | 协议 descriptor | `ui.inspect.select` |
-| `patchbay ui inspect status` | 协议 descriptor | `ui.inspect.status` |
-| `patchbay ui keep-awake off` | 协议 descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake on [--lease-ms <ms>]` | 协议 descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree` | client 显式声明 | — |
-| `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree` | 协议 descriptor | `ui.semantics.tree` |
-| `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` |
-| `patchbay ui targets --emit-manifest` | local 显式声明 | — |
-| `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` |
-| `patchbay ui text set <target-id> <generation> [text]` | 协议 descriptor | `ui.text.set` |
-| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local 显式声明 | — |
-| `patchbay ui wait destination <destination-id>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait frame-revision <revision>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait semantics-mounted <identifier>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait semantics-unmounted <identifier>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait semantics-value <identifier> <value>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait tree-revision <revision>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui widget-tree` | client 显式声明 | — |
-<!-- PATCHBAY_COMMAND_REFERENCE:END -->
+用 `patchbay help <topic>` 查看随包语法，用 `patchbay catalog` 查看当前 App 实际开放的能力；完整生成表
+只在 [CLI 包参考](packages/patchbay_cli/README.zh-CN.md)维护。
 
 ## 为什么是 Patchbay
 
@@ -295,6 +220,7 @@ router、设备 SDK 和隐私策略仍由 App 自己拥有。
 - **[Flutter package](packages/patchbay_flutter/README.zh-CN.md)** — UI 观察、操作、导航与截图
 - **[CLI package](packages/patchbay_cli/README.zh-CN.md)** — 完整命令和连接安全
 - **[Direct transport](packages/patchbay_transport/README.zh-CN.md)** — HTTP 协议与 LAN 风险
+- **[Agent Skill](skills/use-patchbay/SKILL.md)** — AI agent 的只读优先任务路由与 live discovery
 - **[变更记录](CHANGELOG.md)** — 未发布与已发布的 API、协议和安全行为变化
 
 ## License

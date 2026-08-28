@@ -4,6 +4,7 @@
     "serverVersion": "<patchbayPackageVersion>",
     "features": [
       "catalogDigest",
+      "invocationCancellation",
       "lifecycleState",
       "snapshotRevisionDiff",
       "snapshotSelectors"

@@ -8,6 +8,43 @@ import 'package:patchbay_flutter/patchbay_flutter.dart';
 import '../fixture/flutter_bridge_fixtures.dart';
 
 void main() {
+  test('Flutter host forwards versioned domain catalog semantics', () async {
+    final PatchbayFlutterBridge bridge = allowedBridge(PatchbayUiRegistry());
+    addTearDown(bridge.dispose);
+    final _CountingCatalogProvider provider = _CountingCatalogProvider();
+    final PatchbayFlutterServiceHost host =
+        PatchbayFlutterServiceHost.withDomainCatalogProvider(
+          applicationId: 'dev.patchbay.flutter.provider-test',
+          bridge: bridge,
+          domainCatalogProvider: provider,
+          domainInvoke: (_, _, requestId) async =>
+              PatchbayInvocation.accepted(requestId: requestId).toJson(),
+        );
+
+    await host.dispatchInvoke(
+      'device.status',
+      const <String, Object?>{},
+      'provider-1',
+    );
+    await host.dispatchInvoke(
+      'device.status',
+      const <String, Object?>{},
+      'provider-2',
+    );
+    expect(provider.reads, 1);
+
+    expect(await host.dispatchCatalog(), contains('uiTargets'));
+    expect(await host.dispatchCatalog(), contains('uiTargets'));
+    expect(provider.reads, 3);
+
+    await host.dispatchInvoke(
+      'device.status',
+      const <String, Object?>{},
+      'provider-3',
+    );
+    expect(provider.reads, 3);
+  });
+
   test('Flutter host forwards redacted audit configuration', () async {
     final List<PatchbayAuditEvent> delivered = <PatchbayAuditEvent>[];
     final PatchbayFlutterServiceHost host = PatchbayFlutterServiceHost(
@@ -60,6 +97,7 @@ void main() {
         .toSet();
     expect(names, contains('ui.semantics.tree'));
     expect(names, isNot(contains('ui.semantics.action')));
+    expect(names, isNot(contains('ui.semantics.actionByIdentifier')));
     expect(
       <Object?, Object?>{
         for (final Map<String, Object?> command
@@ -221,6 +259,7 @@ void main() {
           .toSet();
 
       expect(names, contains('ui.semantics.action'));
+      expect(names, contains('ui.semantics.actionByIdentifier'));
     },
   );
 
@@ -303,4 +342,24 @@ void main() {
     expect(tapped, isTrue);
     bridge.dispose();
   });
+}
+
+final class _CountingCatalogProvider implements PatchbayCatalogProvider {
+  int reads = 0;
+
+  @override
+  int get commandsRevision => 0;
+
+  @override
+  Future<PatchbayCatalogSample> readCatalog() async {
+    reads += 1;
+    return const PatchbayCatalogSample(
+      commandsRevision: 0,
+      catalog: <String, Object?>{
+        'commands': <Object?>[
+          <String, Object?>{'name': 'device.status'},
+        ],
+      },
+    );
+  }
 }

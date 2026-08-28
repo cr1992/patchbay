@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import '../features.dart';
 import '../generated/core_wire.g.dart';
+import '../invocation_cancellation.dart';
 import '../version.dart';
 import 'host_catalog.dart';
 import 'host_invoker.dart';
@@ -28,6 +29,7 @@ final class HostVmServiceRegistrar {
   static const String catalogMethod = 'ext.patchbay.catalog';
   static const String snapshotMethod = 'ext.patchbay.snapshot';
   static const String invokeMethod = 'ext.patchbay.invoke';
+  static const String cancelInvocationMethod = 'ext.patchbay.cancelInvocation';
   static const String snapshotRequestKey = 'request';
 
   final String applicationId;
@@ -46,6 +48,7 @@ final class HostVmServiceRegistrar {
     _registrar(catalogMethod, handleCatalog);
     _registrar(snapshotMethod, handleSnapshot);
     _registrar(invokeMethod, handleInvoke);
+    _registrar(cancelInvocationMethod, handleCancelInvocation);
   }
 
   Future<ServiceExtensionResponse> handleSnapshot(
@@ -121,7 +124,9 @@ final class HostVmServiceRegistrar {
               key != 'isolateId' &&
               key != 'command' &&
               key != 'args' &&
-              key != 'requestId',
+              key != 'requestId' &&
+              key != 'deadlineMs' &&
+              key != 'ownerToken',
         )) {
       return invalidParams('invoke received unknown parameters');
     }
@@ -132,6 +137,18 @@ final class HostVmServiceRegistrar {
     }
     if (requestId.isEmpty) {
       return invalidParams('requestId must not be empty');
+    }
+    final String? rawDeadline = parameters['deadlineMs'];
+    final int? deadlineMs = rawDeadline == null
+        ? null
+        : int.tryParse(rawDeadline);
+    if (rawDeadline != null &&
+        (deadlineMs == null || deadlineMs < 1 || deadlineMs > 300000)) {
+      return invalidParams('deadlineMs must be between 1 and 300000');
+    }
+    final String? ownerToken = parameters['ownerToken'];
+    if (ownerToken != null && !isValidPatchbayOwnerToken(ownerToken)) {
+      return invalidParams('ownerToken must be a 128-bit base64url value');
     }
     final Object? decoded;
     try {
@@ -147,7 +164,46 @@ final class HostVmServiceRegistrar {
         command,
         Map<String, Object?>.from(decoded),
         requestId,
+        ownerToken: ownerToken,
+        deadline: deadlineMs == null
+            ? null
+            : Duration(milliseconds: deadlineMs),
       ),
+    );
+  }
+
+  Future<ServiceExtensionResponse> handleCancelInvocation(
+    String method,
+    Map<String, String> parameters,
+  ) async {
+    if (method != cancelInvocationMethod ||
+        parameters.keys.any(
+          (String key) =>
+              key != 'isolateId' &&
+              key != 'command' &&
+              key != 'requestId' &&
+              key != 'ownerToken',
+        )) {
+      return invalidParams('cancelInvocation received unknown parameters');
+    }
+    final String? command = parameters['command'];
+    final String? requestId = parameters['requestId'];
+    final String? ownerToken = parameters['ownerToken'];
+    if (command == null || command.isEmpty) {
+      return invalidParams('command is required');
+    }
+    if (requestId == null || requestId.isEmpty) {
+      return invalidParams('requestId is required');
+    }
+    if (ownerToken == null || !isValidPatchbayOwnerToken(ownerToken)) {
+      return invalidParams('ownerToken must be a 128-bit base64url value');
+    }
+    return result(
+      (await _invokerHandler.cancelInvocation(
+        command: command,
+        requestId: requestId,
+        ownerToken: ownerToken,
+      )).toJson(),
     );
   }
 

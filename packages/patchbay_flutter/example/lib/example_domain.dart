@@ -6,6 +6,36 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'example_log_source.dart';
 
+/// The single write gate this example declares, on both planes.
+///
+/// `consumerGate` only ever receives a gate ID string (see
+/// `PatchbayConsumerGate` in `package:patchbay`); it cannot see a command's
+/// descriptor, its `sideEffect`, or which command is being invoked. So the
+/// read/write split this example demonstrates is not something the framework
+/// infers — it is entirely a choice about *which operations declare this gate
+/// ID at all*.
+///
+/// On the UI plane every call site in `main.dart` that attaches this ID does
+/// so because `packages/patchbay/lib/src/ui_protocol_commands.dart` (and
+/// `protocol_commands.dart` for navigation) classifies that operation with
+/// `sideEffect: PatchbaySideEffect.appState` or `.external`: `ui.semantics.
+/// action`/`.tap`, `ui.gesture.*`, `navigation.go`/`push`/`back`,
+/// `ui.inspect.select`, `ui.keepAwake.set`, and `ui.text.set`/`.enter`.
+/// `ui.capture`/`.capture.diff` deliberately do **not** use it: the same
+/// descriptors classify them `sideEffect: none` / `mode: readOnly`, same as
+/// `logs.*`/`blob.*`, so they only ever pass the base gate.
+///
+/// The same rule now applies to the domain descriptors below, and the host
+/// enforces it: a `sideEffect != none` row crosses its declared gates before
+/// `domainInvoke` is called at all. `patchbay.job.cancel` shares this gate
+/// with `example.job.run` on purpose — whoever may start a job may stop it,
+/// and a cancel gated more strictly than its run would strand a running job
+/// behind a closed gate.
+///
+/// See `_exampleConsumerGate` in `main.dart` for the actual default (reject)
+/// and the one explicit exception this example ships with.
+const String exampleWriteGate = 'example.uiWrite';
+
 /// Domain command names the example exposes.
 const String incrementCommand = 'example.counter.increment';
 const String deviceWriteCommand = 'example.device.write';
@@ -13,6 +43,8 @@ const String jobRunCommand = 'example.job.run';
 const String idempotentTouchCommand = 'example.idempotent.touch';
 const String permissionRequestCommand = 'example.permission.request';
 const String permissionStatusCommand = 'example.permission.status';
+const String cooperativeWaitCommand = 'example.invocation.cooperativeWait';
+const String unresponsiveWaitCommand = 'example.invocation.unresponsiveWait';
 
 const Set<String> examplePermissionNames = <String>{
   'camera',
@@ -240,130 +272,189 @@ final class ExampleDomain {
   final Set<String> _appliedRequestIds = <String>{};
   int _touches = 0;
 
-  List<PatchbayCommandDescriptor> get descriptors =>
-      <PatchbayCommandDescriptor>[
-        const PatchbayCommandDescriptor(
-          name: permissionRequestCommand,
-          summary: 'Request one native permission and return after dispatch.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.external,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-          responseSchema: _permissionRequestSchema,
-          parameters: <PatchbayParameterDescriptor>[
-            PatchbayParameterDescriptor(
-              name: 'permission',
-              type: PatchbayParameterType.string,
-              required: true,
-            ),
-          ],
+  // 每条 `sideEffect != none` 的行都声明 `exampleWriteGate`，只读行一条都不声明。
+  // 这不再只是目录上的说明文字：host 在受理段读回这里的 `gates`，写命令必须先过
+  // 基础门与声明门才会进入 `invoke`。因此 `_exampleConsumerGate` 一旦回落到
+  // `factoryDefaultWriteGateDecision`，下面六条写命令会立即一起关上，而
+  // `example.permission.status` / `patchbay.job.get` / `patchbay.job.wait` 逐字节
+  // 不变——「只读默认开放、写入显式开放」在 domain 面有了落点。
+  //
+  // 反过来也成立：声明一个 `consumerGate` 没接线的门 = 拒绝，不是放行，所以迁移
+  // 途中的半成品状态是 fail-closed 的。
+  List<PatchbayCommandDescriptor>
+  get descriptors => <PatchbayCommandDescriptor>[
+    const PatchbayCommandDescriptor(
+      name: permissionRequestCommand,
+      summary: 'Request one native permission and return after dispatch.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.external,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      gates: <String>{exampleWriteGate},
+      responseSchema: _permissionRequestSchema,
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'permission',
+          type: PatchbayParameterType.string,
+          required: true,
         ),
-        const PatchbayCommandDescriptor(
-          name: permissionStatusCommand,
-          summary: 'Read the App-side native permission state.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.none,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-          responseSchema: _permissionStatusSchema,
-          parameters: <PatchbayParameterDescriptor>[
-            PatchbayParameterDescriptor(
-              name: 'permission',
-              type: PatchbayParameterType.string,
-              required: true,
-            ),
-          ],
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: permissionStatusCommand,
+      summary: 'Read the App-side native permission state.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      responseSchema: _permissionStatusSchema,
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'permission',
+          type: PatchbayParameterType.string,
+          required: true,
         ),
-        const PatchbayCommandDescriptor(
-          name: incrementCommand,
-          summary: 'Increment the example consumer counter.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.appState,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: incrementCommand,
+      summary: 'Increment the example consumer counter.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.appState,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      gates: <String>{exampleWriteGate},
+    ),
+    const PatchbayCommandDescriptor(
+      name: deviceWriteCommand,
+      summary: 'Write a simulated device value and report execution evidence.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.external,
+      factSources: <PatchbayFactSource>{
+        PatchbayFactSource.appRecorded,
+        PatchbayFactSource.commandEcho,
+        PatchbayFactSource.deviceReported,
+      },
+      gates: <String>{exampleWriteGate},
+      unchangedEvidenceMaxAgeMs: 60000,
+      confirmationBudgetMs: 5000,
+      responseSchema: _writeSchema,
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'value',
+          type: PatchbayParameterType.integer,
+          required: true,
         ),
-        const PatchbayCommandDescriptor(
-          name: deviceWriteCommand,
-          summary:
-              'Write a simulated device value and report execution evidence.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.external,
-          factSources: <PatchbayFactSource>{
-            PatchbayFactSource.appRecorded,
-            PatchbayFactSource.commandEcho,
-            PatchbayFactSource.deviceReported,
-          },
-          unchangedEvidenceMaxAgeMs: 60000,
-          confirmationBudgetMs: 5000,
-          responseSchema: _writeSchema,
-          parameters: <PatchbayParameterDescriptor>[
-            PatchbayParameterDescriptor(
-              name: 'value',
-              type: PatchbayParameterType.integer,
-              required: true,
-            ),
-            PatchbayParameterDescriptor(
-              name: 'outcome',
-              type: PatchbayParameterType.string,
-              required: false,
-            ),
-          ],
+        PatchbayParameterDescriptor(
+          name: 'outcome',
+          type: PatchbayParameterType.string,
+          required: false,
         ),
-        const PatchbayCommandDescriptor(
-          name: jobRunCommand,
-          summary: 'Run a bounded example job that emits progress events.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.job,
-          sideEffect: PatchbaySideEffect.appState,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-          responseSchema: _jobSchema,
-          parameters: <PatchbayParameterDescriptor>[
-            PatchbayParameterDescriptor(
-              name: 'steps',
-              type: PatchbayParameterType.integer,
-              required: false,
-            ),
-          ],
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: jobRunCommand,
+      summary: 'Run a bounded example job that emits progress events.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.job,
+      sideEffect: PatchbaySideEffect.appState,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      gates: <String>{exampleWriteGate},
+      responseSchema: _jobSchema,
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'steps',
+          type: PatchbayParameterType.integer,
+          required: false,
         ),
-        const PatchbayCommandDescriptor(
-          name: idempotentTouchCommand,
-          summary:
-              'Idempotent external touch used to exercise requestId '
-              'de-duplication.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          // retryPolicy 只允许 external：宿主的重试去重边界是「离开 App 的那次写」，
-          // 声明在 appState 上会让 App 内副作用被当成可安全重放。
-          sideEffect: PatchbaySideEffect.external,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-          retryPolicy: PatchbayRetryPolicy(maxAttempts: 3, backoffMs: 200),
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: idempotentTouchCommand,
+      summary:
+          'Idempotent external touch used to exercise requestId '
+          'de-duplication.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      // retryPolicy 只允许 external：宿主的重试去重边界是「离开 App 的那次写」，
+      // 声明在 appState 上会让 App 内副作用被当成可安全重放。
+      sideEffect: PatchbaySideEffect.external,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      gates: <String>{exampleWriteGate},
+      retryPolicy: PatchbayRetryPolicy(maxAttempts: 3, backoffMs: 200),
+    ),
+    const PatchbayCommandDescriptor(
+      name: jobGetCommand,
+      summary: 'Read one job from the example ledger.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+    ),
+    const PatchbayCommandDescriptor(
+      name: jobWaitCommand,
+      summary: 'Wait for the next event of one example job.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+    ),
+    const PatchbayCommandDescriptor(
+      name: jobCancelCommand,
+      summary: 'Request cancellation of one example job.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.appState,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      // 与 example.job.run 共用同一个门：拿得到启动权限就拿得到停止权限。
+      gates: <String>{exampleWriteGate},
+    ),
+    const PatchbayCommandDescriptor(
+      name: cooperativeWaitCommand,
+      summary: 'Wait until cancellation and confirm the operation stopped.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'timeoutMs',
+          type: PatchbayParameterType.integer,
+          required: true,
         ),
-        const PatchbayCommandDescriptor(
-          name: jobGetCommand,
-          summary: 'Read one job from the example ledger.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.none,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      ],
+    ),
+    const PatchbayCommandDescriptor(
+      name: unresponsiveWaitCommand,
+      summary:
+          'Intentionally ignore cancellation to exercise retained capacity.',
+      plane: PatchbayPlane.domain,
+      mode: PatchbayCommandMode.immediate,
+      sideEffect: PatchbaySideEffect.none,
+      factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      parameters: <PatchbayParameterDescriptor>[
+        PatchbayParameterDescriptor(
+          name: 'timeoutMs',
+          type: PatchbayParameterType.integer,
+          required: true,
         ),
-        const PatchbayCommandDescriptor(
-          name: jobWaitCommand,
-          summary: 'Wait for the next event of one example job.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.none,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-        ),
-        const PatchbayCommandDescriptor(
-          name: jobCancelCommand,
-          summary: 'Request cancellation of one example job.',
-          plane: PatchbayPlane.domain,
-          mode: PatchbayCommandMode.immediate,
-          sideEffect: PatchbaySideEffect.appState,
-          factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
-        ),
-      ];
+      ],
+    ),
+  ];
+
+  Future<Map<String, Object?>> invokeWithContext(
+    String command,
+    Map<String, Object?> arguments,
+    String requestId,
+    PatchbayInvocationContext context,
+  ) {
+    return switch (command) {
+      cooperativeWaitCommand => _cooperativeWait(arguments, requestId, context),
+      unresponsiveWaitCommand => _unresponsiveWait(arguments, requestId),
+      _ => invoke(command, arguments, requestId),
+    };
+  }
 
   Future<Map<String, Object?>> invoke(
     String command,
@@ -396,6 +487,49 @@ final class ExampleDomain {
         ),
       ).toJson(),
     };
+  }
+
+  Future<Map<String, Object?>> _cooperativeWait(
+    Map<String, Object?> arguments,
+    String requestId,
+    PatchbayInvocationContext context,
+  ) {
+    final Map<String, Object?>? invalid = _validateWait(arguments, requestId);
+    if (invalid != null) return Future<Map<String, Object?>>.value(invalid);
+    final Completer<Map<String, Object?>> stopped =
+        Completer<Map<String, Object?>>();
+    context.registerCancellationConfirmation((reason) async {
+      if (!stopped.isCompleted) {
+        stopped.complete(
+          PatchbayInvocation.accepted(
+            requestId: requestId,
+            payload: <String, Object?>{'stopped': true, 'reason': reason.name},
+          ).toJson(),
+        );
+      }
+    });
+    return stopped.future;
+  }
+
+  Future<Map<String, Object?>> _unresponsiveWait(
+    Map<String, Object?> arguments,
+    String requestId,
+  ) {
+    final Map<String, Object?>? invalid = _validateWait(arguments, requestId);
+    if (invalid != null) return Future<Map<String, Object?>>.value(invalid);
+    return Completer<Map<String, Object?>>().future;
+  }
+
+  Map<String, Object?>? _validateWait(
+    Map<String, Object?> arguments,
+    String requestId,
+  ) {
+    if (arguments.length != 1 ||
+        arguments['timeoutMs'] is! int ||
+        (arguments['timeoutMs']! as int) <= 0) {
+      return _invalid(requestId, 'timeoutMs must be a positive integer');
+    }
+    return null;
   }
 
   Future<Map<String, Object?>> _permissionRequest(

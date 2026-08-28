@@ -1,6 +1,7 @@
 import 'package:args/args.dart';
 
 import 'command_registry.dart';
+import 'output/local_artifact.dart' show patchbayDefaultMaxInlineBytes;
 import 'result.dart';
 
 /// Renders CLI help from the parser and friendly-command declarations.
@@ -38,6 +39,7 @@ abstract final class PatchbayCommandHelp {
       if (byService.length > 1) {
         return _serviceCommand(parser, topic.single, byService);
       }
+      if (topic.single == 'blob.read') return _blobRead(parser);
     }
     throw FormatException('unknown help topic: ${topic.join(' ')}');
   }
@@ -180,6 +182,7 @@ abstract final class PatchbayCommandHelp {
         '  ${usages[index].padRight(width)}  ${sorted[index].summary}',
       );
     }
+    _writeDiscoverabilityNotes(output, serviceCommand: serviceCommand);
     _writeConditions(output, sorted);
     _writeOptions(output, parser, <String>{
       for (final PatchbayFriendlyCommandSpec command in sorted)
@@ -236,6 +239,11 @@ abstract final class PatchbayCommandHelp {
       ..writeln()
       ..writeln(command.summary)
       ..writeln(protocolLine(command));
+    _writeDiscoverabilityNotes(
+      output,
+      serviceCommand: command.serviceCommand,
+      path: command.path,
+    );
     if (command.fencesNavigationRevision) {
       output
         ..writeln(
@@ -260,6 +268,136 @@ abstract final class PatchbayCommandHelp {
       ..writeln()
       ..writeln(availabilityLine(command));
     return output.toString();
+  }
+
+  static String _blobRead(ArgParser parser) {
+    final StringBuffer output = StringBuffer()
+      ..writeln('Usage: patchbay exec blob.read --args <json> [options]')
+      ..writeln()
+      ..writeln('Read one raw base64 blob chunk.')
+      ..writeln('Service command: blob.read')
+      ..writeln()
+      ..writeln(
+        'Prefer `patchbay blob get <blob-id> --output <path>`: it downloads '
+        'all chunks and verifies length and SHA-256.',
+      )
+      ..writeln(
+        'The request `limit` is the maximum chunk size; response `length` is '
+        'the number of bytes actually returned.',
+      );
+    _writeOptions(
+      output,
+      parser,
+      PatchbayFriendlyCommandRegistry.allowedOptions(
+        PatchbayFriendlyCommand.exec,
+      ),
+    );
+    output
+      ..writeln()
+      ..writeln('Availability is still decided by the running App catalog.');
+    return output.toString();
+  }
+
+  static void _writeDiscoverabilityNotes(
+    StringBuffer output, {
+    String? serviceCommand,
+    List<String>? path,
+  }) {
+    final bool isTreeSpillCommand =
+        serviceCommand == 'ui.semantics.tree' ||
+        (path != null &&
+            (_pathIs(path, <String>['ui', 'widget-tree']) ||
+                _pathIs(path, <String>['ui', 'render-tree']) ||
+                _pathIs(path, <String>['ui', 'focus-tree'])));
+    if (isTreeSpillCommand) {
+      output
+        ..writeln()
+        ..writeln(
+          'Past $patchbayDefaultMaxInlineBytes inline bytes (the stdout '
+          'document that would carry the tree), this spills to a local '
+          'artifact and the response gets a verified path/length/sha256 '
+          'receipt in its place; --output/--force always write, '
+          '--max-inline-bytes overrides the ceiling and 0 disables '
+          'spilling. --json (indented) and repl JSON (compact) measure '
+          'different documents, so the same tree can trip one and not '
+          'the other.',
+        );
+    }
+    final bool hasBriefProjection =
+        isTreeSpillCommand ||
+        serviceCommand == 'logs.query' ||
+        (path != null && _pathIs(path, <String>['catalog']));
+    if (hasBriefProjection) {
+      output
+        ..writeln()
+        ..writeln(
+          '--json --view brief keeps this response\'s decision facts and '
+          'drops its unbounded field; the dropped path is always listed in '
+          '`localView.omitted`, and --view full (repl: per line) restores '
+          'it.',
+        );
+    }
+    if (serviceCommand == 'ui.capture') {
+      output
+        ..writeln()
+        ..writeln(
+          'Safe artifact commands (automatic chunk download and verification):',
+        )
+        ..writeln('  patchbay capture root --output <path>')
+        ..writeln(
+          '  patchbay capture target <target-id> <generation> --output <path>',
+        );
+    }
+    if (serviceCommand == 'ui.text.set' || serviceCommand == 'ui.text.enter') {
+      output
+        ..writeln()
+        ..writeln(
+          'Identity: the catalog target `id` and Semantics `identifier` are '
+          'separate identity domains.',
+        );
+      if (serviceCommand == 'ui.text.set') {
+        output.writeln(
+          '`text.set` replaces the controller value directly; it does not '
+          'run input formatters or `onChanged`.',
+        );
+      } else {
+        output.writeln(
+          '`text.enter` runs input formatters and calls `onChanged` when the '
+          'target configured it.',
+        );
+      }
+    }
+    // 两条 tap 在命令行上只差两个词，却是两条通道，证明的是不同的事实
+    //（DG-050-08）：按调用目的互相指路，不设默认优劣。
+    if (serviceCommand == 'ui.semantics.tap') {
+      output
+        ..writeln()
+        ..writeln(
+          'To prove a real pointer can reach and trigger the target, use '
+          '`ui gesture tap`: it goes through hit-testing, so an obscured '
+          'target is rejected instead of tapped.',
+        );
+    }
+    if (serviceCommand == 'ui.gesture.tap') {
+      output
+        ..writeln()
+        ..writeln(
+          'Proves a real pointer can reach and trigger the target: the '
+          'tap goes through hit-testing and the gesture arena. To drive a '
+          'target that declares a semantics tap action — including ones no '
+          'pointer can reach — use `ui tap` instead. The two paths prove '
+          'different facts; for avoiding mis-taps the pointer path is the '
+          'stronger fence.',
+        );
+    }
+    if (path case <String>['repl']) {
+      output
+        ..writeln()
+        ..writeln(
+          'Inside the session, `describe <service-command>` reads that row '
+          'from the live catalog without invoking it.',
+        );
+    }
   }
 
   /// Where the command's availability is actually decided.
@@ -403,4 +541,7 @@ abstract final class PatchbayCommandHelp {
     }
     return true;
   }
+
+  static bool _pathIs(List<String> path, List<String> other) =>
+      path.length == other.length && _startsWith(path, other);
 }
