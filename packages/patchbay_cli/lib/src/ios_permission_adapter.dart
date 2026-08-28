@@ -67,7 +67,7 @@ final class PatchbayIosPermissionAdapter
       final String permission = _requiredPermission(request);
       final String applicationId = _requiredApplication(request);
       if (simulator == null) {
-        return _handlePhysical(request, applicationId, permission);
+        return await _handlePhysical(request, applicationId, permission);
       }
       await _verifyApplication(request, simulator, applicationId);
 
@@ -99,7 +99,7 @@ final class PatchbayIosPermissionAdapter
         );
       }
       if (request.operation == PatchbayPermissionOperation.exercise) {
-        return _exercise(
+        return await _exercise(
           request,
           simulator,
           applicationId,

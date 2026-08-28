@@ -136,6 +136,20 @@ pub points 是发布硬标准。发布前使用 pub.dev 评分页当时显示的
 `pubspec_overrides.yaml` 重做依赖检查，四包按依赖顺序发布：每发一个包，等它实际评分满分
 后才继续下一个；未满分立即停止本次发布链。
 
+**对齐 Pana 版本号不等于对齐分析环境**——真正判 lint 的是 analyzer（随 Dart SDK 走）与
+`lints_core`，pub.dev 用它当天部署的**最新 stable** 分析器，而本机与 CN 镜像的工具链都可能
+落后（0.5.0 实证：本机/镜像停在 3.12.2、pub.dev 已是 3.13.2，一条 3.13 新增 lint 让
+patchbay_cli 站点 140/160，本地 Pana 却满分）。因此发布前必须再做一次**影子环境预检**：
+
+```console
+$ curl -s https://storage.googleapis.com/dart-archive/channels/stable/release/latest/VERSION
+# 若真源版本比 `dart --version` 新：下载该 SDK 到临时目录，用它对四包各跑一遍 dart analyze
+$ <临时目录>/dart-sdk/bin/dart analyze packages/<pkg>   # 必须零 issue，红即修完再发
+```
+
+- [ ] 真源（storage.googleapis.com，勿用镜像——镜像同样滞后）最新 stable 与本机一致，
+      或已用影子 SDK 对四包 analyze 全绿
+
 ```console
 $ dart pub global activate pana <pub.dev 当前版本>
 $ pana packages/patchbay --project-root . --exit-code-threshold 0

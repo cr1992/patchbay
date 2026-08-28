@@ -529,7 +529,7 @@ Future<int> _runPatchbayCliWithTrace(
     );
     final String? traceId = store.resolve(parsed.option('trace'));
     if (traceId == null) {
-      return runZoned(
+      return await runZoned(
         () => runPatchbayCliWithSeams(
           arguments,
           connect: connect,
