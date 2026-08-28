@@ -467,6 +467,8 @@ final class PatchbayLaunchContext {
     Duration ttl = patchbayPendingDefaultTtl,
     ProcessRunner processRunner = PlatformProcessUtils.defaultRunner,
     bool? isWindows,
+    bool? isLinux,
+    String procRoot = PlatformProcessUtils.defaultProcRoot,
   }) {
     if (processId <= 0) {
       throw const PatchbaySessionException('sessionRecordInvalid');
@@ -497,6 +499,8 @@ final class PatchbayLaunchContext {
           processId,
           runner: processRunner,
           isWindows: isWindows,
+          isLinux: isLinux,
+          procRoot: procRoot,
         );
     return PatchbaySessionRecord(
       sessionId: sessionId,

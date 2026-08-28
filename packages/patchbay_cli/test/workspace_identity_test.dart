@@ -324,7 +324,11 @@ final class _SlowRunner implements ProcessRunner {
   final ProcessResult result;
 
   @override
-  ProcessResult runSync(String executable, List<String> arguments) {
+  ProcessResult runSync(
+    String executable,
+    List<String> arguments, {
+    Map<String, String>? environment,
+  }) {
     if (delay > Duration.zero) sleep(delay);
     return result;
   }

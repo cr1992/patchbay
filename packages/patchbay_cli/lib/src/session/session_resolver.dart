@@ -281,13 +281,33 @@ final class PatchbaySessionResolver {
     if (current == null) {
       return const _ProcessIdentityCheck(alive: true, identityUnverified: true);
     }
-    // A live PID whose current launch signature no longer matches what this
-    // record captured is not this record's process any more -- the OS has
-    // recycled the PID for something else, and the original App is gone.
-    return _ProcessIdentityCheck(
-      alive: current == expected,
-      identityUnverified: false,
-    );
+    // Never `current == expected`. PB-050-31: a signature carries a scheme
+    // tag precisely so that "I cannot interpret what this record holds" and
+    // "this is a different launch" stay two answers rather than one `false`.
+    return switch (PlatformProcessUtils.compareStartTimeSignatures(
+      expected,
+      current,
+    )) {
+      // A live PID whose current launch signature no longer matches what this
+      // record captured is not this record's process any more -- the OS has
+      // recycled the PID for something else, and the original App is gone.
+      PatchbayStartTimeMatch.different => const _ProcessIdentityCheck(
+        alive: false,
+        identityUnverified: false,
+      ),
+      PatchbayStartTimeMatch.same => const _ProcessIdentityCheck(
+        alive: true,
+        identityUnverified: false,
+      ),
+      // Records written during 0.5.0 development carry an unprefixed `ps`
+      // string, and a Linux host can legitimately produce a `v2-posix` probe
+      // for a `v2-linux` record when procfs stops answering. Neither is
+      // evidence of anything, so neither may retire a record.
+      PatchbayStartTimeMatch.unverifiable => const _ProcessIdentityCheck(
+        alive: true,
+        identityUnverified: true,
+      ),
+    };
   }
 
   /// Selects one session.

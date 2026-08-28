@@ -7,6 +7,13 @@
 /// BUG-20260827-01 追加第四件：PID 探测本身也可能问不到（没有 `procps` 的镜像里
 /// `kill` 根本不是可执行文件）。那种「没问到」必须与「问到了，进程不在」区分开，
 /// 同样降级成 unverified——把两者压成一个 `false` 会让这类主机上的每条记录都被删。
+///
+/// PB-050-31 追加第五件：签名字符串本身也可能读不懂。旧格式是 `ps -o lstart=` 的
+/// 输出，按**读取方**的时区渲染，同一个活进程跨 shell / cron / CI 容器 / DST 读两次
+/// 就得到两个不等的字符串，被判成 PID 复用把活会话删掉。签名改为带 scheme 前缀，
+/// 无前缀或 scheme 不同一律降级 unverified；同 scheme 下不等仍照旧判死。
+/// 本文件里的签名 fixture 因此带 `v2-posix:` / `v2-linux:` 前缀——断言语义未变，
+/// 变的是 fixture 必须是一个真实格式的签名才可能进入「判死」分支。
 library;
 
 import 'dart:io';
@@ -38,7 +45,7 @@ void main() {
     test(
       'a live PID whose start time no longer matches is judged dead',
       () async {
-        store.write(_record('reused', processStartTime: 'launch-a'));
+        store.write(_record('reused', processStartTime: 'v2-posix:launch-a'));
 
         await expectLater(
           PatchbaySessionResolver(
@@ -49,7 +56,7 @@ void main() {
             // The PID answers "alive", but it belongs to a different
             // process now -- the OS recycled it after the original App
             // exited.
-            processStartTimeProbe: (_) => 'launch-b',
+            processStartTimeProbe: (_) => 'v2-posix:launch-b',
           ).resolve(),
           throwsA(_sessionError('sessionStaleProcess')),
         );
@@ -58,14 +65,14 @@ void main() {
     );
 
     test('select() refuses to pin a record whose PID was recycled', () {
-      store.write(_record('reused', processStartTime: 'launch-a'));
+      store.write(_record('reused', processStartTime: 'v2-posix:launch-a'));
 
       final resolver = PatchbaySessionResolver(
         store: store,
         workspaceProbe: () => _workspace,
         workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
-        processStartTimeProbe: (_) => 'launch-b',
+        processStartTimeProbe: (_) => 'v2-posix:launch-b',
       );
 
       expect(
@@ -77,14 +84,14 @@ void main() {
     });
 
     test('inventory() marks a PID-reuse collision stale, not unverified', () {
-      store.write(_record('reused', processStartTime: 'launch-a'));
+      store.write(_record('reused', processStartTime: 'v2-posix:launch-a'));
 
       final PatchbaySessionListing listing = PatchbaySessionResolver(
         store: store,
         workspaceProbe: () => _workspace,
         workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
-        processStartTimeProbe: (_) => 'launch-b',
+        processStartTimeProbe: (_) => 'v2-posix:launch-b',
       ).inventory().single;
 
       expect(listing.status, PatchbaySessionStatus.stale);
@@ -93,14 +100,14 @@ void main() {
     });
 
     test('a matching start time is treated as the same process', () async {
-      store.write(_record('same', processStartTime: 'launch-a'));
+      store.write(_record('same', processStartTime: 'v2-posix:launch-a'));
 
       final resolved = await PatchbaySessionResolver(
         store: store,
         workspaceProbe: () => _workspace,
         workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
-        processStartTimeProbe: (_) => 'launch-a',
+        processStartTimeProbe: (_) => 'v2-posix:launch-a',
         identityProbe: (_) async => _identity(),
       ).resolve();
 
@@ -110,8 +117,157 @@ void main() {
         workspaceProbe: () => _workspace,
         workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
-        processStartTimeProbe: (_) => 'launch-a',
+        processStartTimeProbe: (_) => 'v2-posix:launch-a',
       ).inventory().single;
+      expect(listing.identityUnverified, isFalse);
+    });
+  });
+
+  group('PB-050-31: a signature it cannot interpret is not a mismatch', () {
+    // The defect this group exists for: `processStartTime` used to hold raw
+    // `ps -o lstart=` output, which renders in the *reader's* timezone. Two
+    // reads of one live process from two shells produced two unequal strings,
+    // `_checkProcessIdentity` called that PID reuse, and the record of a
+    // running App was deleted. Signatures now carry a scheme tag, and
+    // anything unreadable degrades instead of judging.
+
+    test('an unprefixed dev-era record is never judged dead', () async {
+      // Exactly the pair the defect produced: same PID, same launch, read
+      // under `TZ=UTC` and under `TZ=Asia/Taipei`.
+      store.write(
+        _record('dev-era', processStartTime: 'Fri Aug 28 01:47:22 2026'),
+      );
+
+      final resolved = await PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) => 'v2-posix:Fri Aug 28 09:47:22 2026',
+        identityProbe: (_) async => _identity(),
+      ).resolve();
+
+      expect(resolved.record.sessionId, 'dev-era');
+      expect(store.readAll(), hasLength(1));
+    });
+
+    test('and inventory() reports it live and unverified, never stale', () {
+      store.write(
+        _record('dev-era', processStartTime: 'Fri Aug 28 01:47:22 2026'),
+      );
+
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) => 'v2-posix:Fri Aug 28 09:47:22 2026',
+      ).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.live);
+      expect(listing.identityUnverified, isTrue);
+    });
+
+    test('two known schemes that disagree are not comparable', () {
+      // A Linux host that recorded a procfs signature and later probes with
+      // procfs unavailable gets a `v2-posix` answer back. Not comparable is
+      // not the same as not equal.
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store
+          ..write(
+            _record(
+              'moved',
+              processStartTime:
+                  'v2-linux:00000000-0000-4000-8000-000000000001:7128607',
+            ),
+          ),
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) => 'v2-posix:Fri Aug 28 01:47:22 2026',
+      ).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.live);
+      expect(listing.identityUnverified, isTrue);
+    });
+
+    test('an unprefixed record is unverified even when the strings match', () {
+      // Deliberate. A format this build cannot interpret proves nothing in
+      // either direction, so it must not be reported as verified either.
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store
+          ..write(
+            _record('dev-era', processStartTime: 'Fri Aug 28 01:47:22 2026'),
+          ),
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) => 'Fri Aug 28 01:47:22 2026',
+      ).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.live);
+      expect(listing.identityUnverified, isTrue);
+    });
+
+    test('a dev-era record with a dead PID is still stale', () {
+      // The degrade is scoped to the signature comparison. A PID the OS
+      // positively reports as gone is still gone.
+      store.write(
+        _record('dev-era-dead', processStartTime: 'Fri Aug 28 01:47:22 2026'),
+      );
+
+      expect(
+        () => PatchbaySessionResolver(
+          store: store,
+          workspaceProbe: () => _workspace,
+          workspaceIdentityAt: (_) => null,
+          pidProbe: (_) => false,
+        ).select('dev-era-dead'),
+        throwsA(_sessionError('sessionStaleProcess')),
+      );
+      expect(store.readAll(), isEmpty);
+    });
+
+    test('a procfs signature still detects PID reuse within its scheme', () {
+      // The PB-050-18 guard, in the new format: same boot, different tick
+      // count means the kernel handed this PID to something else.
+      const String bootId = '00000000-0000-4000-8000-000000000001';
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store
+          ..write(
+            _record('reused', processStartTime: 'v2-linux:$bootId:7128607'),
+          ),
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) => 'v2-linux:$bootId:9000000',
+      ).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.stale);
+      expect(listing.identityUnverified, isFalse);
+    });
+
+    test('a reboot at the same tick offset is still a different launch', () {
+      // Why `boot_id` is part of the signature at all: ticks are counted from
+      // boot, so without it a PID reissued at the same offset into a later
+      // boot would read as the same process.
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store
+          ..write(
+            _record(
+              'rebooted',
+              processStartTime:
+                  'v2-linux:00000000-0000-4000-8000-000000000001:7128607',
+            ),
+          ),
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) =>
+            'v2-linux:00000000-0000-4000-8000-000000000002:7128607',
+      ).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.stale);
       expect(listing.identityUnverified, isFalse);
     });
   });
@@ -120,7 +276,9 @@ void main() {
     test(
       'a live PID whose start time cannot be captured stays alive, flagged',
       () async {
-        store.write(_record('unverifiable', processStartTime: 'launch-a'));
+        store.write(
+          _record('unverifiable', processStartTime: 'v2-posix:launch-a'),
+        );
 
         final resolved = await PatchbaySessionResolver(
           store: store,
@@ -140,7 +298,9 @@ void main() {
     test(
       'such a record is reported unverified, not killed, in inventory()',
       () {
-        store.write(_record('unverifiable', processStartTime: 'launch-a'));
+        store.write(
+          _record('unverifiable', processStartTime: 'v2-posix:launch-a'),
+        );
 
         final PatchbaySessionListing listing = PatchbaySessionResolver(
           store: store,
@@ -165,7 +325,9 @@ void main() {
     // distroless -- that made every command report `sessionStaleProcess` and
     // delete a record whose App was running the whole time.
     test('an unanswerable PID stays alive, flagged unverified', () async {
-      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+      store.write(
+        _record('unanswerable', processStartTime: 'v2-posix:launch-a'),
+      );
 
       final resolved = await PatchbaySessionResolver(
         store: store,
@@ -184,14 +346,16 @@ void main() {
     });
 
     test('inventory() reports it live and unverified, never stale', () {
-      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+      store.write(
+        _record('unanswerable', processStartTime: 'v2-posix:launch-a'),
+      );
 
       final PatchbaySessionListing listing = PatchbaySessionResolver(
         store: store,
         workspaceProbe: () => _workspace,
         workspaceIdentityAt: (_) => null,
         pidProbe: (_) => null,
-        processStartTimeProbe: (_) => 'launch-b',
+        processStartTimeProbe: (_) => 'v2-posix:launch-b',
       ).inventory().single;
 
       expect(listing.status, PatchbaySessionStatus.live);
@@ -199,7 +363,9 @@ void main() {
     });
 
     test('prune() does not delete a record it could not judge', () {
-      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+      store.write(
+        _record('unanswerable', processStartTime: 'v2-posix:launch-a'),
+      );
 
       final PatchbaySessionPruneResult result = PatchbaySessionResolver(
         store: store,
@@ -213,7 +379,9 @@ void main() {
     });
 
     test('select() still pins it rather than refusing', () {
-      store.write(_record('unanswerable', processStartTime: 'launch-a'));
+      store.write(
+        _record('unanswerable', processStartTime: 'v2-posix:launch-a'),
+      );
 
       final PatchbaySessionListing listing = PatchbaySessionResolver(
         store: store,
@@ -233,7 +401,9 @@ void main() {
         // whose status is stale; an unverifiable process reads as alive, and
         // the pending-TTL branch that would otherwise expire the record fires
         // only when there is no wsUri. So the old advice was a loop here.
-        store.write(_record('unanswerable', processStartTime: 'launch-a'));
+        store.write(
+          _record('unanswerable', processStartTime: 'v2-posix:launch-a'),
+        );
         store.writeSelectionFor(_workspace, 'unanswerable');
 
         await expectLater(
@@ -279,7 +449,9 @@ void main() {
     test('a verifiably dead pin still gets the ordinary prune hint', () async {
       // The swap must stay narrow: when the OS did answer, `prune` works and
       // is still the right thing to recommend.
-      store.write(_record('really-dead', processStartTime: 'launch-a'));
+      store.write(
+        _record('really-dead', processStartTime: 'v2-posix:launch-a'),
+      );
       store.writeSelectionFor(_workspace, 'really-dead');
 
       await expectLater(
@@ -338,7 +510,9 @@ void main() {
     test(
       'a definite "not running" is still stale -- the guard is not weakened',
       () {
-        store.write(_record('really-dead', processStartTime: 'launch-a'));
+        store.write(
+          _record('really-dead', processStartTime: 'v2-posix:launch-a'),
+        );
 
         expect(
           () => PatchbaySessionResolver(
@@ -401,24 +575,32 @@ void main() {
 
   group('field round trip', () {
     test('processStartTime survives write/read and completedWith', () async {
-      store.write(_record('roundtrip', processStartTime: 'launch-signature'));
+      store.write(
+        _record('roundtrip', processStartTime: 'v2-posix:launch-signature'),
+      );
 
-      expect(store.readAll().single.processStartTime, 'launch-signature');
+      expect(
+        store.readAll().single.processStartTime,
+        'v2-posix:launch-signature',
+      );
 
       final resolved = await PatchbaySessionResolver(
         store: store,
         workspaceProbe: () => _workspace,
         workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
-        processStartTimeProbe: (_) => 'launch-signature',
+        processStartTimeProbe: (_) => 'v2-posix:launch-signature',
         identityProbe: (_) async => _identity(),
       ).resolve();
 
       // completedWith() must carry the captured signature through, or every
       // resolve() after the first would silently lose it and regress to
       // "always unverified".
-      expect(resolved.record.processStartTime, 'launch-signature');
-      expect(store.readAll().single.processStartTime, 'launch-signature');
+      expect(resolved.record.processStartTime, 'v2-posix:launch-signature');
+      expect(
+        store.readAll().single.processStartTime,
+        'v2-posix:launch-signature',
+      );
     });
 
     test('pendingRecord() captures the signature at creation time', () {
@@ -441,9 +623,15 @@ void main() {
         deviceId: 'device-1',
         processRunner: runner,
         isWindows: false,
+        // Pinned so this asserts the `ps` fallback on every host: on Linux
+        // the probe would otherwise read the real procfs and never reach the
+        // runner at all.
+        isLinux: false,
       );
 
-      expect(record.processStartTime, 'launch-time-x');
+      // PB-050-31: what lands on the record is scheme-tagged, so a later
+      // reader can tell "different launch" from "format I cannot read".
+      expect(record.processStartTime, 'v2-posix:launch-time-x');
       expect(runner.invocations.single.executable, 'ps');
       expect(runner.invocations.single.arguments, [
         '-o',
@@ -451,6 +639,10 @@ void main() {
         '-p',
         '4321',
       ]);
+      expect(runner.invocations.single.environment, {
+        'TZ': 'UTC',
+        'LC_ALL': 'C',
+      });
     });
 
     test(
@@ -475,6 +667,7 @@ void main() {
           deviceId: 'device-1',
           processRunner: runner,
           isWindows: false,
+          isLinux: false,
         );
 
         expect(record.processStartTime, isNull);
@@ -520,9 +713,9 @@ void main() {
   test('toJson includes processStartTime when captured', () {
     final PatchbaySessionRecord record = _record(
       'with-identity',
-      processStartTime: 'launch-signature',
+      processStartTime: 'v2-posix:launch-signature',
     );
-    expect(record.toJson()['processStartTime'], 'launch-signature');
+    expect(record.toJson()['processStartTime'], 'v2-posix:launch-signature');
   });
 
   test('fromJson rejects a non-string, empty processStartTime', () {
@@ -575,9 +768,10 @@ PatchbaySessionRecord _record(
 ).withWorkspace(_workspace);
 
 final class _Invocation {
-  const _Invocation(this.executable, this.arguments);
+  const _Invocation(this.executable, this.arguments, this.environment);
   final String executable;
   final List<String> arguments;
+  final Map<String, String>? environment;
 }
 
 final class _FakeProcessRunner implements ProcessRunner {
@@ -588,8 +782,12 @@ final class _FakeProcessRunner implements ProcessRunner {
   final List<_Invocation> invocations = <_Invocation>[];
 
   @override
-  ProcessResult runSync(String executable, List<String> arguments) {
-    invocations.add(_Invocation(executable, arguments));
+  ProcessResult runSync(
+    String executable,
+    List<String> arguments, {
+    Map<String, String>? environment,
+  }) {
+    invocations.add(_Invocation(executable, arguments, environment));
     return _handler(executable, arguments);
   }
 
