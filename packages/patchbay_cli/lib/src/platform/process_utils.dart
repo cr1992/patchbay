@@ -310,7 +310,13 @@ abstract final class PlatformProcessUtils {
       // boot, so a PID reissued at the same offset into a later boot would
       // read as the same launch. Falling back to `ps` is strictly better than
       // shipping a signature that can collide.
-      if (bootId.isEmpty) return null;
+      //
+      // A boot id that is present but not a UUID gets the same treatment, and
+      // for a sharper reason: [_parseSignature] would refuse to read it back,
+      // so persisting it would hand this host a signature that can only ever
+      // compare `unverifiable` -- the PID-reuse guard silently gone for the
+      // life of the record. `ps` may still be able to answer.
+      if (!_bootIdPattern.hasMatch(bootId)) return null;
       return '$linuxStartTimeScheme:$bootId:$ticks';
     } on FileSystemException {
       return null;
@@ -395,27 +401,28 @@ abstract final class PlatformProcessUtils {
   /// clock time, `v2-win` an ISO-8601 timestamp.
   ///
   /// The payload contracts are read back off the three writers in
-  /// [processStartTimeSignature], and are deliberately no stricter than what
-  /// those writers can emit — a legal signature rejected here would silently
-  /// cost the PID-reuse guard. They are exactly strict enough to recognise a
-  /// value that is *not* one of ours:
+  /// [processStartTimeSignature] — no stricter than what those writers can
+  /// emit, and no looser either. Both directions cost something: a legal
+  /// signature rejected here silently forfeits the PID-reuse guard for that
+  /// record, while a corrupted one accepted here can be read as a different
+  /// launch and delete the record of a live session.
   ///
   /// * `v2-linux` — `<boot_id>:<ticks>`, one `:`, a UUID and a run of decimal
   ///   digits. Not "positive": PID 1 legitimately starts at tick 0.
-  /// * `v2-posix` — whatever `ps -o lstart=` printed, *after* this file's own
-  ///   trim-and-collapse, so: non-empty, no ASCII control characters (`\s`
-  ///   ones were collapsed away, the rest are corruption), no edge spaces and
-  ///   no doubled spaces. Nothing about the shape of a date is asserted: BSD
-  ///   and GNU `ps` disagree on it, and pinning that shape here would judge
-  ///   the *renderer* rather than the process.
+  /// * `v2-posix` — `ps -o lstart=` under the pinned `LC_ALL=C`, after this
+  ///   file's own trim-and-collapse: `Www Mmm D HH:MM:SS YYYY`. The shape is
+  ///   asserted, and can be, precisely *because* the locale is pinned —
+  ///   measured identical on BSD and GNU `ps` under `LC_ALL=C`, the only
+  ///   environment this signature is ever taken in. The day is one or two
+  ///   digits because BSD pads single-digit days with a second space, which
+  ///   the collapse removes.
   /// * `v2-win` — a round-trip (`"o"`) rendering of a UTC `DateTime`, which
-  ///   is culture-invariant and therefore fully specified: `Z`-suffixed, with
-  ///   the fractional second the only part .NET versions may render
-  ///   differently.
+  ///   is culture-invariant and therefore fully specified: exactly seven
+  ///   fractional digits and a `Z`.
   ///
-  /// Being over-strict here can only ever cost a `different` verdict and
-  /// leave a stale record behind; being over-lax can delete a live session's
-  /// record. That asymmetry is why the doubt goes this way.
+  /// Anything short of the full shape is a truncated or mangled value, not a
+  /// dialect: accepting a prefix of one would let a half-written record
+  /// compare unequal to the whole one it was written from.
   static ({String scheme, String payload})? _parseSignature(String signature) {
     final int separator = signature.indexOf(':');
     if (separator <= 0) return null;
@@ -424,7 +431,7 @@ abstract final class PlatformProcessUtils {
     final String payload = signature.substring(separator + 1);
     final bool wellFormed = switch (scheme) {
       linuxStartTimeScheme => _isProcfsPayload(payload),
-      posixStartTimeScheme => _isCollapsedSingleLine(payload),
+      posixStartTimeScheme => _lstartPattern.hasMatch(payload),
       windowsStartTimeScheme => _windowsInstantPattern.hasMatch(payload),
       // A scheme listed in [knownStartTimeSchemes] with no payload contract
       // here is unverifiable by construction rather than trusted by default.
@@ -441,20 +448,19 @@ abstract final class PlatformProcessUtils {
         _startTimeTicksPattern.hasMatch(payload.substring(separator + 1));
   }
 
-  /// Whether [payload] survives this file's own normalisation unchanged.
+  /// `ps -o lstart=` as [_stableFormattingEnvironment] makes it render, after
+  /// the trim-and-collapse in [processStartTimeSignature]:
+  /// `Www Mmm D HH:MM:SS YYYY`.
   ///
-  /// Expressed as the properties that normalisation guarantees rather than as
-  /// a re-run of it, so that a value which merely *looks* normalised but
-  /// carries a NUL or a bell — neither of which is `\s`, so neither of which
-  /// the collapse would have removed — is still recognised as corrupt.
-  static bool _isCollapsedSingleLine(String payload) {
-    if (payload.isEmpty) return false;
-    for (final int unit in payload.codeUnits) {
-      if (unit < 0x20 || unit == 0x7f) return false;
-    }
-    if (payload.startsWith(' ') || payload.endsWith(' ')) return false;
-    return !payload.contains('  ');
-  }
+  /// Asserting the shape is only sound because the locale that decides it is
+  /// pinned by the same code that reads the value — under `LC_ALL=C` BSD and
+  /// GNU `ps` were measured to render identically, and no other locale can
+  /// reach this field. The month and weekday are matched as three letters
+  /// rather than enumerated: the set is fixed, but enumerating it would judge
+  /// the calendar rather than the format.
+  static final RegExp _lstartPattern = RegExp(
+    r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$',
+  );
 
   /// The canonical rendering of `/proc/sys/kernel/random/boot_id`: a UUID,
   /// which is the only thing the kernel prints there. Hex case is not
@@ -474,8 +480,13 @@ abstract final class PlatformProcessUtils {
   /// `Kind` is UTC, so it always ends in `Z` and never carries a local
   /// offset — an offset here is the Windows shape of the PB-050-31 defect
   /// itself, and must not be read as a comparable identity.
+  ///
+  /// Seven fractional digits, exactly. `"o"` is a fixed-width round-trip
+  /// format, not a shortest-form one, so a value carrying three of them (or
+  /// none) was truncated after it was written; allowing it would let the
+  /// truncated copy compare `different` against the intact one.
   static final RegExp _windowsInstantPattern = RegExp(
-    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?Z$',
+    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$',
   );
 
   /// Creates [path] empty and owner-only (`0600` on POSIX) **before** any content is written.
