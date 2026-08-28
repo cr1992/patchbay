@@ -760,6 +760,78 @@ check_local 'permission capabilities 无 driver 时 fail-closed' 6 "" \
   --json permission capabilities
 
 echo
+echo "== 外部注册会话（PB-050-27）=="
+# 不经 `patchbay launch` 启动的 App 靠 `session register` 获得自动发现——这是
+# DG-050-07 裁决的接入方迁移路径，仓内预检在此复刻它的行为承诺：注册即本 checkout
+# 可自动发现、记录能承载真实连接、重名拒绝不覆盖、注销幂等且如实答复。
+#
+# 端点、PID、设备取自在跑会话的 live 记录：注册指向的是本预检真正跑着的 App，
+# `identity` 一步因此证明「注册的记录连得上」，而不是只证明文件写成功。这批步骤
+# 自带 --session-dir 指向隔离目录（随 PRECHECK_TMP 回收），不污染在跑会话的解析；
+# 与「本地面」段不同，其中 identity 一步会真实拨号。注意本段必须留在权限段之前：
+# Android 的 permission reset 会终止 App 进程。
+REGISTER_DIR="$PRECHECK_TMP/register-records"
+mkdir -p "$REGISTER_DIR"
+REGISTER_FIELDS="$(PATCHBAY_RECORDS="$PATCHBAY_SESSION_DIR" PATCHBAY_SID="$PATCHBAY_SESSION_ID" python3 -c "
+import json, os, pathlib
+for path in sorted(pathlib.Path(os.environ['PATCHBAY_RECORDS']).glob('*.json')):
+    try:
+        record = json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        continue
+    if record.get('sessionId') == os.environ['PATCHBAY_SID']:
+        print(record['wsUri'])
+        print(record['processId'])
+        print(record['deviceId'])
+        break
+" 2>/dev/null)"
+REGISTER_WS_URI="$(sed -n 1p <<<"$REGISTER_FIELDS")"
+REGISTER_PID="$(sed -n 2p <<<"$REGISTER_FIELDS")"
+REGISTER_DEVICE="$(sed -n 3p <<<"$REGISTER_FIELDS")"
+if [ -n "$REGISTER_WS_URI" ] && [ -n "$REGISTER_PID" ] && [ -n "$REGISTER_DEVICE" ]; then
+  check_local 'session register 写入外部记录' 0 \
+    "doc['session']['sessionId'] == 'precheck-external' and doc['session']['workspaceAffinity'] == 'current'" \
+    --json --session-dir "$REGISTER_DIR" session register precheck-external \
+    --ws-uri "$REGISTER_WS_URI" --application-id dev.patchbay.example \
+    --device-id "$REGISTER_DEVICE" --process-id "$REGISTER_PID"
+  # 注册记录的全部意义：本 checkout 内不带 --session、不带 --ws-uri 即可发现并连上真 App。
+  check_local 'register 记录承载自动发现连接' 0 \
+    "doc['applicationId'] == 'dev.patchbay.example'" \
+    --json --session-dir "$REGISTER_DIR" identity
+  # 已存在的 id 拒绝而不是覆盖；会话错误按 transport（3）退。这一步不能走
+  # check_local：它把 stderr 合进 stdout，而错误路径在 --json 下同时给 stderr 一行
+  # 人读诊断（成功路径 stderr 为空，所以其余步骤不受影响）。单独分流，只对 stdout
+  # 的信封断言。
+  REGISTER_DUP_CODE=0
+  "$PATCHBAY_CLI_BIN" --json --session-dir "$REGISTER_DIR" \
+    session register precheck-external \
+    --ws-uri "$REGISTER_WS_URI" --application-id dev.patchbay.example \
+    --device-id "$REGISTER_DEVICE" --process-id "$REGISTER_PID" \
+    >"$OUT" 2>/dev/null || REGISTER_DUP_CODE=$?
+  if [ "$REGISTER_DUP_CODE" = 3 ] && PATCHBAY_OUT="$OUT" python3 -c "
+import json, os, sys
+doc = json.load(open(os.environ['PATCHBAY_OUT'], encoding='utf-8'))
+sys.exit(0 if doc['error']['code'] == 'sessionAlreadyRegistered' else 1)
+" 2>/dev/null; then
+    printf '  ✓ %-42s\n' 'register 重名拒绝不覆盖'
+    PASS=$((PASS + 1))
+  else
+    printf '  ✗ %-42s 退出码 %s（期望 3），或信封 error.code 不是 sessionAlreadyRegistered\n' \
+      'register 重名拒绝不覆盖' "$REGISTER_DUP_CODE"
+    FAIL=$((FAIL + 1)); FAILED_STEPS+=('register 重名拒绝不覆盖')
+  fi
+  check_local 'session unregister 移除记录' 0 "doc['removed'] is True" \
+    --json --session-dir "$REGISTER_DIR" session unregister precheck-external
+  # 清理陷阱可能在记录已被清走之后才跑：幂等注销如实答复 removed=False，不报失败。
+  check_local 'unregister 幂等且如实' 0 "doc['removed'] is False" \
+    --json --session-dir "$REGISTER_DIR" session unregister precheck-external
+else
+  printf '  ✗ %-42s %s\n' 'session register 前置字段' \
+    '未从在跑会话记录解析到 wsUri/processId/deviceId'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('session register 前置字段')
+fi
+
+echo
 echo "== 权限真实路径 =="
 if [ "${PATCHBAY_SESSION_PLATFORM:-}" = android ]; then
   PERMISSION_DRIVER="${TMPDIR:-/tmp}/patchbay-precheck-permission-android"
