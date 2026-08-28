@@ -674,13 +674,13 @@ void main() {
       store.write(
         _record(
           'roundtrip',
-          processStartTime: 'v2-posix:Mon Aug 25 09:00:00 2026',
+          processStartTime: 'v2-posix:Tue Aug 25 09:00:00 2026',
         ),
       );
 
       expect(
         store.readAll().single.processStartTime,
-        'v2-posix:Mon Aug 25 09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026',
       );
 
       final resolved = await PatchbaySessionResolver(
@@ -688,7 +688,7 @@ void main() {
         workspaceProbe: () => _workspace,
         workspaceIdentityAt: (_) => null,
         pidProbe: (_) => true,
-        processStartTimeProbe: (_) => 'v2-posix:Mon Aug 25 09:00:00 2026',
+        processStartTimeProbe: (_) => 'v2-posix:Tue Aug 25 09:00:00 2026',
         identityProbe: (_) async => _identity(),
       ).resolve();
 
@@ -697,11 +697,11 @@ void main() {
       // "always unverified".
       expect(
         resolved.record.processStartTime,
-        'v2-posix:Mon Aug 25 09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026',
       );
       expect(
         store.readAll().single.processStartTime,
-        'v2-posix:Mon Aug 25 09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026',
       );
     });
 
@@ -816,11 +816,11 @@ void main() {
   test('toJson includes processStartTime when captured', () {
     final PatchbaySessionRecord record = _record(
       'with-identity',
-      processStartTime: 'v2-posix:Mon Aug 25 09:00:00 2026',
+      processStartTime: 'v2-posix:Tue Aug 25 09:00:00 2026',
     );
     expect(
       record.toJson()['processStartTime'],
-      'v2-posix:Mon Aug 25 09:00:00 2026',
+      'v2-posix:Tue Aug 25 09:00:00 2026',
     );
   });
 
