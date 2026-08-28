@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay_cli/src/platform/process_utils.dart';
@@ -806,6 +807,185 @@ void main() {
           PlatformProcessUtils.processStartTimeSignature(child.pid)!,
         ),
         PatchbayStartTimeMatch.same,
+      );
+    });
+  });
+
+  group('BUG-20260828-01: a scheme tag is a claim, not proof', () {
+    // The gap PB-050-31 left behind. The comparison recognised the scheme and
+    // then trusted whatever followed it, so a corrupted record such as
+    // `v2-linux:garbage` compared "same scheme, unequal payload" against a
+    // healthy probe -- `different`, which the resolver reads as PID reuse and
+    // answers by deleting the record of a session whose App is still running.
+    // A malformed payload is the same kind of fact as an unknown scheme:
+    // nothing can be concluded from it, in either direction.
+
+    // One signature per scheme, in exactly the form this build writes.
+    const String linuxOk = 'v2-linux:$_bootId:7128607';
+    const String posixOk = 'v2-posix:Mon Aug 25 09:00:00 2026';
+    const String winOk = 'v2-win:2026-08-25T16:00:00.0000000Z';
+
+    // Each healthy signature against the corruptions of its own scheme.
+    const Map<String, List<String>> corrupt = <String, List<String>>{
+      linuxOk: <String>[
+        'v2-linux:',
+        'v2-linux:garbage',
+        // Truncated writes, which is what a corrupted record actually looks
+        // like: the boot id survived, the tick count did not.
+        'v2-linux:$_bootId',
+        'v2-linux:$_bootId:',
+        // `int.tryParse` accepts all three of these; field 22 is none of them.
+        'v2-linux:$_bootId:71x8607',
+        'v2-linux:$_bootId:-7128607',
+        'v2-linux:$_bootId:+7128607',
+        'v2-linux:$_bootId:7128607:7128607',
+        'v2-linux:not-a-uuid:7128607',
+        'v2-linux:0000000-0000-4000-8000-000000000001:7128607',
+        'v2-linux:$_bootId\u0000:7128607',
+      ],
+      posixOk: <String>[
+        'v2-posix:',
+        // The writer trims and collapses, so none of these three can be its
+        // output -- each is a value that was mangled after it was written.
+        'v2-posix: Mon Aug 25 09:00:00 2026',
+        'v2-posix:Mon Aug 25 09:00:00 2026 ',
+        'v2-posix:Mon Aug  25 09:00:00 2026',
+        // Control characters are not `\s`, so the collapse would have left
+        // them in place: seeing one means the value is not ours.
+        'v2-posix:Mon Aug 25\u000009:00:00 2026',
+        'v2-posix:Mon Aug 25\n09:00:00 2026',
+        'v2-posix:Mon Aug 25 09:00:00 2026\u007f',
+      ],
+      winOk: <String>[
+        'v2-win:',
+        'v2-win:garbage',
+        // A local offset instead of `Z` is the Windows shape of the
+        // PB-050-31 defect itself: two readers in two timezones would
+        // disagree about one live process. Not comparable, by construction.
+        'v2-win:2026-08-25T16:00:00.0000000-07:00',
+        'v2-win:2026-08-25T16:00:00.0000000',
+        'v2-win:2026-08-25 16:00:00.0000000Z',
+        'v2-win:2026-08-25T16:00:00.00000000Z',
+        'v2-win:2026-08-25T16:00:00.0000000Z\u0000',
+      ],
+    };
+
+    test(
+      'a malformed payload never reaches "different", in either direction',
+      () {
+        corrupt.forEach((String healthy, List<String> broken) {
+          for (final String value in broken) {
+            expect(
+              PlatformProcessUtils.compareStartTimeSignatures(value, healthy),
+              PatchbayStartTimeMatch.unverifiable,
+              reason: 'recorded ${jsonEncode(value)} vs probe $healthy',
+            );
+            expect(
+              PlatformProcessUtils.compareStartTimeSignatures(healthy, value),
+              PatchbayStartTimeMatch.unverifiable,
+              reason: 'record $healthy vs probe ${jsonEncode(value)}',
+            );
+          }
+        });
+      },
+    );
+
+    test('two malformed payloads stay unverifiable, equal or not', () {
+      // Byte-identical included, deliberately: a value this build cannot
+      // interpret proves nothing in *either* direction, so it must not be
+      // reported as a verified identity either.
+      corrupt.forEach((_, List<String> broken) {
+        for (final String value in broken) {
+          expect(
+            PlatformProcessUtils.compareStartTimeSignatures(value, value),
+            PatchbayStartTimeMatch.unverifiable,
+            reason: 'identical malformed pair: ${jsonEncode(value)}',
+          );
+        }
+        for (final String other in broken.skip(1)) {
+          expect(
+            PlatformProcessUtils.compareStartTimeSignatures(
+              broken.first,
+              other,
+            ),
+            PatchbayStartTimeMatch.unverifiable,
+            reason: 'malformed pair: ${jsonEncode(other)}',
+          );
+        }
+      });
+    });
+
+    test('well-formed pairs still decide -- the PID-reuse guard is intact', () {
+      // The other half of the contract: adding a payload check must not cost
+      // a single `same` or `different` verdict the fix already earned.
+      const Map<String, String> otherLaunch = <String, String>{
+        linuxOk: 'v2-linux:$_bootId:9000000',
+        posixOk: 'v2-posix:Mon Aug 25 09:00:01 2026',
+        winOk: 'v2-win:2026-08-25T16:00:01.0000000Z',
+      };
+      otherLaunch.forEach((String healthy, String reused) {
+        expect(
+          PlatformProcessUtils.compareStartTimeSignatures(healthy, healthy),
+          PatchbayStartTimeMatch.same,
+          reason: healthy,
+        );
+        expect(
+          PlatformProcessUtils.compareStartTimeSignatures(healthy, reused),
+          PatchbayStartTimeMatch.different,
+          reason: '$healthy vs $reused',
+        );
+      });
+    });
+
+    test('the payload contracts admit everything their writers emit', () {
+      // Over-strictness has a cost of its own -- every rejected legal value
+      // silently forfeits the PID-reuse guard for that record -- so the
+      // boundaries the writers can actually reach are pinned here.
+      const List<List<String>> sameLaunch = <List<String>>[
+        // PID 1 legitimately starts at tick 0.
+        <String>['v2-linux:$_bootId:0', 'v2-linux:$_bootId:0'],
+        // The kernel prints boot_id in lowercase; hex case is not a fact
+        // about the boot, so it is not asserted.
+        <String>[
+          'v2-linux:00000000-0000-4000-8000-00000000ABCD:7128607',
+          'v2-linux:00000000-0000-4000-8000-00000000ABCD:7128607',
+        ],
+        // BSD and GNU `ps` render `lstart` differently and neither shape is
+        // a fact about the process, so the `v2-posix` contract asserts only
+        // what the writer's own normalisation guarantees. The session-level
+        // fixtures depend on this too.
+        <String>['v2-posix:launch-a', 'v2-posix:launch-a'],
+        <String>[
+          'v2-posix:Fri Aug 8 09:00:00 2026',
+          'v2-posix:Fri Aug 8 09:00:00 2026',
+        ],
+        // `"o"` renders seven fractional digits; older/newer runtimes that
+        // render fewer are still a UTC instant.
+        <String>['v2-win:2026-08-25T16:00:00Z', 'v2-win:2026-08-25T16:00:00Z'],
+        <String>[
+          'v2-win:2026-08-25T16:00:00.000Z',
+          'v2-win:2026-08-25T16:00:00.000Z',
+        ],
+      ];
+      for (final List<String> pair in sameLaunch) {
+        expect(
+          PlatformProcessUtils.compareStartTimeSignatures(pair[0], pair[1]),
+          PatchbayStartTimeMatch.same,
+          reason: 'pair: $pair',
+        );
+      }
+    });
+
+    test('a real procfs signature satisfies its own payload contract', () {
+      // The contract is read off the writer, so the writer is what proves it:
+      // a synthetic fixture could agree with a rule that the kernel does not.
+      if (!Platform.isLinux) return;
+      final String? real = PlatformProcessUtils.processStartTimeSignature(pid);
+      expect(real, isNotNull);
+      expect(
+        PlatformProcessUtils.compareStartTimeSignatures(real!, real),
+        PatchbayStartTimeMatch.same,
+        reason: 'this build must be able to read back what it just wrote',
       );
     });
   });

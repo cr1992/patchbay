@@ -354,41 +354,129 @@ abstract final class PlatformProcessUtils {
   ///   development carry raw `ps`/PowerShell output with no scheme tag, and
   ///   those are precisely the values that must not be trusted in either
   ///   direction.
+  /// * Either side carrying a payload its *own* scheme could not have
+  ///   written is unverifiable for the same reason. A scheme tag says which
+  ///   format a string claims to be in, not that it is in it: a truncated or
+  ///   otherwise corrupted record such as `v2-linux:garbage` would otherwise
+  ///   compare "same scheme, unequal payload" against a perfectly good probe
+  ///   and retire a session whose App is still running. Recognising a format
+  ///   is a precondition for concluding anything from it, so the payload
+  ///   contracts in [_parseSignature] are part of the comparison, not
+  ///   decoration.
   /// * Two *different* known schemes are also unverifiable: a Linux host that
   ///   wrote a procfs signature and later reads it with procfs unavailable
   ///   gets a `v2-posix` probe back, and the two are not comparable. Not
   ///   comparable is not the same as not equal.
-  /// * Only within one known scheme does inequality mean what PB-050-18 says
-  ///   it means: the PID was recycled and this record's process is gone.
+  /// * Only when both sides are well-formed *and* share a scheme does
+  ///   inequality mean what PB-050-18 says it means: the PID was recycled and
+  ///   this record's process is gone.
   static PatchbayStartTimeMatch compareStartTimeSignatures(
     String recorded,
     String observed,
   ) {
-    final String? recordedScheme = _schemeOf(recorded);
-    final String? observedScheme = _schemeOf(observed);
-    if (recordedScheme == null || observedScheme == null) {
+    final ({String scheme, String payload})? left = _parseSignature(recorded);
+    final ({String scheme, String payload})? right = _parseSignature(observed);
+    if (left == null || right == null) {
       return PatchbayStartTimeMatch.unverifiable;
     }
-    if (recordedScheme != observedScheme) {
+    if (left.scheme != right.scheme) {
       return PatchbayStartTimeMatch.unverifiable;
     }
-    return recorded == observed
+    return left.payload == right.payload
         ? PatchbayStartTimeMatch.same
         : PatchbayStartTimeMatch.different;
   }
 
-  /// The leading scheme tag of [signature], or `null` when it carries none
-  /// this build knows.
+  /// Splits [signature] into a scheme this build knows and a payload that
+  /// scheme could actually have produced, or `null` when it is neither.
   ///
   /// The split is on the *first* `:` because every payload may contain more
   /// of them — `v2-linux` joins a UUID to a tick count, `v2-posix` carries a
   /// clock time, `v2-win` an ISO-8601 timestamp.
-  static String? _schemeOf(String signature) {
+  ///
+  /// The payload contracts are read back off the three writers in
+  /// [processStartTimeSignature], and are deliberately no stricter than what
+  /// those writers can emit — a legal signature rejected here would silently
+  /// cost the PID-reuse guard. They are exactly strict enough to recognise a
+  /// value that is *not* one of ours:
+  ///
+  /// * `v2-linux` — `<boot_id>:<ticks>`, one `:`, a UUID and a run of decimal
+  ///   digits. Not "positive": PID 1 legitimately starts at tick 0.
+  /// * `v2-posix` — whatever `ps -o lstart=` printed, *after* this file's own
+  ///   trim-and-collapse, so: non-empty, no ASCII control characters (`\s`
+  ///   ones were collapsed away, the rest are corruption), no edge spaces and
+  ///   no doubled spaces. Nothing about the shape of a date is asserted: BSD
+  ///   and GNU `ps` disagree on it, and pinning that shape here would judge
+  ///   the *renderer* rather than the process.
+  /// * `v2-win` — a round-trip (`"o"`) rendering of a UTC `DateTime`, which
+  ///   is culture-invariant and therefore fully specified: `Z`-suffixed, with
+  ///   the fractional second the only part .NET versions may render
+  ///   differently.
+  ///
+  /// Being over-strict here can only ever cost a `different` verdict and
+  /// leave a stale record behind; being over-lax can delete a live session's
+  /// record. That asymmetry is why the doubt goes this way.
+  static ({String scheme, String payload})? _parseSignature(String signature) {
     final int separator = signature.indexOf(':');
     if (separator <= 0) return null;
     final String scheme = signature.substring(0, separator);
-    return knownStartTimeSchemes.contains(scheme) ? scheme : null;
+    if (!knownStartTimeSchemes.contains(scheme)) return null;
+    final String payload = signature.substring(separator + 1);
+    final bool wellFormed = switch (scheme) {
+      linuxStartTimeScheme => _isProcfsPayload(payload),
+      posixStartTimeScheme => _isCollapsedSingleLine(payload),
+      windowsStartTimeScheme => _windowsInstantPattern.hasMatch(payload),
+      // A scheme listed in [knownStartTimeSchemes] with no payload contract
+      // here is unverifiable by construction rather than trusted by default.
+      _ => false,
+    };
+    return wellFormed ? (scheme: scheme, payload: payload) : null;
   }
+
+  /// `<boot_id>:<ticks>` as [_procfsStartTimeSignature] assembles it.
+  static bool _isProcfsPayload(String payload) {
+    final int separator = payload.indexOf(':');
+    if (separator < 0) return false;
+    return _bootIdPattern.hasMatch(payload.substring(0, separator)) &&
+        _startTimeTicksPattern.hasMatch(payload.substring(separator + 1));
+  }
+
+  /// Whether [payload] survives this file's own normalisation unchanged.
+  ///
+  /// Expressed as the properties that normalisation guarantees rather than as
+  /// a re-run of it, so that a value which merely *looks* normalised but
+  /// carries a NUL or a bell — neither of which is `\s`, so neither of which
+  /// the collapse would have removed — is still recognised as corrupt.
+  static bool _isCollapsedSingleLine(String payload) {
+    if (payload.isEmpty) return false;
+    for (final int unit in payload.codeUnits) {
+      if (unit < 0x20 || unit == 0x7f) return false;
+    }
+    if (payload.startsWith(' ') || payload.endsWith(' ')) return false;
+    return !payload.contains('  ');
+  }
+
+  /// The canonical rendering of `/proc/sys/kernel/random/boot_id`: a UUID,
+  /// which is the only thing the kernel prints there. Hex case is not
+  /// asserted — being stricter than the digits themselves would buy nothing
+  /// and could cost the guard on a host that renders them differently.
+  static final RegExp _bootIdPattern = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}'
+    r'-[0-9a-fA-F]{12}$',
+  );
+
+  /// Field 22 of `/proc/<pid>/stat` as the kernel prints it: decimal digits,
+  /// nothing else. `int.tryParse` would also accept `+7`, `-7` and ` 7`,
+  /// which that field can never be and a corrupted record can.
+  static final RegExp _startTimeTicksPattern = RegExp(r'^[0-9]+$');
+
+  /// `DateTime.ToUniversalTime().ToString("o")`: an ISO-8601 instant whose
+  /// `Kind` is UTC, so it always ends in `Z` and never carries a local
+  /// offset — an offset here is the Windows shape of the PB-050-31 defect
+  /// itself, and must not be read as a comparable identity.
+  static final RegExp _windowsInstantPattern = RegExp(
+    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?Z$',
+  );
 
   /// Creates [path] empty and owner-only (`0600` on POSIX) **before** any content is written.
   static File createRestrictedFileSync(

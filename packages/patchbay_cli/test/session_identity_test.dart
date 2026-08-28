@@ -270,6 +270,52 @@ void main() {
       expect(listing.status, PatchbaySessionStatus.stale);
       expect(listing.identityUnverified, isFalse);
     });
+
+    test('BUG-20260828-01: a corrupted record degrades, it is not judged', () {
+      // The gap PB-050-31 left: the comparison recognised the scheme tag and
+      // then trusted whatever followed it. A record whose payload was
+      // truncated or otherwise mangled therefore compared "same scheme,
+      // different payload" against a healthy probe -- and the resolver reads
+      // that as PID reuse, so a live App's record was deleted by the very
+      // guard that exists to stop exactly that.
+      store.write(_record('corrupt', processStartTime: 'v2-linux:garbage'));
+
+      final PatchbaySessionListing listing = PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) =>
+            'v2-linux:00000000-0000-4000-8000-000000000001:7128607',
+      ).inventory().single;
+
+      expect(listing.status, PatchbaySessionStatus.live);
+      expect(listing.identityUnverified, isTrue);
+      expect(
+        store.readAll(),
+        hasLength(1),
+        reason: 'an unreadable signature must not retire a live record',
+      );
+    });
+
+    test('BUG-20260828-01: and select() keeps that record too', () {
+      // inventory() only reports; select() is the path that removes. Both
+      // must read a malformed payload as "cannot verify".
+      store.write(_record('corrupt', processStartTime: 'v2-linux:garbage'));
+
+      final PatchbaySessionListing selected = PatchbaySessionResolver(
+        store: store,
+        workspaceProbe: () => _workspace,
+        workspaceIdentityAt: (_) => null,
+        pidProbe: (_) => true,
+        processStartTimeProbe: (_) =>
+            'v2-linux:00000000-0000-4000-8000-000000000001:7128607',
+      ).select('corrupt');
+
+      expect(selected.record.sessionId, 'corrupt');
+      expect(selected.identityUnverified, isTrue);
+      expect(store.readAll(), hasLength(1));
+    });
   });
 
   group('start-time probe failure degrades, never fail-closed', () {
