@@ -32,5 +32,6 @@
 ## 文档与发布面
 
 - [ ] 公共 API、协议、默认上限或安全行为变化已同步文档
+- [ ] 本 MR 不接受 Proposal，或已同步 `design.md` 的长期结论并在描述中指出落点（仅版本内有效则说明理由）
 - [ ] 规划文档通过 `dart run tool/check_planning.dart`，或本 MR 不修改规划
 - [ ] 未直接修改包内派生的 `CHANGELOG.md`，或本 MR 是正式发布聚合

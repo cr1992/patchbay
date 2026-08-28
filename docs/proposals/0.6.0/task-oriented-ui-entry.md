@@ -25,6 +25,7 @@
 - 不新增身份域、模糊 selector、label/value 猜测、Element 自动发现或绝对屏幕坐标。
 - 不在 semantics、pointer 与 direct-target 之间自动回退。
 - 不把 reveal 扩成导航或把多步任务藏成不可观察的隐式流程。
+- 不在 canonical 入口冻结前为即将废弃的旧命令面生成 shell 补全，也不由本 Proposal 直接授权补全实现。
 
 ## 契约
 
@@ -64,6 +65,8 @@ selector 不接收 copy/label 猜测；sensitive 输入继续走 stdin；响应�
 - `--via` 是否总是必填，还是仅在多通道 action 上必填。
 - 四类旧入口各自的迁移窗口；推荐保留一版并告警，1.0 前删除非 canonical 推荐面。
 - `executionPath` 是 canonical CLI 的本地投影字段，还是进入稳定 host payload。
+- DG-060-01 接受后，是否以同一 command registry/生成清单派生 zsh/bash completion，使 deprecated 命令按
+  迁移窗口自动退出补全；实现条目只在入口冻结后另立，避免维护两套短命命令树。
 
 ## 被否决方案
 
