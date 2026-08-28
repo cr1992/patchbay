@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:patchbay_cli/src/platform/process_utils.dart';
@@ -645,6 +646,33 @@ void main() {
       );
     });
 
+    test('a boot_id that is not a UUID falls back too', () {
+      // BUG-20260828-01, write side. Persisting it would be worse than
+      // useless: the reader's payload contract would refuse it forever, so
+      // the record would compare `unverifiable` for its whole life and
+      // silently carry no PID-reuse guard at all. `ps` may still answer.
+      File(
+        '${procRoot.path}/sys/kernel/random/boot_id',
+      ).writeAsStringSync('not-a-uuid\n');
+      writeStat(4247, _statLine(comm: 'sleep', startTimeTicks: 42));
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) =>
+            ProcessResult(123, 0, 'Mon Aug 25 09:00:00 2026\n', ''),
+      );
+
+      expect(
+        PlatformProcessUtils.processStartTimeSignature(
+          4247,
+          runner: fake,
+          isWindows: false,
+          isLinux: true,
+          procRoot: procRoot.path,
+        ),
+        'v2-posix:Mon Aug 25 09:00:00 2026',
+      );
+      expect(fake.executedSync.single.executable, 'ps');
+    });
+
     test('a procfs from another PID namespace is refused, not believed', () {
       final Directory foreign = Directory.systemTemp.createTempSync(
         'patchbay-foreign-proc-sig-',
@@ -779,9 +807,9 @@ void main() {
 
     test('an empty or scheme-less string is unverifiable, not different', () {
       for (final pair in <List<String>>[
-        <String>['', 'v2-posix:x'],
-        <String>[':leading', 'v2-posix:x'],
-        <String>['v2-posix:x', 'no-colon-at-all'],
+        <String>['', 'v2-posix:Mon Aug 25 09:00:00 2026'],
+        <String>[':leading', 'v2-posix:Mon Aug 25 09:00:00 2026'],
+        <String>['v2-posix:Mon Aug 25 09:00:00 2026', 'no-colon-at-all'],
       ]) {
         expect(
           PlatformProcessUtils.compareStartTimeSignatures(pair[0], pair[1]),
@@ -806,6 +834,223 @@ void main() {
           PlatformProcessUtils.processStartTimeSignature(child.pid)!,
         ),
         PatchbayStartTimeMatch.same,
+      );
+    });
+  });
+
+  group('BUG-20260828-01: a scheme tag is a claim, not proof', () {
+    // The gap PB-050-31 left behind. The comparison recognised the scheme and
+    // then trusted whatever followed it, so a corrupted record such as
+    // `v2-linux:garbage` compared "same scheme, unequal payload" against a
+    // healthy probe -- `different`, which the resolver reads as PID reuse and
+    // answers by deleting the record of a session whose App is still running.
+    // A malformed payload is the same kind of fact as an unknown scheme:
+    // nothing can be concluded from it, in either direction.
+
+    // One signature per scheme, in exactly the form this build writes.
+    const String linuxOk = 'v2-linux:$_bootId:7128607';
+    const String posixOk = 'v2-posix:Mon Aug 25 09:00:00 2026';
+    const String winOk = 'v2-win:2026-08-25T16:00:00.0000000Z';
+
+    // Each healthy signature against the corruptions of its own scheme.
+    const Map<String, List<String>> corrupt = <String, List<String>>{
+      linuxOk: <String>[
+        'v2-linux:',
+        'v2-linux:garbage',
+        // Truncated writes, which is what a corrupted record actually looks
+        // like: the boot id survived, the tick count did not.
+        'v2-linux:$_bootId',
+        'v2-linux:$_bootId:',
+        // `int.tryParse` accepts all three of these; field 22 is none of them.
+        'v2-linux:$_bootId:71x8607',
+        'v2-linux:$_bootId:-7128607',
+        'v2-linux:$_bootId:+7128607',
+        'v2-linux:$_bootId:7128607:7128607',
+        'v2-linux:not-a-uuid:7128607',
+        'v2-linux:0000000-0000-4000-8000-000000000001:7128607',
+        'v2-linux:$_bootId\u0000:7128607',
+      ],
+      posixOk: <String>[
+        'v2-posix:',
+        // An opaque placeholder is not an `lstart`. Listed first because it
+        // is what this repo's own session fixtures used to hold: a value
+        // that looks harmless and was trusted as a comparable identity.
+        'v2-posix:launch-a',
+        // Truncation, one field at a time. A half-written record compared
+        // against the intact one it came from is exactly the shape that used
+        // to reach `different`.
+        'v2-posix:Mon Aug 25 09:00:00',
+        'v2-posix:Mon Aug 25 09:00:00 202',
+        'v2-posix:Mon Aug 25 09:00 2026',
+        'v2-posix:Aug 25 09:00:00 2026',
+        'v2-posix:Mon Aug 09:00:00 2026',
+        'v2-posix:on Aug 25 09:00:00 2026',
+        'v2-posix:Mon Aug 25 09:00:00 2026 extra',
+        // Field widths `ps` cannot produce under the pinned `LC_ALL=C`: the
+        // clock is two-digit, the day at most two.
+        'v2-posix:Mon Aug 125 09:00:00 2026',
+        'v2-posix:Mon Aug 25 9:00:00 2026',
+        // The writer trims and collapses, so none of these three can be its
+        // output -- each is a value that was mangled after it was written.
+        'v2-posix: Mon Aug 25 09:00:00 2026',
+        'v2-posix:Mon Aug 25 09:00:00 2026 ',
+        'v2-posix:Mon Aug  25 09:00:00 2026',
+        // Control characters are not `\s`, so the collapse would have left
+        // them in place: seeing one means the value is not ours.
+        'v2-posix:Mon Aug 25\u000009:00:00 2026',
+        'v2-posix:Mon Aug 25\n09:00:00 2026',
+        'v2-posix:Mon Aug 25 09:00:00 2026\u007f',
+      ],
+      winOk: <String>[
+        'v2-win:',
+        'v2-win:garbage',
+        // A local offset instead of `Z` is the Windows shape of the
+        // PB-050-31 defect itself: two readers in two timezones would
+        // disagree about one live process. Not comparable, by construction.
+        'v2-win:2026-08-25T16:00:00.0000000-07:00',
+        // `"o"` is fixed width: seven fractional digits, always. Three, none
+        // and eight are each something that happened to the string after it
+        // was written, and a truncated copy must not compare `different`
+        // against the intact one it came from.
+        'v2-win:2026-08-25T16:00:00.000Z',
+        'v2-win:2026-08-25T16:00:00Z',
+        'v2-win:2026-08-25T16:00:00.00000000Z',
+        'v2-win:2026-08-25T16:00:00.0000000',
+        'v2-win:2026-08-25T16:00:00',
+        'v2-win:2026-08-25 16:00:00.0000000Z',
+        'v2-win:2026-08-25T16:00:00.0000000Z\u0000',
+      ],
+    };
+
+    test(
+      'a malformed payload never reaches "different", in either direction',
+      () {
+        corrupt.forEach((String healthy, List<String> broken) {
+          for (final String value in broken) {
+            expect(
+              PlatformProcessUtils.compareStartTimeSignatures(value, healthy),
+              PatchbayStartTimeMatch.unverifiable,
+              reason: 'recorded ${jsonEncode(value)} vs probe $healthy',
+            );
+            expect(
+              PlatformProcessUtils.compareStartTimeSignatures(healthy, value),
+              PatchbayStartTimeMatch.unverifiable,
+              reason: 'record $healthy vs probe ${jsonEncode(value)}',
+            );
+          }
+        });
+      },
+    );
+
+    test('two malformed payloads stay unverifiable, equal or not', () {
+      // Byte-identical included, deliberately: a value this build cannot
+      // interpret proves nothing in *either* direction, so it must not be
+      // reported as a verified identity either.
+      corrupt.forEach((_, List<String> broken) {
+        for (final String value in broken) {
+          expect(
+            PlatformProcessUtils.compareStartTimeSignatures(value, value),
+            PatchbayStartTimeMatch.unverifiable,
+            reason: 'identical malformed pair: ${jsonEncode(value)}',
+          );
+        }
+        for (final String other in broken.skip(1)) {
+          expect(
+            PlatformProcessUtils.compareStartTimeSignatures(
+              broken.first,
+              other,
+            ),
+            PatchbayStartTimeMatch.unverifiable,
+            reason: 'malformed pair: ${jsonEncode(other)}',
+          );
+        }
+      });
+    });
+
+    test('well-formed pairs still decide -- the PID-reuse guard is intact', () {
+      // The other half of the contract: adding a payload check must not cost
+      // a single `same` or `different` verdict the fix already earned.
+      const Map<String, String> otherLaunch = <String, String>{
+        linuxOk: 'v2-linux:$_bootId:9000000',
+        posixOk: 'v2-posix:Mon Aug 25 09:00:01 2026',
+        winOk: 'v2-win:2026-08-25T16:00:01.0000000Z',
+      };
+      otherLaunch.forEach((String healthy, String reused) {
+        expect(
+          PlatformProcessUtils.compareStartTimeSignatures(healthy, healthy),
+          PatchbayStartTimeMatch.same,
+          reason: healthy,
+        );
+        expect(
+          PlatformProcessUtils.compareStartTimeSignatures(healthy, reused),
+          PatchbayStartTimeMatch.different,
+          reason: '$healthy vs $reused',
+        );
+      });
+    });
+
+    test('the payload contracts admit everything their writers emit', () {
+      // Over-strictness has a cost of its own -- every rejected legal value
+      // silently forfeits the PID-reuse guard for that record -- so the
+      // boundaries the writers can actually reach are pinned here.
+      const List<List<String>> sameLaunch = <List<String>>[
+        // PID 1 legitimately starts at tick 0.
+        <String>['v2-linux:$_bootId:0', 'v2-linux:$_bootId:0'],
+        // The kernel prints boot_id in lowercase; hex case is not a fact
+        // about the boot, so it is not asserted.
+        <String>[
+          'v2-linux:00000000-0000-4000-8000-00000000ABCD:7128607',
+          'v2-linux:00000000-0000-4000-8000-00000000ABCD:7128607',
+        ],
+        // BSD pads a single-digit day with a second space and the writer's
+        // collapse removes it, so a one-digit day is a shape the writer
+        // really does emit -- on exactly the platform this suite usually
+        // runs on.
+        <String>[
+          'v2-posix:Fri Aug 8 09:00:00 2026',
+          'v2-posix:Fri Aug 8 09:00:00 2026',
+        ],
+        <String>[
+          'v2-posix:Mon Aug 25 09:00:00 2026',
+          'v2-posix:Mon Aug 25 09:00:00 2026',
+        ],
+        // Midnight, where every field is at its low end: still full width,
+        // because `LC_ALL=C` zero-pads the clock.
+        <String>[
+          'v2-posix:Thu Jan 1 00:00:00 2026',
+          'v2-posix:Thu Jan 1 00:00:00 2026',
+        ],
+        // `"o"` renders seven fractional digits, and a whole second renders
+        // them as zeros rather than omitting them.
+        <String>[
+          'v2-win:2026-08-25T16:00:00.0000000Z',
+          'v2-win:2026-08-25T16:00:00.0000000Z',
+        ],
+      ];
+      for (final List<String> pair in sameLaunch) {
+        expect(
+          PlatformProcessUtils.compareStartTimeSignatures(pair[0], pair[1]),
+          PatchbayStartTimeMatch.same,
+          reason: 'pair: $pair',
+        );
+      }
+    });
+
+    test('a real procfs signature satisfies its own payload contract', () {
+      // The contract is read off the writer, so the writer is what proves it:
+      // a synthetic fixture could agree with a rule that the kernel does not.
+      // Reported as a skip rather than an early `return`: on a non-Linux host
+      // this would otherwise be a green no-op standing in for evidence it
+      // never produced.
+      if (!Platform.isLinux) {
+        return markTestSkipped('procfs is a Linux fact; no `/proc` here');
+      }
+      final String? real = PlatformProcessUtils.processStartTimeSignature(pid);
+      expect(real, isNotNull);
+      expect(
+        PlatformProcessUtils.compareStartTimeSignatures(real!, real),
+        PatchbayStartTimeMatch.same,
+        reason: 'this build must be able to read back what it just wrote',
       );
     });
   });

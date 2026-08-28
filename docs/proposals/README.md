@@ -44,6 +44,7 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 - [Snapshot 双预算、single-flight 与可选 source revision](0.5.0/snapshot-resources-revisions.md)
 - [CLI 公共 API surface 收口](0.5.0/cli-public-api-surface.md)
 - [公开 SDK 下限提升至 Flutter 3.44.0 / Dart 3.12.0](0.5.0/sdk-floor-raise.md)
+- [会话启动身份签名格式与三态比较](0.5.0/session-identity-signature.md)（实现后追溯补齐）
 
 0.5.0 提案中：
 
