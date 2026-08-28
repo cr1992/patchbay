@@ -50,6 +50,14 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 
 （暂无）
 
+0.6.0 提案中：
+
+- [任务导向 UI 命令入口](0.6.0/task-oriented-ui-entry.md)
+- [Core 公共 Dart API 分层](0.6.0/core-public-api-layers.md)
+- [Descriptor 驱动的输出投影](0.6.0/descriptor-output-projection.md)
+- [Gate 声明与执行真源](0.6.0/gate-execution-boundary.md)
+- [UI 可达性与遮挡语义](0.6.0/ui-reachability-semantics.md)
+
 已延期、尚未进入版本范围的候选方案：
 
 - [调试轨迹 scenario 与受控回放](future/trace-replay.md)
