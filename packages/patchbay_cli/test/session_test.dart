@@ -37,6 +37,11 @@ void main() {
                 (PatchbaySessionException error) => error.hint,
                 'hint',
                 contains('--ws-uri'),
+              )
+              .having(
+                (PatchbaySessionException error) => error.hint,
+                'hint',
+                contains('patchbay session register'),
               ),
         ),
       ),

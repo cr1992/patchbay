@@ -152,8 +152,10 @@ abstract final class PatchbayWorkspaceSelectionKernel {
         PatchbaySessionException(
           'sessionDirectoryEmpty',
           hint:
-              'start the App under `patchbay launch -- <consumer command>` '
-              'or connect explicitly with `--ws-uri <uri>`',
+              'start the App under `patchbay launch -- <consumer command>`, '
+              'connect explicitly with `--ws-uri <uri>`, or if the App '
+              'already started on its own, register it with '
+              '`patchbay session register`',
         ),
       );
     }
