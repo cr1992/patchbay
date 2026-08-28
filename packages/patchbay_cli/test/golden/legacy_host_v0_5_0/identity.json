@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "serverVersion": "0.5.0",
+  "features": [
+    "catalogDigest",
+    "invocationCancellation",
+    "lifecycleState",
+    "snapshotRevisionDiff",
+    "snapshotSelectors"
+  ],
+  "applicationId": "dev.patchbay.golden",
+  "appInstanceId": "golden-instance",
+  "isolateId": "<runtime>"
+}

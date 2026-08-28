@@ -142,21 +142,21 @@ packages:
       path: "../../patchbay"
       relative: true
     source: path
-    version: "0.4.1"
+    version: "0.5.0"
   patchbay_flutter:
     dependency: "direct main"
     description:
       path: ".."
       relative: true
     source: path
-    version: "0.4.1"
+    version: "0.5.0"
   patchbay_transport:
     dependency: "direct main"
     description:
       path: "../../patchbay_transport"
       relative: true
     source: path
-    version: "0.4.1"
+    version: "0.5.0"
   path:
     dependency: transitive
     description:

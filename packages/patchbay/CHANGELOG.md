@@ -6,6 +6,33 @@ this file directly.
 
 [root]: https://github.com/cr1992/patchbay/blob/main/CHANGELOG.md
 
+## 0.5.0 - 2026-08-28
+
+Patchbay 0.5.0 is the onboarding and progressive-disclosure release: a minimal
+consumer entry that scales from read-only diagnostics to the full command
+surface, thin `--view brief` output with artifact spill for large payloads,
+hardened host boundaries, and new identifier-anchored UI capabilities.
+
+### Highlights
+
+- BREAKING: the CLI public Dart API narrows from 203 symbols to a frozen 2 + 8
+  surface (`patchbay_cli.dart` plus opt-in `patchbay_client.dart`); consumers
+  using the executable with `--json` are unaffected.
+- BREAKING: minimum SDK floors raise to Flutter >=3.44.0 / Dart >=3.12.0 — a
+  verified floor guarded by a blocking CI lane.
+- Identifier-anchored pointer tap (`ui.gesture.tap`), occlusion admission for
+  point actions, and `ui.reveal` driving lazily built lists with per-container
+  authorization and tighten-only budgets.
+- Domain-plane write commands now enforce their declared gates at host
+  admission; session selection is workspace-affine, and externally launched
+  apps register via `patchbay session register` / `session unregister`.
+- Snapshot provider boundary hardened: non-JSON values, cycles, depth and byte
+  budgets fail closed as `providerProtocolViolation`; audit delivery is
+  strictly ordered and bounded; REPL terminal errors are line-delimited JSON.
+- Session liveness upgraded to a three-state process-identity comparison with
+  timezone-independent, payload-validated signatures; malformed records are
+  quarantined instead of silently deleted.
+
 ## 0.4.1 - 2026-08-24
 
 Patchbay 0.4.1 is an internal quality and architectural modularization release,

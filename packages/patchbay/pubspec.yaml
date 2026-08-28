@@ -1,7 +1,7 @@
 name: patchbay
 description: 'Typed control channel into a running Dart or Flutter app: protocol, gated command admission, fact-sourced state, jobs and blobs.'
 repository: https://github.com/cr1992/patchbay
-version: 0.4.1
+version: 0.5.0
 
 environment:
   sdk: '>=3.12.0 <4.0.0'

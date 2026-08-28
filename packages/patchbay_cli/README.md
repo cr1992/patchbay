@@ -15,7 +15,7 @@ For the protocol, lifecycle, and transport boundaries see
 Install the CLI from pub.dev and pin the version used by the app:
 
 ```console
-$ dart pub global activate patchbay_cli 0.4.1
+$ dart pub global activate patchbay_cli 0.5.0
 $ export PATH="$PATH":"$HOME/.pub-cache/bin"   # it installs here, but that is not on PATH by default
 $ patchbay --help
 ```

@@ -2,6 +2,329 @@
 
 本文件记录尚未发布和已发布版本中会影响接入方、协议行为或安全边界的变化。
 
+## 0.5.0 - 2026-08-28
+
+接入成本与入门门槛批次：消费者侧 `SKILL.md` / `INSTALL.md` 渐进式披露入口闭环，瘦输出
+`--view brief` 与大载荷落 artifact；host 侧收紧 provider、目录、审计、invocation 四条边界，
+新增 identifier 锚定的合成 tap、点性 action 遮挡准入、`ui.reveal` 与外部会话注册命令。
+含 Dart source breaking change 与最低 SDK 上调，迁移见下面首屏五条。
+
+- **CLI 公共 Dart API 从 203 个符号收口为 2 + 8 个封闭清单**（PB-050-13）：`patchbay_cli.dart`
+  只保留 `runPatchbayCli` / `PatchbayExitCode`，新增 opt-in `patchbay_client.dart` 只保留
+  Proposal 冻结的 8 个符号（见 [CLI 公共 API 收口](docs/proposals/0.5.0/cli-public-api-surface.md)）；
+  只用可执行文件 + `--json` 的接入方不受影响，直接 `import` 内部 library 或依赖被移除符号的
+  接入方需要改法。
+- **最低支持版本上调为 Flutter `>=3.44.0`、Dart `>=3.12.0`**（PB-050-12）：低于此版本的 App 侧
+  依赖解析会直接失败，升级前先核对自己工具链版本；这是已验证下限并由阻断性 CI lane 守门
+  （裁决见 [SDK 下限提升](docs/proposals/0.5.0/sdk-floor-raise.md)）。
+- **domain 写命令的 `gates` 从目录展示变为 host 受理段强制求值**（PB-050-25）：`sideEffect`
+  非 `none` 的命令声明了 `gates` 却没有配 evaluator 时，现在以 `consumerGateRejected`
+  （`reason: gateEvaluatorUnavailable`）稳定拒绝，不再只是在 catalog 里展示；升级前确认
+  `PatchbayServiceHost(domainGates: ...)` 或 `PatchbayFlutterServiceHost` 已经接好 evaluator。
+- **不带 `--session` 的会话选择改为按 Git worktree/checkout 亲和**（PB-050-14）：不带
+  `--session` 的命令现在只在当前 checkout 的会话记录里选，跨 checkout 需要显式 `--session`；
+  依赖旧全局选择行为的脚本需要更新（升级说明见[使用指南「会话选择」](docs/guide.md#会话选择)）。
+- **接入方迁移指引**：(1) 依赖换 pin——四包已按 hosted 约束互相依赖，git pin 的接入方不能只改
+  单包：要么整体改用 pub.dev 版本，要么用 `dependency_overrides` 把四包统一指回 git
+  （见[发版检查清单](docs/release-checklist.md)「consumer 换 pin」一节）；(2) 不经
+  `patchbay launch` 启动 App 的接入方，把自建会话记录迁移到 `patchbay session register` /
+  `session unregister`（PB-050-27，见[使用指南「自己起 App 的会话」](docs/guide.md#自己起-app-的会话register--unregister)）。
+
+<!-- PUB_CHANGELOG:START -->
+Patchbay 0.5.0 is the onboarding and progressive-disclosure release: a minimal
+consumer entry that scales from read-only diagnostics to the full command
+surface, thin `--view brief` output with artifact spill for large payloads,
+hardened host boundaries, and new identifier-anchored UI capabilities.
+
+### Highlights
+
+- BREAKING: the CLI public Dart API narrows from 203 symbols to a frozen 2 + 8
+  surface (`patchbay_cli.dart` plus opt-in `patchbay_client.dart`); consumers
+  using the executable with `--json` are unaffected.
+- BREAKING: minimum SDK floors raise to Flutter >=3.44.0 / Dart >=3.12.0 — a
+  verified floor guarded by a blocking CI lane.
+- Identifier-anchored pointer tap (`ui.gesture.tap`), occlusion admission for
+  point actions, and `ui.reveal` driving lazily built lists with per-container
+  authorization and tighten-only budgets.
+- Domain-plane write commands now enforce their declared gates at host
+  admission; session selection is workspace-affine, and externally launched
+  apps register via `patchbay session register` / `session unregister`.
+- Snapshot provider boundary hardened: non-JSON values, cycles, depth and byte
+  budgets fail closed as `providerProtocolViolation`; audit delivery is
+  strictly ordered and bounded; REPL terminal errors are line-delimited JSON.
+- Session liveness upgraded to a three-state process-identity comparison with
+  timezone-independent, payload-validated signatures; malformed records are
+  quarantined instead of silently deleted.
+<!-- PUB_CHANGELOG:END -->
+
+### Added
+
+- 新增可选的 `PatchbayVersionedSnapshotSource`：source 返回 `PatchbaySnapshotSample(contentRevision, body)`，host 在 revision 未前进时直接复用上次冻结视图、不读取新 body，并把答复标记为 `revisionSource: consumerReported`；revision 前进即使内容相同也递增 host `snapshotRevision`，倒退或负数返回 `providerProtocolViolation` 的 `revisionRegressed`。既有 `PatchbaySnapshotSource` 无需修改即可继续使用，仍返回 `revisionSource: hostObserved`；两种 source 互斥，由 host 构造期选定。
+
+- 新增 `PatchbayCatalogProvider`、`PatchbayCatalogSample` 与对应 ServiceHost/Flutter host 构造入口，接入方可用单调 `commandsRevision` 显式失效 invocation catalog policy 缓存。
+
+- 新增 invocation cooperative cancellation：context-aware handler 可区分 deadline、调用方断开、显式取消与 host dispose，并在底层停止后确认释放容量；VM Service 与 direct HTTP 提供同构 cancel 控制面。
+
+- 新增 `ui.semantics.actionByIdentifier` 与 `patchbay ui action`，要求调用方携带已观察的 generation，并在一次受理内按稳定 Semantics identifier 解析、过门和二次复核后派发公开 action。
+
+- 新增 `ui.gesture.tap`（CLI：`patchbay ui gesture tap <identifier> <generation> [--start <json>]`）：identifier 锚定、经真实指针管线的点按。注入真 `PointerDownEvent`/`PointerUpEvent`（异常路径补 `PointerCancelEvent`），复用 gesture 家族的逐点 clip/hit-test 准入与门后二次复核，被遮挡即 `uiGestureTargetObscured`；down→up 间隔是内部固定常数（不进 wire，仍受 policy `maxDurationMs` 预算约束）；`start` 缺省为目标中心且默认值声明在 catalog descriptor 上；调用方 `generation` 必填并在第一次解析即核对。与 `ui.semantics.tap` 并存：前者证明「真实指针可达并能触发」，后者驱动「声明了语义 action 的目标（含指针不可达者）」，两条 help 按调用目的互相指引。零新增稳定错误码。
+
+- 新增 `ui.reveal <identifier>`：以稳定 Semantics identifier 锚定目标，在一次 App 受理内把懒加载列表里
+  尚未挂载的目标驱动到**已挂载且露出**，并返回后续写命令该带的 `generation` 与该走哪条 tap 通道的
+  `reachability`。CLI 语法 `patchbay ui reveal <identifier> [--container <identifier>]
+  [--direction <forward|backward|both>] [--max-steps <n>] [--timeout-ms <ms>]`。
+  - **未注入 reveal policy 即不进 catalog**：升级 package 不会让任何现有 App 多出一条命令。接入方要
+    显式写下新的 `PatchbayRevealPolicy`（新公共类型 `PatchbayRevealDecision` /
+    `PatchbayRevealDirection`，注入点是 `PatchbayFlutterBridge` 的可选具名参数 `revealPolicy`）才拿得到
+    它；直接调 bridge 得 `uiRevealDisabled`。
+  - **机制唯一**：只派发 `scrollUp/scrollDown/scrollLeft/scrollRight`，从不派发
+    `SemanticsAction.showOnScreen`——那是一条接入方在快照与 policy 入参里都看不见、因此拒不掉的驱动
+    通道。**不引入任何坐标入参**，也不按尺寸/深度给滚动容器打分：候选多于一个就拒绝并指引
+    `--container`。
+  - **逐容器授权、每步重评**：policy 的入参是被驱动的**容器**而不是目标；每次由内向外升层都是一次
+    新的完整授权，每一步派发之前还会重解析容器、重跑 policy 并重评声明门。逐步重评意味着交互式 gate
+    会被问到 `steps` 次——需要「一次确认覆盖整条 reveal」的接入方在自己的 gate 闭包内 latch，协议侧
+    不提供 lease。
+  - **三层预算只能收紧**：host 硬顶（200 步 / 2 分钟）→ policy → 命令参数，且 min 通过**拒绝**达成而
+    不是静默夹取（越界即 `uiRevealBudgetExceeded`，一步都不派发）。单一 deadline 在受理时算一次，帧
+    驱动推进、无墙钟 sleep；升层到一个时长授权更严的容器时不改写 deadline，而是停下并报
+    `containerBudgetTooSmall`。
+  - **`direction` 是内容序不是屏幕方向**：`forward` 朝 `maxScrollExtent`，落到哪个 `SemanticsAction`
+    由容器当前暴露的 action 与观察到的位移符号确定，因此 `reverse: true` 与横向列表都不要求调用方先
+    知道布局方向。请求显式方向且容器停在中段时，第一步可能是一次朝反方向的探测步（每容器至多一次，
+    计入 `steps`）；用默认的 `both` 可以避免它。
+  - **payload**：`revealed` 带 `nodeId` / `generation` / `reachability`（`pointer` ⇒ 随后走
+    `ui gesture tap`；`semanticsOnly` ⇒ 随后走 `ui tap`）；`failed` 带封闭的 `reason`
+    （`stepBudgetExceeded` / `scrollExhausted` / `targetObscured` / `targetBlocked` /
+    `targetAmbiguous` / `containerChanged` / `containerDenied` / `containerBudgetTooSmall` /
+    `policyChanged` / `gateRejected` / `lifecycleNotResumed` / `timeout` / `scrollActionFailed`）。
+    两者都带复数 `containers`（每项 `nodeId` / `generation` / `steps` / `direction` /
+    `extentGrowthSteps`），按被驱动的先后顺序由内向外排列；不存在任何单数 container 字段。观察到的
+    滚动位置与 extent **只以计数形式**出现，不回显像素值、坐标、rect 或探针点。
+  - **露出判据复用 PB-050-16 的固定采样基建**：按目标 rect 取中心与四象限五点，任一点未被挡即通过。
+    诚实边界不变——这是固定采样准入，不是可达性证明，也不承诺下一帧仍然如此（那由返回的
+    `generation` 兜住）。
+  - 新增稳定拒绝码 `uiRevealDisabled` / `uiRevealNoScrollableContainer` /
+    `uiRevealContainerAmbiguous` / `uiRevealDenied` / `uiRevealBudgetExceeded` /
+    `uiRevealPolicyChanged`。老 CLI 读到 `outcome: 'failed'` 仍按既有映射得到 `typedFailure` 退出码。
+  - 不受影响的部分：`ui.wait`、`ui.semantics.*`、`ui.gesture.*` 的 wire、CLI 与失败码逐字节不变；
+    `PatchbaySemanticsActionPolicy` / `PatchbaySemanticsActionDecision` 一个字节不动，现存接入方代码
+    无需改动即可编译。
+
+- 新增树类命令的大载荷自动落 artifact：`ui semantics tree`、`ui widget-tree`、`ui render-tree`、`ui focus-tree` 在 stdout 文档超过 64 KiB（可用 `--max-inline-bytes` 调整，`0` 关闭）时自动把无界成员写入本地文件，stdout 就地换成带 `path`/`length`/`sha256`/`verified` 的校验回执，并在顶层附上同一份 `localArtifact`；`treeRevision`/`nodeCount` 等有界事实继续留在 stdout。落盘的文件同时按内容寻址进当前 trace（`artifact.attached`），与既有 blob 下载一致。无界成员为空或 `null` 时（例如非 debug 构建下的三棵诊断树）不自动落盘、按原样内联，避免用一份「已校验」的回执掩盖「本来就没有内容」。这四条命令的 `--output`/`--force` 从「不合法」变为合法（`--output` 仍可选）。同时，`capture`/`blob get`/`logs export` 的 `localArtifact` 回执新增 `origin` 键（既有下载路径为 `hostBlob`，树类落盘为 `cliRendered`），使一个 reader 用一套判据区分两种来源；这是 additive 改动，既有键的名字、位置与值都不变，逐键读取的老 reader 不受影响。阈值内、不带 `--view` 的输出逐字节不变。
+
+- 新增全局 `--view brief`（默认 `full`，必须与 `--json` 同时使用；repl 内可按行覆盖会话默认值）：对受理成功的响应按封闭的删除表投影出决策事实，删掉的字段路径逐条列在追加的 `localView.omitted` 里，删除是保守的 deny-list，不认识的字段一律原样保留。已冻结投影的命令族：`catalog`（每条命令的 `parameters`/`responseSchema`/`executionContract`/`retryPolicy`；`summary` 保留，它是 `describe` 之前判断命令用途的唯一线索）、`ui semantics tree`（`payload.nodes`）、`ui widget-tree`/`render-tree`/`focus-tree`（`data`）、`logs query`（`payload.records`），以及作用于所有响应的 `notice` 通用规则。字段为空或 `null` 时一律不删也不登记，因此「App 给了空的」与「brief 删掉了」始终可分辨。不带 `--view` 的默认输出逐字节不变。
+
+- 新增面向消费者与 AI agent 的 Patchbay Skill 和安装入口，以只读诊断为默认起点，按任务逐层发现 live catalog、命令帮助与专项说明，并由 CLI registry 机检 Skill 中的起步命令不发生漂移。
+
+- 新增 `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id>
+  --process-id <pid> [<session-id>]` 与 `patchbay session unregister <session-id>`：给不经
+  `patchbay launch` 监督、由接入方自己启动的 App 登记一条本地会话记录，此后同一 checkout
+  内的命令不带 `--session` 也能自动发现它。两条命令都不连 App，只读写会话目录：`--ws-uri`
+  在这里是被记录的传输地址而不是被拨号的；记录复用既有 pending 语义与字段，不新增记录字段，
+  `applicationId` 与 launcher 声明的记录一样等第一条真正连上的命令去对账。`--process-id`
+  是本机持有该会话的进程，`sessions list` 的状态与 `sessions prune` 都按它的存活判定；
+  `--build-mode` 默认 `debug`。记录归属执行命令的 checkout，因此自动获得 workspace 亲和性，
+  别的 checkout 看不见它。省略 `<session-id>` 时由 CLI 命名并在输出中报出；同名记录已存在
+  以 `sessionAlreadyRegistered` 拒绝而不覆盖。`unregister` 同时清掉指向该记录的固定项，
+  记录已不存在时正常退出并报告 `removed: false`，便于放进退出清理路径。输出走既有 JSON
+  信封：`register` 返回一个 `session` 对象，`unregister` 返回 `sessionId` 与 `removed`。
+
+### Changed
+
+- Snapshot provider 返回值现在会在 host 边界内按严格 JSON 规则有界验证并冻结；非法类型、非字符串 key、非有限数、循环、过深或过大的结构统一返回 `providerProtocolViolation`，有效响应、selector、revision 与 diff 共用同一份不可变读视图。
+
+- Snapshot revision retention 现在同时受份数、单份 canonical UTF-8 字节和累计 retained 字节三个 host 内预算约束（默认 32 份 / 1 MiB / 8 MiB，可用 `PatchbaySnapshotRetentionLimits` 在 1..128 份、64 KiB..4 MiB、不小于单份上限且不超过 32 MiB 的范围内配置）；单份超出运行预算返回新的稳定 code `snapshotPayloadTooLarge`（details 只含 `encodedBytesAtLeast`/`maxSnapshotBytes`），超出 4 MiB 契约天花板仍是 `providerProtocolViolation`，两者都不改写 latest 或已保留的 revision。返回 metadata 在既有松读面新增 `retainedByteLimit` 与 `snapshotBytes`，因累计预算淘汰 baseline 后的 diff 继续返回 `snapshotRevisionUnavailable` 并附带 `retainedByteLimit`。同一时刻的并发 snapshot 读现在共享一次 provider 采样，各调用者的 selection、diff 与 wait 预算仍相互独立。
+
+- invocation 现在对空参数及 registry 命令同样执行整份 catalog fail-closed 校验；legacy catalog source 仅合并并发读取，versioned provider 则按 commands revision 复用已验证 policy。
+
+- `PatchbayServiceHost` 的 `auditSink` 改为按账本顺序单消费者投递，并新增有界队列、溢出/关闭错误及 `drainAudit` / `dispose` 终态统计；sink 迟延或失败仍不改写命令结果。
+
+- invocation 统一受 host-wide 并发预算约束，默认最多 8 条、可配置 1～256；legacy handler 在 deadline 或取消后明确返回 `cancellation: unsupported`，且仍保留容量直到 handler settle。
+
+- Semantics probe 不再为已就绪的 owner 主动请帧：`ui.semantics.tree`、identifier 观察与解析、`ui.gesture.*`、`ui.reveal` 读取的是命令开始时已提交的语义树，不再额外刷新一帧；`ui.wait` 每一轮未满足的条件因此只驱动一帧而不是两帧，空闲 App 不再被只读探测按显示帧率驱动。
+  - 观察语义随之明确：one-shot 命令答复的是当前已 flush 的树，不承诺「命令后下一帧」的状态；要等某个变化发生请用 `ui.wait`。
+  - `ui.wait` 的 `frameRevision` 计入本次调用实际驱动的**所有**帧，包括 owner 尚不可用时的有界恢复帧（最多三帧，单帧仍最多等 2 秒），并且这些恢复帧用的是调用方自己的 `timeoutMs` 预算，不额外延长。同一次观察的 `elapsedMs` 与 `frameRevision` 可能比旧版本更小，`schemaVersion`、命令形状与稳定 code 均不变。
+
+- 改进 CLI 可发现性：空会话给出 launcher 与 `--ws-uri` 恢复路径，raw artifact help 指向自动分块校验下载命令，并明确文本输入 callback、身份字段及 blob 长度字段的语义。
+
+- `sessionDirectoryEmpty` 的 hint 补上第三条恢复路径：App 已经以自有方式启动、不经 `patchbay launch`
+  的场景，现在可以直接提示改用 `patchbay session register` 登记该会话，不必再套用只适用于
+  `patchbay launch` 或手动 `--ws-uri` 场景的另外两条建议。
+
+- 新增非阻断的 `sdk_floor` CI lane（GitLab 与 GitHub 两边）：机检定位出满足现有 `pubspec.yaml` 声明约束（Dart `>=3.11.0`、`patchbay_flutter`/`example` 的 Flutter `>=3.38.0`）的最早可安装组合是 Flutter 3.41.0（内置 Dart 3.11.0）——原声明的 `flutter: '>=3.38.0'` 与 Dart 下限其实互斥（Flutter 3.38.x 全系只内置 Dart 3.10.x），已如实记录在 `docs/verification/0.5.0-flutter-sdk-floor.md`；该最早组合目前还未全绿（一条既有 reveal 测试断言在本地复现下失败，且未在 Linux CI 上复核），因此这条 lane 先非阻断跑，不改变现有三条 lane 的通过标准，也不改动任何 package 声明的 SDK 下限数字。
+
+- **最低支持的 SDK 组合提升为 Flutter `>=3.44.0` / Dart `>=3.12.0`**（四个 package 与 `example` 的 `pubspec.yaml` 同步收紧）：旧声明的 Flutter `>=3.38.0` + Dart `>=3.11.0` 指向一个装不出来的组合（Flutter 3.38.x 全系只内置 Dart 3.10.x），而真正能装出来的 Flutter 3.41.x 缺少上游提交 `af35e77c83d`——在它之前 `Semantics(identifier:)` 不构成语义边界，`blockUserActions` 会被祖先节点吸收而读不到目标上，导致 `ui.reveal` 把被模态屏蔽的目标误报成 `revealed`，`ui.semantics.*` 也会用 `uiSemanticsActionUnavailable` 顶替 `uiSemanticsActionBlocked`；含该修复的第一个 stable 就是 Flutter 3.44.0，其五个 package 已实测全绿。运行时行为、wire `schemaVersion`、descriptor 与稳定错误码均不变，接入方升级路径只是把自身 Flutter 升到 3.44.0 及以上；`sdk_floor` CI lane 同步钉到 3.44.0 并转为阻断门禁，声明下限此后由 CI 持续守门。
+
+- **Breaking:** `patchbay_cli` 的 Dart 源码入口收口为两个封闭清单，其余符号退出公共面。
+  `package:patchbay_cli/patchbay_cli.dart` 只导出 `runPatchbayCli` 与 `PatchbayExitCode`，
+  且 `runPatchbayCli` 收窄为 `Future<int> runPatchbayCli(List<String> arguments)`；
+  新增 opt-in 的 `package:patchbay_cli/patchbay_client.dart`，只导出 `PatchbayClient`、
+  `PatchbaySnapshotDiffClient`、`PatchbayRuntimeIdentity`、`PatchbayProtocolException`、
+  `PatchbayTransportException`、`PatchbaySnapshotRequest`，以及新的
+  `connectPatchbayVmService` / `connectPatchbayDirect` 两个连接 factory。迁移：
+  - 只执行安装后的 `patchbay` 与 permission 可执行文件的，无需任何迁移——命令、退出码、
+    stdout/stderr、稳定 JSON、wire 与 VM Service / direct 语义都不变；
+  - 调用 `runPatchbayCli(arguments)` 的，import 与调用都不变；给它传 `connect` /
+    `replInput` / `output` / `errorOutput` / `permissionCommands` / `environment` 的，
+    这些是包内测试与进程注入 seam，不再对外承诺；
+  - 用 `PatchbayClient` 或 VM/direct 连接类的，改 import `patchbay_client.dart` 并改用
+    两个 factory，连接类本身不再公开；
+  - 用 `PatchbayErrorEnvelope` 读失败的，改按 `--json` 输出的 error envelope 解析——
+    字节契约不变，只是不再有对应的 Dart 类；
+  - 用 launcher / session / trace / doctor / repl / manifest / permission adapter 实现，
+    以及测试时钟、随机数、sleep、starter、factory、目录与上限常量的，没有 Dart 替代：
+    改走 CLI 命令加稳定 JSON（外部启动的 App 会话见 `patchbay session register`），
+    或在自己的包里实现外部进程协议。
+  不提供 `legacy.dart` / `testing.dart` 过渡入口，也不提供兼容别名。pub 的 `^0.4.1`
+  约束不会自动选到 0.5.0；用 git / tag pin 的接入方必须显式换 pin 并重新编译验证。
+
+- 不带 `--session` 的会话选择收紧到当前工作区（checkout）之内：CLI 每次调用计算一次
+  host-local 的 workspace identity（Git worktree 顶层，非 Git 目录取 cwd 本身；共享 Git
+  common dir 的两个 worktree 判为不同），固定项改为按 workspace 分别保存，`session use`
+  只能固定属于当前 checkout 的记录，`sessions list` / `doctor` / `trace` 与解析器共用同一
+  套归属判断；跨工作区选择只保留显式 `--session <id>` 一个入口，它仍完成完整探活与 runtime
+  identity 握手且不改写任何一边的固定项。新增四个稳定码：当前 checkout 无候选
+  `sessionWorkspaceEmpty`、判不出当前 checkout `sessionWorkspaceUnavailable`、固定别处记录
+  `sessionWorkspaceMismatch`、按 workspace 的固定项超过 256 份
+  `sessionSelectionCapacityExceeded`。会话记录新增 additive 的
+  `workspaceIdentityVersion` / `workspaceKind` / `workspaceId` 三字段，`schemaVersion` 仍为
+  1，老 reader 忽略这三项照常读取；旧记录不删不改，路径可复算证明属于当前 checkout 时在握手
+  后原子补写身份，证明不了则只能用显式 `--session` 选择；升级后遗留的全局 `selected-session`
+  被一次性退役，只有它指向的记录能证明属于当前 checkout 时才转成该 checkout 的固定项，其余
+  情况只丢固定项、不迁移也不删除记录。0.4.x 旧 CLI 不具备本条隔离保证。
+
+- `patchbay session use --clear` 在判不出当前工作区（checkout）时按 `sessionWorkspaceUnavailable`
+  拒绝并退 3，与 `session use <session-id>` 一致；此前这种情况下它会打印「没有固定项」并正常退出，
+  而该工作区的固定项其实原封不动留在磁盘上，后续不带 `--session` 的命令仍会用它。判得出工作区时
+  语义不变，仍然只清除当前 checkout 自己的固定项。
+
+- **Breaking:**（仅 Dart source 层面）`PatchbayGestureKind` 追加枚举值 `tap`（追加在末尾，既有值 index 不变，payload 使用 `kind.name`）。对 gesture policy 里写穷尽 `switch` 的接入方，升级后会得到分析器错误，需为 `tap` 显式补一个分支（允许、拒绝或收紧预算）；写了 `default` 分支的接入方将由既有默认分支替 `tap` 做决定，建议升级后复核该分支对点按是否符合预期。未注入 `PatchbayGesturePolicy` 的接入方不受影响：整个 gesture 家族不进 catalog。
+
+- 收紧 `ui.semantics.*` 的准入：点性 action（当前公开 allowlist 内即 `tap`）在派发前会复核目标是否被
+  非模态覆盖层挡住，全被挡时以新的稳定码 `uiSemanticsTargetObscured` 拒绝，不再穿透激活一个真实指针
+  够不到的目标。此前只有 `BlockSemantics`／`ModalBarrier` 会拦下这类调用。
+  - 判定是**固定采样准入**而不是可达性证明：按目标边界取中心与四象限共五个采样点，任一点未被挡即放行，
+    五点全被挡才拒绝；目标只在采样点之外露出窄缝时会被保守拒绝（fail-closed）。
+  - 拒绝 `details` 固定为 `reason`（`hitTestOrClip`／`emptyBounds`／`viewUnavailable`／
+    `renderAnchorUnavailable`）、`nodeId`、`generation`，identifier 锚定入口另带 `identifier`；
+    不含坐标、rect、探针点，也不回显覆盖层的身份。
+  - 没有 bypass、force 或 `ignoreOcclusion` 开关。确需穿透覆盖层的动作属 domain command 领域，由接入方
+    自己的 policy 与 gate 负责。
+  - 不受影响的部分：目标可达时 valid/rejection 回包逐字节不变；`focus`、`scroll*`、`showOnScreen`、
+    `setText` 等非点性 action 行为不变；`uiSemanticsActionBlocked`、`isInvisible`、
+    `areUserActionsBlocked` 的含义不变；descriptor、CLI 语法与 catalog digest 不变。老 CLI 读到新码时按
+    既有 `admission` 分类落到 `rejected` 退出码，不会解析失败。
+
+- 面向升级到 0.5.0 的接入方明确 `ui.reveal` 的 opt-in 边界：需要在构造 `PatchbayFlutterBridge` 时显式
+  传入具名参数 `revealPolicy`；未注入时 `PatchbayRevealBridge.enabled`（`!kReleaseMode && policy !=
+  null`）为假，命令不进 catalog，直调 bridge 得 `uiRevealDisabled`。这与 0.4.0 引入的 `gesturePolicy`
+  同款——两者的 `enabled` 判定与直调拒绝路径逐字同形；`inspectPolicy`（0.3.0 起）同样遵循「未注入不进
+  catalog」的既有约定，但直调时给的是 `commandNotRegistered` 而非专属 `*Disabled` 码。升级后不注入
+  `revealPolicy` 不会让任何现有 App 多出 `ui.reveal` 命令。
+
+- 会话存活判定收紧为 PID + 进程启动身份三元比对：POSIX 用 `ps -o lstart=`、Windows 用 PowerShell
+  `Get-Process` 的 `StartTime`，两者都经现有 `ProcessRunner` seam；PID 存活但启动身份不匹配（PID
+  复用）现在判定为会话已死。会话记录新增 additive 的 `processStartTime` 字段，没有该字段的旧记录
+  行为完全不变，仍按纯 PID 判定；无论是旧记录还是本次启动身份采集失败，`patchbay sessions list`
+  的人读与 `--json` 输出都会额外标注 `identityUnverified`，绝不会因为核实不了就 fail-closed 杀掉一
+  个其实还活着的会话。
+
+- 会话记录扫描不再对解析失败的 `.json` 文件静默删除：改为原地重命名为 `<原文件名>.quarantine-<pid>-<时间戳>`
+  隔离保留，作为「记录为什么消失」的证据；隔离后的文件不再以 `.json` 结尾，之后的扫描不会重复处理。
+  `PatchbaySessionStore` 新增 `quarantinedFiles()` 枚举隔离文件供诊断消费；隔离动作本身失败（例如目录
+  权限受限）不会阻断本次 `readAll` 读取其余正常记录。临时文件 temp+rename 与并发写入语义不变。
+
+- `patchbay_flutter` example 与四份 README 的 quick-start 注册代码段不再使用 `allow()` 空壳门：
+  示范预设门改为「只读命令默认放行、写类命令默认拒绝并带 `notice` 说明」，且写明「按需在此放行」的
+  显式放行范例；example 里 `ui.capture`/`ui.capture.diff`（`sideEffect: none`）与 `blob.*`/`logs.*`
+  （`mode: readOnly`）不再挂在写门下，`ui.text.set`/`ui.text.enter`（`sideEffect: appState`）则补上了
+  此前缺失的写门声明。这是示例与文档层面的默认姿态调整，不改变任何包公共 API。
+
+- 收敛 CLI 一次性命令、`repl` 与 `launch` 的工作流指引，根 README 不再复制完整命令表，并修复发版时 AOT 安装示例中的下载、校验与移动文件名可能版本不一致的问题。
+
+- **Breaking:** `plane: domain` 的写命令（`sideEffect` 为 `appState` / `external`）现在由 host 在受理段
+  强制评估 descriptor 声明的 `gates`，此前 `gates` 对 domain 命令只进目录、不进派发。升级后有四条行为变化，
+  接入方必须逐条对照：
+  1. **不可省略的基础门开始覆盖 domain 写命令。** 此前它们完全跳过 `PatchbayGateEvaluator`。基础门恒定
+     放行的接入方观察不到差异；基础门带条件（如「依赖未就绪时拒绝」）的接入方，会看到 domain 写命令在
+     这些窗口内开始被拒。只读 domain 命令（`sideEffect: none`）逐字节不变，连基础门都不跑。
+  2. **descriptor 的 `gates` 从展示字段变为强制字段。** 写命令声明的门按 gateId 字典序求值、首个拒绝即
+     返回，与 `ui.*` / `navigation.*` 完全同一套语义；空 `gates` 表示「只跑基础门」。注意声明一个
+     `consumerGate` 未接线的门等于拒绝而不是放行，迁移中途的半成品状态是 fail-closed 的。
+  3. **审计事件 `gateResult` 对 domain 写命令从 `notEvaluated` 变为 `passed` / `rejected`。** 取值词表未
+     扩展，只读命令仍为 `notEvaluated`。
+  4. **声明了 `gates` 但 host 没有门求值器的组合会被拒绝**，答复是既有的 `consumerGateRejected` 加
+     `details.reason: gateEvaluatorUnavailable`。这是一条本来就无法满足的声明，不新增稳定错误码。
+
+  迁移：`package:patchbay_flutter` 的 host 自动复用 `PatchbayFlutterBridge` 已持有的门求值器，无需接线；
+  直接使用 `package:patchbay` 的 host 传入新的可选具名参数 `PatchbayServiceHost(domainGates: ...)`。想让
+  「只读默认开放、写入显式开放」落到 domain 面，给每条 `sideEffect != none` 的 descriptor 加上自己的写门
+  ID 并在 `consumerGate` 中处置它即可；不迁移的接入方只会遇到上面第 1 条。
+
+  拒绝形状复用既有 rejection 信封与退出码 `5`，wire、catalog / descriptor 稳定 JSON 与稳定错误码词表均未
+  变化。门在 external requestId 去重与 replay 之前求值，因此重发一个已被受理过的 requestId 在门关闭后会
+  拿到门拒绝而不是重放；此时 `details.priorRequestObserved` 为 `true`，提示该次写此前确已发生，不要换一个
+  requestId 重试。门可以 `await`，等待期间若动态目录改写了该命令的 `gates` 或 `sideEffect`，答复是
+  `providerProtocolViolation` 加 `details.reason: catalogGateDrift`，由调用方重发。
+
+- 迁移提醒：`plane: domain` 的写命令（`sideEffect` 非 `none`）被 host 强制求值门拒绝时，
+  `rejection.details` 携带的门标识键固定为 `gateId`（[domain-gate-enforcement](docs/proposals/0.5.0/domain-gate-enforcement.md)
+  冻结的契约）。只读 domain 命令（`sideEffect: none`）host 不加闸；接入方若在自己的 adapter 里另行
+  实现了同名门检查，其拒绝 `details` 的键形由该接入方自定，不受 host 约束——同一个 `rejection.code`
+  在写/读命令上 `details` 形状可能不同。迁移中的接入方判断拒绝原因请按 `code` 分支，不要依赖
+  `details` 的键名在读/写命令间保持一致。
+
+- 会话记录的 `processStartTime` 改用带 scheme 前缀、与时区和 locale 无关的启动身份签名：Linux 直接读
+  `/proc/<pid>/stat` 的 `starttime` 配 `/proc/sys/kernel/random/boot_id`（内核原值，不派生子进程），
+  procfs 不可用时回退 `ps -o lstart=` 并把 `TZ=UTC` 与 `LC_ALL=C` 钉进子进程环境，Windows 先
+  `ToUniversalTime()` 再按 `"o"` 格式化。此前签名是按**读取方**环境渲染的字符串，同一个活着的进程在
+  不同 shell、cron、CI 容器或跨一次 DST 切换下读出的两个签名并不相等，会被判成 PID 复用，于是
+  `patchbay` 删掉一条其实还活着的会话记录、后续命令一律退 `sessionStaleProcess`。签名比对同时收敛为
+  三态：两侧 scheme 不同、或签名没有可识别的 scheme（0.5.0 开发期写下的记录属于此类），一律降级为
+  `identityUnverified`，绝不判死；同一 scheme 下签名不等仍照旧判定为 PID 复用并清理记录。
+
+### Fixed
+
+- 修复 `doctor` 对孤儿 pin（已删除的固定会话）在 session 阶段误报通过的问题：直接在 session 阶段 fail-closed 并输出 `patchbay session use --clear` 的直接清理建议。（补记：该行为随 0.4.0 发布，因原碎片在 0.4.0 定版聚合后才创建、未被 release_prep 消费，当时的发布说明遗漏了这条记录，现补记。）
+
+- 修复 Android 权限 `status` / `capabilities` 把「已声明但设备尚未物化运行时记录」误判为 `notDeclaredByApp` 的问题：`dumpsys package` 的 `runtime permissions:` 小节是懒物化的，权限声明过但从未被请求/授予/拒绝过时不会出现对应行，此前据此误判为「没声明」并连带在 capabilities preflight 里把 normalize/reset 的动作集收窄成只剩 `status`。现在改为先读 `requested permissions:` 小节判定声明，已声明无记录时 `status` 返回 `state: notDetermined`、新增的 `platformState: noRuntimeRecord`，`supportedActions` 恢复完整动作集。
+
+- 修复 Android 权限 `status`/`normalize`/`reset` 把刚被授予、还没有任何标记的运行时权限误判为「无运行时记录」的问题：Android 在权限当前没有任何标记（USER_SET / USER_FIXED / ONE_TIME / REVOKE_WHEN_REQUESTED 等）时会整段省略 `dumpsys package` 里的 `, flags=[...]` 小节，而不是打印成 `flags=[]`；解析这段输出的正则此前把该小节写成必需，导致这类行永远匹配不上，`normalize granted` / `reset` 因此可能在权限已经生效之后仍误报 `permissionStateMismatch`。写后复核同时对读取新增有界指数退避重试（100ms 起，总窗口不超过 5 秒，计入既有单次写操作超时预算），不重发 grant/revoke，用于吸收更少见的设备侧最终一致性窗口；重试窗口内仍未观测到目标状态时，照旧如实报告 `permissionStateMismatch`，语义与响应信封形状不变。
+
+- 修复没有 `procps` 的 Linux 主机上每条会话记录都被判死并删除的问题：存活判定此前把「`kill` 不在 `PATH` 上、根本没能启动探测工具」和「OS 回答说进程不在」压成同一个结论，而 Debian/Ubuntu `-slim`、distroless 和绝大多数语言基镜像（含 `dart:stable`）都不带 `procps`，`kill` 与 `ps` 都不是可执行文件，于是这些主机上任何 `--session-dir` 自动发现都退 `sessionStaleProcess`，记录被删，App 全程活着也连不上。现在存活判定区分「问到了，进程不在」与「根本没问到」：后者降级为 `identityUnverified`，与启动身份探测早已采用的策略一致，绝不因为探测工具缺失把活会话判死；Linux 上改为直接读 `/proc/<pid>` 作答，不再为此派生子进程，procfs 不可用或明显不属于本 PID namespace 时才回落 `kill`/`tasklist`。PID 复用仍照旧判死，明确的「进程不在」也仍照旧判死并清理记录。
+  同时修正一条会绕圈的提示：被 pin 的会话连不上、且当前主机根本无法判断其进程是否存活时，不再建议 `patchbay sessions prune`——这种记录按设计判定为存活，prune 不会删它，照做等于白跑一次；改为说明原因，并指向 `patchbay session use --clear` 配显式 `--ws-uri <uri>`，或重新用 `patchbay launch` 启动。
+
+- 会话启动身份签名的比对现在也校验载荷本身，而不只是它自称的 scheme：一条被截断或损坏的
+  `processStartTime`（例如 `v2-linux:` 后面跟着的不是 `<boot_id>:<tick 数>`、`v2-posix:` 后面不是完整的
+  `Www Mmm D HH:MM:SS YYYY`、`v2-win:` 后面少了小数秒或带的是本地时区偏移而不是 UTC）
+  此前会与一条完好的探针比出「同 scheme、
+  签名不等」，被判成 PID 复用，于是 `patchbay` 删掉一条 App 其实还活着的会话记录、后续命令一律退
+  `sessionStaleProcess`。现在这类无法解读的签名与没有 scheme 的旧记录同等对待，降级为
+  `identityUnverified` 并保留记录；两侧签名都合法且同属一个 scheme 时不等仍照旧判定为 PID 复用并清理。
+
+- 修复 snapshot single-flight 在 provider 采样永不返回时把整个 App 的 snapshot 面拖死的问题：挂死的采样
+  会被永久登记为「进行中」，此后 direct 与 VM Service 两侧所有 snapshot 读——完整读、路径选择、
+  `fromRevision` diff 与带 `timeoutMs` 的 wait——都并入这条死采样并永不答复，连 wait 自己声明的
+  `timeoutMs` 预算也被吞掉。现在**加入他人采样的调用者以自己的剩余预算为上限等待**，预算耗尽即按既有
+  `snapshotWaitTimeout` 答复；这条采样既不取消也不摘除，因此持续挂死下 provider source 恰好被调用一次、
+  不因任何调用者放弃等待而重开，晚到的答复仍照常提交恰好一次 revision，此后一切读恢复正常。发起采样的
+  调用者与不带预算的纯读（完整读、路径选择、diff）行为不变，仍等自己的 source 读完、再由预算裁决那份
+  答复是否还算数，源永不返回时依旧由传输层预算兜底。相应地，`snapshotWaitTimeout` 的 `details` 在一次
+  轮询都没有完成时不再给出 `observed`（此时 `polls` 为 `0`），避免把「App 始终没有答复」写成「字段
+  不存在」；既有能完成轮询的答复逐键不变。
+
+- 修复 `--json repl` 在 transport、protocol 或 session 错误终止时输出多行 pretty JSON 的问题；终止答复现在保持为单个 LF 结尾的 compact JSON error envelope，便于按行消费者读取完整流。
+
+- `--max-inline-bytes` 现在在命令执行前完成校验：非法值按用法错误退出且不再发出任何 RPC；`ui semantics tree` 的 usage 行与生成命令表同步宣告 `--output` / `--force` / `--max-inline-bytes` 三个已生效选项。
+
+- 修复 `repl` 会话中本地落盘/下载失败会连带终止整个会话的问题：`ui semantics tree`/`ui widget-tree`/
+  `ui render-tree`/`ui focus-tree` 的 PB-050-20 自动落 artifact 写入失败、或该行显式传了
+  `--output`/`--force` 却写盘失败，现在与其它行内错误一样只报告并终止那一行，session 保持存活并继续
+  消费后续行；`--json` 下该行的 `error` 携带与会话级终止错误一致的 `{code, details}` 形状。这也相应
+  收窄了 `capture`/`blob get` 等既有 blob 下载命令在 repl 内的失败半径：以前它们的下载失败与连接失联
+  一样终止整个会话，现在同样只终止那一行。
+
 ## 0.4.1 - 2026-08-24
 
 0.4.1 是 0.4 系列的内部质量与架构解耦版本，全面完成 Core Host、Flutter Host、CLI 领域服务与大型测试套件的模块化分层治理，建立源码体积预算门禁（生产 ≤ 800 行、测试 ≤ 1000 行）、Pana 满分评分门禁与两阶段发布收尾自动化。
