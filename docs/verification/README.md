@@ -6,6 +6,7 @@
 
 | 版本锚点 | 证据 | 证明范围 | 未证明范围 / 当前边界 |
 |---|---|---|---|
+| 0.6.0 | [reveal 预算门求值顺序](0.6.0-reveal-budget-order.md) | 有可驱动容器时 `_run` 可达且预算门逐项拒绝；两条 `_admit` 短路路径完全不评估 policy 预算，且吞掉的是整个预算门而非某一字段 | 只提供 DG-060-05 裁决输入，不代表已裁决或修复已交付；`flutter_test` 合成滚动与语义树，不是设备事实 |
 | 0.5.0 | [最低 Flutter / Dart SDK 组合](0.5.0-flutter-sdk-floor.md) | Flutter 3.44.0 / Dart 3.12.0 是首个已完整 resolve、analyze、test 且满足 identifier 安全语义的 stable 组合 | 不外推到更早 SDK、未来 SDK 或设备端业务验收 |
 | 0.5.0 | [接入漏斗只读闭环](0.5.0-onboarding-skill-acceptance.md) | 干净检出按 INSTALL + Skill 在 iOS 模拟器完成 identity、catalog、describe 与 snapshot | 只读、单模拟器；不证明安全写操作、capture、Android 或真实无先验用户体验 |
 | 0.5.0 | [Semantics probe 帧放大量测](0.5.0-semantics-probe-benchmark.md) | 固定 harness 与 Android 真机 profile 证明改动前 2 帧放大及改动后帧数口径 | 性能数不是跨设备 SLA，也不授权省略 generation、gate 或 tree identity 复核 |
