@@ -377,9 +377,16 @@ final patchbayUiRevealCommandDescriptor = _ui(
       type: PatchbayParameterType.integer,
       defaultValue: 40,
       summary:
-          'Scroll actions this call may dispatch in total (1..200). It is the '
-          'only hard ceiling: lazy-loaded growth resets the stall counter but '
-          'never extends this budget.',
+          'Scroll actions this call may dispatch in total (1..200). This '
+          'parameter domain is always evaluated, before any container is '
+          'resolved, so it rejects out-of-range values even on calls that end '
+          'up driving nothing. It is a different ceiling from the consumer '
+          'revealPolicy budget: that one authorises one container and is only '
+          'evaluated once a container has been selected for driving, so a '
+          'target that is already exposed, or one with no drivable container, '
+          'never reaches it — a value above the policy ceiling is not a '
+          'rejection on those paths. Lazy-loaded growth resets the stall '
+          'counter but never extends this budget.',
     ),
     const PatchbayParameterDescriptor(
       name: 'timeoutMs',
@@ -387,7 +394,10 @@ final patchbayUiRevealCommandDescriptor = _ui(
       defaultValue: 5000,
       summary:
           'One deadline for the whole call (1..120000), frozen at admission '
-          'and never rewritten while escalating outward.',
+          'and never rewritten while escalating outward. Same two-layer rule '
+          'as maxSteps: this parameter domain is always evaluated, while the '
+          'consumer revealPolicy duration budget authorises one container and '
+          'is only evaluated once that container is being driven.',
     ),
   ],
   cliSyntax: const <PatchbayCliSyntax>[

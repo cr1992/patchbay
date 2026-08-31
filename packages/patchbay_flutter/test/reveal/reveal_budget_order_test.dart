@@ -1,35 +1,38 @@
-// PB-050-36：reveal 预算门与曝光/容器短路的求值顺序——**表征测试，不是契约测试**。
+// PB-050-36：reveal 的两层预算契约——调用级硬顶 vs 容器级 policy 预算。
 //
-// 读之前先看清这一点：本文件断言的是**当前行为**，不是已裁决的期望行为。
-// [UI 可达性与遮挡语义](../../../../docs/proposals/0.6.0/ui-reachability-semantics.md)
-// 原话是「不得先按直觉改顺序」——DG-060-05 要先有决定性复现才能裁决 policy 上限
-// 到底是所有调用的前置参数门，还是只约束真正进入滚动执行的预算。本文件就是那份
-// 复现，落点记录在
+// DG-060-05 已裁决（[UI 可达性与遮挡语义](../../../../docs/proposals/0.6.0/ui-reachability-semantics.md)
+// 已接受）：**保持两层预算，不前移容器 policy**。
+//
+//   host 调用级硬顶（`maxSteps 1..200` / `timeoutMs 1..120000`）在容器解析前**总是**求值；
+//   `PatchbayRevealPolicy` 回答"是否驱动这个容器、以及这个容器的预算"，
+//   只在已选出将被驱动的容器之后求值。
+//
+// 因此"目标已曝光"与"无可驱动容器"两条终止路径上，越过 policy 上限的参数**不构成拒绝**——
+// 那里不存在容器可以问 policy，裁决明确不给它传 nullable/伪造容器，也不新增第三层调用 policy。
+//
+// 本文件原为 PB-050-36 的表征测试（记录当时行为以供裁决）；裁决落地后转为**契约测试**：
+// 下列断言现在是被接受的长期契约，任何一条失败都意味着实现偏离了 DG-060-05，而不是"顺序漂移
+// 待确认"。取证过程与三方对照的原始记录留在
 // [reveal 预算门求值顺序](../../../../docs/verification/0.6.0-reveal-budget-order.md)。
 //
-// 因此：**裁决之前不要"修正"这里的断言**。如果某条断言开始失败，说明求值顺序在
-// 无人裁决的情况下漂移了，那正是本文件要抓的东西。裁决之后，被接受的结论会把对应
-// 断言改成契约断言（或按 Proposal 的说法「为接受的结论补失败测试」）。
+// 三条终止路径的契约：
 //
-// 三方对照是决定性的关键：同一份越界预算参数，分别落在三条终止路径上。
+//   有可驱动容器 + 目标屏外   -> 容器已选出 -> policy 预算求值 -> uiRevealBudgetExceeded
+//   无可驱动候选 + 目标已露出 -> 无容器可问 policy -> revealed / steps 0
+//   无可驱动候选 + 目标未露出 -> 无容器可问 policy -> 容器/目标类拒绝
 //
-//   有可驱动容器 + 目标屏外   -> _run 可达 -> 预算门生效 -> uiRevealBudgetExceeded
-//   无可驱动候选 + 目标已露出 -> _admit 短路成功 -> 预算门**未**求值 -> revealed/steps 0
-//   无可驱动候选 + 目标未露出 -> _admit 短路拒绝 -> 预算门**未**求值 -> noScrollableContainer
-//
-// 第一条此前已被 reveal_policy_test.dart 的预算矩阵覆盖；这里重述它不是冗余，
-// 而是因为"缺口只限短路路径"这个结论只有在三条路径同参数并列时才成立——单独看
-// 任何一条都读不出顺序。
+// 三方并列不是冗余：只有同一份越界参数同时落在三条路径上，"两层预算"才是可验证的断言，
+// 而不是一句可以各自解释的描述。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
 import 'reveal_fixtures.dart';
 
-/// 一个刻意比 policy 宽的调用参数：仍在命令参数域 1..200 内，但越过下面的 policy。
+/// 一个刻意比 policy 宽的调用参数：仍在调用级硬顶 1..200 内，但越过下面的 policy。
 const int _overPolicyMaxSteps = 40;
 
-/// 同理的时长参数：在 host 硬顶 120000 内，越过下面的 policy。
+/// 同理的时长参数：在调用级硬顶 1..120000 内，越过下面的 policy。
 const int _overPolicyTimeoutMs = 5000;
 
 PatchbayFlutterBridge _tightBudgetBridge() => revealBridge(
@@ -40,10 +43,12 @@ PatchbayFlutterBridge _tightBudgetBridge() => revealBridge(
 void main() {
   setUp(resetRevealCounters);
 
-  group('PB-050-36 求值顺序表征：同一越界预算落在三条终止路径上', () {
-    testWidgets('有可驱动容器 + 目标屏外 ⇒ 预算门生效（_run 可达）', (WidgetTester tester) async {
-      // 对照锚点。它证明"预算门本身是好的"——缺口不在预算门的实现，而在它被求值
-      // 的位置。视口 240 / 行高 60 = 一屏 4 行，目标在 380，必须滚动才能露出。
+  group('PB-050-36 两层预算契约：同一越界参数落在三条终止路径上', () {
+    testWidgets('有可驱动容器 + 目标屏外 ⇒ 容器级 policy 预算求值并拒绝', (
+      WidgetTester tester,
+    ) async {
+      // 容器被选出，因此 policy 被问到，其预算生效。视口 240 / 行高 60 = 一屏 4 行，
+      // 目标在 380，必须滚动才能露出。
       final ScrollController controller = ScrollController();
       addTearDown(controller.dispose);
       final PatchbayFlutterBridge bridge = _tightBudgetBridge();
@@ -73,11 +78,11 @@ void main() {
       expect(showOnScreenCalls, 0);
     });
 
-    testWidgets('无可驱动候选 + 目标已露出 ⇒ 短路成功，预算门未求值（当前行为）', (
+    testWidgets('无可驱动候选 + 目标已露出 ⇒ steps 0 成功，不问容器 policy', (
       WidgetTester tester,
     ) async {
-      // 目标在 index 0、内容不足一屏，因此没有可驱动候选而目标已露出，
-      // `_admit` 短路成功。越界参数在这条路径上观察不到 uiRevealBudgetExceeded。
+      // 目标在 index 0、内容不足一屏：没有可驱动候选而目标已露出。裁决明确此时允许
+      // steps: 0 成功，且不用一个并不存在的容器去调用 policy。
       final PatchbayFlutterBridge bridge = _tightBudgetBridge();
       addTearDown(bridge.dispose);
       await tester.pumpWidget(
@@ -98,22 +103,20 @@ void main() {
         result.rejection,
         isNull,
         reason:
-            '当前行为：已露出即短路成功，越界预算参数不被求值。'
-            'DG-060-05 裁决前不要把这条改成期望拒绝——先改行为再改断言，'
-            '等于让实现自己裁决自己。',
+            'DG-060-05 契约：容器级 policy 只约束真正被驱动的容器，'
+            '已曝光路径上越界参数不构成拒绝',
       );
       final Map<String, Object?> payload = revealPayload(result);
       expect(payload['outcome'], 'revealed');
-      expect(payload['steps'], 0, reason: '短路成功不消耗步数');
+      expect(payload['steps'], 0, reason: '无需驱动时不消耗步数');
       expectRevealInvariants(payload);
     });
 
-    testWidgets('无可驱动候选 + 目标未露出 ⇒ 短路拒绝容器门，预算门未求值（当前行为）', (
+    testWidgets('无可驱动候选 + 目标未露出 ⇒ 容器类拒绝，不问容器 policy', (
       WidgetTester tester,
     ) async {
-      // 目标不在树上且内容不足一屏：没有可驱动候选、也没有露出，`_admit` 按
-      // uiRevealNoScrollableContainer 拒绝。越界预算同样不参与判定，因此调用方
-      // 拿到的恢复方向是"去查滚动容器与 --container"，而不是"预算越界"。
+      // 目标不在树上且内容不足一屏：没有可驱动候选、也没有露出。裁决要求这里返回
+      // 目标/容器类拒绝而不是预算拒绝——调用方需要的恢复方向是查容器与 identifier。
       final PatchbayFlutterBridge bridge = _tightBudgetBridge();
       addTearDown(bridge.dispose);
       await tester.pumpWidget(
@@ -134,27 +137,69 @@ void main() {
 
       expect(
         result.rejection?.code,
-        'uiRevealNoScrollableContainer',
-        reason: '当前行为：容器门先于预算门。DG-060-05 裁决前不要改。',
+        isNot('uiRevealBudgetExceeded'),
+        reason: 'DG-060-05 契约：无容器路径不评估容器级 policy 预算',
       );
       expect(
         result.rejection?.details.containsKey('exceeded'),
         isFalse,
-        reason: '容器门的 details 不携带预算越界信息',
+        reason: '容器/目标类拒绝的 details 不携带预算越界信息',
       );
       expect(showOnScreenCalls, 0);
     });
   });
 
-  group('PB-050-36 边界：短路吞掉的是整个预算门，不是某一个字段', () {
-    // 若只有 maxSteps 被吞、timeoutMs 仍生效，缺口的形状会完全不同（是字段级遗漏
-    // 而非求值位置问题），裁决方向也随之不同。逐字段验一遍把这个可能性排除掉。
+  group('PB-050-36 调用级硬顶与容器无关，总是求值', () {
+    // 契约的另一半：硬顶不是"容器被选出后才生效"的东西。同一条已曝光路径上，
+    // 越过硬顶的参数必须被拒——否则"总是求值"这句话没有执行位置。
+    for (final ({String field, int maxSteps, int timeoutMs}) probe
+        in <({String field, int maxSteps, int timeoutMs})>[
+          (field: 'maxSteps', maxSteps: 201, timeoutMs: 5000),
+          (field: 'maxSteps', maxSteps: 0, timeoutMs: 5000),
+          (field: 'timeoutMs', maxSteps: 40, timeoutMs: 120001),
+          (field: 'timeoutMs', maxSteps: 40, timeoutMs: 0),
+        ]) {
+      testWidgets('已曝光路径上越过调用级硬顶的 ${probe.field}'
+          '（${probe.maxSteps}/${probe.timeoutMs}）仍被拒', (
+        WidgetTester tester,
+      ) async {
+        final PatchbayFlutterBridge bridge = _tightBudgetBridge();
+        addTearDown(bridge.dispose);
+        await tester.pumpWidget(
+          revealApp(revealList(itemCount: 2, targetIndex: 0)),
+        );
+
+        final PatchbayInvocation result = await runReveal(
+          tester,
+          bridge,
+          bridge.reveal.reveal(
+            identifier: revealTargetId,
+            maxSteps: probe.maxSteps,
+            timeoutMs: probe.timeoutMs,
+          ),
+        );
+
+        expect(
+          result.rejection,
+          isNotNull,
+          reason:
+              '调用级硬顶在容器解析前求值，已曝光短路不能吞掉它'
+              '（field=${probe.field}）',
+        );
+        expect(showOnScreenCalls, 0);
+      });
+    }
+  });
+
+  group('PB-050-36 容器级 policy 越界在两条短路路径上都不拒绝', () {
+    // 逐字段各验一次，排除"只有 maxSteps 被 policy 层跳过"的读法：两个字段的
+    // 容器级上限都只在容器被驱动时求值，因此这是分层结论而非字段级遗漏。
     for (final ({String field, int maxSteps, int timeoutMs}) probe
         in <({String field, int maxSteps, int timeoutMs})>[
           (field: 'maxSteps', maxSteps: _overPolicyMaxSteps, timeoutMs: 500),
           (field: 'timeoutMs', maxSteps: 1, timeoutMs: _overPolicyTimeoutMs),
         ]) {
-      testWidgets('已露出短路吞掉越界的 ${probe.field}（当前行为）', (
+      testWidgets('已曝光路径上越过容器级 policy 的 ${probe.field} 不构成拒绝', (
         WidgetTester tester,
       ) async {
         final PatchbayFlutterBridge bridge = _tightBudgetBridge();
