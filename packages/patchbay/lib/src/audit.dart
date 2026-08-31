@@ -1,6 +1,56 @@
 import 'dart:async';
 import 'dart:convert';
 
+/// The stage an invocation's admission pipeline stopped or completed at.
+///
+/// PB-050-39 / DG-060-04. The set is closed: a new stage is a protocol-level
+/// vocabulary change, not something an implementation adds in passing.
+///
+/// The stage is **host-only**. It deliberately does not appear in the
+/// invocation envelope or in rejection details — a caller's recovery is decided
+/// by the stable code, `gateId` and existing details, and publishing the
+/// internal stage would turn refactoring topology into protocol.
+///
+/// `uiPreflight` and `operationPolicy` belong to the Flutter handler, which
+/// does not write audit; they become reachable only once the registry/external
+/// admission fork is removed and the handler returns a typed UI decision to
+/// core. Declaring them now keeps the vocabulary frozen in one place instead of
+/// growing it twice.
+const Set<String> patchbayAuditAdmissionStages = <String>{
+  'catalog',
+  'inputPolicy',
+  'baseGate',
+  'descriptorGate',
+  'uiPreflight',
+  'operationPolicy',
+  'postAwaitRecheck',
+  'dispatch',
+  'responseValidation',
+};
+
+/// How the invocation stood relative to consumer declared gates and dynamic
+/// operation policy.
+///
+/// `rejected` covers a base gate rejection too: from the consumer's side the
+/// authorisation answer was no, and which gate said so is already carried by
+/// [PatchbayAuditEvent.admissionStage] and `gateId`. A failure earlier than any
+/// gate is `notReached`, never `notDeclared` — "no gate ran" and "no gate was
+/// declared" are different facts and conflating them would let a fail-closed
+/// refusal read as an open surface.
+const Set<String> patchbayAuditGateDispositions = <String>{
+  'notReached',
+  'notDeclared',
+  'passed',
+  'rejected',
+};
+
+/// What a new audit reader must assume when an old host omits the new keys.
+///
+/// Absence means the host predates the field, not that admission passed. A
+/// reader that defaulted to `passed` would invent authorisation that was never
+/// evaluated.
+const String patchbayAuditLegacyUnknown = 'legacyUnknown';
+
 /// One redacted command audit fact retained by [PatchbayServiceHost].
 ///
 /// [parameterShape] contains only JSON types, object keys and coarse length
@@ -12,20 +62,38 @@ final class PatchbayAuditEvent {
     required this.parameterShape,
     required this.gateResult,
     required this.executionClassification,
+    this.admissionStage,
+    this.gateDisposition,
   });
 
   final String command;
   final String requestId;
   final Map<String, Object?> parameterShape;
+
+  /// The legacy gate outcome, kept byte-for-byte compatible.
+  ///
+  /// [gateDisposition] is not a rename of this field: `gateResult` keeps its
+  /// existing values and write points so old readers see no change, while the
+  /// disposition carries the closed vocabulary that also covers the UI plane.
   final String gateResult;
   final String? executionClassification;
+
+  /// One of [patchbayAuditAdmissionStages], or null on a host that predates it.
+  final String? admissionStage;
+
+  /// One of [patchbayAuditGateDispositions], or null on a host that predates it.
+  final String? gateDisposition;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'command': command,
     'requestId': requestId,
     'parameterShape': parameterShape,
     'gateResult': gateResult,
+    // Written even when null: this key predates the omit-when-absent rule and
+    // old readers index it positionally in golden comparisons.
     'executionClassification': executionClassification,
+    if (admissionStage != null) 'admissionStage': admissionStage,
+    if (gateDisposition != null) 'gateDisposition': gateDisposition,
   };
 }
 
@@ -132,12 +200,16 @@ PatchbayAuditEvent patchbayProjectAuditEvent({
   required Map<String, Object?> arguments,
   required String gateResult,
   required Map<String, Object?> response,
+  String? admissionStage,
+  String? gateDisposition,
 }) => PatchbayAuditEvent(
   command: command,
   requestId: requestId,
   parameterShape: patchbayParameterShape(arguments),
   gateResult: gateResult,
   executionClassification: patchbayAuditExecutionClassification(response),
+  admissionStage: admissionStage,
+  gateDisposition: gateDisposition,
 );
 
 /// Produces a recursively redacted JSON shape without retaining scalar values.

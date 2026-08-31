@@ -149,6 +149,8 @@ final class HostInvokerHandler {
           arguments: withoutStdinProvenance(arguments),
           gateResult: auditState.gateResult,
           response: response,
+          admissionStage: auditState.admissionStage,
+          gateDisposition: auditState.gateDisposition,
         );
       },
     );
@@ -196,6 +198,9 @@ final class HostInvokerHandler {
       arguments: withoutStdinProvenance(arguments),
       gateResult: 'notEvaluated',
       response: rejection,
+      // The ledger is consulted before any gate, so no gate was reached.
+      admissionStage: 'dispatch',
+      gateDisposition: 'notReached',
     );
     return PatchbayHostInvocationHandle(
       response: Future<Map<String, Object?>>.value(rejection),
@@ -225,6 +230,7 @@ final class HostInvokerHandler {
           externalDisposition = value;
           if (value == 'replay') recordAudit = false;
         },
+        audit: auditState,
       );
       final Map<String, Object?> served =
           _invocations.frozenCancellationResponse(command, requestId) ?? result;
@@ -236,6 +242,8 @@ final class HostInvokerHandler {
           arguments: withoutStdinProvenance(arguments),
           gateResult: auditState.gateResult,
           response: served,
+          admissionStage: auditState.admissionStage,
+          gateDisposition: auditState.gateDisposition,
         );
       }
       if (externalDisposition == 'owner') {
@@ -288,6 +296,7 @@ final class HostInvokerHandler {
     required void Function(String disposition) onExternalDisposition,
     required PatchbayInvocationContext context,
     required String? ownerToken,
+    _InvocationAuditState? audit,
   }) async {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
@@ -311,6 +320,7 @@ final class HostInvokerHandler {
     if (arguments.isEmpty) {
       forwarded = arguments;
     } else {
+      audit?.admissionStage = 'inputPolicy';
       final List<String> violations = policy.sensitiveViolations(arguments);
       if (violations.isNotEmpty) {
         return PatchbayInvocation.rejected(
@@ -332,9 +342,11 @@ final class HostInvokerHandler {
         requestId,
         policy,
         onGateResult: onGateResult,
+        audit: audit,
       );
       if (refusal != null) return refusal;
     }
+    audit?.admissionStage = 'dispatch';
     final Map<String, Object?>? cancelledBeforeHandler = _invocations
         .frozenCancellationResponse(command, requestId);
     if (cancelledBeforeHandler != null) return cancelledBeforeHandler;
@@ -342,7 +354,15 @@ final class HostInvokerHandler {
       command,
       forwarded,
       requestId,
-      onGateResult: onGateResult,
+      onGateResult: (String value) {
+        onGateResult(value);
+        // Registry-owned commands report their own gate outcome today; until
+        // the admission fork is removed the disposition mirrors it rather than
+        // claiming core evaluated a gate it never saw.
+        if (audit != null && patchbayAuditGateDispositions.contains(value)) {
+          audit.gateDisposition = value;
+        }
+      },
       context: context,
     );
     final Map<String, Object?> result;
@@ -364,6 +384,7 @@ final class HostInvokerHandler {
     if (cancelledAfterHandler != null) return cancelledAfterHandler;
     final PatchbayInvocationWire wire;
     try {
+      audit?.admissionStage = 'responseValidation';
       wire = PatchbayInvocationWire.fromJson(result);
     } on FormatException {
       return _invalidInvocationEnvelope(requestId, 'malformedEnvelope');
@@ -435,7 +456,11 @@ final class HostInvokerHandler {
     String requestId,
     PatchbayCommandPolicy policy, {
     required void Function(String result) onGateResult,
+    _InvocationAuditState? audit,
   }) async {
+    // The base gate runs first inside the evaluator, so entering this function
+    // means the base gate stage is the one in force until it passes.
+    audit?.admissionStage = 'baseGate';
     final PatchbayGateEvaluator? gates = _domainGates;
     if (gates == null) {
       // No declaration, no evaluator, nothing to enforce: byte-for-byte what
@@ -445,6 +470,9 @@ final class HostInvokerHandler {
       // contract — the gate can never pass. Saying so is the only answer that
       // keeps "declared but never enforced" from existing at all.
       onGateResult('rejected');
+      audit
+        ?..admissionStage = 'descriptorGate'
+        ..gateDisposition = 'rejected';
       return _domainGateRejection(
         command: command,
         requestId: requestId,
@@ -458,6 +486,13 @@ final class HostInvokerHandler {
     );
     if (rejection != null) {
       onGateResult('rejected');
+      // `patchbay.base` is the evaluator's own marker for the non-optional host
+      // gate; anything else is a consumer-declared gate id.
+      audit
+        ?..admissionStage = rejection.gateId == 'patchbay.base'
+            ? 'baseGate'
+            : 'descriptorGate'
+        ..gateDisposition = 'rejected';
       return _domainGateRejection(
         command: command,
         requestId: requestId,
@@ -467,9 +502,15 @@ final class HostInvokerHandler {
       );
     }
     onGateResult('passed');
+    audit
+      ?..admissionStage = 'descriptorGate'
+      ..gateDisposition = policy.declaredGates.isEmpty
+          ? 'notDeclared'
+          : 'passed';
     // A consumer gate may await, and a versioned provider can advance its
     // revision meanwhile. Re-read and compare the two facts the decision was
     // taken from; on a revision cache hit this costs one synchronous getter.
+    audit?.admissionStage = 'postAwaitRecheck';
     final PatchbayCatalogValidity recheck = await _catalogHandler
         .readInvocationCatalog();
     if (recheck.violation case final Map<String, Object?> reason) {
@@ -608,6 +649,8 @@ final class HostInvokerHandler {
     required Map<String, Object?> arguments,
     required String gateResult,
     required Map<String, Object?> response,
+    String admissionStage = 'dispatch',
+    String gateDisposition = 'notReached',
   }) {
     final PatchbayAuditEvent event = patchbayProjectAuditEvent(
       command: command,
@@ -615,6 +658,8 @@ final class HostInvokerHandler {
       arguments: arguments,
       gateResult: gateResult,
       response: response,
+      admissionStage: admissionStage,
+      gateDisposition: gateDisposition,
     );
     if (_auditLedger.length == 256) _auditLedger.removeAt(0);
     _auditLedger.add(event);
@@ -695,5 +740,11 @@ final class HostInvokerHandler {
 
 final class _InvocationAuditState {
   String gateResult = 'notEvaluated';
+
+  /// Where the pipeline currently stands. Overwritten as each stage is entered,
+  /// so whatever value survives is the stage the invocation stopped at — no
+  /// separate "did we get past X" bookkeeping to keep in sync.
+  String admissionStage = 'catalog';
+  String gateDisposition = 'notReached';
   bool recorded = false;
 }
