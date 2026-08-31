@@ -279,6 +279,17 @@ sequenceDiagram
 
 同 ID 多个 mounted 目标一律 fail-closed（歧义拒绝），不按树顺序选。
 
+UI 写命令在 catalog 以封闭的 `interactionModel` 明示语义：注册 text target 是 `directTarget`，成功只证明
+consumer 开放的 controller/adapter 操作已应用，不冒充真实用户可达；Semantics、pointer gesture 与 reveal
+是 `userLike`，继续执行 generation、遮挡、policy 与门后二次解析。两类之间不自动回退，也不存在 force 或
+ignore-occlusion 入口。完整兼容与拒绝形状见已接受的
+[UI 可达性与遮挡语义](proposals/0.6.0/ui-reachability-semantics.md)。
+
+`ui.reveal` 的调用参数硬顶与容器 policy 是两层预算：`maxSteps` / `timeoutMs` 的 host 参数域在解析容器前
+总是校验；`PatchbayRevealPolicy` 只回答“能否驱动这个容器、这个容器预算多少”，没有容器就不求值。
+已曝光且无需滚动可以 `steps: 0` 成功。目标不存在、被遮挡和无可驱动容器分别给出稳定恢复方向；完全剪裁
+但可滚动属于 reveal 的正常输入，不归类为遮挡。
+
 **"不做坐标驱动"管的是身份，不是几何。** 一个用稳定 identifier 锚定的目标，其边界内的相对比例
 坐标（各轴 `[0,1]`）是允许的——按住方向盘的上半部、从卡片中心往下拖，这些说的都是"这个控件的
 哪个部位"，跨设备复现，也仍然经过歧义、代际和门的同一套围栏。被禁的是让**屏幕**坐标充当身份：
