@@ -154,6 +154,28 @@ void main() {
             isNot(contains(payloadSentinel)),
             reason: 'rejection echoed the payload for $item',
           );
+
+          if (response.statusCode == closedBeforeAnswer) {
+            // The host refused on the declared Content-Length before reading
+            // the body and closed while the client was still uploading. Allowed
+            // only where that refusal is the documented behaviour; the
+            // never-accepted and handler-untouched invariants below still hold.
+            expect(
+              item.malformation,
+              MalformationClass.overLimitBody,
+              reason:
+                  'only an over-limit upload may be refused by closing the '
+                  'connection; $item must produce a typed answer',
+            );
+            expect(
+              harness.handlerCalls,
+              handlerCallsBefore,
+              reason:
+                  'closed-before-answer still must not reach a handler '
+                  'for $item',
+            );
+            continue;
+          }
           expect(
             closedRejectionStatuses,
             contains(response.statusCode),
@@ -231,9 +253,14 @@ void main() {
         observed[MalformationClass.boundedOversizedString],
         containsAll(<String>[identityMismatch, protocolError]),
       );
-      expect(observed[MalformationClass.overLimitBody], <String>{
-        '413/bodyTooLarge',
-      });
+      expect(
+        observed[MalformationClass.overLimitBody],
+        everyElement(anyOf('413/bodyTooLarge', '$closedBeforeAnswer/none')),
+        reason:
+            '超限上传只有两种合法 fail-closed 结果：413 的类型化答复，'
+            '或 host 在读 body 前就拒并关连接（见 closedBeforeAnswer 文档）。'
+            '出现第三种即为缺陷。',
+      );
 
       // Volume floors, not exact counts: the generators may grow, but a silent
       // collapse to a handful of cases must not pass.
@@ -272,6 +299,12 @@ void main() {
             item.operation,
             item.bytes,
           );
+          if (response.statusCode == closedBeforeAnswer) {
+            // The cap answered before the upload finished and the socket closed
+            // first. Still fail-closed; the handler assertion below is what
+            // carries the security-relevant part.
+            continue;
+          }
           expect(
             response.errorCode,
             PatchbayDirectErrorCode.bodyTooLarge.name,
@@ -279,6 +312,7 @@ void main() {
           );
           expect(response.statusCode, HttpStatus.requestEntityTooLarge);
         }
+        // Unconditional: whichever way the cap answered, nothing was accepted.
         expect(harness.handlerCalls, 0);
       },
     );
@@ -481,7 +515,7 @@ void main() {
 /// runtime on every authorized request before dispatch, so it is part of the
 /// decode path rather than an application side effect.
 final class _Harness {
-  _Harness._(this._host, this._session, this._client);
+  _Harness._(this._host, this._session);
 
   static Future<_Harness> start() async {
     late final _Harness harness;
@@ -532,13 +566,12 @@ final class _Harness {
       ),
     );
     final PatchbayDirectSession session = await host.start();
-    harness = _Harness._(host, session, HttpClient());
+    harness = _Harness._(host, session);
     return harness;
   }
 
   final PatchbayDirectHost _host;
   final PatchbayDirectSession _session;
-  final HttpClient _client;
   int _handlerCalls = 0;
 
   int get handlerCalls => _handlerCalls;
@@ -552,26 +585,46 @@ final class _Harness {
     final Uri uri = _session.endpoint.replace(
       path: '${_session.endpoint.path}/$operation',
     );
-    final HttpClientRequest request = await _client.postUrl(uri);
-    request.headers.contentType = ContentType.json;
-    request.headers.set(
-      HttpHeaders.authorizationHeader,
-      'Bearer ${_session.bearerToken}',
-    );
-    headers.forEach(request.headers.set);
-    request.add(body);
-    final HttpClientResponse response = await request.close();
-    final String text = await utf8.decoder
-        .bind(response)
-        .join()
-        .catchError((Object _) => '');
-    return _RawResponse(statusCode: response.statusCode, text: text);
+    // One client per request, and no keep-alive.
+    //
+    // `PatchbayDirectHost` sets `persistentConnection = false` on every
+    // response (direct_host.dart), so each connection is dead the moment it has
+    // been answered. A shared `HttpClient` pools sockets and will happily write
+    // the next request onto one the host has already closed — which surfaces as
+    // `HttpException: Connection closed before full header was received`, not as
+    // anything about the decoder under test. That raced ~25% of runs here once
+    // the distribution case started pushing ~195 requests through one client
+    // (BUG-20260831-01). Declaring `Connection: close` and not sharing the
+    // client removes the reuse window entirely; the existing stable
+    // `direct_transport_test.dart` helper takes the same shape for the same
+    // reason.
+    final HttpClient client = HttpClient();
+    try {
+      final HttpClientRequest request = await client.postUrl(uri);
+      request.persistentConnection = false;
+      request.headers.contentType = ContentType.json;
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer ${_session.bearerToken}',
+      );
+      headers.forEach(request.headers.set);
+      request.add(body);
+      final HttpClientResponse response = await request.close();
+      final String text = await utf8.decoder
+          .bind(response)
+          .join()
+          .catchError((Object _) => '');
+      return _RawResponse(statusCode: response.statusCode, text: text);
+    } on HttpException {
+      return const _RawResponse(statusCode: closedBeforeAnswer, text: '');
+    } on SocketException {
+      return const _RawResponse(statusCode: closedBeforeAnswer, text: '');
+    } finally {
+      client.close(force: true);
+    }
   }
 
-  Future<void> dispose() async {
-    _client.close(force: true);
-    await _host.stop();
-  }
+  Future<void> dispose() => _host.stop();
 }
 
 final class _RawResponse {
