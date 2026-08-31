@@ -301,6 +301,12 @@ ignore-occlusion 入口。完整兼容与拒绝形状见已接受的
 已曝光且无需滚动可以 `steps: 0` 成功。目标不存在、被遮挡和无可驱动容器分别给出稳定恢复方向；完全剪裁
 但可滚动属于 reveal 的正常输入，不归类为遮挡。
 
+CLI 的推荐 UI 写入口是 `ui perform <action> <selector>`；selector 以前缀明示既有 `target:`、`semantics:`
+或 `node:` 身份，不扫描、不猜测。只有 tap 同时有 Semantics 与真实 pointer 两条合法通道，因此
+`--via semantics|pointer` 必填；其余 action 的通道唯一，拒绝 `auto`、`best` 与失败后 fallback。CLI 在
+`localRoute` 报告实际 service command，但不改写 host payload。完整命令表与迁移窗口见已接受的
+[任务导向 UI 命令入口](proposals/0.6.0/task-oriented-ui-entry.md)。
+
 **"不做坐标驱动"管的是身份，不是几何。** 一个用稳定 identifier 锚定的目标，其边界内的相对比例
 坐标（各轴 `[0,1]`）是允许的——按住方向盘的上半部、从卡片中心往下拖，这些说的都是"这个控件的
 哪个部位"，跨设备复现，也仍然经过歧义、代际和门的同一套围栏。被禁的是让**屏幕**坐标充当身份：
