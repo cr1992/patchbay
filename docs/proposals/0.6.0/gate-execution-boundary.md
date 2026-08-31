@@ -1,6 +1,6 @@
 # 0.6.0 Gate 声明与执行真源
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-39、PB-050-26
 >
@@ -70,6 +70,63 @@ unknown/legacy，不能推断为 passed。VM/direct 使用同一 host pipeline�
 - consumer gate 注入形态是否改变；推荐优先零 source breaking 的边界收敛。
 - PB-050-26 的 reveal 审计是否增加 steps 与被驱动容器标识；若增加，字段命名、缺省形状、列表上限和
   老 reader 行为是什么；若不增加，是否明确移出 1.0 承诺面。
+
+## 裁决结论（DG-060-04，2026-08-31）
+
+### 一条 pipeline，两种 registry，不序列化动态 policy
+
+接受中立、invocation-scoped 的 admission primitive，不把 domain registry 与 Flutter UI registry 合成一个
+对象。core host 对 registry-owned 与 external command 执行同一条前半 pipeline：catalog validity → sensitive
+input → base gate → descriptor gate；Flutter handler 只追加 target/generation/lifecycle/occlusion 与动态
+operation policy，随后把类型化 UI decision 交回 core 完成 response validation 与 audit projection。
+
+动态 Semantics/gesture/reveal policy 保持构造注入对象，不进入 descriptor wire。descriptor 只能声明静态
+`gates`、`sideEffect` 与 DG-060-05 接受的 `interactionModel`；把现场 policy 序列化会把“当前 callback 的
+判断”伪装成目录静态事实。现有 `PatchbayGateEvaluator`、base gate 与 consumer gate 构造注入保持
+source-compatible；实现可增加内部阶段 API，但不得要求 consumer 改签名或重复注册同一个 gate。
+
+base gate 对所有 `sideEffect != none` 的命令执行；descriptor gate 只要声明非空就执行，不以 registry/external
+分叉。纯只读且无声明门的命令不凭空触发 base gate。任一 await 后只做一次 catalog/target/generation/
+lifecycle 复核；漂移类型化拒绝，不在同一次 invocation 重跑新声明。reveal 每一步仍重新取得现场并重评动态
+policy/gate，不缓存、不租约化。
+
+### 阶段只进入 host audit，不进入公共应答
+
+不向 invocation envelope 或所有 rejection details 增加 `admissionStage`。调用方恢复由稳定 code、`gateId`
+与既有 details 决定；把内部阶段写进公共应答会让重构拓扑变成协议。host-only `PatchbayAuditEvent` 以可选、
+additive 字段记录：
+
+- `admissionStage`：本次事实停止或完成的阶段，封闭值 `catalog`、`inputPolicy`、`baseGate`、
+  `descriptorGate`、`uiPreflight`、`operationPolicy`、`postAwaitRecheck`、`dispatch`、
+  `responseValidation`；
+- `gateDisposition`：相对 consumer 声明门/动态 policy 的封闭值 `notReached`、`notDeclared`、`passed`、
+  `rejected`。base gate 拒绝也记 `rejected`；早于任何 gate 的失败记 `notReached`。
+
+既有 `gateResult` 字段和值保持逐字节兼容；新字段不作为它的重命名。构造参数为可选且有默认值，旧源码
+构造 `PatchbayAuditEvent` 继续编译；`toJson` 对空值省略。老 audit reader 忽略新键，新 reader 遇老 host
+缺键按 `legacyUnknown`，不得把缺失推断为 passed。
+
+### 接受 PB-050-26，但只由 core 投影已校验结果
+
+接受 reveal 审计富化。`PatchbayAuditEvent` 新增可选 `executionDetails`；仅当 `ui.reveal` 返回 accepted、
+payload 已通过 response schema 与语义校验后，core host 写入以下封闭形状：
+
+```json
+{
+  "reveal": {
+    "steps": 3,
+    "containerNodeIds": [41, 57]
+  }
+}
+```
+
+`steps` 必须在 `0..200`；`containerNodeIds` 按首次驱动顺序，元素为非负 int，至多 200 个，不含 generation、
+identifier、rect、文案或 policy 文本。`steps == 0` 时列表为空；拒绝、provider 违规、旧 host 与非 reveal
+命令省略整个 `executionDetails`。投影只读已校验 response，Flutter bridge 不直接写 audit，也不新增跨进程
+audit stream。字段越界视为 host 投影缺陷并省略整块、报告既有 error observer，不截断后冒充完整事实。
+
+PB-050-39 与 PB-050-26 分两个实现 MR：前者收敛 pipeline/阶段，必须先合；后者只增加 audit 公共形状与
+reveal 投影。任一 MR 单独回退都不得撤销 0.5.0 已交付的 domain 写门强制执行。
 
 ## 被否决方案
 
