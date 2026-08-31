@@ -260,6 +260,14 @@ admission stage 只属于 host audit，不进入 invocation envelope；调用方
 恢复。reveal audit 也只由 core 从 schema 已校验的 accepted payload 投影有界 steps/container nodeId，
 Flutter bridge 不直接写 audit，不把 identifier、坐标、文案或 policy 文本带进审计。
 
+descriptor 也拥有机器输出的渐进披露声明：可选 `outputProjection` 作为松读 catalog sibling 进入 wire，
+full 恒等，artifact 先于 brief，canonical CLI façade 复用最终 service command 的声明。brief 沿用 0.5.0
+冻结的删除清单而不是改成保留清单；未知字段默认透传，schema 校验与脱敏必须在投影前完成，不能把 brief
+当安全边界。每条命令至多一个 `renderedMember`、`payloadBlob` 或 `responseBlob` artifact，人读 summary、
+本机路径、命名和覆盖策略仍由 CLI 拥有。老 host 缺声明时只使用冻结的 0.5.0 fallback，新命令不得继续扩
+手工规则。完整 wire、顺序与降级见已接受的
+[Descriptor 驱动的输出投影](proposals/0.6.0/descriptor-output-projection.md)。
+
 ### 4. release 必须可裁除
 
 组合根用编译期常量确保 release 不注册扩展、不构造 adapter、不保留运行时重开入口。
