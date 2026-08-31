@@ -52,6 +52,7 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 
 0.6.0 已接受提案：
 
+- [Core 公共 Dart API 分层](0.6.0/core-public-api-layers.md)
 - [UI 可达性与遮挡语义](0.6.0/ui-reachability-semantics.md)
 - [Gate 声明与执行真源](0.6.0/gate-execution-boundary.md)
 - [任务导向 UI 命令入口](0.6.0/task-oriented-ui-entry.md)
@@ -59,7 +60,7 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 
 0.6.0 提案中：
 
-- [Core 公共 Dart API 分层](0.6.0/core-public-api-layers.md)
+（暂无）
 
 已延期、尚未进入版本范围的候选方案：
 
