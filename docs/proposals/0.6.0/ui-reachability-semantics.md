@@ -1,6 +1,6 @@
 # 0.6.0 UI 可达性与遮挡语义
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-050-34、PB-050-35、PB-050-36
 >
@@ -73,6 +73,55 @@ host 仍可能收到合并码，必须标为 legacy ambiguous，不能自行猜�
 - PB-050-34/35 是否一份 Proposal 裁决、两个实现 MR 交付；推荐是。
 - PB-050-36 的 policy 上限是所有调用的前置参数门，还是只在滚动执行路径求值；保持现状与调整顺序各自的
   help、错误码和兼容义务是什么。
+
+## 裁决结论（DG-060-05，2026-08-31）
+
+### 交互模型进入 catalog
+
+接受可选的 descriptor wire 字段 `interactionModel`，封闭值只有 `directTarget` 与 `userLike`。字段仅出现在
+具有 UI 写副作用或可达性语义的命令上：`ui.text.set|enter` 声明 `directTarget`；Semantics action/tap、
+pointer gesture 与 `ui.reveal` 声明 `userLike`。读命令和非 UI 命令不带该字段。未知值使整份 catalog
+按 provider 违规失效；老 reader 忽略字段，新 reader 面对缺字段的老 host 标为 `legacyUnknown`，不得按
+命令名猜测。
+
+`directTarget` 表示 consumer 明确开放 controller/adapter 自动化面；成功只证明该直接操作已应用，不证明
+真实用户、指针或设备可达。它不增加遮挡 gate。`userLike` 保持既有 generation、policy、hit-test/遮挡和
+门后二次解析，不提供 `force`、`ignoreOcclusion` 或跨通道 fallback。
+
+### reveal 的三种恢复方向
+
+新增并冻结三个准入拒绝码：
+
+| code | 判定 | details 封闭表 | 调用方恢复方向 |
+|---|---|---|---|
+| `uiRevealTargetNotFound` | 目标 identifier 当前零匹配，且没有可驱动或显式授权容器可继续查找 | `identifier`、`matchCount: 0` | 修正 identifier，或显式提供可授权容器 |
+| `uiRevealTargetObscured` | 目标唯一挂载且几何上已曝光，但被 `blockUserActions` 或既有五点采样判为 obstructed | `identifier`、`generation` | 处理 modal/覆盖层；不得尝试滚动穿透 |
+| `uiRevealNoScrollableContainer` | 目标唯一挂载但尚未曝光，且不存在可驱动祖先；或显式容器锚点内无可驱动节点 | `identifier`；显式锚点时另带 `role: container` | 修正/开放滚动容器 |
+
+identifier 多匹配继续使用既有 `uiSemanticsIdentifierAmbiguous`；显式容器不存在/歧义继续沿用既有码；进入
+滚动后才发现目标不存在、遮挡或滚动耗尽，继续属于 accepted payload 的既有 `reason`，不倒退成准入拒绝。
+
+完全剪裁出 viewport、`isInvisible` 或零可见面积本身不叫 obscured：有可驱动容器时继续 reveal；没有时归
+`uiRevealNoScrollableContainer`。`uiRevealTargetObscured` 只表达滚动无法修复的用户动作遮挡，不把“屏外”
+和“被盖住”重新混在一起。可达性分类发生在第一次 scroll 派发前，不消耗 step。
+
+PB-050-34/35 共用本 Proposal，但按两个实现 MR 交付：前者只声明 interaction model 与 direct-target 文档，
+后者只改变 reveal 分类和错误码。两者可独立验收、回退。
+
+### PB-050-36 保持两层预算，不前移容器 policy
+
+接受 [reveal 预算门求值顺序](../../verification/0.6.0-reveal-budget-order.md) 的 widget 三方对照作为决定性
+证据，替代一次设备会话。设备会话仍用于后续 modal、懒加载和真实滚动现场验收，但不是本项裁决前置。
+
+保持现有分层：host 调用级硬顶 `maxSteps 1..200`、`timeoutMs 1..120000` 在容器解析前总是求值；
+`PatchbayRevealPolicy` 是“是否驱动这个容器、以及这个容器的预算”，只在已选出将被驱动的容器后求值。
+已曝光且无需驱动时允许 `steps: 0` 成功；无容器时返回上述更精确的目标/容器拒绝，不用一个并不存在的
+容器调用 policy。
+
+不修改 `PatchbayRevealPolicy(PatchbaySemanticsTarget container, direction)` 的签名，不给它传 nullable/伪造
+容器，也不新增第三层调用 policy。descriptor/help 必须明确“参数域硬顶总是求值；consumer policy 上限
+只约束真正进入滚动的容器”，并把当前表征测试转为该契约的长期回归测试。此结论不改变运行时行为，
+因此 PB-050-36 不产生错误码或老 host 迁移；只修正文档与契约测试。
 
 ## 被否决方案
 
