@@ -249,6 +249,17 @@ payload，带自己的证据等级。CLI 退出码同构：`0` 只代表"App 受
 name 唯一、invocation wire 合法且 `requestId` 一致。领域 adapter 必须使用生成 decoder 或等价 validator
 执行参数、敏感输入和声明门校验，不能把 descriptor 只当展示数据。
 
+core host 与 Flutter UI registry 不合成一个对象，但复用同一 invocation-scoped admission pipeline：catalog、
+sensitive input、base gate 与 descriptor gate 由 core 执行；target/generation/lifecycle/occlusion 与动态
+operation policy 由 Flutter 追加，再回到 core 做 response validation 与 audit。静态 descriptor gate 对
+registry/external 一视同仁，动态 policy 保持注入对象、不伪装成 catalog 静态事实；await 后漂移拒绝而不在
+同一次调用重跑新声明。完整阶段与兼容边界见已接受的
+[Gate 声明与执行真源](proposals/0.6.0/gate-execution-boundary.md)。
+
+admission stage 只属于 host audit，不进入 invocation envelope；调用方仍按稳定 code、`gateId` 和 details
+恢复。reveal audit 也只由 core 从 schema 已校验的 accepted payload 投影有界 steps/container nodeId，
+Flutter bridge 不直接写 audit，不把 identifier、坐标、文案或 policy 文本带进审计。
+
 ### 4. release 必须可裁除
 
 组合根用编译期常量确保 release 不注册扩展、不构造 adapter、不保留运行时重开入口。
