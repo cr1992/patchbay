@@ -91,6 +91,22 @@ final class _Repo {
     );
   }
 
+  /// Writes a `DG` backlog fragment.
+  void gate(String id, {required String target, required String status}) {
+    File('$root/$backlogFragmentDir/$id.md').writeAsStringSync(
+      '---\n'
+      'id: $id\n'
+      'title: 占位裁决点\n'
+      'target: $target\n'
+      'status: $status\n'
+      '---\n'
+      '\n'
+      '## Proposal\n'
+      '\n'
+      '占位方案指针。\n',
+    );
+  }
+
   ProcessResult run() => Process.runSync(Platform.resolvedExecutable, <String>[
     'run',
     _checker,
@@ -336,6 +352,84 @@ void main() {
 
       expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
     });
+
+    test('日期与计数不被误判成提交 SHA', () {
+      // 回归：判据曾只要求"含数字"，于是版本计划里天然存在的日期、字节数和长编号
+      // 全部被判成 SHA。计划文档必然要写日期，这类误报会直接误挡 CI。
+      final _Repo repo = _Repo.create();
+      addTearDown(repo.dispose);
+      repo.plan(
+        '0.6.0',
+        status: '规划中',
+        body: '裁决于 `20260831`；上限 `1048576` 字节；条目 `1000000`。',
+      );
+
+      final ProcessResult result = repo.run();
+
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    });
+
+    test('多行版本分支声明判红', () {
+      // 回归：版本号校验按正则取行、起点校验按前缀另取一行，两行声明时二者分叉，
+      // 一条误报另一条漏检。数量先钉住，后续只用同一次匹配。
+      final _Repo repo = _Repo.create();
+      addTearDown(repo.dispose);
+      repo.plan(
+        '0.6.0',
+        status: '规划中',
+        branchDeclaration: '> 版本分支：待定\n>\n> 版本分支：`dev/0.6.0`，从稳定 `main` 创建。',
+      );
+
+      final ProcessResult result = repo.run();
+
+      expect(result.exitCode, 1);
+      expect(result.stderr, contains('出现 2 行 `> 版本分支：` 声明'));
+    });
+  });
+
+  group('已发布版本残留 target：design-gate', () {
+    test('DG 非终态判红', () {
+      final _Repo repo = _Repo.create();
+      addTearDown(repo.dispose);
+      repo.plan('0.4.0', status: '已发布');
+      repo.gate('DG-040-01', target: '0.4.0', status: '待裁决');
+
+      final ProcessResult result = repo.run();
+
+      expect(result.exitCode, 1);
+      expect(result.stderr, contains('DG-040-01: target 0.4.0 已发布'));
+      expect(
+        result.stderr,
+        contains('已裁决'),
+        reason: 'DG 必须按自己的终态词表报，不能套用特性的终态集',
+      );
+    });
+
+    test('DG 已裁决放行', () {
+      final _Repo repo = _Repo.create();
+      addTearDown(repo.dispose);
+      repo.plan('0.4.0', status: '已发布');
+      repo.gate('DG-040-01', target: '0.4.0', status: '已裁决');
+
+      final ProcessResult result = repo.run();
+
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    });
+  });
+
+  test('docs/releases 下的 README 不被当成版本计划', () {
+    // docs/proposals 本就有 README，作者容易照搬约定；对 README 报
+    // “文件名必须是完整 SemVer”是误导性失败。
+    final _Repo repo = _Repo.create();
+    addTearDown(repo.dispose);
+    repo.plan('0.6.0', status: '规划中');
+    File(
+      '${repo.root}/docs/releases/README.md',
+    ).writeAsStringSync('# 版本计划目录\n\n活跃版本见对应文件。\n');
+
+    final ProcessResult result = repo.run();
+
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
   });
 
   group('target 解析到版本计划', () {

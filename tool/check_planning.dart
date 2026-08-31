@@ -29,6 +29,9 @@ const _publishedPlanStatusPrefix = '已发布';
 /// 两种都得有人管，而此前没有任何机检位置会问这句。
 const _terminalStatusesOnPublishedRelease = <String>{'已验证', '待真机验收'};
 
+/// design-gate 在已发布版本上的终态。DG 的状态词表只有两个值，裁决完即终态。
+const _terminalGateStatusesOnPublishedRelease = <String>{'已裁决'};
+
 /// 版本计划里不允许出现的起草期瞬时事实。
 ///
 /// 它们描述的是"写这份计划的那一刻某个分支上有什么"，几小时后就可能不成立；计划是
@@ -44,11 +47,22 @@ const _transientDraftMarkers = <String>[
 ];
 
 final _planStatusPattern = RegExp(r'^> 状态：(.+)$', multiLine: true);
-final _versionBranchPattern = RegExp(r'^> 版本分支：`dev/([^`]+)`', multiLine: true);
+final _versionBranchPattern = RegExp(
+  r'^> 版本分支：`dev/([^`]+)`[^\n]*',
+  multiLine: true,
+);
 final _semverPattern = RegExp(r'^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$');
 
-/// 反引号包裹、含至少一位数字的 hex token——即提交 SHA 的常见写法。
+/// 反引号包裹的 hex token——即提交 SHA 的常见写法。
+///
+/// 判据要求**同时**含 `a-f` 字母与数字。只要求含数字会把版本计划里天然存在的日期
+/// （`20260831`）、字节数（`1048576`）和长编号一并判成 SHA；只要求含字母又会把
+/// `deadbeef` 之外的普通英文词收进来。两者同时要求是把误报压到可接受的最简判据。
+/// 代价是全字母短 SHA（`deadbee`）漏过——这是卫生检查而不是安全边界，漏一个不改变
+/// 结论，误挡一次 CI 却要人来查，因此宁可漏。
 final _backtickCommitToken = RegExp(r'`([a-f0-9]{7,40})`');
+final _hexLetter = RegExp(r'[a-f]');
+final _hexDigit = RegExp(r'[0-9]');
 
 // `待真机验收` 是发布收尾专用状态：`release_finalize` 按它把条目归进
 // EVIDENCE_PENDING 档——实现已完成、只差真机/接入方证据，碎片保留不删，需显式
@@ -158,7 +172,7 @@ void main() {
     failures: failures,
   );
   _validateNoResidualTargetOnPublishedRelease(
-    entries: pbEntries.values,
+    entries: <BacklogEntry>[...pbEntries.values, ...dgEntries.values],
     plans: plans,
     failures: failures,
   );
@@ -250,6 +264,9 @@ List<_ReleasePlan> _loadReleasePlans(List<String> failures) {
   final plans = <_ReleasePlan>[];
   for (final file in files) {
     final name = file.uri.pathSegments.last;
+    // 与 docs/proposals 的扫描同口径豁免：那边本就有 README，作者容易照搬约定，
+    // 而"版本计划文件名必须是完整 SemVer"对一个 README 是误导性报错。
+    if (name == 'README.md' || name == '_template.md') continue;
     final version = name.substring(0, name.length - '.md'.length);
     final path = '$_releaseDirectoryPath/$name';
     if (!_semverPattern.hasMatch(version)) {
@@ -315,6 +332,19 @@ void _validateVersionStartupOrder(
   List<_ReleasePlan> plans,
   List<String> failures,
 ) {
+  // 声明行必须唯一。两行声明时，"按正则取一行、按前缀又取另一行"会让版本号校验和
+  // 起点校验落在不同行上——一条误报、另一条漏检。先把数量钉住，后面只用同一次匹配。
+  final declarationLines = active.content
+      .split('\n')
+      .where((line) => line.startsWith('> 版本分支：'))
+      .toList();
+  if (declarationLines.length > 1) {
+    failures.add(
+      '${active.path}: 出现 ${declarationLines.length} 行 `> 版本分支：` 声明；'
+      '版本身份只能有一处',
+    );
+  }
+
   final match = _versionBranchPattern.firstMatch(active.content);
   if (match == null) {
     failures.add(
@@ -328,10 +358,7 @@ void _validateVersionStartupOrder(
         '与计划版本 ${active.version} 不一致',
       );
     }
-    final declarationLine = active.content
-        .split('\n')
-        .firstWhere((line) => line.startsWith('> 版本分支：'), orElse: () => '');
-    if (!declarationLine.contains('从稳定 `main`')) {
+    if (!match.group(0)!.contains('从稳定 `main`')) {
       failures.add(
         '${active.path}: 版本分支声明必须写明「从稳定 `main`」创建；'
         '范围与 Proposal MR 只能以版本分支为目标',
@@ -367,7 +394,7 @@ void _validateTransientDraftFacts(_ReleasePlan active, List<String> failures) {
     if (line.startsWith('> 版本分支：')) continue;
     for (final match in _backtickCommitToken.allMatches(line)) {
       final token = match.group(1)!;
-      if (!token.contains(RegExp(r'[0-9]'))) continue;
+      if (!token.contains(_hexLetter) || !token.contains(_hexDigit)) continue;
       failures.add(
         '${active.path}:${index + 1}: 活跃版本计划不得引用提交 SHA `$token`；'
         '除版本分支声明行外，固定 SHA 属候选验收证据，写进计划即刻过期',
@@ -401,6 +428,9 @@ void _validateTargetsResolveToPlans({
 }
 
 /// 已发布版本上不得残留非终态 target。
+///
+/// 特性与 design-gate 各有自己的终态词表，因此按种类取判据——把 DG 塞进特性的终态集
+/// 会让合规的 `已裁决` 全部误报，而漏掉 DG 又是真实覆盖洞：`DG` 碎片同样带 `target`。
 void _validateNoResidualTargetOnPublishedRelease({
   required Iterable<BacklogEntry> entries,
   required List<_ReleasePlan> plans,
@@ -413,12 +443,14 @@ void _validateNoResidualTargetOnPublishedRelease({
   for (final entry in entries) {
     final target = entry.target;
     if (target == null || !published.contains(target)) continue;
+    final terminal = entry.kind == BacklogKind.designGate
+        ? _terminalGateStatusesOnPublishedRelease
+        : _terminalStatusesOnPublishedRelease;
     final status = entry.status ?? '';
-    if (_terminalStatusesOnPublishedRelease.contains(status)) continue;
+    if (terminal.contains(status)) continue;
     failures.add(
       '${entry.id}: target $target 已发布，但状态是「$status」；'
-      '已发布版本只允许保留终态条目'
-      '（${_terminalStatusesOnPublishedRelease.join(' / ')}）——'
+      '已发布版本只允许保留终态条目（${terminal.join(' / ')}）——'
       '若实际延期，按延期流程把 target 清成 $unscheduledTarget',
     );
   }
