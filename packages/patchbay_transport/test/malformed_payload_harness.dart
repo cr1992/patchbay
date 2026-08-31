@@ -56,6 +56,25 @@ const int minGeneratedStringBytes = 1024;
 /// A body deliberately past the host's default request cap.
 const int overLimitBodyBytes = 96 * 1024;
 
+/// Sentinel status for "the host closed before answering".
+///
+/// Not an error condition to paper over — it is the **second legitimate
+/// fail-closed outcome** of an over-limit upload, and the harness has to name it
+/// to keep the strong assertions honest.
+///
+/// `PatchbayDirectHost` refuses on the declared `Content-Length` *before*
+/// reading the body (`direct_host.dart` `_readBoundedBody`), which is the right
+/// call: reading 96 KiB just to refuse it would be the resource exhaustion the
+/// cap exists to prevent. But that means the host writes `413` and closes while
+/// the client is still uploading, so the client legitimately races and may see
+/// the socket close instead of the answer. Measured here: ~2 in 30 runs, on
+/// whichever operation happened to lose the race (BUG-20260831-01).
+///
+/// What this outcome does **not** excuse: the payload must still never be
+/// accepted and no application handler may run. Those invariants stay
+/// unconditional; only the observability of the typed answer is racy.
+const int closedBeforeAnswer = -1;
+
 /// Truncation offsets drawn per operation.
 const int truncationsPerOperation = 6;
 
