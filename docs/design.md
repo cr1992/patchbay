@@ -268,6 +268,14 @@ full 恒等，artifact 先于 brief，canonical CLI façade 复用最终 service
 手工规则。完整 wire、顺序与降级见已接受的
 [Descriptor 驱动的输出投影](proposals/0.6.0/descriptor-output-projection.md)。
 
+公共 Dart 面按使用者而不是实现文件分层。`patchbay.dart` 是 77 符号的默认 consumer façade；
+`patchbay_host.dart` 显式追加 41 个 host lifecycle 符号；`patchbay_protocol.dart` 独占 129 个 raw wire 与
+protocol 符号。Flutter 默认入口只在 core consumer 上追加 `PatchbayKey`、`PatchbayRoot`、
+`PatchbayRootController`、`PatchbayUiRegistry`，service host、bridge 与 policy 进入显式
+`patchbay_flutter_host.dart`。公共 barrel 必须用封闭 `show`，API checker 按 library 展开跨包 re-export；
+新符号未分类即判红。精确基线集合与 source 迁移见已接受的
+[Core 公共 Dart API 分层](proposals/0.6.0/core-public-api-layers.md)。
+
 ### 4. release 必须可裁除
 
 组合根用编译期常量确保 release 不注册扩展、不构造 adapter、不保留运行时重开入口。
