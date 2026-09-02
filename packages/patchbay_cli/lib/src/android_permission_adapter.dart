@@ -136,7 +136,13 @@ final class PatchbayAndroidPermissionAdapter
         // notDetermined 已经在上面分流到 reset），所以目标状态就是它。
         expectedAfterState = request.state!;
       } else if (request.operation == PatchbayPermissionOperation.exercise) {
-        return _exercise(request, device, applicationId, permission, before);
+        return await _exercise(
+          request,
+          device,
+          applicationId,
+          permission,
+          before,
+        );
       } else {
         throw const _AdapterFailure('permissionOperationInvalid');
       }
