@@ -45,7 +45,8 @@ void main() {
       expect(result.admission, PatchbayAdmission.accepted);
       final Map<String, Object?> payload = result.payload;
       expect(payload['outcome'], 'revealed', reason: '$payload');
-      // 目标有指针占位，所以后续该走 `ui gesture tap`，不是 `ui tap`。
+      // 目标有指针占位，所以 reachability 如实报告 pointer；是否允许
+      // canonical `--via pointer` 仍由独立的 gesture policy 决定。
       expect(payload['reachability'], 'pointer');
       expect(payload['steps'], greaterThan(0));
 
@@ -70,7 +71,7 @@ void main() {
         ),
       );
       expect(tap.admission, PatchbayAdmission.rejected);
-      // 手势面只开了三个 gesture surface，reveal 出来的行不在其中——这条断言
+      // 手势面只开放专用 gesture surface，reveal 出来的行不在其中——这条断言
       // 证明的是 generation 真的被后续写命令接受了（拒绝码是 policy 的，不是
       // `uiGenerationStale`）。
       expect(tap.rejection?.code, 'uiGestureDenied');
@@ -101,7 +102,8 @@ void main() {
         'revealed',
         reason: '${result.payload}',
       );
-      // 没有指针占位：后续必须走 `ui tap`（语义通道），走 gesture 会稳定失败。
+      // 没有指针占位：后续必须走 canonical `--via semantics`，选择 pointer
+      // 会稳定失败。
       expect(result.payload['reachability'], 'semanticsOnly');
     });
   });

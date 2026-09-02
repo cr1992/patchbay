@@ -53,7 +53,8 @@ const String revealListSemanticsId = 'example.reveal.list';
 const String revealTargetSemanticsId = 'example.reveal.row.far';
 
 /// A row with semantics but no pointer footprint, so a successful reveal
-/// reports `reachability: semanticsOnly` and the caller must use `ui tap`.
+/// reports `reachability: semanticsOnly` and the caller must select the
+/// canonical `ui perform tap ... --via semantics` route.
 const String revealSemanticsOnlyRowId = 'example.reveal.row.semanticsOnly';
 
 /// Pinned bottom bar. A row that stops under it stays `obstructed`, so reveal
@@ -653,12 +654,12 @@ PatchbaySemanticsActionDecision _semanticsActionPolicy(
       gateIds: <String>{exampleWriteGate},
     );
   }
-  // PB-050-17: both rows `ui.reveal` can drive to reveal double as the tap
-  // targets for the two `reachability` values it reports — `pointer` goes on
-  // to `ui tap` (hit-test resolved), `semanticsOnly` to `ui action ... tap`
-  // (semantics-only). Both land on the same `tapIdentifier` seam and
-  // therefore the same policy check, so one rule covers the full chain the
-  // device precheck exercises after a reveal.
+  // PB-050-17: both rows `ui.reveal` can drive to reveal also opt in to a
+  // Semantics tap. `reachability: pointer` is a geometry fact, not gesture
+  // authorization: the example keeps pointer gestures scoped to the dedicated
+  // surfaces below, so the device precheck explicitly selects the canonical
+  // Semantics route after reveal. Both rows land on the same `tapIdentifier`
+  // seam and therefore the same policy check.
   if ((target.identifier == revealTargetSemanticsId ||
           target.identifier == revealSemanticsOnlyRowId) &&
       action == PatchbaySemanticsAction.tap) {
@@ -671,7 +672,7 @@ PatchbaySemanticsActionDecision _semanticsActionPolicy(
   );
 }
 
-/// Anchored gestures are allowed on the two surfaces built for them, with
+/// Anchored gestures are allowed on the dedicated surfaces built for them, with
 /// budgets small enough that a runaway path is rejected rather than replayed.
 PatchbayGestureDecision _gesturePolicy(
   PatchbayGestureTarget target,

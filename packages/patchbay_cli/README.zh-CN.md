@@ -85,82 +85,90 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 <!-- PATCHBAY_COMMAND_REFERENCE:START -->
 下表只描述当前 CLI 随包发布的语法。协议命令行来自仓内 descriptor；client / local 行仍来自 CLI 的显式声明。它不是运行时 capability catalog，实际可用性请以 `patchbay catalog` 为准。
 
-| CLI 语法 | 声明来源 | 协议命令 |
-|---|---|---|
-| `patchbay blob get <blob-id> --output <path>` | client 显式声明 | `blob.metadata` |
-| `patchbay blob metadata <blob-id>` | client 显式声明 | `blob.metadata` |
-| `patchbay capture diff <before-blob-id> <after-blob-id>` | client 显式声明 | `ui.capture.diff` |
-| `patchbay capture root --output <path>` | 协议 descriptor | `ui.capture` |
-| `patchbay capture target <target-id> <generation> --output <path>` | 协议 descriptor | `ui.capture` |
-| `patchbay catalog` | client 显式声明 | — |
-| `patchbay describe <service-command>` | local 显式声明 | — |
-| `patchbay doctor` | local 显式声明 | — |
-| `patchbay doctor permission` | local 显式声明 | — |
-| `patchbay exec <service-command>` | client 显式声明 | — |
-| `patchbay identity` | client 显式声明 | — |
-| `patchbay job cancel <job-id>` | client 显式声明 | `patchbay.job.cancel` |
-| `patchbay job get <job-id>` | client 显式声明 | `patchbay.job.get` |
-| `patchbay launch -- <consumer command>` | local 显式声明 | — |
-| `patchbay logs export --output <path>` | client 显式声明 | `logs.export` |
-| `patchbay logs query` | client 显式声明 | `logs.query` |
-| `patchbay logs tail` | client 显式声明 | `logs.tail` |
-| `patchbay navigation back [--revision <revision>]` | 协议 descriptor | `navigation.back` |
-| `patchbay navigation catalog` | 协议 descriptor | `navigation.catalog` |
-| `patchbay navigation current` | 协议 descriptor | `navigation.current` |
-| `patchbay navigation go <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.go` |
-| `patchbay navigation push <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.push` |
-| `patchbay net profile` | client 显式声明 | — |
-| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client 显式声明 | — |
-| `patchbay permission capabilities` | local 显式声明 | — |
-| `patchbay permission exercise <permission> --decision <decision>` | local 显式声明 | — |
-| `patchbay permission fail <permission> --state <state>` | local 显式声明 | — |
-| `patchbay permission normalize <permission> --state <state>` | local 显式声明 | — |
-| `patchbay permission reset <permission>` | local 显式声明 | — |
-| `patchbay permission status <permission>` | local 显式声明 | — |
-| `patchbay repl` | client 显式声明 | — |
-| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local 显式声明 | — |
-| `patchbay session unregister <session-id>` | local 显式声明 | — |
-| `patchbay session use <session-id> \| --clear` | local 显式声明 | — |
-| `patchbay sessions list` | local 显式声明 | — |
-| `patchbay sessions prune` | local 显式声明 | — |
-| `patchbay snapshot [--path <dot.path>]` | client 显式声明 | — |
-| `patchbay snapshot diff --from <revision>` | client 显式声明 | — |
-| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client 显式声明 | — |
-| `patchbay trace diff <before-trace-id> <after-trace-id>` | local 显式声明 | — |
-| `patchbay trace export <trace-id> --output <directory>` | local 显式声明 | — |
-| `patchbay trace mark <note>` | local 显式声明 | — |
-| `patchbay trace prune [--dry-run]` | local 显式声明 | — |
-| `patchbay trace show <trace-id>` | local 显式声明 | — |
-| `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — |
-| `patchbay trace stop [trace-id]` | local 显式声明 | — |
-| `patchbay ui action <identifier> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.actionByIdentifier` |
-| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
-| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` |
-| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` |
-| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` |
-| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | 协议 descriptor | `ui.gesture.tap` |
-| `patchbay ui inspect off` | 协议 descriptor | `ui.inspect.select` |
-| `patchbay ui inspect on [--ttl-ms <ms>]` | 协议 descriptor | `ui.inspect.select` |
-| `patchbay ui inspect status` | 协议 descriptor | `ui.inspect.status` |
-| `patchbay ui keep-awake off` | 协议 descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake on [--lease-ms <ms>]` | 协议 descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
-| `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | 协议 descriptor | `ui.reveal` |
-| `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | 协议 descriptor | `ui.semantics.tree` |
-| `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` |
-| `patchbay ui targets --emit-manifest` | local 显式声明 | — |
-| `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` |
-| `patchbay ui text set <target-id> <generation> [text]` | 协议 descriptor | `ui.text.set` |
-| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local 显式声明 | — |
-| `patchbay ui wait destination <destination-id>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait frame-revision <revision>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait semantics-mounted <identifier>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait semantics-unmounted <identifier>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait semantics-value <identifier> <value>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui wait tree-revision <revision>` | 协议 descriptor | `ui.wait` |
-| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — |
+| CLI 语法 | 声明来源 | 协议命令 | 状态 / 迁移 |
+|---|---|---|---|
+| `patchbay blob get <blob-id> --output <path>` | client 显式声明 | `blob.metadata` | 当前入口 |
+| `patchbay blob metadata <blob-id>` | client 显式声明 | `blob.metadata` | 当前入口 |
+| `patchbay capture diff <before-blob-id> <after-blob-id>` | client 显式声明 | `ui.capture.diff` | 当前入口 |
+| `patchbay capture root --output <path>` | 协议 descriptor | `ui.capture` | 当前入口 |
+| `patchbay capture target <target-id> <generation> --output <path>` | 协议 descriptor | `ui.capture` | 当前入口 |
+| `patchbay catalog` | client 显式声明 | — | 当前入口 |
+| `patchbay describe <service-command>` | local 显式声明 | — | 当前入口 |
+| `patchbay doctor` | local 显式声明 | — | 当前入口 |
+| `patchbay doctor permission` | local 显式声明 | — | 当前入口 |
+| `patchbay exec <service-command>` | client 显式声明 | — | 当前入口 |
+| `patchbay identity` | client 显式声明 | — | 当前入口 |
+| `patchbay job cancel <job-id>` | client 显式声明 | `patchbay.job.cancel` | 当前入口 |
+| `patchbay job get <job-id>` | client 显式声明 | `patchbay.job.get` | 当前入口 |
+| `patchbay launch -- <consumer command>` | local 显式声明 | — | 当前入口 |
+| `patchbay logs export --output <path>` | client 显式声明 | `logs.export` | 当前入口 |
+| `patchbay logs query` | client 显式声明 | `logs.query` | 当前入口 |
+| `patchbay logs tail` | client 显式声明 | `logs.tail` | 当前入口 |
+| `patchbay navigation back [--revision <revision>]` | 协议 descriptor | `navigation.back` | 当前入口 |
+| `patchbay navigation catalog` | 协议 descriptor | `navigation.catalog` | 当前入口 |
+| `patchbay navigation current` | 协议 descriptor | `navigation.current` | 当前入口 |
+| `patchbay navigation go <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.go` | 当前入口 |
+| `patchbay navigation push <destination-id> [--revision <revision>]` | 协议 descriptor | `navigation.push` | 当前入口 |
+| `patchbay net profile` | client 显式声明 | — | 当前入口 |
+| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client 显式声明 | — | 当前入口 |
+| `patchbay permission capabilities` | local 显式声明 | — | 当前入口 |
+| `patchbay permission exercise <permission> --decision <decision>` | local 显式声明 | — | 当前入口 |
+| `patchbay permission fail <permission> --state <state>` | local 显式声明 | — | 当前入口 |
+| `patchbay permission normalize <permission> --state <state>` | local 显式声明 | — | 当前入口 |
+| `patchbay permission reset <permission>` | local 显式声明 | — | 当前入口 |
+| `patchbay permission status <permission>` | local 显式声明 | — | 当前入口 |
+| `patchbay repl` | client 显式声明 | — | 当前入口 |
+| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local 显式声明 | — | 当前入口 |
+| `patchbay session unregister <session-id>` | local 显式声明 | — | 当前入口 |
+| `patchbay session use <session-id> \| --clear` | local 显式声明 | — | 当前入口 |
+| `patchbay sessions list` | local 显式声明 | — | 当前入口 |
+| `patchbay sessions prune` | local 显式声明 | — | 当前入口 |
+| `patchbay snapshot [--path <dot.path>]` | client 显式声明 | — | 当前入口 |
+| `patchbay snapshot diff --from <revision>` | client 显式声明 | — | 当前入口 |
+| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client 显式声明 | — | 当前入口 |
+| `patchbay trace diff <before-trace-id> <after-trace-id>` | local 显式声明 | — | 当前入口 |
+| `patchbay trace export <trace-id> --output <directory>` | local 显式声明 | — | 当前入口 |
+| `patchbay trace mark <note>` | local 显式声明 | — | 当前入口 |
+| `patchbay trace prune [--dry-run]` | local 显式声明 | — | 当前入口 |
+| `patchbay trace show <trace-id>` | local 显式声明 | — | 当前入口 |
+| `patchbay trace start --name <name> [--activate] [--pin]` | local 显式声明 | — | 当前入口 |
+| `patchbay trace stop [trace-id]` | local 显式声明 | — | 当前入口 |
+| `patchbay ui action <identifier> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.actionByIdentifier` | 0.6.0 deprecated；改用 `patchbay ui perform action semantics:<identifier> <generation> <action> [text]`；1.0 删除 |
+| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — | 当前入口 |
+| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.drag` | 0.6.0 deprecated；改用 `patchbay ui perform drag semantics:<identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]`；1.0 删除 |
+| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.fling` | 0.6.0 deprecated；改用 `patchbay ui perform fling semantics:<identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]`；1.0 删除 |
+| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | 协议 descriptor | `ui.gesture.pressHold` | 0.6.0 deprecated；改用 `patchbay ui perform press-hold semantics:<identifier> <generation> --start <json> [--duration-ms <ms>]`；1.0 删除 |
+| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | 协议 descriptor | `ui.gesture.tap` | 0.6.0 deprecated；改用 `patchbay ui perform tap semantics:<identifier> <generation> --via pointer [--start <json>]`；1.0 删除 |
+| `patchbay ui inspect off` | 协议 descriptor | `ui.inspect.select` | 当前入口 |
+| `patchbay ui inspect on [--ttl-ms <ms>]` | 协议 descriptor | `ui.inspect.select` | 当前入口 |
+| `patchbay ui inspect status` | 协议 descriptor | `ui.inspect.status` | 当前入口 |
+| `patchbay ui keep-awake off` | 协议 descriptor | `ui.keepAwake.set` | 当前入口 |
+| `patchbay ui keep-awake on [--lease-ms <ms>]` | 协议 descriptor | `ui.keepAwake.set` | 当前入口 |
+| `patchbay ui keep-awake status` | 协议 descriptor | `ui.keepAwake.status` | 当前入口 |
+| `patchbay ui perform action <semantics:<identifier>\|node:<node-id>> <generation> <action> [text]` | local 显式声明 | `ui.semantics.action` / `ui.semantics.actionByIdentifier` | 当前入口 |
+| `patchbay ui perform drag semantics:<identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | local 显式声明 | `ui.gesture.drag` | 当前入口 |
+| `patchbay ui perform enter-text target:<id> <generation> [text]` | local 显式声明 | `ui.text.enter` | 当前入口 |
+| `patchbay ui perform fling semantics:<identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | local 显式声明 | `ui.gesture.fling` | 当前入口 |
+| `patchbay ui perform press-hold semantics:<identifier> <generation> --start <json> [--duration-ms <ms>]` | local 显式声明 | `ui.gesture.pressHold` | 当前入口 |
+| `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | local 显式声明 | `ui.reveal` | 当前入口 |
+| `patchbay ui perform set-text target:<id> <generation> [text]` | local 显式声明 | `ui.text.set` | 当前入口 |
+| `patchbay ui perform tap semantics:<identifier> <generation> --via <semantics\|pointer> [--start <json>]` | local 显式声明 | `ui.gesture.tap` / `ui.semantics.tap` | 当前入口 |
+| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — | 当前入口 |
+| `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | 协议 descriptor | `ui.reveal` | 0.6.0 deprecated；改用 `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]`；1.0 删除 |
+| `patchbay ui semantics action <node-id> <generation> <action> [text]` | 协议 descriptor | `ui.semantics.action` | 0.6.0 deprecated；改用 `patchbay ui perform action node:<node-id> <generation> <action> [text]`；1.0 删除 |
+| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | 协议 descriptor | `ui.semantics.tree` | 当前入口 |
+| `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` | 0.6.0 deprecated；改用 `patchbay ui perform tap semantics:<identifier> <generation> --via semantics`；1.0 删除 |
+| `patchbay ui targets --emit-manifest` | local 显式声明 | — | 当前入口 |
+| `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` | 0.6.0 deprecated；改用 `patchbay ui perform enter-text target:<id> <generation> [text]`；1.0 删除 |
+| `patchbay ui text set <target-id> <generation> [text]` | 协议 descriptor | `ui.text.set` | 0.6.0 deprecated；改用 `patchbay ui perform set-text target:<id> <generation> [text]`；1.0 删除 |
+| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local 显式声明 | — | 当前入口 |
+| `patchbay ui wait destination <destination-id>` | 协议 descriptor | `ui.wait` | 当前入口 |
+| `patchbay ui wait frame-revision <revision>` | 协议 descriptor | `ui.wait` | 当前入口 |
+| `patchbay ui wait semantics-mounted <identifier>` | 协议 descriptor | `ui.wait` | 当前入口 |
+| `patchbay ui wait semantics-unmounted <identifier>` | 协议 descriptor | `ui.wait` | 当前入口 |
+| `patchbay ui wait semantics-value <identifier> <value>` | 协议 descriptor | `ui.wait` | 当前入口 |
+| `patchbay ui wait tree-revision <revision>` | 协议 descriptor | `ui.wait` | 当前入口 |
+| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — | 当前入口 |
 <!-- PATCHBAY_COMMAND_REFERENCE:END -->
 
 由 `flutter run --machine` launcher 启动 App 后，CLI 默认从用户临时目录发现唯一当前会话：

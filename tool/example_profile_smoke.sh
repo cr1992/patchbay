@@ -240,23 +240,33 @@ probe 'identity' required --json identity
 probe 'catalog' required --json catalog
 probe 'snapshot' required --json snapshot
 probe 'ui semantics tree' required --json ui semantics tree
-probe 'ui tap' required --json ui tap example.counter.increment
-# PB-050-15：gesture 面在非 release 构建可用，profile 下只验答复形态。
-# generation 从当前树读取——取不到按失败计，不许静默跳过。
-TAP_GEN="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
+PROFILE_GENS="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
 import json, sys
 doc = json.load(sys.stdin)
 payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
 gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
         if n.get('identifier') and n.get('generation') is not None}
-print(gens.get('example.gesture.surface', ''))
+print(gens.get('example.counter.increment', ''),
+      gens.get('example.gesture.surface', ''))
 ")"
-if [ -n "$TAP_GEN" ]; then
-  probe 'ui gesture tap' required --json ui gesture tap \
-    example.gesture.surface "$TAP_GEN"
+COUNTER_GEN="$(echo "$PROFILE_GENS" | awk '{print $1}')"
+TAP_GEN="$(echo "$PROFILE_GENS" | awk '{print $2}')"
+if [ -n "$COUNTER_GEN" ]; then
+  probe 'ui perform tap（semantics）' required --json ui perform tap \
+    semantics:example.counter.increment "$COUNTER_GEN" --via semantics
 else
-  printf '  ✗ %-34s %s\n' 'ui gesture tap' '未从 semantics 树取到手势面 generation'
-  FAIL=$((FAIL + 1)); FAILED_STEPS+=('ui gesture tap')
+  printf '  ✗ %-34s %s\n' 'ui perform tap（semantics）' \
+    '未从 semantics 树取到 counter generation'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('ui perform tap（semantics）')
+fi
+# PB-050-15：gesture 面在非 release 构建可用，profile 下只验答复形态。
+# generation 从当前树读取——取不到按失败计，不许静默跳过。
+if [ -n "$TAP_GEN" ]; then
+  probe 'ui perform tap（pointer）' required --json ui perform tap \
+    semantics:example.gesture.surface "$TAP_GEN" --via pointer
+else
+  printf '  ✗ %-34s %s\n' 'ui perform tap（pointer）' '未从 semantics 树取到手势面 generation'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('ui perform tap（pointer）')
 fi
 
 echo
@@ -267,7 +277,8 @@ echo "== reveal 答复形态（PB-050-17，不依赖任何 debug-only API）=="
 # （退出码 + 不落进 transport），语义正确性由 example_precheck.sh 在 debug
 # 下逐条断言，本脚本不重复求全覆盖。
 probe 'navigation go reveal' required --json navigation go example.reveal
-probe 'ui reveal' required --json ui reveal example.reveal.row.far \
+probe 'ui perform reveal' required --json ui perform reveal \
+  semantics:example.reveal.row.far \
   --max-steps 60 --timeout-ms 20000
 probe 'navigation go home（reveal 收尾）' required --json navigation go example.home
 

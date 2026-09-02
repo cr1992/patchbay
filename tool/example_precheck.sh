@@ -345,7 +345,8 @@ check_brief_semantics_parity() {
   FAIL=$((FAIL + 1)); FAILED_STEPS+=("$name"); return 0
 }
 
-# PB-050-17：`ui reveal` 恰好派发一次，把它的 outcome/reachability 与紧接着
+# PB-050-17：canonical `ui perform reveal` 恰好派发一次，把它的
+# outcome/reachability 与紧接着
 # 该带的 generation 一起从**同一份**答复里取出来。
 #
 # reveal 是写命令，真的会滚动列表：像别处那样先 `check` 断言、再另起一次
@@ -367,7 +368,7 @@ check_reveal() {
   shift 3
   local actual=0
   REVEAL_GENERATION=""
-  example_session_cli --json ui reveal "$identifier" "$@" >"$OUT" 2>&1 || actual=$?
+  example_session_cli --json ui perform reveal "semantics:$identifier" "$@" >"$OUT" 2>&1 || actual=$?
   if [ "$actual" != 0 ]; then
     printf '  ✗ %-42s 退出码 %s（期望 0）\n' "$name" "$actual"
     sed -E 's#(ws|http)s?://[^[:space:]]+#<redacted-uri>#g' "$OUT" | tail -3 | sed 's/^/      /'
@@ -378,7 +379,10 @@ import json, os, sys
 doc = json.load(open(os.environ['PATCHBAY_OUT'], encoding='utf-8'))
 payload = doc['payload']
 ok = (payload['outcome'] == 'revealed'
-      and payload['reachability'] == '$expect_reachability')
+      and payload['reachability'] == '$expect_reachability'
+      and doc['localRoute']['selectorKind'] == 'semantics'
+      and doc['localRoute']['executionPath'] == 'scrollReveal'
+      and doc['localRoute']['serviceCommand'] == 'ui.reveal')
 sys.exit(0 if ok else 1)
 " 2>/dev/null; then
     printf '  ✗ %-42s 断言不成立（outcome/reachability）\n' "$name"
@@ -475,26 +479,33 @@ check 'job cancel' 0 "" --json job cancel "$LONG_JOB_ID"
 echo
 echo "== UI 观察与操作 =="
 check 'ui semantics tree' 0 "'nodes' in json.dumps(doc)" --json ui semantics tree
-check 'ui tap increment' 0 "" --json ui tap example.counter.increment
-ACTION_GEN="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
+UI_GENERATIONS="$(example_session_cli --json ui semantics tree 2>/dev/null | python3 -c "
 import json, sys
 doc = json.load(sys.stdin)
 payload = doc.get('payload') if isinstance(doc.get('payload'), dict) else doc
-print(next((n.get('generation') for n in payload.get('nodes', [])
-            if n.get('identifier') == 'example.identifier.action'), ''))
+gens = {n.get('identifier'): n.get('generation') for n in payload.get('nodes', [])
+        if n.get('identifier') and n.get('generation') is not None}
+print(gens.get('example.counter.increment', ''),
+      gens.get('example.identifier.action', ''))
 ")"
-if [ -n "$ACTION_GEN" ]; then
+INCREMENT_GEN="$(echo "$UI_GENERATIONS" | awk '{print $1}')"
+ACTION_GEN="$(echo "$UI_GENERATIONS" | awk '{print $2}')"
+if [ -n "$INCREMENT_GEN" ] && [ -n "$ACTION_GEN" ]; then
+  check 'ui perform tap increment（semantics）' 0 \
+    "doc['localRoute']['executionPath'] == 'semanticsAction'" \
+    --json ui perform tap semantics:example.counter.increment "$INCREMENT_GEN" \
+    --via semantics
   check 'ui action focus' 0 "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui action example.identifier.action "$ACTION_GEN" focus
+    --json ui perform action semantics:example.identifier.action "$ACTION_GEN" focus
   check 'ui action scrollDown' 0 "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui action example.identifier.action "$ACTION_GEN" scrollDown
+    --json ui perform action semantics:example.identifier.action "$ACTION_GEN" scrollDown
   check 'ui action setText' 0 \
     "doc['payload']['outcome'] == 'dispatched' and doc['payload']['length'] == 8" \
-    --json ui action example.identifier.action "$ACTION_GEN" setText precheck
+    --json ui perform action semantics:example.identifier.action "$ACTION_GEN" setText precheck
 else
-  printf '  ✗ %-42s %s\n' 'identifier action generation' \
-    '未从 semantics 树解析到 example.identifier.action 的 generation'
-  FAIL=$((FAIL + 1)); FAILED_STEPS+=('identifier action generation')
+  printf '  ✗ %-42s %s\n' 'canonical UI generation' \
+    '未从 semantics 树解析到 counter.increment / identifier.action 的 generation'
+  FAIL=$((FAIL + 1)); FAILED_STEPS+=('canonical UI generation')
 fi
 check 'ui wait tree-revision' 0 "" --json ui wait tree-revision 1
 check 'ui widget-tree' 0 "" --json ui widget-tree
@@ -534,20 +545,20 @@ COVERED_GEN="$(echo "$GEN" | awk '{print $4}')"
 if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ] && [ -n "$COVERED_GEN" ]; then
   echo "  gesture generation：surface=$SURFACE_GEN list=$LIST_GEN nested=$NESTED_GEN covered=$COVERED_GEN"
   check 'gesture press-hold' 0 "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui gesture press-hold \
-    example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
+    --json ui perform press-hold \
+    semantics:example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.5}' --duration-ms 600
   # drag 的 path 必须至少两点：契约要求分段路径，单点会按 uiGestureBudgetExceeded 拒绝。
   check 'gesture drag 分段路径' 0 "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui gesture drag \
-    example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
+    --json ui perform drag \
+    semantics:example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
     --gesture-path '[{"x":0.5,"y":0.5},{"x":0.5,"y":0.2}]' --duration-ms 400
   # velocity 的单位是「目标宽/高每秒」，向量长度上限 20（见 anchored-gestures Proposal），
   # 不是设备像素每秒。用 -1200 这类像素速度会先撞全局预算，于是这一步会**因为错误的原因**
   # 变绿：看着是"按压面拒绝 fling"，实际是速度越界。断言 code 才能区分这两件事。
   check 'gesture fling 在按压面按策略被拒' 5 \
     "doc['rejection']['code'] == 'uiGestureDenied'" \
-    --json ui gesture fling \
-    example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
+    --json ui perform fling \
+    semantics:example.gesture.surface "$SURFACE_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
   # dispatched 只证明指针注入完成，不证明嵌套列表真的滚动。前后各抓一帧并比较，
   # 把“命令退 0 但 UI 没动”的假绿挡在业务验收之前。
@@ -555,8 +566,8 @@ if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ] && [ -n "
     capture root >"$OUT" 2>&1
   NESTED_BEFORE_BLOB="$(read_json "doc['payload']['blob']['blobId']")"
   check 'gesture drag 嵌套水平列表' 0 "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui gesture drag \
-    example.gesture.nested "$NESTED_GEN" --start '{"x":0.8,"y":0.5}' \
+    --json ui perform drag \
+    semantics:example.gesture.nested "$NESTED_GEN" --start '{"x":0.8,"y":0.5}' \
     --gesture-path '[{"x":0.5,"y":0.5},{"x":0.2,"y":0.5}]' --duration-ms 300
   example_session_cli --json --output "$PRECHECK_TMP/nested-after.png" \
     capture root >"$OUT" 2>&1
@@ -567,21 +578,22 @@ if [ -n "$SURFACE_GEN" ] && [ -n "$LIST_GEN" ] && [ -n "$NESTED_GEN" ] && [ -n "
   # 外层 fling 放在嵌套拖动之后；先 fling 可能把 index 2 的嵌套目标滚出视口，
   # 让后续手势因遮挡被拒而不是验证嵌套归属。
   check 'gesture fling 在列表面被接受' 0 "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui gesture fling \
-    example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
+    --json ui perform fling \
+    semantics:example.gesture.list "$LIST_GEN" --start '{"x":0.5,"y":0.8}' \
     --velocity '{"x":0,"y":-6}'
   # PB-050-15 锚定 tap（可达 + 遮挡两例）。可达例不止看 dispatched：手势面的
   # onTap 会把 Semantics value 置为 'tap'，用有界等待把「App 真的收到了这次
   # 点按」也钉住——reachability 分流（tap 前先证指针可达）正是这两步合起来。
-  check 'gesture tap 可达按压面' 0 "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui gesture tap example.gesture.surface "$SURFACE_GEN"
+  check 'gesture tap 可达按压面' 0 \
+    "doc['payload']['outcome'] == 'dispatched' and doc['localRoute']['executionPath'] == 'pointerGesture'" \
+    --json ui perform tap semantics:example.gesture.surface "$SURFACE_GEN" --via pointer
   check 'gesture tap 后 App 侧观察到点按' 0 "" \
     --json ui wait semantics-value example.gesture.surface tap --timeout-ms 5000
   # 遮挡例：covered 探针被不透明装饰块盖住，policy 放行但 hit-test 必须拒绝。
   # 断言 code 而不只是退出码——uiGestureDenied / uiGenerationStale 也退 5。
   check 'gesture tap 被遮挡目标如实拒绝' 5 \
     "doc['rejection']['code'] == 'uiGestureTargetObscured'" \
-    --json ui gesture tap example.gesture.covered "$COVERED_GEN"
+    --json ui perform tap semantics:example.gesture.covered "$COVERED_GEN" --via pointer
 else
   printf '  ✗ %-42s %s\n' 'gesture target generation' \
     '未从 semantics 树解析到 surface / list / nested / covered 四个目标的 generation'
@@ -592,10 +604,12 @@ fi
 # setText 可能让系统键盘占据视口；若放在手势前，较矮设备上的两个手势节点存在被裁出
 # Semantics 树的风险。手势证据固定后再测文本输入，后续 navigation 会离开当前页，
 # 不再依赖这三个节点。
-check 'ui text set' 0 "" \
-  --json ui text set example.note "$NOTE_GENERATION" 'precheck note'
-check 'ui text enter' 0 "" \
-  --json ui text enter example.note "$NOTE_GENERATION" ' entered'
+check 'ui perform set-text' 0 \
+  "doc['localRoute']['executionPath'] == 'directTarget'" \
+  --json ui perform set-text target:example.note "$NOTE_GENERATION" 'precheck note'
+check 'ui perform enter-text' 0 \
+  "doc['localRoute']['serviceCommand'] == 'ui.text.enter'" \
+  --json ui perform enter-text target:example.note "$NOTE_GENERATION" ' entered'
 
 echo
 echo "== 导航 =="
@@ -626,16 +640,20 @@ if check_reveal 'ui reveal 语义可达的目标' example.reveal.row.semanticsOn
 then
   check 'reveal 之后按 semanticsOnly 分流走 ui action tap' 0 \
     "doc['payload']['outcome'] == 'dispatched'" \
-    --json ui action example.reveal.row.semanticsOnly "$REVEAL_GENERATION" tap
+    --json ui perform action semantics:example.reveal.row.semanticsOnly "$REVEAL_GENERATION" tap
 fi
 
 # 指针可达的目标挂在懒加载分页的更深处、还被一条固定底栏盖过：reveal 必须继续
-# 滚动直到底栏不再挡住它，reachability 落到 pointer，落地的 tap 走指针通道。
+# 滚动直到底栏不再挡住它，reachability 落到 pointer。reachability 只报告可达性，
+# 不替接入方授权 gesture policy；example 刻意只对上面的专用 gesture surface 开放
+# pointer tap，因此本行仍显式选择已授权的 semantics 通道。pointer 通道已由锚定手势段
+# 的成功与遮挡拒绝两例覆盖。
 if check_reveal 'ui reveal 指针可达的目标（懒加载 + 固定底栏）' example.reveal.row.far \
   pointer --max-steps 60 --timeout-ms 20000
 then
-  check 'reveal 之后按 pointer 分流走 ui tap' 0 "" \
-    --json ui tap example.reveal.row.far --generation "$REVEAL_GENERATION"
+  check 'reveal 后显式选择已授权的 semantics tap' 0 "" \
+    --json ui perform tap semantics:example.reveal.row.far \
+    "$REVEAL_GENERATION" --via semantics
 fi
 
 check 'navigation go home（reveal 收尾）' 0 "" --json navigation go example.home

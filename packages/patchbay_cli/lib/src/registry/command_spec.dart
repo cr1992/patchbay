@@ -151,7 +151,8 @@ enum PatchbayCommandTarget {
   localLauncher(PatchbayCommandDeclarationSource.local),
   localDiagnostics(PatchbayCommandDeclarationSource.local),
   localPermissionDriver(PatchbayCommandDeclarationSource.local),
-  localTraceStore(PatchbayCommandDeclarationSource.local);
+  localTraceStore(PatchbayCommandDeclarationSource.local),
+  routedServiceCommand(PatchbayCommandDeclarationSource.local);
 
   const PatchbayCommandTarget(this.declarationSource);
 
@@ -169,6 +170,7 @@ final class PatchbayFriendlyInvocation {
     this.force = false,
     this.plaintextArgumentKeys = const <String>{},
     this.resolvesRevision = false,
+    this.localRoute,
   });
 
   final PatchbayFriendlyCommandSpec spec;
@@ -183,4 +185,8 @@ final class PatchbayFriendlyInvocation {
   final bool force;
   final Set<String> plaintextArgumentKeys;
   final bool resolvesRevision;
+
+  /// CLI-only routing facts for canonical commands. Host fields stay at the
+  /// response root unchanged; the dispatcher adds this map beside them.
+  final Map<String, Object?>? localRoute;
 }

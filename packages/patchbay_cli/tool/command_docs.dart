@@ -6,8 +6,13 @@ import 'package:yaml/yaml.dart';
 const String commandReferenceStart =
     '<!-- PATCHBAY_COMMAND_REFERENCE:START -->';
 const String commandReferenceEnd = '<!-- PATCHBAY_COMMAND_REFERENCE:END -->';
+const String uiMigrationStart = '<!-- PATCHBAY_UI_MIGRATION:START -->';
+const String uiMigrationEnd = '<!-- PATCHBAY_UI_MIGRATION:END -->';
 const String _managedSkillName = 'use-patchbay';
 const String _skillDocument = '../../skills/$_managedSkillName/SKILL.md';
+const String _releaseDocument = '../../docs/releases/0.6.0.md';
+const String _deprecatedFragment =
+    '../../changelog.d/0.6.0/PB-060-01.deprecated.md';
 
 const List<({String path, bool chinese})> _documents =
     <({String path, bool chinese})>[
@@ -67,14 +72,41 @@ int runCommandDocs(
     if (!install.existsSync()) {
       throw FormatException('managed document does not exist: ${install.path}');
     }
-    updates.add((
-      file: skill,
-      updated: replaceCommandReferenceBlock(
+    final String updatedSkill = replaceUiMigrationBlock(
+      replaceCommandReferenceBlock(
         currentSkill,
         renderSkillStarterCommands(),
         source: skill.path,
       ),
-    ));
+      renderUiMigrationTable(chinese: false),
+      source: skill.path,
+    );
+    updates.add((file: skill, updated: updatedSkill));
+    for (final ({String path, bool chinese, String indent}) document
+        in <({String path, bool chinese, String indent})>[
+          (path: _releaseDocument, chinese: true, indent: ''),
+          (path: _deprecatedFragment, chinese: true, indent: '  '),
+        ]) {
+      final File file = File('${root.path}/${document.path}');
+      if (!file.existsSync()) {
+        // Release preparation consumes changelog fragments. Keep generating
+        // this migration table while the fragment is queued, but do not make
+        // the permanent docs generator depend on a released input forever.
+        if (document.path == _deprecatedFragment) continue;
+        throw FormatException('managed document does not exist: ${file.path}');
+      }
+      updates.add((
+        file: file,
+        updated: replaceUiMigrationBlock(
+          file.readAsStringSync(),
+          renderUiMigrationTable(
+            chinese: document.chinese,
+            indent: document.indent,
+          ),
+          source: file.path,
+        ),
+      ));
+    }
 
     final List<({File file, String updated})> drifted = updates
         .where(
@@ -124,8 +156,8 @@ String renderCommandReference({required bool chinese}) {
         '实际可用性请以 `patchbay catalog` 为准。',
       )
       ..writeln()
-      ..writeln('| CLI 语法 | 声明来源 | 协议命令 |')
-      ..writeln('|---|---|---|');
+      ..writeln('| CLI 语法 | 声明来源 | 协议命令 | 状态 / 迁移 |')
+      ..writeln('|---|---|---|---|');
   } else {
     out
       ..writeln(
@@ -135,8 +167,11 @@ String renderCommandReference({required bool chinese}) {
         'use `patchbay catalog` for actual availability.',
       )
       ..writeln()
-      ..writeln('| CLI syntax | Declaration source | Protocol command |')
-      ..writeln('|---|---|---|');
+      ..writeln(
+        '| CLI syntax | Declaration source | Protocol command | '
+        'Status / migration |',
+      )
+      ..writeln('|---|---|---|---|');
   }
   for (final PatchbayFriendlyCommandSpec command in commands) {
     final String syntax = <String>[
@@ -147,12 +182,19 @@ String renderCommandReference({required bool chinese}) {
     final String source = command.protocolDescriptor != null
         ? (chinese ? '协议 descriptor' : 'protocol descriptor')
         : _explicitSource(command.target, chinese: chinese);
-    final String protocol = command.serviceCommand == null
-        ? '—'
-        : '`${_escape(command.serviceCommand!)}`';
+    final String protocol = _protocolCommands(command);
+    final PatchbayUiCommandMigration? migration =
+        PatchbayFriendlyCommandRegistry.uiMigrationFor(command.path);
+    final String status = migration == null
+        ? (chinese ? '当前入口' : 'current')
+        : chinese
+        ? '0.6.0 deprecated；改用 `patchbay ${_escape(migration.replacement)}`；'
+              '1.0 删除'
+        : 'deprecated in 0.6.0; use '
+              '`patchbay ${_escape(migration.replacement)}`; removed in 1.0';
     out.writeln(
       '| `${_escape(syntax)}` | ${_escape(source)} | '
-      '$protocol |',
+      '$protocol | $status |',
     );
   }
   return out.toString().trimRight();
@@ -185,6 +227,25 @@ String renderSkillStarterCommands() {
       if (command.usageSuffix.isNotEmpty) command.usageSuffix,
     ].join(' ');
     out.writeln('- `${_escape(syntax)}` — ${command.summary}');
+  }
+  return out.toString().trimRight();
+}
+
+String renderUiMigrationTable({required bool chinese, String indent = ''}) {
+  final StringBuffer out = StringBuffer();
+  void line(String value) => out.writeln('$indent$value');
+  if (chinese) {
+    line('| 0.6.0 deprecated 旧入口 | canonical 替代 | 删除版本 |');
+  } else {
+    line('| Deprecated in 0.6.0 | Canonical replacement | Removal |');
+  }
+  line('|---|---|---|');
+  for (final PatchbayUiCommandMigration migration
+      in PatchbayFriendlyCommandRegistry.uiMigrations) {
+    line(
+      '| `${_escape(migration.legacyCommand)}` | '
+      '`${_escape(migration.replacement)}` | 1.0 |',
+    );
   }
   return out.toString().trimRight();
 }
@@ -278,6 +339,50 @@ String replaceCommandReferenceBlock(
       '${document.substring(end)}';
 }
 
+String replaceUiMigrationBlock(
+  String document,
+  String generated, {
+  String source = 'document',
+}) => _replaceManagedBlock(
+  document,
+  generated,
+  startMarker: uiMigrationStart,
+  endMarker: uiMigrationEnd,
+  label: 'UI migration',
+  source: source,
+);
+
+String _replaceManagedBlock(
+  String document,
+  String generated, {
+  required String startMarker,
+  required String endMarker,
+  required String label,
+  required String source,
+}) {
+  final List<int> starts = _markerOffsets(document, startMarker);
+  final List<int> ends = _markerOffsets(document, endMarker);
+  if (starts.length != 1 || ends.length != 1) {
+    throw FormatException(
+      '$source must contain exactly one $label marker pair '
+      '(start=${starts.length}, end=${ends.length})',
+    );
+  }
+  final int start = starts.single;
+  final int end = ends.single;
+  if (end <= start) {
+    throw FormatException('$source $label markers are out of order');
+  }
+  final int bodyStart = start + startMarker.length;
+  final int endLineStart = document.lastIndexOf('\n', end - 1) + 1;
+  final String endIndent = document.substring(endLineStart, end);
+  if (endIndent.trim().isNotEmpty) {
+    throw FormatException('$source $label end marker must start its own line');
+  }
+  return '${document.substring(0, bodyStart)}\n$generated\n'
+      '${document.substring(endLineStart)}';
+}
+
 List<int> _markerOffsets(String input, String marker) {
   final List<int> offsets = <int>[];
   var from = 0;
@@ -296,6 +401,19 @@ String _explicitSource(PatchbayCommandTarget target, {required bool chinese}) {
     PatchbayCommandDeclarationSource.client =>
       chinese ? 'client 显式声明' : 'client CLI declaration',
   };
+}
+
+String _protocolCommands(PatchbayFriendlyCommandSpec command) {
+  final Set<String> commands = switch (command) {
+    PatchbayCanonicalUiCommandSpec(:final routes) => <String>{
+      for (final PatchbayCanonicalUiRoute route in routes) route.serviceCommand,
+    },
+    _ when command.serviceCommand != null => <String>{command.serviceCommand!},
+    _ => const <String>{},
+  };
+  if (commands.isEmpty) return '—';
+  final List<String> sorted = commands.toList()..sort();
+  return sorted.map((String value) => '`${_escape(value)}`').join(' / ');
 }
 
 String _escape(String value) => value.replaceAll('|', r'\|');

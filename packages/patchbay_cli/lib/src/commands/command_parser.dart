@@ -108,6 +108,13 @@ ArgParser patchbayCliParser() => ArgParser()
     'generation',
     help: 'Expected semantics generation; refuses a target that already moved.',
   )
+  ..addOption(
+    'via',
+    allowed: const <String>['semantics', 'pointer'],
+    help:
+        'Canonical ui perform tap channel; no default or fallback '
+        '(semantics|pointer).',
+  )
   ..addOption('start', help: 'JSON target-local normalized gesture point.')
   ..addOption('gesture-path', help: 'JSON array of target-local drag points.')
   ..addOption('velocity', help: 'JSON normalized fling velocity vector.')

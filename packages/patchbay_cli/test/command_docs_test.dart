@@ -21,6 +21,24 @@ void main() {
       rendered,
       contains('| `patchbay sessions list` | local CLI declaration | — |'),
     );
+    expect(
+      rendered,
+      contains(
+        '| `patchbay ui perform tap semantics:<identifier> <generation> '
+        '--via <semantics\\|pointer> [--start <json>]` | '
+        'local CLI declaration | `ui.gesture.tap` / `ui.semantics.tap` |',
+      ),
+    );
+    expect(
+      rendered,
+      contains(
+        '`patchbay ui gesture tap <identifier> <generation> '
+        '[--start <json>]` | protocol descriptor | `ui.gesture.tap` | '
+        'deprecated in 0.6.0; use `patchbay ui perform tap '
+        'semantics:<identifier> <generation> --via pointer '
+        '[--start <json>]`; removed in 1.0',
+      ),
+    );
     expect(rendered, contains('not the runtime capability catalog'));
   });
 
@@ -61,6 +79,29 @@ void main() {
       expect(rendered, contains('`patchbay describe <service-command>`'));
       expect(rendered, isNot(contains('`patchbay exec')));
       expect(rendered, isNot(contains('`patchbay ui')));
+    },
+  );
+
+  test(
+    'one registry renders the release, Skill and changelog migration table',
+    () {
+      final String english = docs.renderUiMigrationTable(chinese: false);
+      final String chinese = docs.renderUiMigrationTable(chinese: true);
+
+      expect(PatchbayFriendlyCommandRegistry.uiMigrations, hasLength(10));
+      for (final PatchbayUiCommandMigration migration
+          in PatchbayFriendlyCommandRegistry.uiMigrations) {
+        expect(english, contains('`${migration.legacyCommand}`'));
+        expect(
+          english,
+          contains('`${migration.replacement.replaceAll('|', r'\|')}`'),
+        );
+        expect(chinese, contains('`${migration.legacyCommand}`'));
+        expect(
+          chinese,
+          contains('`${migration.replacement.replaceAll('|', r'\|')}`'),
+        );
+      }
     },
   );
 
@@ -276,6 +317,29 @@ after
     );
   });
 
+  test('released changelog fragment may already be consumed', () {
+    final _Fixture fixture = _Fixture.create();
+    addTearDown(fixture.dispose);
+    fixture.files.last.deleteSync();
+
+    expect(
+      docs.runCommandDocs(
+        const <String>['--write'],
+        packageDirectory: fixture.packageDirectory,
+        writeOutput: (_) {},
+      ),
+      0,
+    );
+    expect(
+      docs.runCommandDocs(
+        const <String>['--check'],
+        packageDirectory: fixture.packageDirectory,
+        writeOutput: (_) {},
+      ),
+      0,
+    );
+  });
+
   test('write rejects a missing marker before changing any document', () {
     final _Fixture fixture = _Fixture.create();
     addTearDown(fixture.dispose);
@@ -308,6 +372,8 @@ final class _Fixture {
       File('${packageDirectory.path}/README.md'),
       File('${packageDirectory.path}/README.zh-CN.md'),
       File('${root.path}/skills/use-patchbay/SKILL.md'),
+      File('${root.path}/docs/releases/0.6.0.md'),
+      File('${root.path}/changelog.d/0.6.0/PB-060-01.deprecated.md'),
     ];
     for (final File file in files) {
       file.parent.createSync(recursive: true);
@@ -319,11 +385,16 @@ description: Inspect a running App through Patchbay.
 
 '''
           : '';
+      final bool commandReference =
+          file.path.endsWith('/README.md') ||
+          file.path.endsWith('/README.zh-CN.md') ||
+          file.path.endsWith('/SKILL.md');
+      final bool uiMigration =
+          file.path.endsWith('/SKILL.md') ||
+          file.path.endsWith('/0.6.0.md') ||
+          file.path.endsWith('/PB-060-01.deprecated.md');
       file.writeAsStringSync('''${frontmatter}handwritten before
-${docs.commandReferenceStart}
-old generated block
-${docs.commandReferenceEnd}
-handwritten after
+${commandReference ? '${docs.commandReferenceStart}\nold generated block\n${docs.commandReferenceEnd}\n' : ''}${uiMigration ? '${docs.uiMigrationStart}\nold migration block\n${docs.uiMigrationEnd}\n' : ''}handwritten after
 ''');
     }
     File('${root.path}/skills/use-patchbay/INSTALL.md')

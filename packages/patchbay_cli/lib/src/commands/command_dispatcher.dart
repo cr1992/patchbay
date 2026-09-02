@@ -160,6 +160,7 @@ abstract final class CommandDispatcher {
         throw StateError('permission commands own their external driver');
       case PatchbayCommandTarget.declaredServiceCommand:
       case PatchbayCommandTarget.callerServiceCommand:
+      case PatchbayCommandTarget.routedServiceCommand:
         final String command = friendly.serviceCommand!;
         final Map<String, Object?> catalog = await connection.catalog();
         CatalogInvoker.refuseSensitiveArgv(
@@ -217,6 +218,9 @@ abstract final class CommandDispatcher {
                   'host did not declare captureAfterFrames; captured in legacy '
                   'immediate mode',
           };
+        }
+        if (friendly.localRoute case final Map<String, Object?> localRoute) {
+          response = <String, Object?>{...response, 'localRoute': localRoute};
         }
         return ExecutionResult(
           friendly.resolvesRevision

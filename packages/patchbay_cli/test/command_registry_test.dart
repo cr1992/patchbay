@@ -191,6 +191,24 @@ void main() {
       final List<String> words = <String>[
         ...spec.path,
         ...switch (spec) {
+          PatchbayCanonicalUiCommandSpec(action: 'set-text' || 'enter-text') =>
+            <String>['target:field.id', '3', 'hello'],
+          PatchbayCanonicalUiCommandSpec(action: 'tap') => <String>[
+            'semantics:gesture.target',
+            '1',
+          ],
+          PatchbayCanonicalUiCommandSpec(action: 'action') => <String>[
+            'semantics:profile.action',
+            '7',
+            'tap',
+          ],
+          PatchbayCanonicalUiCommandSpec(
+            action: 'press-hold' || 'drag' || 'fling',
+          ) =>
+            <String>['semantics:gesture.target', '1'],
+          PatchbayCanonicalUiCommandSpec(action: 'reveal') => <String>[
+            'semantics:row.42',
+          ],
           PatchbayFriendlyCommand.launch => <String>['fake-consumer'],
           PatchbayFriendlyCommand.exec ||
           PatchbayFriendlyCommand.describe => <String>['fixture.command'],
@@ -281,18 +299,25 @@ void main() {
       final List<String> options = <String>[
         if (spec.name == 'uiGesturePressHold' ||
             spec.name == 'uiGestureDrag' ||
-            spec.name == 'uiGestureFling') ...<String>[
-          '--start',
-          '{"x":0.5,"y":0.5}',
-        ],
-        if (spec.name == 'uiGestureDrag') ...<String>[
+            spec.name == 'uiGestureFling' ||
+            spec is PatchbayCanonicalUiCommandSpec &&
+                <String>{'press-hold', 'drag', 'fling'}.contains(
+                  spec.action,
+                )) ...<String>['--start', '{"x":0.5,"y":0.5}'],
+        if (spec.name == 'uiGestureDrag' ||
+            spec is PatchbayCanonicalUiCommandSpec &&
+                spec.action == 'drag') ...<String>[
           '--gesture-path',
           '[{"x":0.5,"y":0.4},{"x":0.5,"y":0.2}]',
         ],
-        if (spec.name == 'uiGestureFling') ...<String>[
+        if (spec.name == 'uiGestureFling' ||
+            spec is PatchbayCanonicalUiCommandSpec &&
+                spec.action == 'fling') ...<String>[
           '--velocity',
           '{"x":0,"y":-2}',
         ],
+        if (spec is PatchbayCanonicalUiCommandSpec &&
+            spec.action == 'tap') ...<String>['--via', 'semantics'],
         if (spec.protocolSyntax?.fencesNavigationRevision ?? false) ...<String>[
           '--revision',
           '1',
@@ -345,13 +370,23 @@ void main() {
         parsed,
       );
       expect(resolved?.spec, same(spec), reason: spec.name);
-      expect(
-        resolved?.serviceCommand,
-        spec.target == PatchbayCommandTarget.callerServiceCommand
-            ? 'fixture.command'
-            : spec.serviceCommand,
-        reason: spec.name,
-      );
+      if (spec is PatchbayCanonicalUiCommandSpec) {
+        expect(
+          spec.routes.map(
+            (PatchbayCanonicalUiRoute route) => route.serviceCommand,
+          ),
+          contains(resolved?.serviceCommand),
+          reason: spec.name,
+        );
+      } else {
+        expect(
+          resolved?.serviceCommand,
+          spec.target == PatchbayCommandTarget.callerServiceCommand
+              ? 'fixture.command'
+              : spec.serviceCommand,
+          reason: spec.name,
+        );
+      }
     }
   });
 
@@ -383,11 +418,16 @@ void main() {
   test('client targets never claim a catalog service command', () {
     for (final PatchbayFriendlyCommandSpec spec
         in PatchbayFriendlyCommandRegistry.commands) {
-      expect(
-        spec.serviceCommand != null,
-        spec.target == PatchbayCommandTarget.declaredServiceCommand,
-        reason: spec.name,
-      );
+      if (spec is PatchbayCanonicalUiCommandSpec) {
+        expect(spec.target, PatchbayCommandTarget.routedServiceCommand);
+        expect(spec.routes, isNotEmpty, reason: spec.name);
+      } else {
+        expect(
+          spec.serviceCommand != null,
+          spec.target == PatchbayCommandTarget.declaredServiceCommand,
+          reason: spec.name,
+        );
+      }
     }
   });
 
