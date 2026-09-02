@@ -11,11 +11,9 @@ import 'dart:convert';
 /// by the stable code, `gateId` and existing details, and publishing the
 /// internal stage would turn refactoring topology into protocol.
 ///
-/// `uiPreflight` and `operationPolicy` belong to the Flutter handler, which
-/// does not write audit; they become reachable only once the registry/external
-/// admission fork is removed and the handler returns a typed UI decision to
-/// core. Declaring them now keeps the vocabulary frozen in one place instead of
-/// growing it twice.
+/// `uiPreflight` and `operationPolicy` belong to the Flutter handler. An
+/// internal admission scope projects the last reached handler stage into the
+/// host-only audit state; neither value crosses the invocation envelope.
 const Set<String> patchbayAuditAdmissionStages = <String>{
   'catalog',
   'inputPolicy',

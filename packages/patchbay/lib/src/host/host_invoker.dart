@@ -6,6 +6,7 @@ import '../catalog_digest.dart';
 import '../command_descriptor.dart';
 import '../command_registry.dart';
 import '../execution_evidence.dart';
+import '../gate_admission_scope.dart';
 import '../gates.dart';
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
@@ -59,11 +60,12 @@ final class HostInvokerHandler {
   final PatchbayCommandRegistry _registry;
   final HostCatalogHandler _catalogHandler;
 
-  /// The evaluator consumer-owned write commands cross before dispatch.
+  /// The evaluator every catalog-declared admission crosses before dispatch.
   ///
-  /// Registry-owned commands are not routed through it: they already evaluate
-  /// their own declared gates inside their registration or bridge handler, and
-  /// running the same IDs twice would turn one authorization into two.
+  /// The base gate applies to writes. Descriptor gates apply whenever declared,
+  /// independent of side effect or registry ownership. Registry handlers run in
+  /// an internal scope that removes already-admitted stages from bridge-local
+  /// evaluation.
   final PatchbayGateEvaluator? _domainGates;
   late final AuditDispatcher? _auditDispatcher;
   Future<PatchbayAuditDrainResult>? _emptyAuditDrain;
@@ -336,8 +338,12 @@ final class HostInvokerHandler {
           ? arguments
           : withoutStdinProvenance(arguments);
     }
-    if (!_registry.handles(command) && policy.writesSideEffect) {
-      final Map<String, Object?>? refusal = await _admitDomainWrite(
+    final bool requiresCoreAdmission =
+        policy.writesSideEffect || policy.declaredGates.isNotEmpty;
+    final bool coreGateEvaluated =
+        requiresCoreAdmission && _domainGates != null;
+    if (requiresCoreAdmission) {
+      final Map<String, Object?>? refusal = await _admitCommand(
         command,
         requestId,
         policy,
@@ -350,21 +356,40 @@ final class HostInvokerHandler {
     final Map<String, Object?>? cancelledBeforeHandler = _invocations
         .frozenCancellationResponse(command, requestId);
     if (cancelledBeforeHandler != null) return cancelledBeforeHandler;
-    final Map<String, Object?>? registered = await _registry.tryDispatch(
-      command,
-      forwarded,
-      requestId,
-      onGateResult: (String value) {
-        onGateResult(value);
-        // Registry-owned commands report their own gate outcome today; until
-        // the admission fork is removed the disposition mirrors it rather than
-        // claiming core evaluated a gate it never saw.
-        if (audit != null && patchbayAuditGateDispositions.contains(value)) {
-          audit.gateDisposition = value;
-        }
-      },
-      context: context,
-    );
+    final Map<String, Object?>? registered =
+        await runInPatchbayGateAdmissionScope<Map<String, Object?>?>(
+          skipBase: coreGateEvaluated || !policy.writesSideEffect,
+          admittedGateIds: coreGateEvaluated
+              ? policy.declaredGates
+              : const <String>{},
+          onGateResult: onGateResult,
+          onGateDisposition: (String value) {
+            audit?.gateDisposition = value;
+          },
+          onAdmissionStage: (String value) {
+            audit?.admissionStage = value;
+          },
+          body: () => _registry.tryDispatch(
+            command,
+            forwarded,
+            requestId,
+            onGateResult: (String value) {
+              // A registration with no legacy `_gate` reports `notDeclared`
+              // before entering its handler. Do not let that erase a core
+              // result; dynamic handler gates report through the scope above.
+              if (!coreGateEvaluated ||
+                  value == 'passed' ||
+                  value == 'rejected') {
+                onGateResult(value);
+                if (audit != null &&
+                    patchbayAuditGateDispositions.contains(value)) {
+                  audit.gateDisposition = value;
+                }
+              }
+            },
+            context: context,
+          ),
+        );
     final Map<String, Object?> result;
     if (registered != null) {
       result = registered;
@@ -382,6 +407,7 @@ final class HostInvokerHandler {
     final Map<String, Object?>? cancelledAfterHandler = _invocations
         .frozenCancellationResponse(command, requestId);
     if (cancelledAfterHandler != null) return cancelledAfterHandler;
+    final String? handlerAdmissionStage = audit?.admissionStage;
     final PatchbayInvocationWire wire;
     try {
       audit?.admissionStage = 'responseValidation';
@@ -398,6 +424,12 @@ final class HostInvokerHandler {
     final String? semanticViolation = _invocationSemanticViolation(wire);
     if (semanticViolation != null) {
       return _invalidInvocationEnvelope(requestId, semanticViolation);
+    }
+    if (registered != null &&
+        wire.admission == PatchbayAdmissionWire.rejected &&
+        (handlerAdmissionStage == 'uiPreflight' ||
+            handlerAdmissionStage == 'operationPolicy')) {
+      audit?.admissionStage = handlerAdmissionStage!;
     }
     final PatchbayResponseSchema? responseSchema =
         catalog.responseSchemas[command];
@@ -441,7 +473,7 @@ final class HostInvokerHandler {
     }, executionValidation);
   }
 
-  /// The admission gate for consumer-owned write commands.
+  /// The shared admission gate for registry-owned and external commands.
   ///
   /// It sits after the sensitive-stdin check and before routing, and returns
   /// the rejection envelope to serve, or null to continue dispatching.
@@ -451,16 +483,16 @@ final class HostInvokerHandler {
   /// retry of a request that was already served. It also runs before a ledger
   /// slot is reserved, so a slow gate cannot starve unrelated commands into
   /// `requestLedgerFull`.
-  Future<Map<String, Object?>?> _admitDomainWrite(
+  Future<Map<String, Object?>?> _admitCommand(
     String command,
     String requestId,
     PatchbayCommandPolicy policy, {
     required void Function(String result) onGateResult,
     _InvocationAuditState? audit,
   }) async {
-    // The base gate runs first inside the evaluator, so entering this function
-    // means the base gate stage is the one in force until it passes.
-    audit?.admissionStage = 'baseGate';
+    audit?.admissionStage = policy.writesSideEffect
+        ? 'baseGate'
+        : 'descriptorGate';
     final PatchbayGateEvaluator? gates = _domainGates;
     if (gates == null) {
       // No declaration, no evaluator, nothing to enforce: byte-for-byte what
@@ -481,9 +513,12 @@ final class HostInvokerHandler {
         reason: 'gateEvaluatorUnavailable',
       );
     }
-    final PatchbayGateRejection? rejection = await gates.evaluate(
-      policy.declaredGates,
-    );
+    final PatchbayGateRejection? rejection =
+        await runInPatchbayGateAdmissionScope<PatchbayGateRejection?>(
+          skipBase: !policy.writesSideEffect,
+          admittedGateIds: const <String>{},
+          body: () => gates.evaluate(policy.declaredGates),
+        );
     if (rejection != null) {
       onGateResult('rejected');
       // `patchbay.base` is the evaluator's own marker for the non-optional host
