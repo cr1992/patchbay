@@ -1,5 +1,5 @@
-# 仓内开发用：把随版包解析到工作树，pubspec.yaml 里保留发布合法的 hosted 约束。
-# 由 `dart run packages/patchbay/bin/release_prep.dart --apply` 维护，勿手改。
+# workspace 外的 example consumer 用：把随版包解析到当前工作树。
+# 由 `dart run tool/repo_tasks.dart release --apply` 维护，勿手改。
 dependency_overrides:
   patchbay:
     path: ../../patchbay

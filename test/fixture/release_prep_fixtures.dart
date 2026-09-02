@@ -46,6 +46,9 @@ String pubspecFixture(
     ..writeln('environment:')
     ..writeln("  sdk: '>=3.11.0 <4.0.0'");
   if (isFlutter) out.writeln("  flutter: '>=3.38.0'");
+  out
+    ..writeln()
+    ..writeln('resolution: workspace');
   if (isFlutter || isCli) {
     out
       ..writeln()
@@ -167,21 +170,6 @@ ReleaseInputs releaseInputsFixture({
       ? '| `$tagPrefix$resolved` | `$sha` | $matrixSchemaCell | 3.44.9 '
             '| `>=3.38.0` | $consumers |\n'
       : '';
-  String? overridesFor(String name) {
-    if (!publishable) return null;
-    if (dropOverrides.contains('packages/$name')) return null;
-    return switch (name) {
-      'patchbay_cli' => renderOverrides(<String, String>{
-        'patchbay': '../patchbay',
-        'patchbay_transport': '../patchbay_transport',
-      }),
-      'patchbay_flutter' => renderOverrides(<String, String>{
-        'patchbay': '../patchbay',
-      }),
-      _ => null,
-    };
-  }
-
   return ReleaseInputs(
     packages: <String, PackageManifest>{
       for (final String name in releasePackages)
@@ -197,7 +185,7 @@ ReleaseInputs releaseInputsFixture({
           files: publishable
               ? <String>{'LICENSE', 'README.md', 'CHANGELOG.md'}
               : <String>{},
-          overrides: overridesFor(name),
+          overrides: null,
           changelog: released
               ? '# Changelog\n\n## $changelogVersion - 2026-08-14\n\n见根表。\n'
               : null,
@@ -233,7 +221,7 @@ ReleaseInputs releaseInputsFixture({
         'dependencies:\n'
         '  patchbay_flutter:\n'
         '    path: ..\n',
-    exampleOverrides: publishable
+    exampleOverrides: publishable && !dropOverrides.contains('example')
         ? renderOverrides(<String, String>{'patchbay': exampleOverridePath})
         : null,
     exampleLock:

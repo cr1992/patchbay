@@ -14,7 +14,7 @@
 //   dart run tool/migrate_backlog.dart [--source docs/backlog.md] [--apply]
 import 'dart:io';
 
-import '../packages/patchbay/tool/backlog_store.dart';
+import 'backlog_store.dart';
 
 final RegExp _separatorCell = RegExp(r'^:?-{3,}:?$');
 

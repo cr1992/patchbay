@@ -16,7 +16,7 @@
     "packages/patchbay/test/job_response_schema_test.dart": 709,
     "packages/patchbay/test/snapshot_selection_test.dart": 720,
     "packages/patchbay/tool/command_codegen.dart": 786,
-    "packages/patchbay/tool/src/release_prep/release_checker.dart": 683,
+    "tool/src/release_prep/release_checker.dart": 683,
     "packages/patchbay/tool/wire_codegen.dart": 703,
     "packages/patchbay_cli/lib/src/android_permission_adapter.dart": 606,
     "packages/patchbay_cli/lib/src/cli.dart": 712,

@@ -26,13 +26,13 @@ List<String> manualSteps(String version, ReleaseInputs inputs) {
         '      git rev-parse $tag^{}   # 填 commit SHA 列（annotated tag 必须 peeled）\n'
         '      「已知 consumer」列的 `$pendingConsumers` 换成向 consumer 仓核实后的口径',
     '回填后重跑本脚本确认转绿：\n'
-        '      dart run packages/patchbay/bin/release_prep.dart --version $version --check',
+        '      dart run tool/repo_tasks.dart release --version $version --check',
     '复核 example lock 与真实解析一致（脚本只改版本格子，不跑 pub）：\n'
         '      (cd $examplePath && flutter pub get)\n'
         '      git diff --exit-code $exampleLockPath',
     '开发布开关（仓主决定，一次性）：四包的 `publish_to: none` 不删，pub 直接拒收，'
         'dry-run 也跑不起来。确认 $version 对外发布后：\n'
-        '      dart run packages/patchbay/bin/release_prep.dart --version $version --apply --enable-publish\n'
+        '      dart run tool/repo_tasks.dart release --version $version --apply --enable-publish\n'
         '      # 等价于人工删掉四包 pubspec 的 `publish_to: none` 一行',
     'pub points 是发布硬门：用 pub.dev 当前版本的 Pana 对待发布包评分，必须满分才继续；'
         '按依赖顺序逐包发布并等待上游版本可解析，再复算下游。每包发布后还要核对 pub.dev Scores API '
@@ -50,7 +50,7 @@ List<String> manualSteps(String version, ReleaseInputs inputs) {
 
 const String _usage = '''
 用法：
-  dart run packages/patchbay/bin/release_prep.dart --version <SemVer> (--check|--apply)
+  dart run tool/repo_tasks.dart release --version <SemVer> (--check|--apply)
 
 可选：
   --date YYYY-MM-DD        CHANGELOG 落款日期，默认今天

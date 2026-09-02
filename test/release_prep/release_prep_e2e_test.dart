@@ -327,7 +327,7 @@ void main() {
       );
     });
 
-    test('apply 会把 hosted 约束与 overrides 一起带到目标版本', () async {
+    test('apply 会把 hosted 约束带到目标版本并维持 workspace 解析', () async {
       materializeInputs(repo, releaseInputsFixture(publishable: true));
       await execReleasePrepProcess(repo, '--apply', version: '0.4.0');
       final String cli = File(
@@ -343,31 +343,27 @@ void main() {
         version: '0.4.0',
       );
       expect(check.stdout, contains('[通过] internal-dep-constraints'));
-      expect(check.stdout, contains('[通过] local-overrides'));
+      expect(check.stdout, contains('[通过] workspace-resolution'));
     });
 
-    test('缺 overrides 时 apply 代生成，且不推平已经指对的文件', () async {
+    test('example 缺 overrides 时 apply 代生成，且不推平已经指对的文件', () async {
       materializeInputs(
         repo,
         releaseInputsFixture(
           publishable: true,
-          dropOverrides: <String>{'packages/patchbay_cli'},
+          dropOverrides: <String>{'example'},
         ),
       );
-      final File overrides = File(
-        '${repo.path}/${overridesPathOf('patchbay_cli')}',
-      );
+      final File overrides = File('${repo.path}/$exampleOverridesPath');
       expect(overrides.existsSync(), isFalse);
       await execReleasePrepProcess(repo, '--apply');
       expect(readPathOverrides(overrides.readAsStringSync()), <String, String>{
-        'patchbay': '../patchbay',
-        'patchbay_transport': '../patchbay_transport',
+        'patchbay': '../../patchbay',
       });
 
       const String handEdited =
           '# 手工加过的注释\ndependency_overrides:\n'
-          '  patchbay:\n    path: ../patchbay\n'
-          '  patchbay_transport:\n    path: ../patchbay_transport\n';
+          '  patchbay:\n    path: ../../patchbay\n';
       overrides.writeAsStringSync(handEdited);
       await execReleasePrepProcess(repo, '--apply');
       expect(overrides.readAsStringSync(), handEdited);

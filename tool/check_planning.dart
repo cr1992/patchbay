@@ -2,11 +2,11 @@
 //
 // 台账真源是 `docs/backlog.d/` 下的每条目一个碎片（见该目录 README）；
 // `docs/backlog.md` 只剩说明与目录指引，不再承载条目行。碎片的结构性解析
-// 住在 `packages/patchbay/tool/backlog_store.dart`——`release_finalize` 随包
-// 发布且要读写同一份碎片，共享代码必须留在包内。
+// 住在根私有 repo-tooling 的 `tool/backlog_store.dart`，与 release_finalize 共用，
+// 不进入四个发布包。
 import 'dart:io';
 
-import '../packages/patchbay/tool/backlog_store.dart';
+import 'backlog_store.dart';
 
 // PB-060-04：活跃版本不再是手写常量。
 //

@@ -33,7 +33,7 @@ List<ReleaseCheck> evaluateRelease({
     _checkCompatRow(version, inputs),
     _checkCompatBackfill(inputs, resolveTag),
     _checkInternalConstraints(version, inputs),
-    _checkLocalOverrides(inputs),
+    _checkWorkspaceResolution(inputs),
     _checkPublishSwitch(inputs),
     ..._checkPublishManifest(inputs),
   ];
@@ -517,17 +517,22 @@ ReleaseCheck _checkInternalConstraints(String version, ReleaseInputs inputs) {
   );
 }
 
-ReleaseCheck _checkLocalOverrides(ReleaseInputs inputs) {
-  final Map<String, Map<String, String>> expected = expectedOverrides(inputs);
-  final Map<String, String?> actual = <String, String?>{
+ReleaseCheck _checkWorkspaceResolution(ReleaseInputs inputs) {
+  final problems = <String>[
     for (final MapEntry<String, PackageManifest> entry
         in inputs.packages.entries)
-      overridesPathOf(entry.key): entry.value.overrides,
-    exampleOverridesPath: inputs.exampleOverrides,
-  };
-  final problems = <String>[];
+      if (readPubspecField(entry.value.pubspec, 'resolution') != 'workspace')
+        '${entry.key} 缺 `resolution: workspace`',
+    for (final MapEntry<String, PackageManifest> entry
+        in inputs.packages.entries)
+      if (entry.value.overrides != null)
+        '${overridesPathOf(entry.key)} 不应存在（发布包由根 workspace 解析）',
+  ];
+  final Map<String, Map<String, String>> expected = expectedOverrides(inputs);
   expected.forEach((path, wanted) {
-    final Map<String, String> present = readPathOverrides(actual[path]);
+    final Map<String, String> present = readPathOverrides(
+      inputs.exampleOverrides,
+    );
     final List<String> diff = <String>[];
     wanted.forEach((dep, wantedPath) {
       final String? got = present[dep];
@@ -541,22 +546,22 @@ ReleaseCheck _checkLocalOverrides(ReleaseInputs inputs) {
   });
   if (problems.isNotEmpty) {
     return ReleaseCheck.failed(
-      'local-overrides',
-      '${problems.join('；')}——少一条，仓内开发就会从 pub.dev 拉那个包，'
-          '工作树里的改动测不到（`--apply` 可代生成）',
+      'workspace-resolution',
+      '${problems.join('；')}——发布包必须统一命中 workspace 候选；workspace 外的 '
+          'example 必须显式覆盖传递依赖（example overrides 可由 `--apply` 代生成）',
       hard: true,
     );
   }
   if (expected.isEmpty) {
     return const ReleaseCheck.skipped(
-      'local-overrides',
-      '没有需要 override 的随版依赖',
+      'workspace-resolution',
+      '四个发布包已进入 workspace，example 没有需要覆盖的传递依赖',
       hard: true,
     );
   }
   return ReleaseCheck.ok(
-    'local-overrides',
-    '${expected.length} 处 pubspec_overrides.yaml 指向工作树',
+    'workspace-resolution',
+    '四个发布包使用根 workspace；example 的独立 overrides 指向工作树',
     hard: true,
   );
 }

@@ -29,31 +29,5 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo '== SDK floor =='
-flutter --version
-
-for package in patchbay patchbay_cli patchbay_transport; do
-  echo "== packages/$package =="
-  (
-    cd "packages/$package"
-    dart pub get
-    dart analyze --fatal-infos
-    dart test --reporter failures-only
-  )
-done
-
-echo '== packages/patchbay_flutter =='
-(
-  cd packages/patchbay_flutter
-  flutter pub get
-  flutter analyze
-  flutter test --reporter failures-only
-)
-
-echo '== packages/patchbay_flutter/example =='
-(
-  cd packages/patchbay_flutter/example
-  flutter pub get
-  flutter analyze
-  flutter test --reporter failures-only
-)
+# 兼容原有本地入口；真实包清单与命令只维护在私有 repo task 中。
+exec dart run tool/repo_tasks.dart sdk-floor
