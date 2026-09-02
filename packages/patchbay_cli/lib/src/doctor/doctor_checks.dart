@@ -7,6 +7,7 @@ import '../client.dart';
 import '../rpc_timeout.dart';
 import '../session.dart';
 import '../session/workspace_selection.dart';
+import '../trace/trace_redaction.dart';
 import 'doctor_models.dart';
 
 /// Reads the local session directory and judges what a command would do next.
@@ -56,6 +57,53 @@ PatchbayDoctorFinding patchbaySessionDirectoryFinding(
   );
 }
 
+/// The name a quarantined session file is reported under.
+///
+/// PB-050-29. Quarantined files sit flat in the session directory, so the file
+/// name **is** the path relative to it — which keeps the operator's ability to
+/// find the file (they know their own `--session-dir`) while keeping the local
+/// absolute path out of output that, by the comment on `counts()` below, is
+/// something operators paste into issues. The same reasoning already keeps the
+/// workspace root out of this finding, and `trace_redaction.dart` already treats
+/// anything that looks like an absolute path as sensitive; quarantined files
+/// were the one place that principle had not been applied.
+///
+/// Applied at the **sink** rather than at the one producer on purpose: this is
+/// the function that emits the details map, so redacting here holds no matter
+/// which caller assembled the list. A producer-side projection would leave the
+/// sink willing to print whatever it was handed.
+///
+/// Fails closed: a value that still looks absolute after taking the last
+/// segment — it should not, but a future nested quarantine layout would make it
+/// so — reports the sentinel instead of leaking the path. Losing locatability is
+/// the safe direction.
+///
+/// Splits on both separators rather than delegating to `Uri.file`, which follows
+/// the *host* convention: a Windows-shaped value read on a POSIX host would come
+/// back as one segment and fail closed to the sentinel, throwing away
+/// locatability for no reason. The job here is "never emit something that looks
+/// absolute", so it must not depend on which platform is parsing.
+String patchbayQuarantinedFileLabel(String path) {
+  final String name =
+      path
+          .split(RegExp(r'[/\\]'))
+          .where((String segment) => segment.isNotEmpty)
+          .lastOrNull ??
+      '';
+  if (name.isEmpty ||
+      looksAbsolutePath(name) ||
+      _bareDriveLetter.hasMatch(name)) {
+    return '<redacted:absolute-path>';
+  }
+  return name;
+}
+
+/// `C:` — what splitting `C:\` leaves behind.
+///
+/// It leaks nothing, but reporting a drive letter as a *file name* is nonsense
+/// output; the sentinel says "no name available" honestly.
+final RegExp _bareDriveLetter = RegExp(r'^[A-Za-z]:$');
+
 /// The session verdict for one directory listing.
 PatchbayDoctorFinding patchbaySessionFinding({
   required List<PatchbaySessionListing> listings,
@@ -85,7 +133,9 @@ PatchbayDoctorFinding patchbaySessionFinding({
     'scopedPin': scope?.scopedSelection,
     if (quarantinedFiles.isNotEmpty) ...<String, Object?>{
       'quarantined': quarantinedFiles.length,
-      'quarantinedFiles': quarantinedFiles,
+      'quarantinedFiles': quarantinedFiles
+          .map(patchbayQuarantinedFileLabel)
+          .toList(growable: false),
     },
   };
 
