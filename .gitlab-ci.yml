@@ -10,6 +10,12 @@ default:
   image: $PATCHBAY_CI_IMAGE
   interruptible: true
 
+# 共享 Flutter 镜像默认指向第三方 Pub 镜像；该镜像从 GitLab runner 访问时可能持续
+# 返回 authorization failed。Patchbay 只依赖公开包，显式回到官方源，也与 GitHub CI
+# 的默认解析来源保持一致，避免基础镜像的下载源选择静默改变本仓门禁结果。
+variables:
+  PUB_HOSTED_URL: "https://pub.dev"
+
 stages: [check, sdk_floor_check]
 
 # PB-050-12：**已验证下限的守门 lane。** 它跑的版本就是 pubspec 声明的下限
