@@ -3,6 +3,7 @@ import 'package:patchbay/patchbay.dart';
 
 import '../sensitive_input.dart';
 import 'argument_decoder.dart';
+import 'canonical_ui_registry.dart';
 import 'command_spec.dart';
 import 'friendly_commands.dart';
 
@@ -24,8 +25,17 @@ abstract final class FriendlyCommandRegistryResolver {
     final List<String> path = canonicalPath(words, allCommands);
     final PatchbayFriendlyCommandSpec? spec = match(path, allCommands);
     if (spec == null) return null;
-    validateOptions(spec, options);
     final List<String> tail = path.sublist(spec.path.length);
+    if (spec is PatchbayCanonicalUiCommandSpec) {
+      return _resolveCanonicalUi(
+        spec: spec,
+        tail: tail,
+        options: options,
+        allCommands: allCommands,
+        readSensitiveInput: readSensitiveInput,
+      );
+    }
+    validateOptions(spec, options, allCommands: allCommands);
     final String? serviceCommand;
     if (spec.target == PatchbayCommandTarget.callerServiceCommand) {
       if (tail.length != 1) {
@@ -339,6 +349,93 @@ abstract final class FriendlyCommandRegistryResolver {
     );
   }
 
+  static PatchbayFriendlyInvocation _resolveCanonicalUi({
+    required PatchbayCanonicalUiCommandSpec spec,
+    required List<String> tail,
+    required ArgResults options,
+    required List<PatchbayFriendlyCommandSpec> allCommands,
+    required String Function() readSensitiveInput,
+  }) {
+    if (tail.isEmpty) {
+      throw FormatException(
+        '${spec.path.join(' ')} requires an explicit selector',
+      );
+    }
+    final PatchbayCanonicalUiSelector selector =
+        PatchbayCanonicalUiSelector.parse(tail.first);
+    final String? via = options.option('via');
+    if (spec == PatchbayCanonicalUiRegistry.tap && via == null) {
+      throw const FormatException(
+        'ui perform tap requires --via semantics or --via pointer',
+      );
+    }
+    if (spec != PatchbayCanonicalUiRegistry.tap && via != null) {
+      throw FormatException('--via is not valid for ${spec.path.join(' ')}');
+    }
+    final List<PatchbayCanonicalUiRoute> matches = spec.routes
+        .where(
+          (PatchbayCanonicalUiRoute route) =>
+              route.selectorKind == selector.kind && route.via == via,
+        )
+        .toList(growable: false);
+    if (matches.length != 1) {
+      throw FormatException(
+        '${selector.kind.name}: selector is not valid for '
+        '${spec.path.join(' ')}${via == null ? '' : ' --via $via'}',
+      );
+    }
+    final PatchbayCanonicalUiRoute route = matches.single;
+    final PatchbayFriendlyCommandSpec destination = _protocolSpec(
+      allCommands,
+      route.serviceCommand,
+    );
+    final Set<String> allowed = <String>{...allowedOptions(destination)};
+    final Map<String, String> boundOptionValues = <String, String>{};
+    final List<String> destinationTail;
+    if (route.serviceCommand == 'ui.semantics.tap') {
+      if (tail.length != 2) {
+        throw const FormatException(
+          'ui perform tap requires <generation> after the selector',
+        );
+      }
+      destinationTail = <String>[selector.value];
+      allowed.remove('generation');
+      boundOptionValues['generation'] = tail[1];
+    } else {
+      destinationTail = <String>[selector.value, ...tail.skip(1)];
+    }
+    if (spec == PatchbayCanonicalUiRegistry.tap) allowed.add('via');
+    validateOptions(
+      spec,
+      options,
+      allowedOverride: allowed,
+      commandPath: spec.path,
+    );
+    final Map<String, Object?> arguments = ArgumentDecoder.protocolArguments(
+      destination,
+      destinationTail,
+      options,
+      readSensitiveInput,
+      boundOptionValues: boundOptionValues,
+    );
+    return PatchbayFriendlyInvocation(
+      spec: spec,
+      arguments: arguments,
+      serviceCommand: route.serviceCommand,
+      plaintextArgumentKeys: ArgumentDecoder.plaintextArgumentKeys(options),
+      localRoute: route.toLocalRoute(),
+    );
+  }
+
+  static PatchbayFriendlyCommandSpec _protocolSpec(
+    List<PatchbayFriendlyCommandSpec> allCommands,
+    String serviceCommand,
+  ) => allCommands.singleWhere(
+    (PatchbayFriendlyCommandSpec command) =>
+        command.protocolSyntax != null &&
+        command.serviceCommand == serviceCommand,
+  );
+
   static List<String> canonicalPath(
     List<String> words,
     List<PatchbayFriendlyCommandSpec> allCommands,
@@ -437,9 +534,14 @@ abstract final class FriendlyCommandRegistryResolver {
 
   static void validateOptions(
     PatchbayFriendlyCommandSpec spec,
-    ArgResults options,
-  ) {
-    final Set<String> allowed = allowedOptions(spec);
+    ArgResults options, {
+    List<PatchbayFriendlyCommandSpec> allCommands =
+        const <PatchbayFriendlyCommandSpec>[],
+    Set<String>? allowedOverride,
+    List<String>? commandPath,
+  }) {
+    final Set<String> allowed =
+        allowedOverride ?? allowedOptions(spec, allCommands: allCommands);
     const Set<String> friendlyOptions = <String>{
       'args',
       'stdin',
@@ -488,11 +590,13 @@ abstract final class FriendlyCommandRegistryResolver {
       'include-artifacts',
       'sample-limit',
       'max-inline-bytes',
+      'via',
     };
     for (final String name in friendlyOptions) {
       if (options.wasParsed(name) && !allowed.contains(name)) {
         throw FormatException(
-          '--$name is not valid for ${spec.path.join(' ')}',
+          '--$name is not valid for '
+          '${(commandPath ?? spec.path).join(' ')}',
         );
       }
     }
@@ -512,7 +616,26 @@ abstract final class FriendlyCommandRegistryResolver {
     }
   }
 
-  static Set<String> allowedOptions(PatchbayFriendlyCommandSpec spec) {
+  static Set<String> allowedOptions(
+    PatchbayFriendlyCommandSpec spec, {
+    List<PatchbayFriendlyCommandSpec> allCommands =
+        const <PatchbayFriendlyCommandSpec>[],
+  }) {
+    if (spec is PatchbayCanonicalUiCommandSpec) {
+      final Set<String> result = <String>{};
+      for (final PatchbayCanonicalUiRoute route in spec.routes) {
+        final PatchbayFriendlyCommandSpec destination = _protocolSpec(
+          allCommands,
+          route.serviceCommand,
+        );
+        result.addAll(allowedOptions(destination));
+        if (route.serviceCommand == 'ui.semantics.tap') {
+          result.remove('generation');
+        }
+        if (route.via != null) result.add('via');
+      }
+      return result;
+    }
     if (spec.protocolSyntax case final PatchbayCliSyntax syntax) {
       return <String>{
         ...syntax.optionParameters.values,

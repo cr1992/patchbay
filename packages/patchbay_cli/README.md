@@ -94,82 +94,90 @@ name that no declaration ships is still an `unknown help topic`.
 <!-- PATCHBAY_COMMAND_REFERENCE:START -->
 This table describes syntax shipped by this CLI. Protocol-backed rows come from repository descriptors; client and local rows remain explicit CLI declarations. It is not the runtime capability catalog; use `patchbay catalog` for actual availability.
 
-| CLI syntax | Declaration source | Protocol command |
-|---|---|---|
-| `patchbay blob get <blob-id> --output <path>` | client CLI declaration | `blob.metadata` |
-| `patchbay blob metadata <blob-id>` | client CLI declaration | `blob.metadata` |
-| `patchbay capture diff <before-blob-id> <after-blob-id>` | client CLI declaration | `ui.capture.diff` |
-| `patchbay capture root --output <path>` | protocol descriptor | `ui.capture` |
-| `patchbay capture target <target-id> <generation> --output <path>` | protocol descriptor | `ui.capture` |
-| `patchbay catalog` | client CLI declaration | — |
-| `patchbay describe <service-command>` | local CLI declaration | — |
-| `patchbay doctor` | local CLI declaration | — |
-| `patchbay doctor permission` | local CLI declaration | — |
-| `patchbay exec <service-command>` | client CLI declaration | — |
-| `patchbay identity` | client CLI declaration | — |
-| `patchbay job cancel <job-id>` | client CLI declaration | `patchbay.job.cancel` |
-| `patchbay job get <job-id>` | client CLI declaration | `patchbay.job.get` |
-| `patchbay launch -- <consumer command>` | local CLI declaration | — |
-| `patchbay logs export --output <path>` | client CLI declaration | `logs.export` |
-| `patchbay logs query` | client CLI declaration | `logs.query` |
-| `patchbay logs tail` | client CLI declaration | `logs.tail` |
-| `patchbay navigation back [--revision <revision>]` | protocol descriptor | `navigation.back` |
-| `patchbay navigation catalog` | protocol descriptor | `navigation.catalog` |
-| `patchbay navigation current` | protocol descriptor | `navigation.current` |
-| `patchbay navigation go <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.go` |
-| `patchbay navigation push <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.push` |
-| `patchbay net profile` | client CLI declaration | — |
-| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client CLI declaration | — |
-| `patchbay permission capabilities` | local CLI declaration | — |
-| `patchbay permission exercise <permission> --decision <decision>` | local CLI declaration | — |
-| `patchbay permission fail <permission> --state <state>` | local CLI declaration | — |
-| `patchbay permission normalize <permission> --state <state>` | local CLI declaration | — |
-| `patchbay permission reset <permission>` | local CLI declaration | — |
-| `patchbay permission status <permission>` | local CLI declaration | — |
-| `patchbay repl` | client CLI declaration | — |
-| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local CLI declaration | — |
-| `patchbay session unregister <session-id>` | local CLI declaration | — |
-| `patchbay session use <session-id> \| --clear` | local CLI declaration | — |
-| `patchbay sessions list` | local CLI declaration | — |
-| `patchbay sessions prune` | local CLI declaration | — |
-| `patchbay snapshot [--path <dot.path>]` | client CLI declaration | — |
-| `patchbay snapshot diff --from <revision>` | client CLI declaration | — |
-| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client CLI declaration | — |
-| `patchbay trace diff <before-trace-id> <after-trace-id>` | local CLI declaration | — |
-| `patchbay trace export <trace-id> --output <directory>` | local CLI declaration | — |
-| `patchbay trace mark <note>` | local CLI declaration | — |
-| `patchbay trace prune [--dry-run]` | local CLI declaration | — |
-| `patchbay trace show <trace-id>` | local CLI declaration | — |
-| `patchbay trace start --name <name> [--activate] [--pin]` | local CLI declaration | — |
-| `patchbay trace stop [trace-id]` | local CLI declaration | — |
-| `patchbay ui action <identifier> <generation> <action> [text]` | protocol descriptor | `ui.semantics.actionByIdentifier` |
-| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
-| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` |
-| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` |
-| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.pressHold` |
-| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | protocol descriptor | `ui.gesture.tap` |
-| `patchbay ui inspect off` | protocol descriptor | `ui.inspect.select` |
-| `patchbay ui inspect on [--ttl-ms <ms>]` | protocol descriptor | `ui.inspect.select` |
-| `patchbay ui inspect status` | protocol descriptor | `ui.inspect.status` |
-| `patchbay ui keep-awake off` | protocol descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake on [--lease-ms <ms>]` | protocol descriptor | `ui.keepAwake.set` |
-| `patchbay ui keep-awake status` | protocol descriptor | `ui.keepAwake.status` |
-| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
-| `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | protocol descriptor | `ui.reveal` |
-| `patchbay ui semantics action <node-id> <generation> <action> [text]` | protocol descriptor | `ui.semantics.action` |
-| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | protocol descriptor | `ui.semantics.tree` |
-| `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` |
-| `patchbay ui targets --emit-manifest` | local CLI declaration | — |
-| `patchbay ui text enter <target-id> <generation> [text]` | protocol descriptor | `ui.text.enter` |
-| `patchbay ui text set <target-id> <generation> [text]` | protocol descriptor | `ui.text.set` |
-| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local CLI declaration | — |
-| `patchbay ui wait destination <destination-id>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait frame-revision <revision>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait semantics-mounted <identifier>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait semantics-unmounted <identifier>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait semantics-value <identifier> <value>` | protocol descriptor | `ui.wait` |
-| `patchbay ui wait tree-revision <revision>` | protocol descriptor | `ui.wait` |
-| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — |
+| CLI syntax | Declaration source | Protocol command | Status / migration |
+|---|---|---|---|
+| `patchbay blob get <blob-id> --output <path>` | client CLI declaration | `blob.metadata` | current |
+| `patchbay blob metadata <blob-id>` | client CLI declaration | `blob.metadata` | current |
+| `patchbay capture diff <before-blob-id> <after-blob-id>` | client CLI declaration | `ui.capture.diff` | current |
+| `patchbay capture root --output <path>` | protocol descriptor | `ui.capture` | current |
+| `patchbay capture target <target-id> <generation> --output <path>` | protocol descriptor | `ui.capture` | current |
+| `patchbay catalog` | client CLI declaration | — | current |
+| `patchbay describe <service-command>` | local CLI declaration | — | current |
+| `patchbay doctor` | local CLI declaration | — | current |
+| `patchbay doctor permission` | local CLI declaration | — | current |
+| `patchbay exec <service-command>` | client CLI declaration | — | current |
+| `patchbay identity` | client CLI declaration | — | current |
+| `patchbay job cancel <job-id>` | client CLI declaration | `patchbay.job.cancel` | current |
+| `patchbay job get <job-id>` | client CLI declaration | `patchbay.job.get` | current |
+| `patchbay launch -- <consumer command>` | local CLI declaration | — | current |
+| `patchbay logs export --output <path>` | client CLI declaration | `logs.export` | current |
+| `patchbay logs query` | client CLI declaration | `logs.query` | current |
+| `patchbay logs tail` | client CLI declaration | `logs.tail` | current |
+| `patchbay navigation back [--revision <revision>]` | protocol descriptor | `navigation.back` | current |
+| `patchbay navigation catalog` | protocol descriptor | `navigation.catalog` | current |
+| `patchbay navigation current` | protocol descriptor | `navigation.current` | current |
+| `patchbay navigation go <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.go` | current |
+| `patchbay navigation push <destination-id> [--revision <revision>]` | protocol descriptor | `navigation.push` | current |
+| `patchbay net profile` | client CLI declaration | — | current |
+| `patchbay perf profile [--duration-ms <ms>] [--sample-limit <events>]` | client CLI declaration | — | current |
+| `patchbay permission capabilities` | local CLI declaration | — | current |
+| `patchbay permission exercise <permission> --decision <decision>` | local CLI declaration | — | current |
+| `patchbay permission fail <permission> --state <state>` | local CLI declaration | — | current |
+| `patchbay permission normalize <permission> --state <state>` | local CLI declaration | — | current |
+| `patchbay permission reset <permission>` | local CLI declaration | — | current |
+| `patchbay permission status <permission>` | local CLI declaration | — | current |
+| `patchbay repl` | client CLI declaration | — | current |
+| `patchbay session register --ws-uri <uri> --application-id <id> --device-id <id> --process-id <pid> [<session-id>]` | local CLI declaration | — | current |
+| `patchbay session unregister <session-id>` | local CLI declaration | — | current |
+| `patchbay session use <session-id> \| --clear` | local CLI declaration | — | current |
+| `patchbay sessions list` | local CLI declaration | — | current |
+| `patchbay sessions prune` | local CLI declaration | — | current |
+| `patchbay snapshot [--path <dot.path>]` | client CLI declaration | — | current |
+| `patchbay snapshot diff --from <revision>` | client CLI declaration | — | current |
+| `patchbay snapshot wait <dot.path> --until <condition> [<json-value>]` | client CLI declaration | — | current |
+| `patchbay trace diff <before-trace-id> <after-trace-id>` | local CLI declaration | — | current |
+| `patchbay trace export <trace-id> --output <directory>` | local CLI declaration | — | current |
+| `patchbay trace mark <note>` | local CLI declaration | — | current |
+| `patchbay trace prune [--dry-run]` | local CLI declaration | — | current |
+| `patchbay trace show <trace-id>` | local CLI declaration | — | current |
+| `patchbay trace start --name <name> [--activate] [--pin]` | local CLI declaration | — | current |
+| `patchbay trace stop [trace-id]` | local CLI declaration | — | current |
+| `patchbay ui action <identifier> <generation> <action> [text]` | protocol descriptor | `ui.semantics.actionByIdentifier` | deprecated in 0.6.0; use `patchbay ui perform action semantics:<identifier> <generation> <action> [text]`; removed in 1.0 |
+| `patchbay ui focus-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — | current |
+| `patchbay ui gesture drag <identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.drag` | deprecated in 0.6.0; use `patchbay ui perform drag semantics:<identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]`; removed in 1.0 |
+| `patchbay ui gesture fling <identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.fling` | deprecated in 0.6.0; use `patchbay ui perform fling semantics:<identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]`; removed in 1.0 |
+| `patchbay ui gesture press-hold <identifier> <generation> --start <json> [--duration-ms <ms>]` | protocol descriptor | `ui.gesture.pressHold` | deprecated in 0.6.0; use `patchbay ui perform press-hold semantics:<identifier> <generation> --start <json> [--duration-ms <ms>]`; removed in 1.0 |
+| `patchbay ui gesture tap <identifier> <generation> [--start <json>]` | protocol descriptor | `ui.gesture.tap` | deprecated in 0.6.0; use `patchbay ui perform tap semantics:<identifier> <generation> --via pointer [--start <json>]`; removed in 1.0 |
+| `patchbay ui inspect off` | protocol descriptor | `ui.inspect.select` | current |
+| `patchbay ui inspect on [--ttl-ms <ms>]` | protocol descriptor | `ui.inspect.select` | current |
+| `patchbay ui inspect status` | protocol descriptor | `ui.inspect.status` | current |
+| `patchbay ui keep-awake off` | protocol descriptor | `ui.keepAwake.set` | current |
+| `patchbay ui keep-awake on [--lease-ms <ms>]` | protocol descriptor | `ui.keepAwake.set` | current |
+| `patchbay ui keep-awake status` | protocol descriptor | `ui.keepAwake.status` | current |
+| `patchbay ui perform action <semantics:<identifier>\|node:<node-id>> <generation> <action> [text]` | local CLI declaration | `ui.semantics.action` / `ui.semantics.actionByIdentifier` | current |
+| `patchbay ui perform drag semantics:<identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | local CLI declaration | `ui.gesture.drag` | current |
+| `patchbay ui perform enter-text target:<id> <generation> [text]` | local CLI declaration | `ui.text.enter` | current |
+| `patchbay ui perform fling semantics:<identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | local CLI declaration | `ui.gesture.fling` | current |
+| `patchbay ui perform press-hold semantics:<identifier> <generation> --start <json> [--duration-ms <ms>]` | local CLI declaration | `ui.gesture.pressHold` | current |
+| `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | local CLI declaration | `ui.reveal` | current |
+| `patchbay ui perform set-text target:<id> <generation> [text]` | local CLI declaration | `ui.text.set` | current |
+| `patchbay ui perform tap semantics:<identifier> <generation> --via <semantics\|pointer> [--start <json>]` | local CLI declaration | `ui.gesture.tap` / `ui.semantics.tap` | current |
+| `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — | current |
+| `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | protocol descriptor | `ui.reveal` | deprecated in 0.6.0; use `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]`; removed in 1.0 |
+| `patchbay ui semantics action <node-id> <generation> <action> [text]` | protocol descriptor | `ui.semantics.action` | deprecated in 0.6.0; use `patchbay ui perform action node:<node-id> <generation> <action> [text]`; removed in 1.0 |
+| `patchbay ui semantics tree [--output <path>] [--force] [--max-inline-bytes <n>]` | protocol descriptor | `ui.semantics.tree` | current |
+| `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` | deprecated in 0.6.0; use `patchbay ui perform tap semantics:<identifier> <generation> --via semantics`; removed in 1.0 |
+| `patchbay ui targets --emit-manifest` | local CLI declaration | — | current |
+| `patchbay ui text enter <target-id> <generation> [text]` | protocol descriptor | `ui.text.enter` | deprecated in 0.6.0; use `patchbay ui perform enter-text target:<id> <generation> [text]`; removed in 1.0 |
+| `patchbay ui text set <target-id> <generation> [text]` | protocol descriptor | `ui.text.set` | deprecated in 0.6.0; use `patchbay ui perform set-text target:<id> <generation> [text]`; removed in 1.0 |
+| `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local CLI declaration | — | current |
+| `patchbay ui wait destination <destination-id>` | protocol descriptor | `ui.wait` | current |
+| `patchbay ui wait frame-revision <revision>` | protocol descriptor | `ui.wait` | current |
+| `patchbay ui wait semantics-mounted <identifier>` | protocol descriptor | `ui.wait` | current |
+| `patchbay ui wait semantics-unmounted <identifier>` | protocol descriptor | `ui.wait` | current |
+| `patchbay ui wait semantics-value <identifier> <value>` | protocol descriptor | `ui.wait` | current |
+| `patchbay ui wait tree-revision <revision>` | protocol descriptor | `ui.wait` | current |
+| `patchbay ui widget-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — | current |
 <!-- PATCHBAY_COMMAND_REFERENCE:END -->
 
 Once the app is launched by the `flutter run --machine` launcher, the CLI discovers the unique

@@ -3,6 +3,29 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
+  test('device precheck drives canonical UI writes and no deprecated path', () {
+    final String source = _examplePrecheck().readAsStringSync();
+
+    for (final String command in <String>[
+      'ui perform set-text target:example.note',
+      'ui perform tap semantics:example.counter.increment',
+      'ui perform action semantics:example.identifier.action',
+      '--json ui perform drag \\',
+      'semantics:example.gesture.surface',
+      '--json ui perform reveal "semantics:\$identifier"',
+    ]) {
+      expect(source, contains(command), reason: command);
+    }
+    expect(
+      source,
+      isNot(
+        matches(
+          RegExp(r'--json ui (?:text|tap|action|gesture|reveal)(?! perform)'),
+        ),
+      ),
+    );
+  });
+
   test('nested gesture precheck is mandatory and verifies a visual change', () {
     final String source = _examplePrecheck().readAsStringSync();
 

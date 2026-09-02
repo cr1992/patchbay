@@ -114,6 +114,7 @@ Future<int> runPatchbayCliWithSeams(
     if (parsed.rest.isEmpty) {
       throw FormatException(PatchbayCommandHelp.usageLine());
     }
+    _writeUiMigrationWarning(parsed, error);
     if (PatchbayFriendlyCommandRegistry.specFor(parsed.rest)?.target ==
         PatchbayCommandTarget.localLauncher) {
       final PatchbayFriendlyInvocation invocation =
@@ -243,6 +244,7 @@ Future<int> runPatchbayCliWithSeams(
       return await PatchbayReplSession(
         parser: parser,
         execute: (ArgResults line) async {
+          _writeUiMigrationWarning(line, error);
           final PatchbayTraceRecorder? trace =
               PatchbayTraceContext.currentRecorder;
           final PatchbayFriendlyCommandSpec? lineSpec =
@@ -591,6 +593,12 @@ Future<int> _runPatchbayCliWithTrace(
       exitCode: PatchbayExitCode.protocol,
     );
   }
+}
+
+void _writeUiMigrationWarning(ArgResults parsed, StringSink error) {
+  final PatchbayUiCommandMigration? migration =
+      PatchbayFriendlyCommandRegistry.uiMigrationFor(parsed.rest);
+  if (migration != null) error.writeln(migration.warning);
 }
 
 Future<Outcome> _executeOnce(

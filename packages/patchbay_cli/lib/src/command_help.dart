@@ -126,6 +126,7 @@ abstract final class PatchbayCommandHelp {
         '  ${usages[index].padRight(width)}  ${sorted[index].summary}',
       );
     }
+    _writeUiMigrations(output, sorted);
     _writeConditions(output, sorted);
     _writeOptions(output, parser, optionNames);
     // A group name can also be a command of its own — `snapshot` is both — and
@@ -182,6 +183,7 @@ abstract final class PatchbayCommandHelp {
         '  ${usages[index].padRight(width)}  ${sorted[index].summary}',
       );
     }
+    _writeUiMigrations(output, sorted);
     _writeDiscoverabilityNotes(output, serviceCommand: serviceCommand);
     _writeConditions(output, sorted);
     _writeOptions(output, parser, <String>{
@@ -244,6 +246,7 @@ abstract final class PatchbayCommandHelp {
       serviceCommand: command.serviceCommand,
       path: command.path,
     );
+    _writeUiMigrations(output, <PatchbayFriendlyCommandSpec>[command]);
     if (command.fencesNavigationRevision) {
       output
         ..writeln(
@@ -400,11 +403,34 @@ abstract final class PatchbayCommandHelp {
     }
   }
 
+  static void _writeUiMigrations(
+    StringBuffer output,
+    List<PatchbayFriendlyCommandSpec> commands,
+  ) {
+    final List<PatchbayUiCommandMigration> migrations =
+        <PatchbayUiCommandMigration>[
+          for (final PatchbayFriendlyCommandSpec command in commands)
+            if (PatchbayFriendlyCommandRegistry.uiMigrationFor(command.path)
+                case final PatchbayUiCommandMigration migration)
+              migration,
+        ];
+    if (migrations.isEmpty) return;
+    output
+      ..writeln()
+      ..writeln('Deprecated in 0.6.0; removed in 1.0:');
+    for (final PatchbayUiCommandMigration migration in migrations) {
+      output.writeln(
+        '  ${migration.legacyCommand} -> ${migration.replacement}',
+      );
+    }
+  }
+
   /// Where the command's availability is actually decided.
   static String availabilityLine(PatchbayFriendlyCommandSpec command) =>
       switch (command.target) {
         PatchbayCommandTarget.declaredServiceCommand ||
-        PatchbayCommandTarget.callerServiceCommand =>
+        PatchbayCommandTarget.callerServiceCommand ||
+        PatchbayCommandTarget.routedServiceCommand =>
           'Availability is still decided by the running App catalog.',
         PatchbayCommandTarget.clientIdentity ||
         PatchbayCommandTarget.clientCatalog ||
@@ -460,6 +486,9 @@ abstract final class PatchbayCommandHelp {
       'Service command: ${command.serviceCommand}',
     PatchbayCommandTarget.callerServiceCommand =>
       'Service command: the <service-command> argument',
+    PatchbayCommandTarget.routedServiceCommand =>
+      'Service command: selected from the frozen action, selector and --via '
+          'route; no fallback is attempted.',
     PatchbayCommandTarget.clientIdentity ||
     PatchbayCommandTarget.clientCatalog ||
     PatchbayCommandTarget.clientSnapshot =>

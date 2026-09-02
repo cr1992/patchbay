@@ -35,8 +35,9 @@ abstract final class ArgumentDecoder {
     PatchbayFriendlyCommandSpec spec,
     List<String> tail,
     ArgResults options,
-    String Function() readSensitiveInput,
-  ) {
+    String Function() readSensitiveInput, {
+    Map<String, String> boundOptionValues = const <String, String>{},
+  }) {
     final PatchbayCommandDescriptor descriptor = spec.protocolDescriptor!;
     final PatchbayCliSyntax syntax = spec.protocolSyntax!;
     if (syntax.inputMode == PatchbayCliInputMode.mergedJsonObject) {
@@ -98,7 +99,8 @@ abstract final class ArgumentDecoder {
     for (final MapEntry<String, String> binding
         in syntax.optionParameters.entries) {
       final PatchbayParameterDescriptor parameter = parameters[binding.key]!;
-      final String? raw = options.option(binding.value);
+      final String? raw =
+          boundOptionValues[binding.key] ?? options.option(binding.value);
       if (raw != null) {
         arguments[binding.key] = protocolValue(
           parameter,

@@ -58,6 +58,27 @@ Run the smallest read-only sequence that can answer the task:
 - `patchbay describe <service-command>` — Describe one live service command and its retry eligibility.
 <!-- PATCHBAY_COMMAND_REFERENCE:END -->
 
+## Canonical UI writes
+
+Use `patchbay ui perform` for UI writes. Keep the `target:`, `semantics:`, or `node:` selector explicit;
+`tap` also requires `--via semantics` or `--via pointer`, and Patchbay never falls back to another channel.
+The table is generated from the same registry that resolves commands and emits runtime warnings.
+
+<!-- PATCHBAY_UI_MIGRATION:START -->
+| Deprecated in 0.6.0 | Canonical replacement | Removal |
+|---|---|---|
+| `ui text set` | `ui perform set-text target:<id> <generation> [text]` | 1.0 |
+| `ui text enter` | `ui perform enter-text target:<id> <generation> [text]` | 1.0 |
+| `ui tap` | `ui perform tap semantics:<identifier> <generation> --via semantics` | 1.0 |
+| `ui action` | `ui perform action semantics:<identifier> <generation> <action> [text]` | 1.0 |
+| `ui semantics action` | `ui perform action node:<node-id> <generation> <action> [text]` | 1.0 |
+| `ui gesture tap` | `ui perform tap semantics:<identifier> <generation> --via pointer [--start <json>]` | 1.0 |
+| `ui gesture press-hold` | `ui perform press-hold semantics:<identifier> <generation> --start <json> [--duration-ms <ms>]` | 1.0 |
+| `ui gesture drag` | `ui perform drag semantics:<identifier> <generation> --start <json> --gesture-path <json> [--duration-ms <ms>]` | 1.0 |
+| `ui gesture fling` | `ui perform fling semantics:<identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | 1.0 |
+| `ui reveal` | `ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | 1.0 |
+<!-- PATCHBAY_UI_MIGRATION:END -->
+
 Use only the commands needed for the question. When launcher discovery is unavailable, inspect the
 CLI connection options and supply the running App's VM Service URI without persisting it.
 

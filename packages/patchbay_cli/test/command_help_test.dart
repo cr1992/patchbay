@@ -55,6 +55,45 @@ Availability is still decided by the running App catalog.
     );
   });
 
+  test('canonical ui help exposes every action and explicit tap channel', () {
+    final ArgParser parser = patchbayCliParser();
+    final String group = PatchbayCommandHelp.render(parser, <String>[
+      'ui',
+      'perform',
+    ]);
+
+    for (final String action in <String>[
+      'set-text',
+      'enter-text',
+      'tap',
+      'action',
+      'press-hold',
+      'drag',
+      'fling',
+      'reveal',
+    ]) {
+      expect(group, contains('ui perform $action'));
+    }
+    expect(group, contains('--via'));
+    expect(group, contains('semantics|pointer'));
+  });
+
+  test('deprecated ui help derives the exact canonical replacement', () {
+    final String help = PatchbayCommandHelp.render(
+      patchbayCliParser(),
+      <String>['ui', 'gesture', 'tap'],
+    );
+
+    expect(help, contains('Deprecated in 0.6.0; removed in 1.0'));
+    expect(
+      help,
+      contains(
+        'ui gesture tap -> ui perform tap semantics:<identifier> '
+        '<generation> --via pointer [--start <json>]',
+      ),
+    );
+  });
+
   test(
     'every friendly declaration is represented by help and parser options',
     () {
