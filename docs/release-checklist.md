@@ -25,7 +25,7 @@ CHANGELOG。定版先按碎片规范校验并把目标版本目录聚合为根�
 ## 1. 脚本项：跑一遍机检
 
 ```console
-$ dart run packages/patchbay/bin/release_prep.dart --version <SemVer> --check
+$ dart run tool/repo_tasks.dart release --version <SemVer> --check
 ```
 
 只读、可反复跑；红绿即结论，末尾还会打印发布顺序与人工清单。要它代改文件就把 `--check`
@@ -44,7 +44,7 @@ $ dart run packages/patchbay/bin/release_prep.dart --version <SemVer> --check
 | `compat-matrix-row` | 硬 | 兼容矩阵有本 tag 的行、在表顶，且 schema / Flutter 三列与源码一致（0.2.1 漏的就是这项） |
 | `compat-matrix-backfill` | 硬 | 已打过 tag 的行不留占位符，SHA 与 peeled tag 一致 |
 | `internal-dep-constraints` | 硬 | 四包互相之间的 hosted 约束接纳目标版本 |
-| `local-overrides` | 硬 | `pubspec_overrides.yaml` 把随版包指到工作树（少一条，仓内就在测 pub.dev 上的旧版） |
+| `workspace-resolution` | 硬 | 四个发布包均以 `resolution: workspace` 命中同一候选；workspace 外 example 的 overrides 指向当前工作树 |
 | `publish-switch` | 硬 | 四包已去掉 `publish_to: none`（见第 3 节，仓主决定） |
 | `publish-manifest` | 硬 | LICENSE、description、无 path 依赖等 pub 的 error 级项 |
 | `publish-advisories` | 硬 | README / CHANGELOG / repository / description 长度等 pub 的 warning 级项 |
@@ -56,41 +56,31 @@ warning，`--dry-run` 就退 65，和 error 一样发不出去；排版则是 CI
 
 `--apply` 会代改：四包 version 与随版依赖约束、`patchbayPackageVersion`、README / guide / CLI README
 的受管版本引用、版本化协议兼容语料、根 CHANGELOG 落款、四包 CHANGELOG（从根表派生）、
-`example/pubspec.lock` 的版本格子、兼容矩阵新行（tag 后才能定的两格留占位符）、缺失的
+`example/pubspec.lock` 的版本格子、兼容矩阵新行（tag 后才能定的两格留占位符）、缺失的 example
 `pubspec_overrides.yaml`。它不碰 `publish_to: none`（第 3 节），也不代写 CHANGELOG 正文；碎片只从
 与 `--version` 精确同名的目录读取。
 
 ## 2. 人工项：CI 门禁全绿
 
 脚本只在本地判排版，analyze / test / codegen 仍看 CI。GitLab（`.gitlab-ci.yml`）与 GitHub
-Actions（[`ci.yml`](../.github/workflows/ci.yml)）三个 job 一一对应：
+Actions（[`ci.yml`](../.github/workflows/ci.yml)）四个 job 一一对应，二者都只选择根私有
+`repo_tasks.dart` 中的任务：
 
-- [ ] `dart_packages` —— 排版与规划一致性门禁 + 三个纯 Dart 包 `dart analyze --fatal-infos` + `dart test`
+- [ ] `dart_packages` —— 排版与规划一致性门禁 + 根私有工具和三个纯 Dart 包的 analyze/test
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` + `flutter test`
 - [ ] `codegen_drift` —— `wire_codegen.dart --check` 同时确认 Dart 与 wire surface golden，
   `command_codegen.dart --check` 按提交形态确认生成物或紧凑快照无漂移
+- [ ] `sdk_floor` —— 同一仓内任务在 Flutter 3.44.0 / Dart 3.12.0 下复跑根工具、四包与 example
 - [ ] 本地 example 端到端预检全绿——CI 三个 job 都跑在无设备的容器里，证明不了「CLI 真的连上了一个跑
   在设备上的 host」。这一项必须在接入方真机验收之前完成，不能用 CI 绿灯代替。
-- [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，三个 job 与上面一一对应）
+- [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，四个 job 与上面一一对应）
 - [ ] 当前文档、双语入口与 SVG 在打 tag 前定稿；`documentation-current` 已绿，不留“发布后再改”事项
 
-本地复跑（`wire_codegen.dart --check` 必须从仓根调用——它的生成物 header 记录仓根相对路径，
-进包目录跑会假漂移；`command_codegen.dart --check` 没有这个约束，其 header 记录的是相对生成物
-自身的路径）：
+本地复跑只选择同一任务；任务内部保证 `wire_codegen.dart --check` 从仓根调用，并把 package-relative
+工具放到正确工作目录：
 
 ```console
-$ for p in patchbay patchbay_cli patchbay_transport; do
-    (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test)
-  done
-$ dart run tool/check_planning.dart
-$ (cd packages/patchbay_flutter && flutter pub get && flutter analyze && flutter test)
-$ (cd packages/patchbay_flutter/example && flutter pub get && flutter test)
-$ dart run packages/patchbay/bin/wire_codegen.dart \
-    --contract packages/patchbay/contracts/core_wire.json \
-    --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
-$ dart run packages/patchbay/bin/command_codegen.dart \
-    --contract packages/patchbay/contracts/example_commands.json \
-    --output packages/patchbay/contracts/example_commands.g.dart --check
+$ dart run tool/repo_tasks.dart check
 ```
 
 `example_commands.g.dart` 是完整生成结果的 SHA-256 紧凑快照，不作为源码导入。contract 或
@@ -104,7 +94,7 @@ generator 有意变更后，以同一命令把 `--check` 换成 `--write-snapsho
 - [ ] 确认本版对外发布，再删这一行；开关未开之前 `publish-dry-run` 一直是「跳过」
 
 ```console
-$ dart run packages/patchbay/bin/release_prep.dart --version X.Y.Z --apply --enable-publish
+$ dart run tool/repo_tasks.dart release --version X.Y.Z --apply --enable-publish
 ```
 
 ## 4. 人工项：打 tag（`patchbay-vX.Y.Z`）
@@ -131,9 +121,8 @@ $ git ls-remote --tags origin patchbay-vX.Y.Z
 `0.3.0` 起四包发布到 pub.dev。顺序由脚本按包间依赖推导（当前为
 `patchbay → patchbay_transport → patchbay_cli → patchbay_flutter`），凭据由人提供，脚本只打印命令。
 
-pub points 是发布硬标准。发布前使用 pub.dev 评分页当时显示的 Pana 版本，在包的
-临时副本上运行；不允许以「尚未解析同版内部依赖」当成评分结果。因为 pub.dev 会忽略
-`pubspec_overrides.yaml` 重做依赖检查，四包按依赖顺序发布：每发一个包，等它实际评分满分
+pub points 是发布硬标准。发布前使用 pub.dev 评分页当时显示的 Pana 版本，在发布归档形态上运行；
+不允许以「workspace 内可以解析」代替 hosted 依赖验证。四包按依赖顺序发布：每发一个包，等它实际评分满分
 后才继续下一个；未满分立即停止本次发布链。
 
 ```console

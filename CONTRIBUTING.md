@@ -14,12 +14,10 @@
 
 1. 从 MR 的目标分支拉分支：版本功能目标是对应 `dev/<SemVer>`，hotfix 和仓库治理从 `main` 拉。
    MR 保持一个可独立评审、验收和回退的交付单元，具体颗粒度见[规划与交付治理](docs/planning.md)；
-2. 跑绿再提 MR：仓根 `dart format --output=none --set-exit-if-changed .` 零改动，
-   四包 `dart test` / `flutter test` 全过，`dart analyze` 无问题；
-3. 生成物改动跑两个 `--check`：`wire_codegen.dart`（**必须从仓根调用**，进包目录会假漂移
-   ——header 记录的是仓根相对路径）与 `command_codegen.dart`（从哪个目录调用都一样，
-   header 记录的是相对生成物自身的路径）；完整两条命令见
-   [发版清单](docs/release-checklist.md)；
+2. 跑绿再提 MR：仓根运行 `dart run tool/repo_tasks.dart check`；它从 pub workspace 读取四包清单，
+   统一执行 format、planning、根私有工具与四包/example 的 analyze/test 以及 codegen 零漂移；
+3. 生成物改动仍由同一个 `codegen-drift` 任务检查；它保证 `wire_codegen.dart` 从仓根调用，
+   package-relative 工具在各自目录运行。任务与发版命令见[发版清单](docs/release-checklist.md)；
 4. 新增行为必须带测试，且测试要验证过「能红」（打个定向 mutation 确认断言真的红）。
 5. 公共 API、协议字段、默认资源上限或安全行为有变化时，同步更新 README / 对应专题文档，并按
    [CHANGELOG 碎片规范](changelog.d/README.md)新增碎片；日常 MR 不直接修改根或包内 CHANGELOG，

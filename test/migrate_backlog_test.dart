@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 
 import '../tool/backlog_store.dart';
 
-final _script = File('../../tool/migrate_backlog.dart').absolute.path;
+final _script = File('tool/migrate_backlog.dart').absolute.path;
 
 const _legacy = '''
 # 问题与特性台账

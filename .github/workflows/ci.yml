@@ -1,5 +1,5 @@
-# 公开仓 CI 门禁：四个 job 与 GitLab .gitlab-ci.yml 的四检查项一一对应
-# （sdk_floor / dart_packages / flutter_package / codegen_drift），两边改动需同步。
+# 公开仓 CI 门禁：四个 job 与 GitLab .gitlab-ci.yml 一一对应，但这里只选择
+# `tool/repo_tasks.dart` 中的仓内任务，不复制包清单与命令。
 # Flutter 版本（上界）与 GitLab CI 镜像 flutter-node:3.44.9 对齐；sdk_floor 跑的是
 # pubspec 声明的下限 3.44.0，两个数字不是同一件事，见 docs/compat-matrix.md。
 name: CI
@@ -37,22 +37,10 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-      # 排版门禁从仓根跑一次，覆盖全部四包与 example，故不在 flutter_package 内重复。
-      # 不依赖 pub get：语言版本取各包 pubspec 的 SDK 约束，本仓无 formatter 配置覆盖，
-      # 解析与否结果一致（patchbay_flutter 的 analysis_options include 未解析会打 warning，
-      # 只是提示，不参与判定）。放在 analyze/test 之前是为了快速失败。
-      - name: 排版对齐（全仓 dart format）
-        run: dart format --output=none --set-exit-if-changed .
-      - name: 规划文档一致性
-        run: dart run tool/check_planning.dart
-      - name: analyze + test（三个纯 Dart 包）
-        run: |
-          # GH 共享 runner 比 GitLab podman runner 慢，VM Service 跨进程测试首跑会顶到
-          # dart test 默认 30s 单测超时，统一上调（GitLab 侧不需要，保持原样）。
-          for p in patchbay patchbay_cli patchbay_transport; do
-            echo "== packages/$p =="
-            (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test --timeout=90s)
-          done
+      - name: 排版、规划、analyze + test（根工具与三个纯 Dart 包）
+        env:
+          PATCHBAY_DART_TEST_TIMEOUT: 90s
+        run: dart run tool/repo_tasks.dart dart-packages
 
   flutter_package:
     runs-on: ubuntu-latest
@@ -65,14 +53,7 @@ jobs:
           channel: stable
           cache: true
       - name: analyze + test（patchbay_flutter 及 example）
-        run: |
-          cd packages/patchbay_flutter
-          flutter pub get
-          flutter analyze
-          flutter test
-          cd example
-          flutter pub get
-          flutter test
+        run: dart run tool/repo_tasks.dart flutter-package
 
   codegen_drift:
     runs-on: ubuntu-latest
@@ -84,14 +65,8 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-      # wire：生成物 header 记录仓根相对路径，--check 必须从仓根调用（包目录内跑会假漂移）。
-      # command：header 记录的是相对生成物自身的路径，从哪个目录调用都一致，不必迁就 cwd。
       - name: 四个 codegen / docs 零漂移
-        run: |
-          (cd packages/patchbay && dart pub get)
-          dart run packages/patchbay/bin/wire_codegen.dart --contract packages/patchbay/contracts/core_wire.json --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
-          dart run packages/patchbay/bin/command_codegen.dart --contract packages/patchbay/contracts/example_commands.json --output packages/patchbay/contracts/example_commands.g.dart --check
-          (cd packages/patchbay_cli && dart pub get && dart run tool/protocol_cli_codegen.dart --check && dart run tool/command_docs.dart --check)
+        run: dart run tool/repo_tasks.dart codegen-drift
 
   # needs：GitHub Actions 默认每个 job 各自一台 runner，本不存在 GitLab 那种同机资源
   # 争用；这里加 needs 纯粹是为了两边 job 结构与调度顺序保持对应（.gitlab-ci.yml 的
@@ -113,4 +88,4 @@ jobs:
           channel: stable
           cache: true
       - name: 已验证的最低 Flutter / Dart 组合
-        run: ./tool/verify_sdk_floor.sh
+        run: dart run tool/repo_tasks.dart sdk-floor

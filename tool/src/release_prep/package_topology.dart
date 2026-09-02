@@ -79,16 +79,12 @@ Set<String> overridesNeededFor(ReleaseInputs inputs, Iterable<String> roots) =>
     transitiveDeps(dependencyGraph(inputs), roots)
       ..removeAll(transitiveDeps(pathDependencyGraph(inputs), roots));
 
-/// 每个需要 override 的目录 -> 「依赖名 -> 相对路径」。
+/// workspace 外的 consumer 验证目录 -> 「依赖名 -> 相对路径」。
+///
+/// 四个发布包由根 pub workspace 解析到同一工作树，不再各自维护 overrides；example
+/// 刻意留在 workspace 外，继续用独立 lock 模拟真实 consumer，因此只为它生成覆盖。
 Map<String, Map<String, String>> expectedOverrides(ReleaseInputs inputs) {
   final result = <String, Map<String, String>>{};
-  for (final String name in releasePackages) {
-    final Set<String> needed = overridesNeededFor(inputs, <String>[name]);
-    if (needed.isEmpty) continue;
-    result[overridesPathOf(name)] = <String, String>{
-      for (final String dep in needed.toList()..sort()) dep: '../$dep',
-    };
-  }
   final Set<String> exampleNeeded = overridesNeededFor(
     inputs,
     readPathDependencies(

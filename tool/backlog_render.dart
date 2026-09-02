@@ -9,7 +9,7 @@
 //   dart run tool/backlog_render.dart --out /tmp/backlog-view.md
 import 'dart:io';
 
-import '../packages/patchbay/tool/backlog_store.dart';
+import 'backlog_store.dart';
 
 void main(List<String> args) {
   var out = '';

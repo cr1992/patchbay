@@ -314,10 +314,8 @@ Map<String, String> readPathOverrides(String? yaml) {
 String renderOverrides(Map<String, String> paths) {
   final List<String> names = paths.keys.toList()..sort();
   final StringBuffer out = StringBuffer()
-    ..writeln('# 仓内开发用：把随版包解析到工作树，pubspec.yaml 里保留发布合法的 hosted 约束。')
-    ..writeln(
-      '# 由 `dart run packages/patchbay/bin/release_prep.dart --apply` 维护，勿手改。',
-    )
+    ..writeln('# workspace 外的 example consumer 用：把随版包解析到当前工作树。')
+    ..writeln('# 由 `dart run tool/repo_tasks.dart release --apply` 维护，勿手改。')
     ..writeln('dependency_overrides:');
   for (final String name in names) {
     out

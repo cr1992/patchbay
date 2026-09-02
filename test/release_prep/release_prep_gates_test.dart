@@ -158,7 +158,7 @@ sdks:
       expect(checkOf(checks, 'publish-manifest').hard, isTrue);
       expect(checkOf(checks, 'package-changelog').hard, isTrue);
       expect(checkOf(checks, 'internal-dep-constraints').hard, isTrue);
-      expect(checkOf(checks, 'local-overrides').hard, isTrue);
+      expect(checkOf(checks, 'workspace-resolution').hard, isTrue);
       expect(checkOf(checks, 'documentation-current').hard, isTrue);
     });
 
@@ -455,7 +455,7 @@ sdks:
           'publish-manifest',
           'publish-advisories',
           'internal-dep-constraints',
-          'local-overrides',
+          'workspace-resolution',
         ]) {
           expect(statusOf(checks, id), ReleaseCheckStatus.ok, reason: id);
         }
@@ -511,18 +511,18 @@ sdks:
         );
       });
 
-      test('override 指错路径或缺条目时红', () {
+      test('example override 指错路径或缺条目时红', () {
         final ReleaseCheck missing = checkOf(
           evaluateRelease(
             version: '0.3.0',
             inputs: releaseInputsFixture(
               released: true,
               publishable: true,
-              dropOverrides: <String>{'packages/patchbay_cli'},
+              dropOverrides: <String>{'example'},
             ),
             resolveTag: (_) => null,
           ),
-          'local-overrides',
+          'workspace-resolution',
         );
         expect(missing.status, ReleaseCheckStatus.failed);
         expect(missing.detail, contains('缺 patchbay'));
@@ -537,7 +537,7 @@ sdks:
             ),
             resolveTag: (_) => null,
           ),
-          'local-overrides',
+          'workspace-resolution',
         );
         expect(wrong.status, ReleaseCheckStatus.failed);
         expect(wrong.detail, contains('应为 ../../patchbay'));

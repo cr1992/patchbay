@@ -1,0 +1,9 @@
+include: package:lints/core.yaml
+
+analyzer:
+  exclude:
+    - packages/**
+  errors:
+    dead_code: error
+    unused_element: error
+    unused_import: error

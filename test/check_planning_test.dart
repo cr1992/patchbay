@@ -117,7 +117,7 @@ final class _Repo {
   static const String _defaultBranch = '<default>';
 }
 
-final String _checker = File('../../tool/check_planning.dart').absolute.path;
+final String _checker = File('tool/check_planning.dart').absolute.path;
 
 String _checkerSource() => File(_checker).readAsStringSync();
 

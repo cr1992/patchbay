@@ -1,9 +1,11 @@
 .dart_tool/
 build/
 *.iml
+/pubspec.lock
 
-# pubspec_overrides.yaml 不再忽略：随版包在 pubspec.yaml 里已是 hosted 约束（发布合法），
-# 仓内解析到工作树全靠这些 overrides，必须入库。由 release_prep --apply 维护。
+# 四个发布包由根 pub workspace 解析；workspace 外的 example 保持独立 consumer lock，
+# 根 lock 与发布包 lock 一样按 SDK 组合现解，避免当前 SDK 锁阻断 sdk_floor；example
+# 的 consumer lock 仍入库。它的 pubspec_overrides.yaml 由私有 release task 维护。
 
 # 本地代码索引（工具生成，勿入库）
 .codegraph/

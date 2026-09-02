@@ -1,7 +1,5 @@
-# Patchbay 独立仓 CI：全仓排版 + 四包 analyze + test + 生成物零漂移，外加一条守住已验证
-# SDK 下限的 lane。
-# 双 CI 并行：GitLab（本文件）+ GitHub Actions（.github/workflows/ci.yml，公开仓协作门禁），
-# 四 job 两边一一对应，改动需同步。
+# Patchbay 独立仓 CI。四条 lane 只选择 `tool/repo_tasks.dart` 中的仓内任务；包清单、
+# 命令与顺序不在 GitLab / GitHub 两边重复维护。
 
 default:
   tags:
@@ -43,8 +41,8 @@ stages: [check, sdk_floor_check]
 #    走包仓。播种失败只告警不阻断——下次重新走外网即可，不引入第二个失败面。
 # 完整性锚不变：无论从哪个源取到，都必须过同一行 SHA-256 校验才会被使用或回传；
 # 包仓路径含 floor 版本号，floor 经 Proposal 调整后新路径自然未命中并重新播种。
-# GitHub 侧同名 job 不受影响也无需同步改动：它经 subosito/flutter-action 按版本号取
-# SDK 并自带缓存，两边验证的是同一版本、跑同一个 tool/verify_sdk_floor.sh。
+# GitHub 侧经 subosito/flutter-action 按版本号取 SDK 并自带缓存；两边验证同一版本，
+# 并选择同一个 `repo_tasks.dart sdk-floor` 任务。
 sdk_floor:
   stage: sdk_floor_check
   variables:
@@ -75,35 +73,19 @@ sdk_floor:
       fi
     - tar --no-same-owner -xJf "$SDK_FLOOR_ARCHIVE_PATH" -C "$CI_PROJECT_DIR/.ci"
     - export PATH="$SDK_FLOOR_FLUTTER_DIR/bin:$PATH"
-    - ./tool/verify_sdk_floor.sh
+    - dart run tool/repo_tasks.dart sdk-floor
 
 # dart_packages 内含 packages/patchbay/test/command_name_parity_test.dart ——
 # 命令名跨包一致护栏（CLI/服务方/fixture 三处钉死）。
 dart_packages:
   stage: check
   script:
-    # 排版门禁从仓根跑一次，覆盖全部四包与 example，故不在 flutter_package 内重复。
-    # 不依赖 pub get：语言版本取各包 pubspec 的 SDK 约束，本仓无 formatter 配置覆盖，
-    # 解析与否结果一致（patchbay_flutter 的 analysis_options include 未解析会打 warning，
-    # 只是提示，不参与判定）。放在最前面是为了快速失败。
-    - dart format --output=none --set-exit-if-changed .
-    - dart run tool/check_planning.dart
-    - |
-      for p in patchbay patchbay_cli patchbay_transport; do
-        echo "== packages/$p =="
-        (cd "packages/$p" && dart pub get && dart analyze --fatal-infos && dart test)
-      done
+    - dart run tool/repo_tasks.dart dart-packages
 
 flutter_package:
   stage: check
   script:
-    - cd packages/patchbay_flutter
-    - flutter pub get
-    - flutter analyze
-    - flutter test
-    - cd example
-    - flutter pub get
-    - flutter test
+    - dart run tool/repo_tasks.dart flutter-package
 
 # 四个生成器（含 README 命令参考）都在这里查零漂移。
 # wire：生成物 header 记录仓根相对路径，--check 必须从仓根调用（包目录内跑会假漂移）。
@@ -111,7 +93,4 @@ flutter_package:
 codegen_drift:
   stage: check
   script:
-    - (cd packages/patchbay && dart pub get)
-    - dart run packages/patchbay/bin/wire_codegen.dart --contract packages/patchbay/contracts/core_wire.json --output packages/patchbay/lib/src/generated/core_wire.g.dart --check
-    - dart run packages/patchbay/bin/command_codegen.dart --contract packages/patchbay/contracts/example_commands.json --output packages/patchbay/contracts/example_commands.g.dart --check
-    - (cd packages/patchbay_cli && dart pub get && dart run tool/protocol_cli_codegen.dart --check && dart run tool/command_docs.dart --check)
+    - dart run tool/repo_tasks.dart codegen-drift
