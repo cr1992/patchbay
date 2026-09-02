@@ -63,17 +63,19 @@ warning，`--dry-run` 就退 65，和 error 一样发不出去；排版则是 CI
 ## 2. 人工项：CI 门禁全绿
 
 脚本只在本地判排版，analyze / test / codegen 仍看 CI。GitLab（`.gitlab-ci.yml`）与 GitHub
-Actions（[`ci.yml`](../.github/workflows/ci.yml)）四个 job 一一对应，二者都只选择根私有
+Actions（[`ci.yml`](../.github/workflows/ci.yml)）五个 job 一一对应，二者都只选择根私有
 `repo_tasks.dart` 中的任务：
 
 - [ ] `dart_packages` —— 排版与规划一致性门禁 + 根私有工具和三个纯 Dart 包的 analyze/test
 - [ ] `flutter_package` —— `patchbay_flutter` 本体与 `example` 均 `flutter analyze` + `flutter test`
 - [ ] `codegen_drift` —— `wire_codegen.dart --check` 同时确认 Dart 与 wire surface golden，
   `command_codegen.dart --check` 按提交形态确认生成物或紧凑快照无漂移
+- [ ] `coverage` —— informational lane 为四个发布包与 example 生成独立 branch LCOV；GitLab/GitHub
+  均上传 `coverage/` artifact，失败显示 warning 但本版不设百分比硬门
 - [ ] `sdk_floor` —— 同一仓内任务在 Flutter 3.44.0 / Dart 3.12.0 下复跑根工具、四包与 example
-- [ ] 本地 example 端到端预检全绿——CI 三个 job 都跑在无设备的容器里，证明不了「CLI 真的连上了一个跑
+- [ ] 本地 example 端到端预检全绿——CI 都跑在无设备的容器里，证明不了「CLI 真的连上了一个跑
   在设备上的 host」。这一项必须在接入方真机验收之前完成，不能用 CI 绿灯代替。
-- [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，四个 job 与上面一一对应）
+- [ ] GitHub Actions 门禁绿（[`ci.yml`](../.github/workflows/ci.yml)，五个 job 与上面一一对应）
 - [ ] 当前文档、双语入口与 SVG 在打 tag 前定稿；`documentation-current` 已绿，不留“发布后再改”事项
 
 本地复跑只选择同一任务；任务内部保证 `wire_codegen.dart --check` 从仓根调用，并把 package-relative
@@ -81,6 +83,7 @@ Actions（[`ci.yml`](../.github/workflows/ci.yml)）四个 job 一一对应，�
 
 ```console
 $ dart run tool/repo_tasks.dart check
+$ dart run tool/repo_tasks.dart coverage  # informational；报告写入 coverage/
 ```
 
 `example_commands.g.dart` 是完整生成结果的 SHA-256 紧凑快照，不作为源码导入。contract 或

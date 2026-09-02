@@ -17,7 +17,9 @@
 2. 跑绿再提 MR：仓根运行 `dart run tool/repo_tasks.dart check`；它从 pub workspace 读取四包清单，
    统一执行 format、planning、根私有工具与四包/example 的 analyze/test 以及 codegen 零漂移；
 3. 生成物改动仍由同一个 `codegen-drift` 任务检查；它保证 `wire_codegen.dart` 从仓根调用，
-   package-relative 工具在各自目录运行。任务与发版命令见[发版清单](docs/release-checklist.md)；
+   package-relative 工具在各自目录运行。需要刷新覆盖地图时运行
+   `dart run tool/repo_tasks.dart coverage`，五份仓根相对路径的 LCOV 写入被忽略的 `coverage/`；
+   该任务只提供信息，不设置覆盖率阈值。任务与发版命令见[发版清单](docs/release-checklist.md)；
 4. 新增行为必须带测试，且测试要验证过「能红」（打个定向 mutation 确认断言真的红）。
 5. 公共 API、协议字段、默认资源上限或安全行为有变化时，同步更新 README / 对应专题文档，并按
    [CHANGELOG 碎片规范](changelog.d/README.md)新增碎片；日常 MR 不直接修改根或包内 CHANGELOG，

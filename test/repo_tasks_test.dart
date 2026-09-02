@@ -96,6 +96,7 @@ void main() {
       'flutter-package',
       'codegen-drift',
       'sdk-floor',
+      'coverage',
     ]) {
       final String invocation = 'dart run tool/repo_tasks.dart $task';
       expect(gitlab, contains(invocation));
@@ -103,6 +104,12 @@ void main() {
     }
     expect(gitlab, isNot(contains('for p in patchbay')));
     expect(github, isNot(contains('for p in patchbay')));
+    expect(gitlab, contains('allow_failure: true'));
+    expect(gitlab, contains('- coverage/'));
+    expect(gitlab, contains('dependencies: []'));
+    expect(github, contains('continue-on-error: true'));
+    expect(github, contains('actions/upload-artifact@v4'));
+    expect(github, contains('path: coverage/'));
   });
 
   test('任务从 workspace 分类生成包级命令', () {
@@ -130,6 +137,109 @@ void main() {
         'packages/patchbay_flutter',
         'packages/patchbay_flutter/example',
       ],
+    );
+  });
+
+  test('coverage 任务为四个发布 package 与 example 生成独立 branch LCOV', () {
+    final RepoWorkspace workspace = RepoWorkspace.discover(root.path);
+    final RepoTaskCatalog catalog = RepoTaskCatalog(workspace);
+    final List<RepoCommand> commands = catalog.commandsFor('coverage');
+
+    final List<RepoCommand> dartCoverage = commands
+        .where(
+          (command) =>
+              command.executable == 'dart' &&
+              command.arguments.contains('coverage:test_with_coverage'),
+        )
+        .toList(growable: false);
+    expect(dartCoverage.map((command) => command.workingDirectory), <String>[
+      'packages/patchbay',
+      'packages/patchbay_cli',
+      'packages/patchbay_transport',
+    ]);
+    for (final RepoCommand command in dartCoverage) {
+      expect(command.arguments, contains('--branch-coverage'));
+      expect(
+        command.arguments.any((argument) => argument.startsWith('--out=')),
+        isTrue,
+      );
+      expect(
+        command.arguments.any(
+          (argument) => argument.startsWith('--scope-output='),
+        ),
+        isTrue,
+      );
+    }
+
+    final List<RepoCommand> flutterCoverage = commands
+        .where(
+          (command) =>
+              command.executable == 'flutter' &&
+              command.arguments.contains('--coverage'),
+        )
+        .toList(growable: false);
+    expect(flutterCoverage.map((command) => command.workingDirectory), <String>[
+      'packages/patchbay_flutter',
+      'packages/patchbay_flutter/example',
+    ]);
+    for (final RepoCommand command in flutterCoverage) {
+      expect(command.arguments, contains('--branch-coverage'));
+      expect(
+        command.arguments.any(
+          (argument) => argument.startsWith('--coverage-path='),
+        ),
+        isTrue,
+      );
+    }
+  });
+
+  test('coverage 输出规范化后要求五份 LCOV 与三份 Dart raw JSON', () {
+    final Directory temporary = Directory.systemTemp.createTempSync(
+      'patchbay-repo-coverage-',
+    );
+    addTearDown(() => temporary.deleteSync(recursive: true));
+
+    final List<CoverageReport> reports = coverageReportsFor(
+      RepoWorkspace.discover(root.path),
+    );
+    for (final CoverageReport report in reports) {
+      final Directory directory = Directory(
+        '${temporary.path}/coverage/${report.name}',
+      )..createSync(recursive: true);
+      final String source =
+          '${temporary.path}/${report.workingDirectory}/lib/example.dart';
+      File('${directory.path}/lcov.info').writeAsStringSync(
+        'TN:${report.name}\nSF:$source\nDA:1,1\nend_of_record\n',
+      );
+      if (report.requiresRawJson) {
+        File('${directory.path}/coverage.json').writeAsStringSync('{}\n');
+      }
+    }
+
+    normalizeCoverageReports(temporary.path, reports);
+    expect(
+      () => validateCoverageReports(temporary.path, reports),
+      returnsNormally,
+    );
+    for (final CoverageReport report in reports) {
+      final String lcov = File(
+        '${temporary.path}/coverage/${report.name}/lcov.info',
+      ).readAsStringSync();
+      expect(lcov, isNot(contains(temporary.path)));
+      expect(lcov, contains('SF:${report.workingDirectory}/lib/example.dart'));
+    }
+    File(
+      '${temporary.path}/coverage/patchbay_cli/lcov.info',
+    ).writeAsStringSync('');
+    expect(
+      () => validateCoverageReports(temporary.path, reports),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('patchbay_cli'),
+        ),
+      ),
     );
   });
 }
