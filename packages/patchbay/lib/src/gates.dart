@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'gate_admission_scope.dart';
+
 /// Stable decision returned by the host base gate or a consumer gate.
 final class PatchbayGateDecision {
   const PatchbayGateDecision._({required this.allowed, this.code, this.notice});
@@ -30,19 +32,33 @@ final class PatchbayGateEvaluator {
   final PatchbayConsumerGate _consumerGate;
 
   Future<PatchbayGateRejection?> evaluate(Iterable<String> gateIds) async {
-    final PatchbayGateDecision base = await _baseGate();
-    if (!base.allowed) {
-      return PatchbayGateRejection(
-        gateId: 'patchbay.base',
-        code: base.code ?? 'baseGateRejected',
-        notice: base.notice,
-      );
+    final PatchbayGateAdmissionScope? scope = patchbayGateAdmissionScope;
+    if (!(scope?.skipBase ?? false)) {
+      final PatchbayGateDecision base = await _baseGate();
+      if (!base.allowed) {
+        scope?.reportGateResult('rejected');
+        return PatchbayGateRejection(
+          gateId: 'patchbay.base',
+          code: base.code ?? 'baseGateRejected',
+          notice: base.notice,
+        );
+      }
     }
 
-    final List<String> ordered = gateIds.toSet().toList()..sort();
+    final List<String> ordered =
+        gateIds
+            .where(
+              (String gateId) =>
+                  !(scope?.admittedGateIds.contains(gateId) ?? false),
+            )
+            .toSet()
+            .toList()
+          ..sort();
+    if (ordered.isNotEmpty) scope?.enterOperationPolicy();
     for (final String gateId in ordered) {
       final PatchbayGateDecision decision = await _consumerGate(gateId);
       if (!decision.allowed) {
+        scope?.reportGateResult('rejected');
         return PatchbayGateRejection(
           gateId: gateId,
           code: decision.code ?? 'consumerGateRejected',
@@ -50,6 +66,7 @@ final class PatchbayGateEvaluator {
         );
       }
     }
+    if (ordered.isNotEmpty) scope?.reportGateResult('passed');
     return null;
   }
 }

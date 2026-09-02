@@ -9,6 +9,7 @@
 /// 都不跑。
 library;
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
@@ -66,7 +67,7 @@ void main() {
     expect(host.auditEvents.single.gateResult, 'passed');
   });
 
-  test('read-only domain commands never reach the gate', () async {
+  test('read-only domain commands skip base but run declared gates', () async {
     final _Adapter adapter = _Adapter();
     final PatchbayFlutterServiceHost host = _host(
       adapter: adapter,
@@ -81,24 +82,147 @@ void main() {
 
     expect(response['admission'], 'accepted');
     expect(adapter.calls, <String>['example.device.read']);
-    expect(host.auditEvents.single.gateResult, 'notEvaluated');
+    expect(host.auditEvents.single.gateResult, 'passed');
   });
 
-  test('registry-owned UI commands keep their own gate stage', () async {
-    // `ui.keepAwake.status` is `sideEffect: none` and registry-owned; the
-    // domain admission gate must not appear in front of it.
+  test(
+    'host skips the base gate already admitted by core for UI reads',
+    () async {
+      final _GateProbe probe = _GateProbe(baseAllowed: false);
+      final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+        registry: PatchbayUiRegistry(),
+        isAppResumed: () => true,
+        gates: probe.evaluator,
+      );
+      final PatchbayFlutterServiceHost host = _host(
+        adapter: _Adapter(),
+        bridge: bridge,
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.keepAwake.status',
+        const <String, Object?>{},
+        'req-registry',
+      );
+
+      expect(response['admission'], 'accepted');
+      expect(probe.baseCalls, 0);
+
+      final PatchbayInvocation direct = await bridge.keepAwake.status();
+      expect(direct.rejection?.code, 'baseGateRejected');
+      expect(probe.baseCalls, 1);
+    },
+  );
+
+  test('registry descriptor gates are evaluated exactly once', () async {
+    final _GateProbe probe = _GateProbe();
+    final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+      registry: PatchbayUiRegistry(),
+      isAppResumed: () => true,
+      gates: probe.evaluator,
+      keepAwakeDelegate: (_) async {},
+      keepAwakeGates: const <String>{'consumer.keepAwake'},
+    );
     final PatchbayFlutterServiceHost host = _host(
       adapter: _Adapter(),
-      closedGateIds: const <String>{'example.write'},
+      bridge: bridge,
     );
 
     final Map<String, Object?> response = await host.dispatchInvoke(
-      'ui.keepAwake.status',
-      const <String, Object?>{},
-      'req-registry',
+      'ui.keepAwake.set',
+      const <String, Object?>{'enabled': true},
+      'req-ui-static-gate',
     );
 
     expect(response['admission'], 'accepted');
+    expect(probe.baseCalls, 1);
+    expect(probe.consumerCalls, <String>['consumer.keepAwake']);
+    final PatchbayAuditEvent event = host.auditEvents.single;
+    expect(event.gateResult, 'passed');
+    expect(event.gateDisposition, 'passed');
+    expect(event.admissionStage, 'responseValidation');
+  });
+
+  test('typed UI argument rejection is audited at uiPreflight only', () async {
+    final _GateProbe probe = _GateProbe();
+    final PatchbayFlutterServiceHost host = _host(
+      adapter: _Adapter(),
+      bridge: PatchbayFlutterBridge(
+        registry: PatchbayUiRegistry(),
+        isAppResumed: () => true,
+        gates: probe.evaluator,
+      ),
+    );
+
+    final Map<String, Object?> response = await host.dispatchInvoke(
+      'ui.text.set',
+      const <String, Object?>{'id': 'form.code', 'generation': 1},
+      'req-ui-preflight',
+    );
+
+    expect(_code(response), 'invalidUiArguments');
+    expect(response.containsKey('admissionStage'), isFalse);
+    expect(_details(response).containsKey('admissionStage'), isFalse);
+    expect(probe.baseCalls, 1);
+    expect(probe.consumerCalls, isEmpty);
+    final PatchbayAuditEvent event = host.auditEvents.single;
+    expect(event.admissionStage, 'uiPreflight');
+    expect(event.gateDisposition, 'notDeclared');
+  });
+
+  testWidgets('dynamic UI gates remain in operationPolicy audit stage', (
+    WidgetTester tester,
+  ) async {
+    final PatchbayUiRegistry registry = PatchbayUiRegistry();
+    final PatchbayKey key = PatchbayKey.text(
+      'form.code',
+      registry: registry,
+      operationGates: const <PatchbayUiOperation, Set<String>>{
+        PatchbayUiOperation.textSet: <String>{'target.write'},
+      },
+    );
+    final TextEditingController controller = TextEditingController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TextField(key: key, controller: controller),
+        ),
+      ),
+    );
+    final _GateProbe probe = _GateProbe(
+      rejectedGateIds: const <String>{'target.write'},
+    );
+    final PatchbayFlutterBridge bridge = PatchbayFlutterBridge(
+      registry: registry,
+      isAppResumed: () => true,
+      gates: probe.evaluator,
+    );
+    final PatchbayFlutterServiceHost host = _host(
+      adapter: _Adapter(),
+      bridge: bridge,
+    );
+    final int generation = registry.catalog().single.generation;
+
+    final Map<String, Object?> response = await host.dispatchInvoke(
+      'ui.text.set',
+      <String, Object?>{
+        'id': 'form.code',
+        'generation': generation,
+        'text': 'blocked',
+      },
+      'req-ui-dynamic-gate',
+    );
+
+    expect(_code(response), 'consumerGateRejected');
+    expect(_details(response), <String, Object?>{'gateId': 'target.write'});
+    expect(controller.text, isEmpty);
+    expect(probe.baseCalls, 1);
+    expect(probe.consumerCalls, <String>['target.write']);
+    final PatchbayAuditEvent event = host.auditEvents.single;
+    expect(event.gateResult, 'rejected');
+    expect(event.gateDisposition, 'rejected');
+    expect(event.admissionStage, 'operationPolicy');
   });
 }
 
@@ -106,21 +230,26 @@ PatchbayFlutterServiceHost _host({
   required _Adapter adapter,
   bool baseAllowed = true,
   Set<String> closedGateIds = const <String>{},
+  PatchbayFlutterBridge? bridge,
 }) => PatchbayFlutterServiceHost(
   applicationId: 'dev.patchbay.domain-gate.test',
   registrar: (_, _) {},
-  bridge: PatchbayFlutterBridge(
-    registry: PatchbayUiRegistry(),
-    isAppResumed: () => true,
-    gates: PatchbayGateEvaluator(
-      baseGate: () => baseAllowed
-          ? const PatchbayGateDecision.allow()
-          : const PatchbayGateDecision.reject(code: 'baseGateRejected'),
-      consumerGate: (String gateId) => closedGateIds.contains(gateId)
-          ? const PatchbayGateDecision.reject(code: 'writeGateClosedByDefault')
-          : const PatchbayGateDecision.allow(),
-    ),
-  ),
+  bridge:
+      bridge ??
+      PatchbayFlutterBridge(
+        registry: PatchbayUiRegistry(),
+        isAppResumed: () => true,
+        gates: PatchbayGateEvaluator(
+          baseGate: () => baseAllowed
+              ? const PatchbayGateDecision.allow()
+              : const PatchbayGateDecision.reject(code: 'baseGateRejected'),
+          consumerGate: (String gateId) => closedGateIds.contains(gateId)
+              ? const PatchbayGateDecision.reject(
+                  code: 'writeGateClosedByDefault',
+                )
+              : const PatchbayGateDecision.allow(),
+        ),
+      ),
   domainCatalog: () async => <String, Object?>{
     'commands': <Object?>[
       for (final PatchbayCommandDescriptor descriptor in _descriptors)
@@ -129,6 +258,33 @@ PatchbayFlutterServiceHost _host({
   },
   domainInvoke: adapter.invoke,
 );
+
+final class _GateProbe {
+  _GateProbe({
+    this.baseAllowed = true,
+    this.rejectedGateIds = const <String>{},
+  });
+
+  final bool baseAllowed;
+  final Set<String> rejectedGateIds;
+  int baseCalls = 0;
+  final List<String> consumerCalls = <String>[];
+
+  PatchbayGateEvaluator get evaluator => PatchbayGateEvaluator(
+    baseGate: () {
+      baseCalls += 1;
+      return baseAllowed
+          ? const PatchbayGateDecision.allow()
+          : const PatchbayGateDecision.reject(code: 'baseGateRejected');
+    },
+    consumerGate: (String gateId) {
+      consumerCalls.add(gateId);
+      return rejectedGateIds.contains(gateId)
+          ? const PatchbayGateDecision.reject(code: 'consumerGateRejected')
+          : const PatchbayGateDecision.allow();
+    },
+  );
+}
 
 const List<PatchbayCommandDescriptor> _descriptors =
     <PatchbayCommandDescriptor>[

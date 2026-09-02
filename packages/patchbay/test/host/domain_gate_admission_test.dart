@@ -8,13 +8,17 @@ import 'package:test/test.dart';
 /// PB-050-25：domain-plane 写命令的 gate 强制执行。
 ///
 /// 闸点冻结在 `HostInvokerHandler._dispatchInvoke` 的受理序列内：sensitive-stdin
-/// 校验之后、registry / external 路由之前，判据是「registry 未处理 + 目录行判为
-/// 写」。本文件锁的是这条受理闸的全部可观察后果——求值语义、缺省投影、次序、
-/// 门后目录复核、replay 接缝与审计取值。
+/// 校验之后、registry / external 路由之前。基础门覆盖所有写命令，descriptor 门
+/// 覆盖所有声明了 gate 的命令；registry 所有权不改变这两条规则。本文件锁的是这条
+/// 受理闸的全部可观察后果——求值语义、缺省投影、次序、门后目录复核、replay 接缝
+/// 与审计取值。
 void main() {
-  group('read-only domain commands stay ungated', () {
-    test('a sideEffect:none row never reaches the base gate', () async {
-      final _RecordingGates gates = _RecordingGates(baseAllowed: false);
+  group('read-only domain commands skip only the base gate', () {
+    test('a sideEffect:none row still evaluates its descriptor gate', () async {
+      final _RecordingGates gates = _RecordingGates(
+        baseAllowed: false,
+        rejectedGateIds: const <String>{'write'},
+      );
       final List<String> executed = <String>[];
       final PatchbayServiceHost host = _host(
         commands: <Map<String, Object?>>[
@@ -30,11 +34,12 @@ void main() {
         'req-read',
       );
 
-      expect(response['admission'], 'accepted');
-      expect(executed, <String>['device.status']);
+      expect(response['admission'], 'rejected');
+      expect(_code(response), 'consumerGateRejected');
+      expect(executed, isEmpty);
       expect(gates.baseCalls, 0);
-      expect(gates.consumerCalls, isEmpty);
-      expect(host.auditEvents.single.gateResult, 'notEvaluated');
+      expect(gates.consumerCalls, <String>['write']);
+      expect(host.auditEvents.single.gateResult, 'rejected');
     });
   });
 
@@ -319,8 +324,9 @@ void main() {
       expect(gates.baseCalls, 0);
     });
 
-    test('registry-owned commands keep their own gate stage', () async {
+    test('registry-owned writes cross the same core base gate', () async {
       final _RecordingGates gates = _RecordingGates(baseAllowed: false);
+      var handled = false;
       final PatchbayCommandRegistry registry = PatchbayCommandRegistry(
         <PatchbayCommandRegistration<Object?>>[
           PatchbayCommandRegistration<Map<String, Object?>>(
@@ -334,8 +340,10 @@ void main() {
               gates: <String>{'registryGate'},
             ),
             decode: (Map<String, Object?> arguments) => arguments,
-            handle: (Map<String, Object?> _, String requestId) =>
-                PatchbayInvocation.accepted(requestId: requestId).toJson(),
+            handle: (Map<String, Object?> _, String requestId) {
+              handled = true;
+              return PatchbayInvocation.accepted(requestId: requestId).toJson();
+            },
           ),
         ],
       );
@@ -351,8 +359,103 @@ void main() {
         'req-registry',
       );
 
+      expect(response['admission'], 'rejected');
+      expect(_code(response), 'baseGateRejected');
+      expect(gates.baseCalls, 1);
+      expect(gates.consumerCalls, isEmpty);
+      expect(handled, isFalse);
+    });
+
+    test(
+      'registry-owned reads cross declared gates without the base',
+      () async {
+        final _RecordingGates gates = _RecordingGates(
+          baseAllowed: false,
+          rejectedGateIds: const <String>{'registryGate'},
+        );
+        var handled = false;
+        final PatchbayCommandRegistry registry = PatchbayCommandRegistry(<
+          PatchbayCommandRegistration<Object?>
+        >[
+          PatchbayCommandRegistration<Map<String, Object?>>(
+            descriptor: const PatchbayCommandDescriptor(
+              name: 'patchbay.registered.read',
+              summary: 'Registry-owned gated read.',
+              plane: PatchbayPlane.domain,
+              mode: PatchbayCommandMode.readOnly,
+              sideEffect: PatchbaySideEffect.none,
+              factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+              gates: <String>{'registryGate'},
+            ),
+            decode: (Map<String, Object?> arguments) => arguments,
+            handle: (Map<String, Object?> _, String requestId) {
+              handled = true;
+              return PatchbayInvocation.accepted(requestId: requestId).toJson();
+            },
+          ),
+        ]);
+        final PatchbayServiceHost host = _host(
+          commands: const <Map<String, Object?>>[],
+          domainGates: gates.evaluator,
+          registry: registry,
+        );
+
+        final Map<String, Object?> response = await host.dispatchInvoke(
+          'patchbay.registered.read',
+          const <String, Object?>{},
+          'req-registry-read',
+        );
+
+        expect(response['admission'], 'rejected');
+        expect(_code(response), 'consumerGateRejected');
+        expect(gates.baseCalls, 0);
+        expect(gates.consumerCalls, <String>['registryGate']);
+        expect(handled, isFalse);
+      },
+    );
+
+    test('admission facts expire when a registry handler returns', () async {
+      final _RecordingGates gates = _RecordingGates();
+      final Completer<void> detachedEvaluation = Completer<void>();
+      final PatchbayCommandRegistry registry = PatchbayCommandRegistry(
+        <PatchbayCommandRegistration<Object?>>[
+          PatchbayCommandRegistration<Map<String, Object?>>(
+            descriptor: const PatchbayCommandDescriptor(
+              name: 'patchbay.registered.detached',
+              summary: 'Registry-owned write with detached follow-up work.',
+              plane: PatchbayPlane.domain,
+              mode: PatchbayCommandMode.immediate,
+              sideEffect: PatchbaySideEffect.appState,
+              factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+            ),
+            decode: (Map<String, Object?> arguments) => arguments,
+            handle: (Map<String, Object?> _, String requestId) {
+              unawaited(
+                Future<void>.delayed(Duration.zero, () async {
+                  await gates.evaluator.evaluate(const <String>{});
+                  detachedEvaluation.complete();
+                }),
+              );
+              return PatchbayInvocation.accepted(requestId: requestId).toJson();
+            },
+          ),
+        ],
+      );
+      final PatchbayServiceHost host = _host(
+        commands: const <Map<String, Object?>>[],
+        domainGates: gates.evaluator,
+        registry: registry,
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'patchbay.registered.detached',
+        const <String, Object?>{},
+        'req-registry-detached',
+      );
+      await detachedEvaluation.future;
+
       expect(response['admission'], 'accepted');
-      expect(gates.baseCalls, 0);
+      expect(gates.baseCalls, 2);
     });
 
     test('requestId ledger replay runs before new admission', () async {
@@ -550,9 +653,7 @@ void main() {
         // this call. A read-only row never opens a gate window, so there is no
         // recheck to fail — the next call sees the new declaration instead.
         final _MutableProvider provider = _MutableProvider(
-          commands: <Object?>[
-            _row('device.probe', sideEffect: 'none', gates: <String>['write']),
-          ],
+          commands: <Object?>[_row('device.probe', sideEffect: 'none')],
         );
         final List<String> executed = <String>[];
         final PatchbayServiceHost host = _providerHost(

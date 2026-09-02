@@ -3,9 +3,11 @@ import 'dart:async';
 import 'command_dispatch_scope.dart';
 import 'command_descriptor.dart';
 import 'execution_evidence.dart';
+import 'gate_admission_scope.dart';
 import 'invocation.dart';
 import 'invocation_cancellation.dart';
 import 'response_schema.dart';
+import 'ui_descriptor.dart';
 
 typedef PatchbayCommandDecoder<T> = T Function(Map<String, Object?> arguments);
 typedef PatchbayCommandGate<T> =
@@ -72,6 +74,9 @@ final class PatchbayCommandRegistration<T> {
     void Function(String result)? onGateResult,
     PatchbayInvocationContext? context,
   }) async {
+    if (descriptor.plane == PatchbayPlane.flutterUi) {
+      patchbayGateAdmissionScope?.enterUiPreflight();
+    }
     if (!available) {
       onGateResult?.call('notEvaluated');
       return PatchbayInvocation.rejected(

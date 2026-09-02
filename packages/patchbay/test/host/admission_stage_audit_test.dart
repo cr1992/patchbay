@@ -13,9 +13,9 @@ import 'package:test/test.dart';
 /// 同时锁住三条兼容义务：`gateResult` 取值与写入点逐字节不变；新字段可选、旧源码构造
 /// 继续编译；`toJson` 在缺失时省略新键（老 reader 看不到多出来的键）。
 ///
-/// 本 MR 只收敛 core 侧阶段。`uiPreflight` / `operationPolicy` 属 Flutter handler，
-/// 它不写 audit，因此这两个值在本 MR 内不可达——封闭词表先在一处冻结，避免后续 MR
-/// 再扩一次词表。这一点由「词表包含 UI 阶段但 core 不产生它们」一条显式记录。
+/// `uiPreflight` / `operationPolicy` 属 Flutter handler，由 invocation-scoped
+/// admission 把最后到达的阶段投影进 core audit；正向行为覆盖位于 Flutter host 测试，
+/// 本文件仍负责冻结共用词表。
 void main() {
   group('阶段与门处置进 audit，不进应答', () {
     test('目录不可用停在 catalog，且没有任何门被触达', () async {
@@ -252,10 +252,9 @@ void main() {
       }
     });
 
-    test('词表含 UI 阶段，但 core 在本 MR 内不产生它们', () {
-      // 记录本 MR 的边界：`uiPreflight` / `operationPolicy` 由 Flutter handler
-      // 拥有，而它不写 audit。词表先冻结在一处，等准入分叉消除后这两个值才可达；
-      // 这条断言在那之后应当被替换成正向覆盖，而不是删掉。
+    test('共用词表包含 Flutter handler 投影的阶段', () {
+      // `domain_gate_enforcement_test.dart` 正向覆盖动态 gate 停在
+      // `operationPolicy`；这里仅锁住 core 与 Flutter 共用同一封闭词表。
       expect(patchbayAuditAdmissionStages, contains('uiPreflight'));
       expect(patchbayAuditAdmissionStages, contains('operationPolicy'));
     });
