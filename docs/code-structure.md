@@ -119,6 +119,15 @@ element model 校验**入口自足**——每个公共 library 导出符号的�
 逐字节不变，由 `test/bridge/semantics_pipeline_characterization_test.dart` 在拆分前后各跑一次
 钉住。PB-050-38 还有四个热点（`flutter_service_host` / `reveal_engine` / `host_invoker` /
 `snapshot_payload`）在后续 MR 里各自处理，本条不代它们下判断。
+| `patchbay/lib/src/host/host_invoker.dart` | 787 → 387 行 | admission pipeline 的七个阶段各自独立成文件（`invocation_catalog_stage` / `invocation_input_stage` / `invocation_gate_stage` / `invocation_handler_stage` / `invocation_response_stage` / `invocation_audit_stage` / `external_invocation_ledger`，另有共用的 `invocation_rejections` 与 `invocation_admission_state`），invoker 只留公共门面、按 DG-060-04 冻结顺序的编排与「一次调用只落一条审计」的记账规则 |
+
+依据是「必须拆分」第 1 条：`_dispatchInvoke`（130 行）把 catalog → sensitive input →
+gate → 门后复核 → handler → response validation 六段只靠局部变量串起来，任何一段都无法
+单独失败注入。拆分保持外部语义逐字节不变，由
+`test/host/host_invoker_pipeline_characterization_test.dart` 在拆分前后各跑一次钉住，
+`test/host/host_invoker_stage_units_test.dart` 则逐阶段注入失败证明它们真的分开了——
+其中 `priorRequestObserved` 与 `requestLedgerFull` 两条分支端到端不可达，拆分后才第一次
+拿到覆盖。PB-050-38 其余四个热点在各自的 MR 里处理，本条不代它们下判断。
 
 **已复核，维持现状**：
 
