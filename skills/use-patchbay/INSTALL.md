@@ -3,6 +3,15 @@
 This installs reusable agent guidance only. It does not add the Patchbay package to an App, install
 the Patchbay CLI, start a device, or enable a host.
 
+## Prove it works first
+
+Before installing this Skill for a consumer App, or if you just need to confirm the CLI and a
+Patchbay host actually talk to each other, run the repository's own
+[10-minute quick path](../../docs/quickstart.md). It uses the checked-in example App and a CLI
+built from source, needs no App integration work, and ends with a real `snapshot`, a safe
+`ui perform` write, and a `capture`. Treat a clean run of it as the baseline before layering the
+steps below onto a real consumer App.
+
 ## Version contract
 
 The Skill is released with the Patchbay repository tag rather than on an independent version line.

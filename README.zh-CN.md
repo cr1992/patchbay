@@ -15,6 +15,7 @@
 <p align="center">
   <a href="#适合解决什么问题">适用场景</a> ·
   <a href="#快速开始">快速开始</a> ·
+  <a href="docs/quickstart.md">英文十分钟路径</a> ·
   <a href="#能做什么">核心能力</a> ·
   <a href="#架构与包">架构</a> ·
   <a href="docs/guide.md">使用指南</a> ·
@@ -45,8 +46,10 @@ Patchbay 不是 adb 的替代品，也不是坐标驱动的黑盒测试框架；
 
 ## 快速开始
 
-下面用 VM Service 跑通最短链路。完整的门禁、业务命令、会话发现和 direct HTTP 接入见
-[使用指南](docs/guide.md)。
+下面用 VM Service 跑通最短链路，并把 Patchbay 接入你自己的 App。如果只想先看 Patchbay 本身能不能
+跑通，用仓内自带的示例 App 即可，不用写一行 Dart：见英文的
+[10-minute quick path](docs/quickstart.md)（一次 `snapshot`、一次安全的 `ui perform` 写操作、一次
+`capture`）。完整的门禁、业务命令、会话发现和 direct HTTP 接入见[使用指南](docs/guide.md)。
 
 ### 1. 添加 Flutter 依赖
 
@@ -181,7 +184,7 @@ $ patchbay identity
 $ patchbay --json snapshot
 $ patchbay --wait exec example.job.run
 $ patchbay ui semantics tree
-$ patchbay ui tap login.submit
+$ patchbay ui perform tap semantics:login.submit <generation> --via semantics
 $ patchbay --output screen.png capture root
 $ patchbay logs tail
 $ patchbay repl < commands.txt
@@ -233,6 +236,8 @@ router、设备 SDK 和隐私策略仍由 App 自己拥有。
 
 ## 文档
 
+- **[10-minute quick path](docs/quickstart.md)** — 只用仓内示例 App 走通 install、`identity`、
+  `catalog`、`snapshot`、一次安全的 `ui perform` 写操作与 `capture`（英文）
 - **[使用指南](docs/guide.md)** — 安装、App 接入、CLI 手册、退出码与边界
 - **[设计](docs/design.md)** — 架构、六条设计立场与传输选型
 - **[Core package](packages/patchbay/README.zh-CN.md)** — 协议、信封、门禁、job 与 blob
