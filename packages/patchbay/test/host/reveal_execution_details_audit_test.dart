@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:test/test.dart';
 
 /// PB-050-26 / DG-060-04：`ui.reveal` 的 accepted 响应在通过 response schema 与
