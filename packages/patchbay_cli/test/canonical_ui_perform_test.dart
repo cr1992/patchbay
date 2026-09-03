@@ -85,22 +85,22 @@ Future<_Run> _run(
 void main() {
   group('canonical routing reuses protocol descriptor decoding', () {
     test('registered targets preserve identifier colons and text stdin', () {
-      final PatchbayFriendlyInvocation setText = _resolve(<String>[
+      final PatchbayFriendlyInvocation multiWord = _resolve(<String>[
         'ui',
         'perform',
-        'set-text',
+        'enter-text',
         'target:form:email',
         '3',
         'hello',
         'world',
       ]);
       _expectRoute(
-        setText,
+        multiWord,
         selectorKind: 'target',
         executionPath: 'directTarget',
-        serviceCommand: 'ui.text.set',
+        serviceCommand: 'ui.text.enter',
       );
-      expect(setText.arguments, <String, Object?>{
+      expect(multiWord.arguments, <String, Object?>{
         'id': 'form:email',
         'generation': 3,
         'text': 'hello world',
@@ -341,13 +341,13 @@ void main() {
           '--json',
           'ui',
           'perform',
-          'set-text',
+          'enter-text',
           'target:field',
           '2',
           'hello',
         ],
         commands: <Map<String, Object?>>[
-          <String, Object?>{'name': 'ui.text.set'},
+          <String, Object?>{'name': 'ui.text.enter'},
         ],
         handle: (String command, Map<String, Object?> arguments) async =>
             fakeAccepted(<String, Object?>{
@@ -359,14 +359,14 @@ void main() {
       expect(result.exitCode, PatchbayExitCode.accepted);
       expect(result.err, isEmpty);
       expect(result.client.calls, hasLength(1));
-      expect(result.client.calls.single.command, 'ui.text.set');
+      expect(result.client.calls.single.command, 'ui.text.enter');
       expect(result.json, containsPair('requestId', 'fake-request'));
       expect(result.json, containsPair('admission', 'accepted'));
       expect(result.json['payload'], containsPair('outcome', 'applied'));
       expect(result.json['localRoute'], <String, Object?>{
         'selectorKind': 'target',
         'executionPath': 'directTarget',
-        'serviceCommand': 'ui.text.set',
+        'serviceCommand': 'ui.text.enter',
       });
     },
   );
@@ -385,7 +385,7 @@ void main() {
           ),
           catalog: () async => <String, Object?>{
             'commands': <Object?>[
-              <String, Object?>{'name': 'ui.text.set'},
+              <String, Object?>{'name': 'ui.text.enter'},
             ],
             'uiTargets': const <Object?>[],
           },
@@ -422,7 +422,7 @@ void main() {
           '--json',
           'ui',
           'perform',
-          'set-text',
+          'enter-text',
           'target:field',
           '2',
           'hello',
@@ -433,7 +433,7 @@ void main() {
       );
 
       expect(exitCode, PatchbayExitCode.accepted);
-      expect(invokedCommand, 'ui.text.set');
+      expect(invokedCommand, 'ui.text.enter');
       expect(invokedArguments, <String, Object?>{
         'id': 'field',
         'generation': 2,
@@ -445,7 +445,7 @@ void main() {
       expect(response['localRoute'], <String, Object?>{
         'selectorKind': 'target',
         'executionPath': 'directTarget',
-        'serviceCommand': 'ui.text.set',
+        'serviceCommand': 'ui.text.enter',
       });
     },
   );
@@ -488,17 +488,18 @@ void main() {
         'semantics',
         'ui',
         'perform',
-        'set-text',
+        'enter-text',
         'target:field',
         '1',
       ],
       <String>['--via', 'pointer', 'ui', 'perform', 'tap', 'node:4', '1'],
       <String>['ui', 'perform', 'reveal', 'target:row'],
       <String>['ui', 'perform', 'action', 'target:field', '1', 'focus'],
-      <String>['ui', 'perform', 'set-text', 'semantics:field', '1'],
-      <String>['ui', 'perform', 'set-text', 'target:', '1'],
+      <String>['ui', 'perform', 'enter-text', 'semantics:field', '1'],
+      <String>['ui', 'perform', 'enter-text', 'target:', '1'],
       <String>['ui', 'perform', 'action', 'node:-1', '1', 'focus'],
       <String>['ui', 'perform', 'action', 'label:submit', '1', 'tap'],
+      <String>['ui', 'perform', 'set-text', 'target:field', '1', 'hello'],
     ]) {
       test(argv.join(' '), () async {
         final _Run result = await _run(<String>['--json', ...argv]);
@@ -536,7 +537,7 @@ void main() {
 ''');
       expect(result.err.trim().split('\n'), hasLength(1));
       expect(result.err, contains('deprecated'));
-      expect(result.err, contains('ui perform set-text target:<id>'));
+      expect(result.err, contains('ui perform enter-text target:<id>'));
     },
   );
 

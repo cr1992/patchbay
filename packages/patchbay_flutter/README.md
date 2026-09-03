@@ -216,6 +216,11 @@ Two distinct semantics are supported today:
 - `text.enter` — runs the target's `inputFormatters` in order, writes back to the controller, then
   calls the public `onChanged`; suitable for simulating one Flutter-level user input.
 
+The CLI's canonical `ui perform enter-text` maps to `text.enter`. `text.set` has no canonical CLI
+entry: its name never said it skips formatters and `onChanged`, and consumers reached for it as if it
+were input. It stays reachable through the deprecated `ui text set` (until 1.0) and through the wire
+command for host-side callers.
+
 Both prove only that the Flutter target accepted and observed the value change — never IME, soft
 keyboard UI, or system input method behavior.
 

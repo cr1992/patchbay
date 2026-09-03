@@ -7,7 +7,7 @@ void main() {
     final String source = _examplePrecheck().readAsStringSync();
 
     for (final String command in <String>[
-      'ui perform set-text target:example.note',
+      'ui perform enter-text target:example.note',
       'ui perform tap semantics:example.counter.increment',
       'ui perform action semantics:example.identifier.action',
       '--json ui perform drag \\',
@@ -16,6 +16,9 @@ void main() {
     ]) {
       expect(source, contains(command), reason: command);
     }
+    // The controller-only write has no canonical spelling; the device precheck
+    // must not keep exercising a path the CLI no longer offers.
+    expect(source, isNot(contains('ui perform set-text')));
     expect(
       source,
       isNot(

@@ -191,8 +191,11 @@ void main() {
       final List<String> words = <String>[
         ...spec.path,
         ...switch (spec) {
-          PatchbayCanonicalUiCommandSpec(action: 'set-text' || 'enter-text') =>
-            <String>['target:field.id', '3', 'hello'],
+          PatchbayCanonicalUiCommandSpec(action: 'enter-text') => <String>[
+            'target:field.id',
+            '3',
+            'hello',
+          ],
           PatchbayCanonicalUiCommandSpec(action: 'tap') => <String>[
             'semantics:gesture.target',
             '1',

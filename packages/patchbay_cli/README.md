@@ -160,7 +160,6 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay ui perform fling semantics:<identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | local CLI declaration | `ui.gesture.fling` | current |
 | `patchbay ui perform press-hold semantics:<identifier> <generation> --start <json> [--duration-ms <ms>]` | local CLI declaration | `ui.gesture.pressHold` | current |
 | `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | local CLI declaration | `ui.reveal` | current |
-| `patchbay ui perform set-text target:<id> <generation> [text]` | local CLI declaration | `ui.text.set` | current |
 | `patchbay ui perform tap semantics:<identifier> <generation> --via <semantics\|pointer> [--start <json>]` | local CLI declaration | `ui.gesture.tap` / `ui.semantics.tap` | current |
 | `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client CLI declaration | — | current |
 | `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | protocol descriptor | `ui.reveal` | deprecated in 0.6.0; use `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]`; removed in 1.0 |
@@ -169,7 +168,7 @@ This table describes syntax shipped by this CLI. Protocol-backed rows come from 
 | `patchbay ui tap <identifier> [--generation <generation>]` | protocol descriptor | `ui.semantics.tap` | deprecated in 0.6.0; use `patchbay ui perform tap semantics:<identifier> <generation> --via semantics`; removed in 1.0 |
 | `patchbay ui targets --emit-manifest` | local CLI declaration | — | current |
 | `patchbay ui text enter <target-id> <generation> [text]` | protocol descriptor | `ui.text.enter` | deprecated in 0.6.0; use `patchbay ui perform enter-text target:<id> <generation> [text]`; removed in 1.0 |
-| `patchbay ui text set <target-id> <generation> [text]` | protocol descriptor | `ui.text.set` | deprecated in 0.6.0; use `patchbay ui perform set-text target:<id> <generation> [text]`; removed in 1.0 |
+| `patchbay ui text set <target-id> <generation> [text]` | protocol descriptor | `ui.text.set` | deprecated in 0.6.0; use `patchbay ui perform enter-text target:<id> <generation> [text]`; removed in 1.0 |
 | `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local CLI declaration | — | current |
 | `patchbay ui wait destination <destination-id>` | protocol descriptor | `ui.wait` | current |
 | `patchbay ui wait frame-revision <revision>` | protocol descriptor | `ui.wait` | current |

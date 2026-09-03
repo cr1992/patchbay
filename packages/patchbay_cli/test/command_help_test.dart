@@ -63,7 +63,6 @@ Availability is still decided by the running App catalog.
     ]);
 
     for (final String action in <String>[
-      'set-text',
       'enter-text',
       'tap',
       'action',
@@ -74,6 +73,11 @@ Availability is still decided by the running App catalog.
     ]) {
       expect(group, contains('ui perform $action'));
     }
+    expect(group, isNot(contains('ui perform set-text')));
+    expect(group, contains('`patchbay ui targets`'));
+    expect(group, contains('`patchbay ui semantics tree`'));
+    expect(group, contains('never'));
+    expect(group, contains('retries with it.'));
     expect(group, contains('--via'));
     expect(group, contains('semantics|pointer'));
   });
