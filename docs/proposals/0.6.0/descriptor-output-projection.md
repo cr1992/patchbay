@@ -211,6 +211,40 @@ codegen/golden 迁移；拆成“只加 wire”和“只换 CLI”会产生两�
 不变，仍不允许分隔符、空白或任何运行时派生文本，`localView.omitted` / `localView.projection` 只回显
 声明里的静态字面量这一性质不变。
 
+**三、CLI-local 声明的实际范围。** 本 Proposal 的「非协议命令的同一声明类型」一节只点名 `catalog` 与
+三棵 Flutter diagnostic tree。实现中还有两个拼写必须持有 CLI-local 声明：`blob get`（`blob.metadata` 有
+两个拼写、只有它下载，声明属于拼写而不属于 service command，因此 `blob.metadata` 的 descriptor 刻意
+不声明）与 `logs export`（argv 在建立连接之前就要决定是否接受 `--output`，静态副本是唯一来源）。
+`capture root|target` **不**持有副本：其可达拼写是生成的，直接解析 `ui.capture` 的声明。
+
+副本即第二份可写真源，因此由测试钉住不漂移：`packages/patchbay_cli/test/output_projection_resolution_test.dart`
+的 `the reachable CLI-local declarations are a closed set`（可达 CLI-local 声明恰为六项）与
+`the one CLI-local copy of a service declaration cannot drift`（`logs export` 的副本与
+`logs.export` descriptor 声明逐字段相等；`capture root|target` 断言无副本且静态解析结果等于
+`ui.capture` 的声明）。
+
+**四、显式 `--output` 遇到缺成员。** 本 Proposal 写「显式 `--output` 仍无条件尝试写成员」，但 0.5.0
+`tree-artifact-output.md` 已冻结「`spilledMember` 指向的成员缺失时按内联渲染，不报错」，且其验证节
+把这条列为必测项。两者冲突时按本段原则沿用 0.5.0：**缺成员在显式 `--output` 下仍是静默 no-op，不落盘、
+不报错、不生造结构**。「无条件」只约束**大小**——成员存在时任意大小都落盘，不看阈值。
+
+**五、畸形语料的落点与 seed。** 本 Proposal 要求把 `outputProjection` 的畸形矩阵加进 PB-060-06 的
+harness。该 harness 的章程明确「不在 forwarded object 内部变异」，而 `outputProjection` 由
+`package:patchbay` 在其上一层解码，因此语料落在解码层的确定性表
+（`packages/patchbay/test/output_projection_test.dart`），而不是 transport harness。复现契约不分叉：
+seed 常量由测试 `defaultMalformedSeed equals the transport harness constant` 对着 harness 的声明文本
+校验，跨包无法 import 时以此代替第三份字面量复制。host 侧同一批畸形另有
+`host refuses a malformed declaration before it serves the catalog` 覆盖。
+
+
+**六、受限路径新增 CLI-local 根命名空间保留。** 本 Proposal 的路径语法未约束根字段名。实现在其上追加
+一条：`omit` 与 `member` 的**首段**不得以 `local` 开头，因为 `localView` / `localRoute` / `localArtifact` /
+`localKeepAwake` 是 CLI 在投影**之后**追加的自有事实（求值顺序第 4 步），descriptor 只能选择 App 返回的
+成员。这条既是语义纠正也是加固：PB-060-01 曾把 `localRoute` 在投影前并入响应，host 只要声明
+`omit: ["$.localRoute"]` 就能删掉 CLI 自己的路由报告并让 `localView.omitted` 回显该删除。实现已把所有
+CLI-local 键改为投影后追加，语法层的拒绝是第二道闸。
+
+
 ## 被否决方案
 
 - brief 改用保留清单：与 0.5.0 冻结的未知字段透传和 `localView.omitted` 稳定语义冲突；脱敏也不应依赖
