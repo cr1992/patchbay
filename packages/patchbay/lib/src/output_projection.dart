@@ -59,6 +59,17 @@ final RegExp _idPattern = RegExp(r'^[A-Za-z0-9.\-]+$');
 
 final RegExp _fieldPattern = RegExp(r'^[A-Za-z][A-Za-z0-9_]*$');
 
+/// Root-level prefix the CLI reserves for the facts it appends itself.
+///
+/// `localView`, `localRoute`, `localArtifact` and `localKeepAwake` are written
+/// by the CLI *after* the host response has been projected. A declaration may
+/// only select members the App actually returned, so a rule that named one of
+/// these would either be a no-op (evaluation order puts them after projection)
+/// or, worse, a provider deleting the CLI's own report of what it did. Refused
+/// at declaration time rather than ignored at evaluation time, so the mistake
+/// surfaces as a catalog violation instead of as silence.
+const String patchbayOutputProjectionReservedRootPrefix = 'local';
+
 /// Where an artifact's bytes come from. A closed set: a declaration may not
 /// name a path, a template, a formatter or a second artifact.
 enum PatchbayOutputArtifactKind {
@@ -216,6 +227,14 @@ final class PatchbayOutputProjectionPath {
       }
       if (traverses && index == parts.length - 1) {
         throw FormatException('$path must not end with "[]"');
+      }
+      if (index == 1 &&
+          field.startsWith(patchbayOutputProjectionReservedRootPrefix)) {
+        throw FormatException(
+          '$path names "\$.$field", which is in the CLI-reserved '
+          '"$patchbayOutputProjectionReservedRootPrefix" root namespace; a '
+          'declaration may only select members the App returned',
+        );
       }
       segments.add(
         PatchbayOutputProjectionPathSegment(field, traversesList: traverses),

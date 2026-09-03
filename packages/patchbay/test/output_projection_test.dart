@@ -472,6 +472,193 @@ void main() {
     });
   });
 
+  group(
+    'host refuses a malformed declaration before it serves the catalog',
+    () {
+      // D3: the CLI refusing a bad declaration is only half the contract. A
+      // provider whose own host happily publishes it ships a catalog that looks
+      // healthy from inside the App and breaks every reader — which is exactly
+      // the per-client divergence the declaration exists to remove. The host
+      // validates the same shapes, through the same validator, and reports them
+      // in the existing `invalidCatalogCommands` / `providerProtocolViolation`
+      // envelope rather than a new one.
+      Future<Map<String, Object?>> serve(Object? projection) {
+        final PatchbayServiceHost host = PatchbayServiceHost(
+          applicationId: 'output-projection-host-test',
+          catalog: () async => <String, Object?>{
+            'commands': <Object?>[
+              <String, Object?>{
+                'name': 'device.declaring',
+                'outputProjection': projection,
+              },
+            ],
+          },
+          snapshot: () async => const <String, Object?>{},
+          invoke: (_, _, requestId) async =>
+              PatchbayInvocation.accepted(requestId: requestId).toJson(),
+        );
+        return host.dispatchCatalog();
+      }
+
+      final Map<String, Object?> malformed = <String, Object?>{
+        'an unknown artifact key (outputPath)': <String, Object?>{
+          'artifact': <String, Object?>{
+            'kind': 'renderedMember',
+            'member': r'$.payload.nodes',
+            'encoding': 'json',
+            'mediaType': 'application/json',
+            'extension': 'json',
+            'automaticSpill': true,
+            'outputPath': '/tmp/anywhere',
+          },
+        },
+        'an unknown top-level key': <String, Object?>{
+          'brief': <String, Object?>{
+            'id': 'x',
+            'omit': <String>[r'$.a'],
+          },
+          'formatter': 'shell',
+        },
+        'a wrong type': <String, Object?>{'brief': 7},
+        'an empty id': <String, Object?>{
+          'brief': <String, Object?>{
+            'id': '',
+            'omit': <String>[r'$.a'],
+          },
+        },
+        'an id with whitespace': <String, Object?>{
+          'brief': <String, Object?>{
+            'id': 'ui semantics',
+            'omit': <String>[r'$.a'],
+          },
+        },
+        'a repeated omit rule': <String, Object?>{
+          'brief': <String, Object?>{
+            'id': 'x',
+            'omit': <String>[r'$.a', r'$.a'],
+          },
+        },
+        'a path outside the grammar': <String, Object?>{
+          'brief': <String, Object?>{
+            'id': 'x',
+            'omit': <String>[r'$.a[0]'],
+          },
+        },
+        'a CLI-reserved root path': <String, Object?>{
+          'brief': <String, Object?>{
+            'id': 'x',
+            'omit': <String>[r'$.localRoute'],
+          },
+        },
+        'neither brief nor artifact': <String, Object?>{},
+        'automaticSpill that is not true': <String, Object?>{
+          'artifact': <String, Object?>{
+            'kind': 'renderedMember',
+            'member': r'$.payload.nodes',
+            'encoding': 'json',
+            'mediaType': 'application/json',
+            'extension': 'json',
+            'automaticSpill': false,
+          },
+        },
+        'a mediaType that does not pair with the encoding': <String, Object?>{
+          'artifact': <String, Object?>{
+            'kind': 'renderedMember',
+            'member': r'$.payload.nodes',
+            'encoding': 'json',
+            'mediaType': 'text/plain; charset=utf-8',
+            'extension': 'json',
+            'automaticSpill': true,
+          },
+        },
+        'a member that traverses a list': <String, Object?>{
+          'artifact': <String, Object?>{
+            'kind': 'renderedMember',
+            'member': r'$.commands[].parameters',
+            'encoding': 'json',
+            'mediaType': 'application/json',
+            'extension': 'json',
+            'automaticSpill': true,
+          },
+        },
+      };
+
+      for (final MapEntry<String, Object?> entry in malformed.entries) {
+        test('${entry.key} takes the whole catalog down', () async {
+          final Map<String, Object?> catalog = await serve(entry.value);
+          expect(
+            catalog.containsKey('commands'),
+            isFalse,
+            reason: 'a violated catalog serves no command listing at all',
+          );
+          final Map<Object?, Object?> rejection =
+              catalog['rejection']! as Map<Object?, Object?>;
+          expect(rejection['code'], 'providerProtocolViolation');
+          final Map<Object?, Object?> details =
+              rejection['details']! as Map<Object?, Object?>;
+          expect(details['reason'], 'invalidCatalogCommands');
+          expect(
+            (details['violations']! as List<Object?>).single,
+            containsPair('reason', 'invalidOutputProjection'),
+          );
+        });
+      }
+
+      test('a well-formed declaration is served untouched', () async {
+        final Map<String, Object?> catalog = await serve(_validWire());
+        final List<Object?> commands = catalog['commands']! as List<Object?>;
+        expect(
+          (commands.single! as Map<Object?, Object?>)['outputProjection'],
+          _validWire(),
+        );
+      });
+
+      test('a row without the key is served as before', () async {
+        final PatchbayServiceHost host = PatchbayServiceHost(
+          applicationId: 'output-projection-host-test',
+          catalog: () async => <String, Object?>{
+            'commands': <Object?>[
+              <String, Object?>{'name': 'device.silent'},
+            ],
+          },
+          snapshot: () async => const <String, Object?>{},
+          invoke: (_, _, requestId) async =>
+              PatchbayInvocation.accepted(requestId: requestId).toJson(),
+        );
+        final Map<String, Object?> catalog = await host.dispatchCatalog();
+        expect(catalog['commands'], hasLength(1));
+      });
+    },
+  );
+
+  group('the malformed corpus shares PB-060-06\'s seed', () {
+    // D9: this corpus lives at the decode layer rather than inside PB-060-06's
+    // transport harness, because that harness is chartered never to mutate
+    // inside a forwarded object and `outputProjection` is decoded one layer up.
+    // What must not diverge is the replay contract, so the seed is pinned
+    // against the harness's own constant instead of being a third copy of the
+    // literal. Read as text because a test library is not importable across
+    // packages.
+    test('defaultMalformedSeed equals the transport harness constant', () {
+      final File harness = File(
+        '../patchbay_transport/test/malformed_payload_harness.dart',
+      );
+      expect(
+        harness.existsSync(),
+        isTrue,
+        reason: 'PB-060-06 harness moved; re-point this ratchet at it',
+      );
+      final RegExp declaration = RegExp(
+        r'const int defaultMalformedSeed = (0x[0-9A-Fa-f]+|\d+);',
+      );
+      final RegExpMatch? match = declaration.firstMatch(
+        harness.readAsStringSync(),
+      );
+      expect(match, isNotNull, reason: 'harness seed declaration not found');
+      expect(int.parse(match!.group(1)!), defaultMalformedSeed);
+    });
+  });
+
   group('descriptor carries the declaration as a loose catalog sibling', () {
     test('ui.semantics.tree publishes brief and artifact', () {
       final Map<String, Object?> json = patchbayUiSemanticsTreeCommandDescriptor

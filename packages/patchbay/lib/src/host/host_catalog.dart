@@ -3,6 +3,7 @@ import '../command_descriptor.dart';
 import '../command_registry.dart';
 import '../execution_evidence.dart';
 import '../generated/core_wire.g.dart';
+import '../output_projection.dart';
 import '../response_schema.dart';
 import 'host_models.dart';
 
@@ -415,6 +416,23 @@ final class HostCatalogHandler {
             'index': index,
             'name': rawName,
             'reason': 'invalidRetryPolicy',
+          });
+        }
+      }
+      if (entry.containsKey('outputProjection')) {
+        // PB-050-40: the host refuses a malformed declaration for the same
+        // reason the CLI does, and it has to be *this* side that refuses —
+        // a provider whose declaration only the client rejects ships a catalog
+        // that looks fine from inside the App and breaks every reader of it.
+        // Serving it and letting each client decide would be exactly the
+        // per-client guessing `outputProjection` exists to remove.
+        try {
+          PatchbayOutputProjection.fromCatalogRow(entry);
+        } on Object {
+          violations.add(<String, Object?>{
+            'index': index,
+            'name': rawName,
+            'reason': 'invalidOutputProjection',
           });
         }
       }
