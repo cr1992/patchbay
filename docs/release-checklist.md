@@ -165,7 +165,22 @@ $ (cd packages/patchbay && PUB_HOSTED_URL=https://pub.dev dart pub publish)
 - 整体改用 pub.dev 版本（推荐）；
 - 或在自己仓的**根** pubspec 加 `dependency_overrides`，把四包统一指回同一 git ref。
 
-接入方侧的具体文件与命令（`PATCHBAY_PINS`、双 lock 等）**未在本仓验证**，以该仓自身文档为准。
+候选尚未发布时统一使用第二条，不临时发布 prerelease。仓内工具会从 workspace 清单生成四包覆盖，且只接受
+完整的 40 位 commit SHA，避免验收期间分支移动：
+
+```console
+$ dart run tool/repo_tasks.dart candidate-consumer \
+    --repository '<git-url>' --commit '<40-character-commit-sha>' \
+    --output /path/to/consumer/pubspec_overrides.yaml
+$ # 在 consumer 仓运行 flutter pub get 后，回到 patchbay 候选检出：
+$ dart run tool/repo_tasks.dart candidate-consumer \
+    --repository '<git-url>' --commit '<40-character-commit-sha>' \
+    --verify-lock /path/to/consumer/pubspec.lock
+```
+
+lock 校验要求四包的 Git URL、`ref`、`resolved-ref` 与 monorepo path 全部一致；生成文件只用于候选验收，
+不得提交进 consumer 仓。完整的依赖声明、验证和清理步骤见
+[候选接入说明](candidate-validation.md)。接入方自身的双 lock 或额外 guard 仍以该仓文档为准。
 
 ## 9. 人工项：真机验收
 

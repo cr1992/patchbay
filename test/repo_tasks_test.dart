@@ -112,6 +112,14 @@ void main() {
     expect(github, contains('path: coverage/'));
   });
 
+  test('candidate consumer 是本地工具任务，不进入 CI job', () {
+    expect(RepoTaskCatalog.taskNames, contains('candidate-consumer'));
+    final String gitlab = File('.gitlab-ci.yml').readAsStringSync();
+    final String github = File('.github/workflows/ci.yml').readAsStringSync();
+    expect(gitlab, isNot(contains('repo_tasks.dart candidate-consumer')));
+    expect(github, isNot(contains('repo_tasks.dart candidate-consumer')));
+  });
+
   test('任务从 workspace 分类生成包级命令', () {
     final RepoWorkspace workspace = RepoWorkspace.discover(root.path);
     final RepoTaskCatalog catalog = RepoTaskCatalog(workspace);

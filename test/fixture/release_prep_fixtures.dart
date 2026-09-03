@@ -132,6 +132,7 @@ curl /releases/download/patchbay-v$version/patchbay-$version-linux-x64
   'packages/patchbay_flutter/README.zh-CN.md': '# Flutter\n',
   'packages/patchbay_flutter/example/README.md': '# Example\n',
   'packages/patchbay_flutter/example/README.zh-CN.md': '# Example\n',
+  'docs/candidate-validation.md': '# Candidate validation\n',
   'docs/design.md': 'CLI->>Host: exec example.job.run\n',
   'docs/assets/patchbay-hero.svg':
       '<svg><text>patchbay exec example.job.run</text></svg>\n',
