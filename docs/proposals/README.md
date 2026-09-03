@@ -60,7 +60,7 @@ Proposal 用来冻结实现前必须一致理解的技术契约。它不是 back
 
 0.6.0 提案中：
 
-（暂无）
+- [Semantics 拒绝 details 对齐](0.6.0/semantics-rejection-details.md)
 
 已延期、尚未进入版本范围的候选方案：
 

@@ -2,7 +2,7 @@
 
 > 状态：已接受
 >
-> 关联：PB-060-01
+> 关联：PB-060-01、PB-060-08
 >
 > 设计闸门：DG-060-01
 
@@ -73,8 +73,8 @@ selector 不接收 copy/label 猜测；sensitive 输入继续走 stdin；响应�
 ### canonical 家族与 selector 语法
 
 接受 CLI-only 的 `patchbay ui perform <action> <selector> ...` 家族。它解析后只调用既有 service command，
-不新增 wire command、身份域或 host fallback。`action` 封闭为 `set-text`、`enter-text`、`tap`、`action`、
-`press-hold`、`drag`、`fling`、`reveal`；selector 只允许：
+不新增 wire command、身份域或 host fallback。`action` 封闭为 `enter-text`、`tap`、`action`、
+`press-hold`、`drag`、`fling`、`reveal`（`set-text` 于 2026-09-03 修订移除，见下）；selector 只允许：
 
 - `target:<id>`：现有注册 target id；第一个冒号后的非空原文是 id，id 内后续冒号保留；
 - `semantics:<identifier>`：现有 Semantics identifier，同样只消费第一个冒号；
@@ -84,7 +84,6 @@ canonical 拼写与映射冻结为：
 
 | CLI 入口 | selector / generation | 映射的既有 service command |
 |---|---|---|
-| `ui perform set-text target:<id> <generation> [text]` | target；generation 必填 | `ui.text.set` |
 | `ui perform enter-text target:<id> <generation> [text]` | target；generation 必填 | `ui.text.enter` |
 | `ui perform tap semantics:<identifier> <generation> --via semantics` | semantics；generation 必填 | `ui.semantics.tap` |
 | `ui perform tap semantics:<identifier> <generation> --via pointer [--start <json>]` | semantics；generation 必填 | `ui.gesture.tap` |
@@ -109,6 +108,19 @@ canonical 机器结果在 CLI-local 的顶层 `localRoute` 报告 `selectorKind`
 `serviceCommand`；不把 CLI 路由事实伪装进 host payload。`executionPath` 封闭值为 `directTarget`、
 `semanticsAction`、`pointerGesture`、`scrollReveal`，与 DG-060-05 的 `interactionModel` 一致但不替代它。
 底层 host response、requestId、admission、payload、退出码与 VM/direct 字节保持不变。
+
+### 裁决修订（2026-09-03，PB-060-08）：移除 `set-text`
+
+`ui.text.set` 只替换 controller 值，不跑 `inputFormatters`、不调 `onChanged`；`set-text` 这个名字不表达这层
+差别。接入方首次使用就把它当成「输入文本」，表单状态不动、提交按钮恒禁用。`enter-text` 在实践上是超集：
+formatter 与 `onChanged` 都走，`onChanged` 为空时退化成同一结果。canonical 家族因此只保留 `enter-text`。
+
+- `ui text set` 的迁移目标改为 `ui perform enter-text target:<id> <generation> [text]`；deprecated 窗口不变，
+  仍保留至 1.0 并向 stderr 告警。
+- wire 命令 `ui.text.set` 与 host 行为不变。只写 controller 的自动化面继续经 deprecated 入口与 wire 命令可达；
+  `ui.text.set` 是否进入 1.0 承诺留给 RC 的候选评估。
+- `ui perform` 的 help 标明 `target:` 的 generation 来自 `ui targets`，`semantics:` / `node:` 的来自
+  `ui semantics tree`；stale 拒绝携带 `currentGeneration`，CLI 不据此自动重发。
 
 ### 旧入口窗口
 
