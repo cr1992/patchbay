@@ -829,11 +829,27 @@ $ patchbay help <topic>                     # 帮助由声明生成
 容器可以问 policy。要卡住"任何调用都不许超过 N 步"，用调用级硬顶的口径去写脚本，不要指望 policy 上限
 兜住已曝光的调用（这条分层由 DG-060-05 裁决固定，不是实现细节）。
 
-**`uiRevealNoScrollableContainer` 目前偏宽，一个码盖住三种不同情况：** 目标压根不存在（含
-identifier 拼错）、目标已挂载但被浮层遮挡、以及确实没有可授权的滚动容器，现在共用同一个拒绝码，
-不能仅凭它分辨是哪一种——遇到时先用 `ui tap` 或 `ui semantics tree` 对同一 identifier 核对是否
-被遮挡，再排查 `--container` 或 identifier 拼写；不要看到这个码就默认去找滚动容器（改进方向已登记
-[PB-050-35](backlog.d/PB-050-35.md)）。
+**准入拒绝分三种，每种对应一个不同的下一步。** 分类发生在第一次滚动派发之前，因此不消耗步数：
+
+| code | 说明 | 你该做的 |
+|---|---|---|
+| `uiRevealTargetNotFound` | identifier 当前零匹配，且没有可驱动容器、也没给 `--container` 可继续查找；details 带 `matchCount: 0` | 改 identifier，或用 `--container` 指一个已授权的滚动容器 |
+| `uiRevealTargetObscured` | 目标唯一挂载、几何上已经露出来了，却被 `blockUserActions` 或五点采样判为被盖住；details 带 `generation` | 处理挡在前面的 modal / 浮层。**不要**改成加大 `--max-steps`：滚动穿不透它，Patchbay 一步都不会派发 |
+| `uiRevealNoScrollableContainer` | 目标唯一挂载但还没露出来，祖先链上没有可驱动容器；或 `--container` 指的锚点里没有可驱动节点（details 另带 `role: container`） | 修 / 开放滚动容器，或换一个锚点 |
+
+identifier 匹配到多个仍是 `uiSemanticsIdentifierAmbiguous`。**给了 `--container` 时先判锚点**：锚点
+不存在、有歧义、锚点内滚动节点有歧义或锚点内没有可驱动节点，一律沿用既有码（前两者带
+`role: container` 的 `uiSemantics*`，后两者是 `uiRevealContainerAmbiguous` /
+`uiRevealNoScrollableContainer`），并优先于遮挡判定——你给的那个 identifier 本身就是错的，先改它；
+只有锚点解析成功之后，被盖住的目标才换来 `uiRevealTargetObscured`。
+
+**目标完全滚出视口不算被遮挡**——那正是 reveal 要解决的事，有可驱动容器就继续滚。同理，进入滚动之后
+才发现的遮挡、目标消失或滚到底仍找不到，都留在成功受理的回包里当 `reason`，不会倒退成上面这三个
+准入拒绝码。
+
+**对着 0.6.0 之前的 App 时**，上面三种情况仍然合并成一个 `uiRevealNoScrollableContainer`：那是
+legacy ambiguous，CLI 不会替老 host 改写码、也不会自己猜遮挡。此时仍按旧办法排查——先用 `ui tap` 或
+`ui semantics tree` 对同一 identifier 核对是否被遮挡，再排查 `--container` 或 identifier 拼写。
 
 `reachability` 是这次请求终止帧上、一次固定采样命中测试的结论，不是「这个目标此刻及此后都能
 操作」的持续性证明——下一帧的遮挡、动画或布局变化都可能让它过期，真正的操作围栏是随后写操作携带

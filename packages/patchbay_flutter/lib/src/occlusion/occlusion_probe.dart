@@ -101,13 +101,22 @@ final class PatchbayOcclusionGeometry {
   Offset globalOf(double x, double y) =>
       MatrixUtils.transformPoint(transform, _localOf(x, y));
 
+  /// 归一化探针点是否落在祖先 `parentPaintClipRect` 之内。
+  ///
+  /// [probe] 把「被剪裁掉」与「被外来层盖住」合并成同一个
+  /// [PatchbayOcclusionState.obstructed]：对遮挡闸而言两者同样 fail-closed，
+  /// 合并是对的。但 PB-050-35 / DG-060-05 的 reveal 准入分类必须把两者分开
+  /// ——完全剪裁出 viewport 不叫遮挡，它的恢复方向是继续滚动而不是处理浮层
+  /// ——所以把 [probe] 的第一道判定单独暴露一次，而不是另起一套几何。
+  bool withinPaintClip(double x, double y) {
+    final Rect? clip = node.parentPaintClipRect;
+    return clip == null || clip.contains(_localOf(x, y));
+  }
+
   /// 对一个归一化探针点求三态判定。
   PatchbayOcclusionState probe(double x, double y) {
+    if (!withinPaintClip(x, y)) return PatchbayOcclusionState.obstructed;
     final Offset local = _localOf(x, y);
-    final Rect? clip = node.parentPaintClipRect;
-    if (clip != null && !clip.contains(local)) {
-      return PatchbayOcclusionState.obstructed;
-    }
     final HitTestResult result = HitTestResult();
     GestureBinding.instance.hitTestInView(
       result,
@@ -308,6 +317,17 @@ PatchbaySampledOcclusion patchbaySampledOcclusion({
   if (geometry == null) {
     return PatchbaySampledOcclusion.refused(resolution.reason!);
   }
+  return patchbaySampleOcclusionGeometry(geometry);
+}
+
+/// [patchbaySampledOcclusion] 的第二半：几何已解析时的五点采样。
+///
+/// 单独暴露只为让调用方复用**同一份**几何——reveal 的准入分类既要采样结论，
+/// 又要知道采样点有没有被祖先 paint clip 剪掉，重解析一次几何等于重跑一遍
+/// `hitTest`，且两次解析之间的树变化会让两个结论互相矛盾。
+PatchbaySampledOcclusion patchbaySampleOcclusionGeometry(
+  PatchbayOcclusionGeometry geometry,
+) {
   var best = PatchbayOcclusionState.obstructed;
   for (final PatchbayOcclusionProbe probe in patchbaySemanticsProbeSamples) {
     final PatchbayOcclusionState state = geometry.probe(probe.x, probe.y);

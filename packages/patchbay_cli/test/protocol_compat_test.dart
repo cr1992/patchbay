@@ -651,6 +651,31 @@ void main() {
 
       expect(patchbayExitCodeFor(response), PatchbayExitCode.rejected);
     });
+
+    test('PB-050-35 新增的两个 reveal 准入码同样落在既有 rejected 分支', () {
+      // 拆码是收紧且 additive：分类器按信封形状走，不认码值，所以老 CLI 见到
+      // 一个它从未听说过的 code 仍然正确分类，退出码不变。反过来，新 CLI 面对
+      // 老 host 仍会收到合并后的 `uiRevealNoScrollableContainer`——那是 legacy
+      // ambiguous，CLI 不转换码、也不自行猜测遮挡。
+      for (final String code in <String>[
+        'uiRevealTargetNotFound',
+        'uiRevealTargetObscured',
+      ]) {
+        final Map<String, Object?> response = PatchbayInvocation.rejected(
+          requestId: 'reveal-compat-$code',
+          rejection: PatchbayRejection(
+            code: code,
+            details: const <String, Object?>{'identifier': 'row.42'},
+          ),
+        ).toJson();
+
+        expect(
+          patchbayExitCodeFor(response),
+          PatchbayExitCode.rejected,
+          reason: code,
+        );
+      }
+    });
   });
 
   group('0.4.1 reader ↔ 带 origin 的新 localArtifact 回执', () {

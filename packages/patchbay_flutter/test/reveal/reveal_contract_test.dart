@@ -124,8 +124,10 @@ void main() {
       }
     });
 
-    test('准入前新增码恰好 6 个，且 bridge 里以字面量出现（可被全仓 ratchet 扫到）', () {
-      expect(PatchbayRevealRejection.values, hasLength(6));
+    test('准入前新增码恰好 8 个，且 bridge 里以字面量出现（可被全仓 ratchet 扫到）', () {
+      // PB-050-35 把偏宽的 uiRevealNoScrollableContainer 拆成三个恢复方向，
+      // 因此这张封闭表从 6 涨到 8。
+      expect(PatchbayRevealRejection.values, hasLength(8));
       final String source = File(_bridgeSource).readAsStringSync();
       for (final String code in PatchbayRevealRejection.values) {
         expect(

@@ -482,7 +482,10 @@ void main() {
   });
 
   group('准入前拒绝', () {
-    testWidgets('内容不足一屏 ⇒ uiRevealNoScrollableContainer', (
+    // PB-050-35：这两条的目标 identifier 都是零匹配，因此 DG-060-05 之后归
+    // `uiRevealTargetNotFound`——恢复方向是改 identifier 或开放容器，不是去查
+    // 滚动容器。三个码的完整边界矩阵在 reveal_rejection_shapes_test.dart。
+    testWidgets('内容不足一屏且目标零匹配 ⇒ uiRevealTargetNotFound', (
       WidgetTester tester,
     ) async {
       final PatchbayFlutterBridge bridge = revealBridge();
@@ -499,12 +502,12 @@ void main() {
         bridge.reveal.reveal(identifier: revealTargetId, timeoutMs: 60000),
       );
 
-      expect(result.rejection?.code, 'uiRevealNoScrollableContainer');
+      expect(result.rejection?.code, 'uiRevealTargetNotFound');
       expect(showOnScreenCalls, 0);
     });
 
     testWidgets(
-      'NeverScrollableScrollPhysics ⇒ uiRevealNoScrollableContainer',
+      'NeverScrollableScrollPhysics 且目标零匹配 ⇒ uiRevealTargetNotFound',
       (WidgetTester tester) async {
         final PatchbayFlutterBridge bridge = revealBridge();
         addTearDown(bridge.dispose);
@@ -525,7 +528,7 @@ void main() {
           bridge.reveal.reveal(identifier: revealTargetId, timeoutMs: 60000),
         );
 
-        expect(result.rejection?.code, 'uiRevealNoScrollableContainer');
+        expect(result.rejection?.code, 'uiRevealTargetNotFound');
         expect(showOnScreenCalls, 0);
       },
     );

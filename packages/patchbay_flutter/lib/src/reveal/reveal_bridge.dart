@@ -16,6 +16,7 @@ import '../frame_observer.dart';
 import '../lifecycle.dart';
 import '../semantics/semantics_bridge.dart';
 import '../semantics/semantics_lookup.dart';
+import 'reveal_admission.dart';
 import 'reveal_engine.dart';
 import 'reveal_models.dart';
 
@@ -122,6 +123,7 @@ final class PatchbayRevealBridge {
     }
     final SemanticsNode? target = targets.isEmpty ? null : targets.single;
 
+    // PB-050-35 / DG-060-05：可达性分类发生在第一次 scroll 派发前，不消耗 step。
     final _Admission admission = _admit(
       id: id,
       root: root,
@@ -129,11 +131,13 @@ final class PatchbayRevealBridge {
       container: container,
       direction: direction,
       target: target,
-      alreadyRevealed: patchbayRevealedNow(
-        owner: owner,
-        node: target,
-        semantics: _semantics,
-      ),
+      classified: target == null
+          ? null
+          : patchbayRevealTargetAdmission(
+              owner: owner,
+              node: target,
+              semantics: _semantics,
+            ),
     );
     if (admission.rejection case final PatchbayInvocation rejection) {
       return rejection;
@@ -368,6 +372,29 @@ final class PatchbayRevealBridge {
   /// 准入容器按固定顺序确定，每一步都要么唯一，要么拒绝。
   ///
   /// 不按尺寸、深度或可滚动距离给候选打分——那正是 design.md 红线要挡的猜测。
+  ///
+  /// PB-050-35 / DG-060-05 把「没露出」拆成三个恢复方向，判定顺序如下，且顺序
+  /// 本身是契约的一部分：
+  ///
+  /// 1. **显式 `--container` 先解析。** 锚点不存在、锚点歧义、锚点内滚动节点歧义
+  ///    与锚点内无可驱动节点，一律沿用既有码（前两者是 `uiSemantics*`，后两者是
+  ///    `uiRevealContainerAmbiguous` / `uiRevealNoScrollableContainer` 带
+  ///    `role: container`），并**优先于**遮挡分类。裁决明写「显式容器不存在/歧义
+  ///    继续沿用既有码」：调用方给的那个 identifier 本身就是错的，先把它说清楚，
+  ///    否则一个 `uiRevealTargetObscured` 会让人以为 `--container` 写对了。
+  ///    同理，锚点解析失败时也不去谈遮挡——连要推哪块区域都还没确定。
+  /// 2. 已挂载 + 几何上已曝光 + 被屏蔽或被盖住 ⇒ `uiRevealTargetObscured`。
+  ///    锚点已解析成功（或调用方压根没给 `--container`）之后判定，且排在候选容器
+  ///    搜索与 policy / 门之前：滚动穿不透覆盖层，推容器只会白花预算并把真正的
+  ///    原因埋掉。
+  /// 3. 零匹配 + 没有可驱动容器、也没有显式授权容器可继续查找 ⇒
+  ///    `uiRevealTargetNotFound`。恢复方向是改 identifier 或开放容器。
+  /// 4. 已挂载但尚未曝光 + 没有可驱动祖先 ⇒ `uiRevealNoScrollableContainer`。
+  ///
+  /// 「完全剪裁出 viewport / `isInvisible` / 零可见面积」不进第 2 条：它是
+  /// reveal 的正常输入，有容器就继续滚，没容器才落到第 4 条。
+  ///
+  /// 三条判定全部发生在第一次 scroll 派发之前，因此都不消耗 step。
   _Admission _admit({
     required String id,
     required SemanticsNode root,
@@ -375,10 +402,23 @@ final class PatchbayRevealBridge {
     required String? container,
     required PatchbayRevealDirection direction,
     required SemanticsNode? target,
-    required PatchbayRevealOutcome? alreadyRevealed,
+    // 非空当且仅当 [target] 非空——两者在调用点一起产生，见 `reveal`。
+    required PatchbayRevealTargetAdmission? classified,
   }) {
     if (container != null) {
-      return _admitAnchored(id, root, container, direction);
+      final _Admission anchored = _admitAnchored(
+        id,
+        root,
+        container,
+        direction,
+      );
+      // 锚点没解析出来就照它的既有码回答；解析出来了才谈目标遮挡。
+      if (anchored.anchor == null) return anchored;
+      return _obscuredRejection(id, identifier, target, classified) ?? anchored;
+    }
+    if (_obscuredRejection(id, identifier, target, classified)
+        case final _Admission obscured) {
+      return obscured;
     }
     final List<SemanticsNode> candidates = target == null
         // 目标未挂载：没有祖先链可用，全树只有一个可驱动滚动节点时才用它。
@@ -386,18 +426,32 @@ final class PatchbayRevealBridge {
         // 目标已挂载：祖先链上最内层的可驱动滚动节点。
         : _drivable(patchbaySemanticsScrollAncestors(target), direction);
     if (candidates.isEmpty) {
-      if (alreadyRevealed != null) {
+      if (classified?.outcome case final PatchbayRevealOutcome revealed) {
         // 链上没有可驱动容器而目标已经露出：无事可做，直接成功。
-        return _Admission.shortcut(alreadyRevealed);
+        return _Admission.shortcut(revealed);
+      }
+      if (target == null) {
+        return _Admission.rejected(
+          _rejected(
+            id,
+            'uiRevealTargetNotFound',
+            details: <String, Object?>{
+              'identifier': identifier,
+              'matchCount': 0,
+            },
+            notice:
+                'No mounted semantics node carries this identifier, and no '
+                'drivable scroll container is mounted to reveal one. Fix the '
+                'identifier, or name an authorised container.',
+          ),
+        );
       }
       return _Admission.rejected(
         _rejected(
           id,
           'uiRevealNoScrollableContainer',
           details: <String, Object?>{'identifier': identifier},
-          notice: target == null
-              ? 'No drivable scroll container is mounted.'
-              : 'No drivable scroll container encloses the target.',
+          notice: 'No drivable scroll container encloses the target.',
         ),
       );
     }
@@ -417,6 +471,33 @@ final class PatchbayRevealBridge {
       );
     }
     return _Admission.anchor(_anchorOf(candidates.first));
+  }
+
+  /// 已挂载且几何上已曝光的目标被屏蔽或被盖住时的拒绝，否则 null。
+  ///
+  /// 提成一个方法是因为它有两个调用点（给了 `--container` 与没给），而两个调用
+  /// 点上它的**位置不同**——见 [_admit] 的顺序说明。
+  _Admission? _obscuredRejection(
+    String id,
+    String identifier,
+    SemanticsNode? target,
+    PatchbayRevealTargetAdmission? classified,
+  ) {
+    if (target == null || !classified!.obscured) return null;
+    return _Admission.rejected(
+      _rejected(
+        id,
+        'uiRevealTargetObscured',
+        details: <String, Object?>{
+          'identifier': identifier,
+          'generation': _semantics.observe(target).generation,
+        },
+        notice:
+            'The target is mounted and geometrically exposed, but user '
+            'actions on it are blocked or every fixed sample point is '
+            'covered. Scrolling cannot reach through that.',
+      ),
+    );
   }
 
   _Admission _admitAnchored(
@@ -476,7 +557,12 @@ final class PatchbayRevealBridge {
         _rejected(
           id,
           'uiRevealNoScrollableContainer',
-          details: <String, Object?>{'identifier': container},
+          // `role` 说明这个 identifier 说的是显式锚点而不是目标：同一个码在
+          // 两种现场都成立，调用方要能一眼看出该去改哪一个 identifier。
+          details: <String, Object?>{
+            'identifier': container,
+            'role': 'container',
+          },
           notice:
               'The container anchor encloses no scroll node that currently '
               'exposes a same-axis scroll action.',

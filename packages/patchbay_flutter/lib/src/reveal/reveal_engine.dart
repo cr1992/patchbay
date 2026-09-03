@@ -17,10 +17,10 @@ import 'package:patchbay/patchbay.dart';
 import 'package:patchbay/patchbay_protocol.dart';
 
 import '../frame_observer.dart';
-import '../occlusion/occlusion_probe.dart';
 import '../semantics/semantics_bridge.dart';
 import '../semantics/semantics_lookup.dart';
 import '../semantics/semantics_models.dart';
+import 'reveal_admission.dart';
 import 'reveal_models.dart';
 
 /// 一次 reveal 调用的步进循环。每次调用构造一个实例，不跨调用复用。
@@ -452,40 +452,6 @@ final class PatchbayRevealEngine {
       return _Timed<T>.timeout();
     }
   }
-}
-
-/// 目标此刻已挂载且露出时的成功终态，否则 null。
-///
-/// 进入循环之前的那一次判定（步数为 0 的那一次）只认这一个终态：被模态屏蔽、
-/// 被裁剪、被盖住都不是 0 步终态——受理后的 `failed` payload 要求 `containers`
-/// 恒非空，而一次都没派发时它必然是空的。那几种情形因此继续步进。
-PatchbayRevealOutcome? patchbayRevealedNow({
-  required SemanticsOwner owner,
-  required SemanticsNode? node,
-  required PatchbaySemanticsBridge semantics,
-}) {
-  if (node == null || node.areUserActionsBlocked || node.isInvisible) {
-    return null;
-  }
-  final PatchbaySampledOcclusion occlusion = patchbaySampledOcclusion(
-    owner: owner,
-    node: node,
-  );
-  if (!occlusion.passed) return null;
-  return PatchbayRevealOutcome.revealed(
-    nodeId: node.id,
-    generation: semantics.observe(node).generation,
-    reachability: switch (occlusion.state) {
-      PatchbayOcclusionState.reachable =>
-        PatchbayRevealReachabilityWire.pointer,
-      PatchbayOcclusionState.noPointerFootprint =>
-        PatchbayRevealReachabilityWire.semanticsOnly,
-      // 通过的两态只有上面两个；obstructed 由 `passed` 挡在外面。
-      PatchbayOcclusionState.obstructed => throw StateError(
-        'obstructed cannot pass the sampled occlusion admission',
-      ),
-    },
-  );
 }
 
 /// 容器在 policy 眼里的稳定身份。
