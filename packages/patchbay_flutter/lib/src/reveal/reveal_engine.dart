@@ -14,7 +14,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:patchbay/patchbay.dart';
-import 'package:patchbay/patchbay_protocol.dart';
 
 import '../frame_observer.dart';
 import '../semantics/semantics_bridge.dart';

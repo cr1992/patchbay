@@ -21,7 +21,7 @@
 //
 // 本文件不出现在包的 barrel 里，全部符号都是包内实现，不构成公共 API。
 import 'package:flutter/semantics.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import '../occlusion/occlusion_probe.dart';
 import '../semantics/semantics_bridge.dart';
