@@ -133,7 +133,7 @@ final class CatalogCommandDescriptor {
     // catalog a *dispatch* holds has already passed
     // [validateCatalogDeclarations] via `CatalogInvoker.fetchCatalog`, but the
     // manifest walkthrough re-reads a fresh catalog per screen straight off
-    // `connection.catalog()` and drives `invokeAgainstCatalog` — and so this
+    // the connection's catalog RPC and drives `invokeAgainstCatalog` — and so this
     // lookup — with that second, unvalidated document. Removing the call would
     // leave a host that starts serving an unknown `interactionModel` mid-walk
     // interpreted row by row. It also keeps the whole-catalog shape when a
