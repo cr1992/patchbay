@@ -168,6 +168,18 @@ abstract final class PatchbayRevealReason {
 /// 准入前稳定拒绝码里 reveal 新增的那一组。
 abstract final class PatchbayRevealRejection {
   static const String disabled = 'uiRevealDisabled';
+
+  /// PB-050-35 / DG-060-05：目标 identifier 零匹配，且没有可驱动或显式授权容器
+  /// 可以继续查找。details 带 `identifier` 与 `matchCount: 0`。
+  static const String targetNotFound = 'uiRevealTargetNotFound';
+
+  /// PB-050-35 / DG-060-05：目标唯一挂载、几何上已曝光，却被 `blockUserActions`
+  /// 或五点采样判为 obstructed。details 带 `identifier` 与 `generation`；不尝试
+  /// 滚动穿透。
+  static const String targetObscured = 'uiRevealTargetObscured';
+
+  /// 目标唯一挂载但尚未曝光且没有可驱动祖先，或显式容器锚点内没有可驱动节点
+  /// （后者的 details 另带 `role: container`）。
   static const String noScrollableContainer = 'uiRevealNoScrollableContainer';
   static const String containerAmbiguous = 'uiRevealContainerAmbiguous';
   static const String denied = 'uiRevealDenied';
@@ -177,6 +189,8 @@ abstract final class PatchbayRevealRejection {
   /// 穷尽性测试用的封闭集合。
   static const Set<String> values = <String>{
     disabled,
+    targetNotFound,
+    targetObscured,
     noScrollableContainer,
     containerAmbiguous,
     denied,

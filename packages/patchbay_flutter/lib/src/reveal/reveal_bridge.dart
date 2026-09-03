@@ -15,6 +15,7 @@ import '../frame_observer.dart';
 import '../lifecycle.dart';
 import '../semantics/semantics_bridge.dart';
 import '../semantics/semantics_lookup.dart';
+import 'reveal_admission.dart';
 import 'reveal_engine.dart';
 import 'reveal_models.dart';
 
@@ -121,6 +122,7 @@ final class PatchbayRevealBridge {
     }
     final SemanticsNode? target = targets.isEmpty ? null : targets.single;
 
+    // PB-050-35 / DG-060-05：可达性分类发生在第一次 scroll 派发前，不消耗 step。
     final _Admission admission = _admit(
       id: id,
       root: root,
@@ -128,11 +130,13 @@ final class PatchbayRevealBridge {
       container: container,
       direction: direction,
       target: target,
-      alreadyRevealed: patchbayRevealedNow(
-        owner: owner,
-        node: target,
-        semantics: _semantics,
-      ),
+      classified: target == null
+          ? null
+          : patchbayRevealTargetAdmission(
+              owner: owner,
+              node: target,
+              semantics: _semantics,
+            ),
     );
     if (admission.rejection case final PatchbayInvocation rejection) {
       return rejection;
@@ -367,6 +371,19 @@ final class PatchbayRevealBridge {
   /// 准入容器按固定顺序确定，每一步都要么唯一，要么拒绝。
   ///
   /// 不按尺寸、深度或可滚动距离给候选打分——那正是 design.md 红线要挡的猜测。
+  ///
+  /// PB-050-35 / DG-060-05 把「没露出」拆成三个恢复方向，判定顺序如下，且顺序
+  /// 本身是契约的一部分：
+  ///
+  /// 1. 已挂载 + 几何上已曝光 + 被屏蔽或被盖住 ⇒ `uiRevealTargetObscured`。
+  ///    它排在容器解析之前，因为滚动穿不透覆盖层——即使调用方显式给了
+  ///    `--container`，推那个容器也只会白白花掉预算并把真正的原因埋掉。
+  /// 2. 零匹配 + 没有可驱动容器、也没有显式授权容器可继续查找 ⇒
+  ///    `uiRevealTargetNotFound`。恢复方向是改 identifier 或开放容器。
+  /// 3. 已挂载但尚未曝光 + 没有可驱动祖先 ⇒ `uiRevealNoScrollableContainer`。
+  ///
+  /// 「完全剪裁出 viewport / `isInvisible` / 零可见面积」不进第 1 条：它是
+  /// reveal 的正常输入，有容器就继续滚，没容器才落到第 3 条。
   _Admission _admit({
     required String id,
     required SemanticsNode root,
@@ -374,8 +391,25 @@ final class PatchbayRevealBridge {
     required String? container,
     required PatchbayRevealDirection direction,
     required SemanticsNode? target,
-    required PatchbayRevealOutcome? alreadyRevealed,
+    // 非空当且仅当 [target] 非空——两者在调用点一起产生，见 `reveal`。
+    required PatchbayRevealTargetAdmission? classified,
   }) {
+    if (target != null && classified!.obscured) {
+      return _Admission.rejected(
+        _rejected(
+          id,
+          'uiRevealTargetObscured',
+          details: <String, Object?>{
+            'identifier': identifier,
+            'generation': _semantics.observe(target).generation,
+          },
+          notice:
+              'The target is mounted and geometrically exposed, but user '
+              'actions on it are blocked or every fixed sample point is '
+              'covered. Scrolling cannot reach through that.',
+        ),
+      );
+    }
     if (container != null) {
       return _admitAnchored(id, root, container, direction);
     }
@@ -385,18 +419,32 @@ final class PatchbayRevealBridge {
         // 目标已挂载：祖先链上最内层的可驱动滚动节点。
         : _drivable(patchbaySemanticsScrollAncestors(target), direction);
     if (candidates.isEmpty) {
-      if (alreadyRevealed != null) {
+      if (classified?.outcome case final PatchbayRevealOutcome revealed) {
         // 链上没有可驱动容器而目标已经露出：无事可做，直接成功。
-        return _Admission.shortcut(alreadyRevealed);
+        return _Admission.shortcut(revealed);
+      }
+      if (target == null) {
+        return _Admission.rejected(
+          _rejected(
+            id,
+            'uiRevealTargetNotFound',
+            details: <String, Object?>{
+              'identifier': identifier,
+              'matchCount': 0,
+            },
+            notice:
+                'No mounted semantics node carries this identifier, and no '
+                'drivable scroll container is mounted to reveal one. Fix the '
+                'identifier, or name an authorised container.',
+          ),
+        );
       }
       return _Admission.rejected(
         _rejected(
           id,
           'uiRevealNoScrollableContainer',
           details: <String, Object?>{'identifier': identifier},
-          notice: target == null
-              ? 'No drivable scroll container is mounted.'
-              : 'No drivable scroll container encloses the target.',
+          notice: 'No drivable scroll container encloses the target.',
         ),
       );
     }
@@ -475,7 +523,12 @@ final class PatchbayRevealBridge {
         _rejected(
           id,
           'uiRevealNoScrollableContainer',
-          details: <String, Object?>{'identifier': container},
+          // `role` 说明这个 identifier 说的是显式锚点而不是目标：同一个码在
+          // 两种现场都成立，调用方要能一眼看出该去改哪一个 identifier。
+          details: <String, Object?>{
+            'identifier': container,
+            'role': 'container',
+          },
           notice:
               'The container anchor encloses no scroll node that currently '
               'exposes a same-axis scroll action.',

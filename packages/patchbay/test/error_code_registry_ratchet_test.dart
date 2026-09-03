@@ -312,6 +312,8 @@ const Set<String> _frozenStableCodes = <String>{
   'uiRevealDisabled',
   'uiRevealNoScrollableContainer',
   'uiRevealPolicyChanged',
+  'uiRevealTargetNotFound',
+  'uiRevealTargetObscured',
   'uiSemanticsActionBlocked',
   'uiSemanticsActionDenied',
   'uiSemanticsActionUnavailable',
