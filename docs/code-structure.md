@@ -133,15 +133,27 @@ gate → 门后复核 → handler → response validation 六段只靠局部变�
 互指注释：若不再相等，该拒绝码变为可达，须补端到端测试。让步结构另由
 `test/host/host_invoker_microtask_depth_test.dart` 以实测微任务轮次钉住（4 / 6 / 3，与拆分前
 同值）——取消信号只能在让步窗口插入，多一个窗口就是改变了取消的观察时机。PB-050-38 其余四个热点在各自的 MR 里处理，本条不代它们下判断。
+**已拆分**（PB-050-38，按职责阶段拆而不是按行数横切）：
+
+| 位置 | 拆分前后 | 拆法 |
+|---|---|---|
+| `patchbay_flutter/lib/src/flutter_service_host.dart` | 950 → 160 行 | 七个包内单元各自成文件：`flutter_ui_command_descriptors`（命令声明与运行期覆写）、`flutter_ui_argument_decoders`（解码）、`flutter_ui_rejection`（拒绝投影）、`flutter_ui_registration`（descriptor↔handler 按位置配对，两端守数量）、`flutter_ui_command_bindings`（八个命令族各自到桥的派发）、`flutter_ui_catalog`（uiTargets 投影）、`flutter_host_assembly`（注册表合并、缺省源与 features）；host 只留公共门面与构造转交 |
+
+这条推翻了下面「已复核，维持现状」里对 `_uiCommandRegistry` 的旧判断。旧判断读的是控制流
+密度——254 行只有 7 个 return、11 个 if，看起来只是一张声明式装配表；换成「一个函数是否串起
+多个阶段」来读就不成立：声明装配、参数解码、拒绝投影、descriptor↔handler 配对与 23 条命令
+各自的桥派发五件事挤在同一个函数里，任何一件都无法脱离整台 host 单独构造或注入失败。拆分保持
+外部语义逐字节不变，由 `test/service_host_characterization_test.dart` 在拆分前后各跑一次钉住，
+`test/service_host_stage_units_test.dart` 逐个单元注入失败。PB-050-38 还有三个热点
+（`reveal_engine` / `host_invoker` / `snapshot_payload`）在后续 MR 里各自处理，本条不代它们
+下判断。
 
 **已复核，维持现状**：
 
 - 因文件长度被点过名的 `manifest_parser` / `gesture_bridge` /
   `artifact_service` / `trace_store` / `doctor_checks` / `release_checker`——
   长度来自同构成员集合与内聚类，属「不该拆分」第 1、2 条；
-- `flutter_service_host` 的 `_uiCommandRegistry`（254 行）与 `command_codegen` 的
-  `_render`（208 行）——声明式装配与模板拼装，控制流稀疏（前者 254 行只有 7 个 return、
-  11 个 if），拆开不会更好读。
+- `command_codegen` 的 `_render`（208 行）——模板拼装，控制流稀疏，拆开不会更好读。
 
 ## 0.5.0 RC 审计（2026-08-28）
 
