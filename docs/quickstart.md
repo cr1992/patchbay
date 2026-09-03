@@ -82,10 +82,11 @@ $ patchbay --ws-uri "$WS_URI" --json catalog
 ```
 
 **You'll see:** the commands and UI targets this running app actually registers — this is the
-only source of truth for what is callable; a target's entry carries an `id` and a `generation`
-you will need in step 5. The example's target list includes `example.note` (a text field) and a
-semantics identifier `example.counter.increment` (a button); nothing else in this guide, the
-README, or the Skill is a substitute for reading this output yourself. If the plain output is too
+only source of truth for what is callable; each entry under `uiTargets` carries an `id` and a
+`generation` you will need in step 5. The example registers `example.note` (a text field) as a
+target. Accessibility nodes such as the counter button (`example.counter.increment`) are not
+registered targets and do not appear here — step 5 reads them from `ui semantics tree`. Nothing
+else in this guide, the README, or the Skill is a substitute for reading this output yourself. If the plain output is too
 long to read, add `--view brief` to keep the decision facts and drop the bulky field (it is always
 named in `localView.omitted`, never silently missing).
 
@@ -110,8 +111,11 @@ guessing at a partial match.
 ## 5. Make a safe write: `ui perform`
 
 `ui perform` is the one canonical entry point for every UI write in this version; it always
-takes an explicit selector (`target:`, `semantics:`, or `node:`) and the `generation` you read
-from `catalog` in step 3 — a write against a stale generation is rejected, not silently retried.
+takes an explicit selector (`target:`, `semantics:`, or `node:`) and the `generation` you
+observed before writing — a write against a stale generation is rejected, not silently retried.
+The two identity domains keep separate counters: a `target:` generation comes from `catalog`'s
+`uiTargets` (step 3, or `patchbay ui targets`); a `semantics:` or `node:` generation comes from
+`ui semantics tree`, never from `catalog`.
 
 Write into the registered text target:
 
@@ -122,13 +126,17 @@ $ patchbay --ws-uri "$WS_URI" ui perform enter-text target:example.note <generat
 **You'll see:** the app's "Debug note" field now shows that text, and the CLI exits `0`. Substitute
 `<generation>` with the value you read for `id: "example.note"` in step 3.
 
-Or dispatch a real accessibility tap on the counter button:
+Or dispatch a real accessibility tap on the counter button. First read the semantics tree and
+find the node whose `identifier` is `example.counter.increment`; its `generation` is the value
+to pass:
 
 ```console
+$ patchbay --ws-uri "$WS_URI" --json --view brief ui semantics tree
 $ patchbay --ws-uri "$WS_URI" ui perform tap semantics:example.counter.increment <generation> --via semantics
 ```
 
-**You'll see:** the on-screen counter increments by one.
+**You'll see:** the on-screen counter increments by one. (`--view brief` keeps the node list
+readable; the full tree is one `--view full` away.)
 
 **If it fails:** `uiTargetNotFound` / `uiSemanticsIdentifierNotFound` means that selector is not
 currently registered or mounted — re-read `catalog`. `uiGenerationStale` /
