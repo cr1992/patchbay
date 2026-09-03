@@ -496,6 +496,12 @@ wire 面有握手兜底：版本对不上就 `schemaVersionMismatch`，谁都不
 所以会话记录的 `schemaVersion` 保持 `1`，新字段一律松读追加，reader 逐键读、不认识的键忽略。要真的
 需要一次不兼容的结构变更，先换目录名，让新旧两套记录互不可见，而不是指望老 CLI 认得新版本号。
 
+会话的本地进程身份同样遵循「无法证明绝不判死」：Linux procfs 只有在 `self/status` 的 `NSpid` 证明
+挂载视图与 CLI 使用同一 PID namespace 时才可回答 liveness 与启动签名，目录中碰巧存在同号 PID 不算
+证据；签名必须由同一个 codec 写入和读取，未知 scheme、跨 scheme 或不可能由对应平台探针产生的载荷
+都只降级为 `identityUnverified`。确定的 PID 不存在或同 scheme 合法签名不等仍判死，不能借保守降级
+取消 PID 复用守卫。完整判定表见[会话启动身份签名 Proposal](proposals/0.5.0/session-identity-signature.md)。
+
 ### SDK 下限是一组实测组合，不是两个独立数字
 
 Flutter release 自带一版精确的 Dart，framework 的 transitive package 也随之精确 pin；因此「最低
