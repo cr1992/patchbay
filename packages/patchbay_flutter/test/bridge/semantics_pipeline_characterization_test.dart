@@ -9,6 +9,7 @@
 // 快照读出后回填进期望串，因此比对的是「同一次运行里的逐字节相同」。
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -28,16 +29,17 @@ PatchbaySemanticsActionDecision _allowAll(
 
 PatchbaySemanticsBridge _bridge({
   PatchbayGateDecision Function()? baseGate,
-  PatchbayGateDecision Function(String gateId)? consumerGate,
+  FutureOr<PatchbayGateDecision> Function(String gateId)? consumerGate,
   PatchbaySemanticsActionPolicy? policy = _allowAll,
   bool resumed = true,
+  bool Function()? isAppResumed,
 }) => PatchbaySemanticsBridge(
   gates: PatchbayGateEvaluator(
     baseGate: baseGate ?? () => const PatchbayGateDecision.allow(),
     consumerGate: consumerGate ?? (_) => const PatchbayGateDecision.allow(),
   ),
   actionPolicy: policy,
-  isAppResumed: () => resumed,
+  isAppResumed: isAppResumed ?? () => resumed,
   newRequestId: () => _requestId,
 );
 
@@ -919,6 +921,343 @@ void main() {
           'failureType': 'StateError',
         }),
       );
+      bridge.dispose();
+    });
+  });
+
+  group('dispatch 路径的门前围栏表征', () {
+    testWidgets('base gate 拒绝在 dispatch 路径上同样带 patchbay.base', (tester) async {
+      var taps = 0;
+      await tester.pumpWidget(_target(onTap: () => taps += 1));
+      final PatchbaySemanticsBridge bridge = _bridge(
+        baseGate: () => const PatchbayGateDecision.reject(
+          code: 'hostNotConnected',
+          notice: 'no host',
+        ),
+      );
+      addTearDown(bridge.dispose);
+
+      final PatchbayInvocation result = await pumpUntilComplete(
+        tester,
+        bridge.tapIdentifier(identifier: 'characterization.target'),
+      );
+
+      expect(result.rejection?.code, 'hostNotConnected');
+      expect(result.rejection?.notice, 'no host');
+      expect(
+        _json(result.rejection?.details),
+        _json(<String, Object?>{'gateId': 'patchbay.base'}),
+      );
+      expect(taps, 0);
+      bridge.dispose();
+    });
+
+    testWidgets('非 resumed 在 dispatch 路径上同样报告 lifecycleState', (tester) async {
+      var taps = 0;
+      await tester.pumpWidget(_target(onTap: () => taps += 1));
+      final PatchbaySemanticsBridge bridge = _bridge(resumed: false);
+      addTearDown(bridge.dispose);
+
+      final PatchbayInvocation result = await pumpUntilComplete(
+        tester,
+        bridge.tapIdentifier(identifier: 'characterization.target'),
+      );
+
+      expect(result.rejection?.code, 'uiLifecycleNotResumed');
+      expect(
+        _json(result.rejection?.details),
+        _json(<String, Object?>{'lifecycleState': 'unknown'}),
+      );
+      expect(taps, 0);
+      bridge.dispose();
+    });
+  });
+
+  group('声明门 await 之后的复核表征', () {
+    testWidgets('门后生命周期复核失败：拒绝形状与门前那次逐字相同', (tester) async {
+      var taps = 0;
+      var resumed = true;
+      final Completer<PatchbayGateDecision> gate =
+          Completer<PatchbayGateDecision>();
+      await tester.pumpWidget(_target(onTap: () => taps += 1));
+      final PatchbaySemanticsBridge bridge = _bridge(
+        policy: (_, _) => const PatchbaySemanticsActionDecision.allow(
+          gateIds: <String>{'app.declared'},
+        ),
+        consumerGate: (_) => gate.future,
+        isAppResumed: () => resumed,
+      );
+      addTearDown(bridge.dispose);
+
+      final Future<PatchbayInvocation> pending = bridge.tapIdentifier(
+        identifier: 'characterization.target',
+      );
+      await tester.pump();
+      resumed = false;
+      gate.complete(const PatchbayGateDecision.allow());
+      final PatchbayInvocation result = await pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      expect(result.rejection?.code, 'uiLifecycleNotResumed');
+      expect(
+        _json(result.rejection?.details),
+        _json(<String, Object?>{'lifecycleState': 'unknown'}),
+      );
+      expect(taps, 0);
+      bridge.dispose();
+    });
+
+    testWidgets('门后目标消失：二次解析的拒绝原样透传', (tester) async {
+      var taps = 0;
+      final Completer<PatchbayGateDecision> gate =
+          Completer<PatchbayGateDecision>();
+      await tester.pumpWidget(_target(onTap: () => taps += 1));
+      final PatchbaySemanticsBridge bridge = _bridge(
+        policy: (_, _) => const PatchbaySemanticsActionDecision.allow(
+          gateIds: <String>{'app.declared'},
+        ),
+        consumerGate: (_) => gate.future,
+      );
+      addTearDown(bridge.dispose);
+
+      final Future<PatchbayInvocation> pending = bridge.tapIdentifier(
+        identifier: 'characterization.target',
+      );
+      await tester.pump();
+      await tester.pumpWidget(
+        _target(identifier: 'characterization.moved', onTap: () => taps += 1),
+      );
+      await tester.pump();
+      gate.complete(const PatchbayGateDecision.allow());
+      final PatchbayInvocation result = await pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      final Map<String, Object?> details = result.rejection!.details;
+      expect(result.rejection?.code, 'uiSemanticsIdentifierNotFound');
+      expect(details['treeRevision'], isA<int>());
+      expect(
+        _json(details),
+        _json(<String, Object?>{
+          'identifier': 'characterization.target',
+          // treeRevision 由本次运行读出后回填：钉的是键序与其余取值。
+          'treeRevision': details['treeRevision'],
+          'matchCount': 0,
+          'mountedIdentifierCount': 1,
+          'mountedIdentifiers': <String>['characterization.moved'],
+          'mountedIdentifiersTruncated': false,
+        }),
+      );
+      expect(taps, 0);
+      bridge.dispose();
+    });
+
+    testWidgets('门后 policy 转为拒绝：透传新 code 与 notice，不报 policyChanged', (
+      tester,
+    ) async {
+      var taps = 0;
+      var calls = 0;
+      final Completer<PatchbayGateDecision> gate =
+          Completer<PatchbayGateDecision>();
+      await tester.pumpWidget(_target(onTap: () => taps += 1));
+      final PatchbaySemanticsBridge bridge = _bridge(
+        policy: (_, _) {
+          calls += 1;
+          return calls <= 1
+              ? const PatchbaySemanticsActionDecision.allow(
+                  gateIds: <String>{'app.declared'},
+                )
+              : const PatchbaySemanticsActionDecision.reject(
+                  rejectionCode: 'consumerRevokedMidFlight',
+                  rejectionNotice: 'screen left',
+                );
+        },
+        consumerGate: (_) => gate.future,
+      );
+      addTearDown(bridge.dispose);
+
+      final Future<PatchbayInvocation> pending = bridge.tapIdentifier(
+        identifier: 'characterization.target',
+      );
+      await tester.pump();
+      gate.complete(const PatchbayGateDecision.allow());
+      final PatchbayInvocation result = await pumpUntilComplete(
+        tester,
+        pending,
+      );
+
+      expect(calls, 2);
+      expect(result.rejection?.code, 'consumerRevokedMidFlight');
+      expect(result.rejection?.notice, 'screen left');
+      expect(_json(result.rejection?.details), _json(<String, Object?>{}));
+      expect(taps, 0);
+      bridge.dispose();
+    });
+
+    testWidgets('只有 sensitiveInput 变了、声明集没变：仍按 policyChanged 拒绝', (
+      tester,
+    ) async {
+      var taps = 0;
+      var calls = 0;
+      await tester.pumpWidget(_target(onTap: () => taps += 1));
+      final PatchbaySemanticsBridge bridge = _bridge(
+        policy: (_, _) {
+          calls += 1;
+          return calls <= 1
+              ? const PatchbaySemanticsActionDecision.allow(
+                  gateIds: <String>{'app.declared'},
+                )
+              : const PatchbaySemanticsActionDecision.allow(
+                  gateIds: <String>{'app.declared'},
+                  sensitiveInput: true,
+                );
+        },
+      );
+      addTearDown(bridge.dispose);
+
+      final PatchbayInvocation result = await pumpUntilComplete(
+        tester,
+        bridge.tapIdentifier(identifier: 'characterization.target'),
+      );
+
+      expect(calls, 2);
+      expect(result.rejection?.code, 'uiSemanticsPolicyChanged');
+      expect(_json(result.rejection?.details), _json(<String, Object?>{}));
+      expect(taps, 0);
+      bridge.dispose();
+    });
+  });
+
+  group('只读投影与生命周期入口的表征', () {
+    testWidgets('observeIdentifier 命中与未命中的字段逐个冻结', (tester) async {
+      await tester.pumpWidget(_target(obscured: true, onTap: () {}));
+      final PatchbaySemanticsBridge bridge = _bridge();
+      addTearDown(bridge.dispose);
+      final Map<String, Object?> node = await _nodeWithIdentifier(
+        tester,
+        bridge,
+        'characterization.target',
+      );
+
+      final PatchbaySemanticsIdentifierObservation? hit =
+          await pumpUntilComplete(
+            tester,
+            bridge.observeIdentifier('characterization.target'),
+          );
+      final PatchbaySemanticsIdentifierObservation? miss =
+          await pumpUntilComplete(
+            tester,
+            bridge.observeIdentifier('characterization.missing'),
+          );
+
+      expect(hit, isNotNull);
+      expect(hit!.treeRevision, bridge.treeRevision);
+      expect(hit.matches, hasLength(1));
+      final PatchbaySemanticsIdentifierMatch match = hit.matches.single;
+      expect(match.nodeId, node['nodeId']);
+      expect(match.generation, node['generation']);
+      expect(match.value, '');
+      expect(match.obscured, isTrue);
+      expect(match.invisible, isFalse);
+      // 只读观察不重排也不截断：未命中给的是空清单，不是 null 匹配。
+      expect(miss?.matches, isEmpty);
+      expect(miss?.treeRevision, bridge.treeRevision);
+      // 观察本身不请帧，因此两次读数与同步读数一致。
+      expect(
+        await pumpUntilComplete(tester, bridge.observeTreeRevision()),
+        bridge.treeRevision,
+      );
+      bridge.dispose();
+    });
+
+    testWidgets('owner 缺失时两个只读入口都返回 null 而不是编造读数', (tester) async {
+      await tester.pumpWidget(_target(onTap: () {}));
+      final PatchbaySemanticsBridge bridge = _bridge();
+      addTearDown(bridge.dispose);
+      addTearDown(() => debugPatchbaySemanticsOwnerSource = null);
+      debugPatchbaySemanticsOwnerSource = () => null;
+
+      expect(
+        await pumpUntilComplete(
+          tester,
+          bridge.observeIdentifier('characterization.target'),
+        ),
+        isNull,
+      );
+      expect(
+        await pumpUntilComplete(tester, bridge.observeTreeRevision()),
+        isNull,
+      );
+
+      debugPatchbaySemanticsOwnerSource = null;
+      bridge.dispose();
+    });
+
+    testWidgets('actionsEnabled 只由 policy 的有无决定', (tester) async {
+      await tester.pumpWidget(_target(onTap: () {}));
+      final PatchbaySemanticsBridge without = _bridge(policy: null);
+      addTearDown(without.dispose);
+      final PatchbaySemanticsBridge with_ = _bridge();
+      addTearDown(with_.dispose);
+
+      expect(without.actionsEnabled, isFalse);
+      expect(with_.actionsEnabled, isTrue);
+      // 门与生命周期都不参与这个读数：它说的是「有没有策略」，不是「这次准不准」。
+      final PatchbaySemanticsBridge closed = _bridge(
+        baseGate: () =>
+            const PatchbayGateDecision.reject(code: 'hostNotConnected'),
+        resumed: false,
+      );
+      addTearDown(closed.dispose);
+      expect(closed.actionsEnabled, isTrue);
+
+      without.dispose();
+      with_.dispose();
+      closed.dispose();
+    });
+
+    testWidgets('dispose 之后的调用按 uiSemanticsUnavailable 拒绝，不抛异常', (
+      tester,
+    ) async {
+      var taps = 0;
+      await tester.pumpWidget(_target(onTap: () => taps += 1));
+      final PatchbaySemanticsBridge bridge = _bridge();
+      addTearDown(bridge.dispose);
+      await _nodes(tester, bridge);
+      bridge.dispose();
+
+      final PatchbayInvocation snapshot = await pumpUntilComplete(
+        tester,
+        bridge.snapshot(),
+      );
+      final PatchbayInvocation tap = await pumpUntilComplete(
+        tester,
+        bridge.tapIdentifier(identifier: 'characterization.target'),
+      );
+
+      expect(snapshot.rejection?.code, 'uiSemanticsUnavailable');
+      expect(_json(snapshot.rejection?.details), _json(<String, Object?>{}));
+      expect(tap.rejection?.code, 'uiSemanticsUnavailable');
+      expect(
+        _json(tap.rejection?.details),
+        _json(<String, Object?>{'identifier': 'characterization.target'}),
+      );
+      expect(
+        await pumpUntilComplete(
+          tester,
+          bridge.observeIdentifier('characterization.target'),
+        ),
+        isNull,
+      );
+      expect(
+        await pumpUntilComplete(tester, bridge.observeTreeRevision()),
+        isNull,
+      );
+      expect(taps, 0);
+      // 重复 dispose 是幂等的。
       bridge.dispose();
     });
   });
