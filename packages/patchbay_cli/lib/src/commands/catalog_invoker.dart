@@ -9,7 +9,6 @@ export '../support/catalog_descriptor.dart';
 
 import '../client.dart';
 import '../command_registry.dart';
-import '../output/output_projection_resolver.dart';
 import '../request_id.dart';
 import '../support/catalog_descriptor.dart';
 import '../rpc_timeout.dart';
@@ -20,21 +19,21 @@ import '../ui_manifest.dart';
 
 /// Invoker responsible for catalog command dispatch, RPC execution, retries, trace admission, and validation.
 abstract final class CatalogInvoker {
-  /// Reads the host catalog and refuses it whole if any row carries an
-  /// `outputProjection` the CLI cannot interpret.
+  /// Reads the host catalog and refuses it whole if any declaration in it is
+  /// one the CLI cannot interpret.
   ///
-  /// PB-050-40 puts the check here, at the one place a dispatch obtains a
-  /// catalog, rather than at the render seam: a declaration the CLI cannot
-  /// read is a provider protocol violation, and the caller must find that out
-  /// *before* it invokes a command against that catalog, not after the side
-  /// effect has happened. Refusing the whole document — rather than dropping
-  /// the bad field and continuing — is what keeps two clients from projecting
-  /// the same command two different ways.
+  /// The check belongs here, at the one place a dispatch obtains a catalog,
+  /// rather than at the render seam: a declaration the CLI cannot read is a
+  /// provider protocol violation, and the caller must find that out *before*
+  /// it invokes a command against that catalog, not after the side effect has
+  /// happened. Every direct reader — including `patchbay catalog` itself and
+  /// `doctor` — goes through this or calls
+  /// [validateCatalogDeclarations] explicitly.
   static Future<Map<String, Object?>> fetchCatalog(
     PatchbayClient connection,
   ) async {
     final Map<String, Object?> catalog = await connection.catalog();
-    validatePatchbayCatalogOutputProjections(catalog);
+    validateCatalogDeclarations(catalog);
     return catalog;
   }
 

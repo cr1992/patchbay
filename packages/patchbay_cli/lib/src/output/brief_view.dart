@@ -201,3 +201,20 @@ Map<String, Object?> projectPatchbayBriefView({
     'localView': _localView(projection: brief?.id, omitted: omitted),
   };
 }
+
+/// Appends the CLI's own routing report, after every projection has run.
+///
+/// PB-050-40 evaluation order, step 4: `localRoute` is a CLI-local fact, not a
+/// host response member. Merging it into the response before projection — the
+/// way PB-060-01 first did — let a descriptor declare `omit: ["$.localRoute"]`
+/// and delete the CLI's report of which service command it actually called.
+/// Appending it here makes that impossible by construction rather than by a
+/// rule someone has to remember, and the declaration grammar refuses the
+/// `local` root namespace on top of that.
+Map<String, Object?> withPatchbayLocalRoute(
+  Map<String, Object?> response,
+  Map<String, Object?>? localRoute,
+) {
+  if (localRoute == null) return response;
+  return <String, Object?>{...response, 'localRoute': localRoute};
+}

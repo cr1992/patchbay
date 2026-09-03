@@ -27,11 +27,17 @@ final class ExecutionResult {
     this.artifact,
     this.exitCode,
     this.summary,
+    this.localRoute,
   });
 
   final Map<String, Object?> response;
   final Map<String, Object?>? catalog;
   final ArtifactRequest? artifact;
+
+  /// PB-050-40: CLI-only routing facts for canonical commands, carried beside
+  /// the host response rather than merged into it. The render seam appends it
+  /// after the projection has run, so a descriptor can never declare it away.
+  final Map<String, Object?>? localRoute;
 
   /// Set only when the CLI itself decided the outcome, so the classification of
   /// an App response stays in one place.
@@ -41,10 +47,19 @@ final class ExecutionResult {
 
 /// Final outcome of a CLI execution.
 final class Outcome {
-  const Outcome(this.response, this.exitCode, {this.summary, this.catalog});
+  const Outcome(
+    this.response,
+    this.exitCode, {
+    this.summary,
+    this.catalog,
+    this.localRoute,
+  });
 
   final Map<String, Object?> response;
   final int exitCode;
+
+  /// PB-050-40: CLI-only routing facts, appended after the projection.
+  final Map<String, Object?>? localRoute;
 
   /// PB-050-40: the host catalog this dispatch ran against, carried to the
   /// render seam so the projection can be resolved from the host's own

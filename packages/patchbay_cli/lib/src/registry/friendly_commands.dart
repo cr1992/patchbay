@@ -511,15 +511,17 @@ enum PatchbayFriendlyCommand
       artifact: PatchbayOutputArtifactProjection.payloadBlob(),
     ),
   ),
+  // PB-050-40: these two stubs deliberately declare nothing. They are filtered
+  // out before path matching, so the reachable `capture root|target` spellings
+  // are the generated ones, which resolve `ui.capture`'s declaration — from the
+  // host catalog at render time, from the frozen table before that. A copy here
+  // would be a second writable truth that nothing reads.
   @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
   captureRoot.compatibilityFrozen(
     'ui.capture',
     <String>['capture', 'root'],
     summary: 'Capture the Flutter root repaint boundary.',
     usageSuffix: '--output <path>',
-    localOutputProjection: PatchbayOutputProjection(
-      artifact: PatchbayOutputArtifactProjection.payloadBlob(),
-    ),
   ),
   @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
   captureTarget.compatibilityFrozen(
@@ -527,9 +529,6 @@ enum PatchbayFriendlyCommand
     <String>['capture', 'target'],
     summary: 'Capture a registered Flutter UI target.',
     usageSuffix: '<target-id> <generation> --output <path>',
-    localOutputProjection: PatchbayOutputProjection(
-      artifact: PatchbayOutputArtifactProjection.payloadBlob(),
-    ),
   ),
   captureDiff(
     'ui.capture.diff',
@@ -593,12 +592,15 @@ enum PatchbayFriendlyCommand
       _fencesNavigationRevision = false,
       _isCompatibilityStub = true;
 
+  /// PB-050-40: a frozen stub takes no projection. Every one of them is
+  /// filtered out before path matching, so a declaration here would be a copy
+  /// nothing reads — and a second writable truth beside the reachable
+  /// spelling's. The reachable spellings resolve their service descriptor.
   const PatchbayFriendlyCommand.compatibilityFrozen(
     this._serviceCommand,
     this._path, {
     required String summary,
     String usageSuffix = '',
-    this.localOutputProjection,
     this.waitCondition,
     bool fencesNavigationRevision = false,
   }) : _summary = summary,
@@ -606,6 +608,7 @@ enum PatchbayFriendlyCommand
        _fencesNavigationRevision = fencesNavigationRevision,
        _compatibilityProtocol = null,
        _isCompatibilityStub = true,
+       localOutputProjection = null,
        target = PatchbayCommandTarget.declaredServiceCommand;
 
   final String? _serviceCommand;

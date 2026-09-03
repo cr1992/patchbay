@@ -78,29 +78,17 @@ const Map<String, PatchbayOutputProjection> patchbayFrozen050OutputProjections =
 
 /// The frozen 0.5.0 declaration for [spec], or `null`.
 ///
-/// A generated spelling whose build-time `cliSyntax.artifactDisposition` names
-/// a blob is answered from that declaration rather than from the table: the
-/// disposition is per-spelling build-time CLI syntax, and reading it here keeps
-/// the CLI's option surface identical to 0.5.0 even for a host that publishes
-/// no `outputProjection`.
+/// A closed table lookup and nothing else. An earlier revision also derived a
+/// fallback from `spec.protocolSyntax?.artifactDisposition`, which read like a
+/// convenience and behaved like a loophole: any future command that set an
+/// `artifactDisposition` on its CLI syntax and forgot `outputProjection` would
+/// have picked up a projection silently — the same "add one more line to the
+/// CLI's table" habit the proposal closes when it calls this fallback a
+/// read-only compatibility area that must not grow for 0.6.0 commands. A
+/// 0.6.0 command declares on its descriptor, or it has no projection.
 PatchbayOutputProjection? patchbayFrozenOutputProjection(
   PatchbayFriendlyCommandSpec spec,
-) {
-  final PatchbayOutputProjection? byServiceCommand =
-      patchbayFrozen050OutputProjections[spec.serviceCommand];
-  if (byServiceCommand != null) return byServiceCommand;
-  return switch (spec.protocolSyntax?.artifactDisposition) {
-    PatchbayCliArtifactDisposition.payloadBlob =>
-      const PatchbayOutputProjection(
-        artifact: PatchbayOutputArtifactProjection.payloadBlob(),
-      ),
-    PatchbayCliArtifactDisposition.responseBlob =>
-      const PatchbayOutputProjection(
-        artifact: PatchbayOutputArtifactProjection.responseBlob(),
-      ),
-    PatchbayCliArtifactDisposition.none || null => null,
-  };
-}
+) => patchbayFrozen050OutputProjections[spec.serviceCommand];
 
 /// The projection the CLI can name **before** it has talked to a host.
 ///

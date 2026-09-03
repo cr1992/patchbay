@@ -225,14 +225,18 @@ abstract final class CommandDispatcher {
                   'immediate mode',
           };
         }
-        if (friendly.localRoute case final Map<String, Object?> localRoute) {
-          response = <String, Object?>{...response, 'localRoute': localRoute};
-        }
+        // PB-050-40: `localRoute` is *not* merged into the response here any
+        // more. Evaluation order step 4 puts every CLI-local fact after the
+        // projection; leaving it in the host response let a descriptor declare
+        // `omit: ["$.localRoute"]` and delete the CLI's own report of which
+        // service command it routed to. It travels beside the response instead
+        // and is appended once rendering is done.
         return ExecutionResult(
           friendly.resolvesRevision
               ? CatalogInvoker.withRevisionSource(response)
               : response,
           catalog: catalog,
+          localRoute: friendly.localRoute,
           // `renderedMember` commands never go through `ArtifactRequest` /
           // `PatchbayArtifactDownloader`: there is no host blob to fetch, the
           // member is already in `response`. `_executeOnce` renders and

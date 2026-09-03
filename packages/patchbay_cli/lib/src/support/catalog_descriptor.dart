@@ -4,6 +4,38 @@
 // 若继续住在 `commands/` 里就会形成 commands -> output -> commands 的领域环。
 import 'package:patchbay/patchbay.dart';
 
+import '../client.dart';
+
+/// Typed failure code for a provider declaration the CLI refuses to interpret.
+const String patchbayCatalogOutputProjectionInvalid =
+    'catalogOutputProjectionInvalid';
+
+/// Validates every declaration a catalog document carries, before the CLI
+/// invokes anything against it.
+///
+/// One named seam on purpose. PB-050-40 is the first declaration validated
+/// here and, at the time of writing, the only one; PB-050-34's interaction
+/// models are meant to land in the same function rather than beside it. The
+/// bug that motivates the shape is that a per-feature validator gets wired
+/// into the dispatch path and then quietly misses the direct readers —
+/// `patchbay catalog` and `doctor` — so a violating host looks healthy through
+/// exactly the two commands an operator reaches for first.
+///
+/// All-or-nothing: a declaration the CLI cannot read is a provider protocol
+/// violation, and dropping just that field would leave two clients projecting
+/// the same command differently — the ambiguity these declarations exist to
+/// remove.
+void validateCatalogDeclarations(Map<String, Object?> catalog) {
+  try {
+    patchbayDecodeCatalogOutputProjections(catalog);
+  } on FormatException catch (failure) {
+    throw PatchbayProtocolException(
+      patchbayCatalogOutputProjectionInvalid,
+      details: <String, Object?>{'reason': failure.message},
+    );
+  }
+}
+
 /// One catalog row, read only for what the CLI itself has to decide.
 final class CatalogCommandDescriptor {
   const CatalogCommandDescriptor(

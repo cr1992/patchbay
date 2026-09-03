@@ -13,30 +13,10 @@ import 'package:patchbay/patchbay.dart';
 
 import '../client.dart';
 import '../command_registry.dart';
+import '../support/catalog_descriptor.dart';
 
-/// Typed failure code for a provider declaration the CLI refuses to interpret.
-const String patchbayCatalogOutputProjectionInvalid =
-    'catalogOutputProjectionInvalid';
-
-/// Validates every `outputProjection` in [catalog], throwing
-/// [PatchbayProtocolException] with [patchbayCatalogOutputProjectionInvalid]
-/// as soon as one row is malformed.
-///
-/// All-or-nothing on purpose. A declaration the CLI cannot read is a provider
-/// protocol violation, and dropping just that field would leave two clients
-/// looking at the same host and projecting the same command differently — the
-/// exact ambiguity `outputProjection` exists to remove. The catalog is refused
-/// whole, before any command is invoked against it.
-void validatePatchbayCatalogOutputProjections(Map<String, Object?> catalog) {
-  try {
-    patchbayDecodeCatalogOutputProjections(catalog);
-  } on FormatException catch (failure) {
-    throw PatchbayProtocolException(
-      patchbayCatalogOutputProjectionInvalid,
-      details: <String, Object?>{'reason': failure.message},
-    );
-  }
-}
+export '../support/catalog_descriptor.dart'
+    show patchbayCatalogOutputProjectionInvalid, validateCatalogDeclarations;
 
 /// The declaration [spec] runs under, given the host [catalog] this dispatch
 /// used (`null` for a command that never reads one).

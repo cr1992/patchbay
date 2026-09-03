@@ -304,6 +304,7 @@ Future<int> runPatchbayCliWithSeams(
       writer: outputWriter,
       spec: PatchbayFriendlyCommandRegistry.specFor(parsed.rest),
       catalog: outcome.catalog,
+      localRoute: outcome.localRoute,
       response: outcome.response,
       exitCode: outcome.exitCode,
       outputPath: parsed.option('output'),
@@ -658,6 +659,7 @@ Future<Outcome> _executeOnce(
       execution.exitCode ?? patchbayExitCodeFor(output),
       summary: execution.summary,
       catalog: execution.catalog,
+      localRoute: execution.localRoute,
     );
   } on PatchbayArtifactRejected catch (rejected) {
     return Outcome(rejected.response, patchbayExitCodeFor(rejected.response));
@@ -695,6 +697,7 @@ Future<Outcome> _renewKeepAwakeAfterSuccess(
     renewal.success ? outcome.exitCode : PatchbayExitCode.typedFailure,
     summary: '$originalSummary $keepAwakeSummary',
     catalog: outcome.catalog,
+    localRoute: outcome.localRoute,
   );
 }
 
@@ -779,6 +782,7 @@ Future<Map<String, Object?>> _finishRendering({
   required PatchbayLocalArtifactWriter writer,
   required PatchbayFriendlyCommandSpec? spec,
   required Map<String, Object?>? catalog,
+  required Map<String, Object?>? localRoute,
   required Map<String, Object?> response,
   required int exitCode,
   required String? outputPath,
@@ -806,12 +810,14 @@ Future<Map<String, Object?>> _finishRendering({
         environment: environment,
       );
   attachSpilledArtifactToTrace(spilled.artifact);
-  if (view != patchbayViewBrief) return spilled.response;
-  return projectPatchbayBriefView(
-    projection: projection,
-    response: spilled.response,
-    exitCode: exitCode,
-  );
+  final Map<String, Object?> projected = view == patchbayViewBrief
+      ? projectPatchbayBriefView(
+          projection: projection,
+          response: spilled.response,
+          exitCode: exitCode,
+        )
+      : spilled.response;
+  return withPatchbayLocalRoute(projected, localRoute);
 }
 
 PatchbayErrorEnvelope _usageEnvelope(FormatException failure) =>
