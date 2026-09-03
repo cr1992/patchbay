@@ -105,12 +105,15 @@ void main() {
     final Map<String, Object?> json = patchbayUiGestureTapCommandDescriptor
         .toJson();
 
-    // catalog 行 = 严格 wire 核心 + 追加字段（对 tap 只有
-    // weakConfirmationCompletes）。0.4.1 复刻 reader 的字段集不变是全 catalog
-    // 兼容套件的事；这里冻结 tap 自己没有引入任何新字段，且 object 形态的
+    // catalog 行 = 严格 wire 核心 + 追加字段（对 tap 是
+    // weakConfirmationCompletes 与 DG-060-05 的 interactionModel:
+    // userLike）。0.4.1 复刻 reader 的字段集不变是全 catalog 兼容套件的事；
+    // 这里冻结 tap 自己没有引入任何*严格解码*字段，且 object 形态的
     // `start` 默认值能被严格参数解码逐字节往返。
+    expect(json['interactionModel'], 'userLike');
     final Map<String, Object?> core = Map<String, Object?>.of(json)
-      ..remove('weakConfirmationCompletes');
+      ..remove('weakConfirmationCompletes')
+      ..remove('interactionModel');
     final PatchbayCommandDescriptorWire wire =
         PatchbayCommandDescriptorWire.fromJson(core);
     expect(wire.name, 'ui.gesture.tap');

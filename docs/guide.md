@@ -780,6 +780,16 @@ UI 写入口最容易混淆的是下面四套，先按需求选对入口，再�
 identifier 派发动作，指针面才是真实触摸事件、还要另过接入方自己的手势策略。按需求选对应入口
 即可，不必先弄懂全部分类再动手。
 
+这条差异从 0.6.0 起也是 catalog 上可机读的事实（DG-060-05）：`ui text set/enter` 在 catalog 声明
+`interactionModel: directTarget`，`ui action` / `ui tap` / `ui gesture.*` / `ui reveal` 声明
+`interactionModel: userLike`；只读命令与非 UI 命令不带这个字段。`directTarget` **不查遮挡**——对被
+浮层完全盖住的注册文本目标执行 `ui text set` 仍会返回 `applied` 且文本确实写入，这是有意设计，不是
+遗漏（[design.md](design.md) 已固化这条立场）。`applied` 因此只证明 consumer 开放的
+controller/adapter 操作已应用，**不证明**真实用户、指针或设备当下能看到或摸到这个目标；`userLike`
+才继续执行既有的 generation、遮挡、policy 与门后二次解析，且两类之间都不提供 force 或
+ignore-occlusion。老 host 缺这个字段时按「未声明」读，不按命令名猜测；`patchbay describe <command>`
+会把这个状态如实标成 `legacyUnknown`。
+
 ```console
 $ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查
 $ patchbay catalog                          # App 实际注册了什么（唯一真源）
