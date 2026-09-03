@@ -1,5 +1,6 @@
 import 'command_descriptor.dart';
 import 'facts.dart';
+import 'output_projection.dart';
 import 'ui_descriptor.dart';
 
 const _uiFacts = <PatchbayFactSource>{PatchbayFactSource.uiObserved};
@@ -33,6 +34,7 @@ PatchbayCommandDescriptor _ui(
   List<PatchbayParameterDescriptor> parameters = const [],
   List<PatchbayCliSyntax> cliSyntax = const [],
   Set<String> gates = const {},
+  PatchbayOutputProjection? outputProjection,
 }) => PatchbayCommandDescriptor(
   name: name,
   summary: summary,
@@ -43,6 +45,7 @@ PatchbayCommandDescriptor _ui(
   parameters: parameters,
   cliSyntax: cliSyntax,
   gates: gates,
+  outputProjection: outputProjection,
 );
 
 final patchbayUiTextSetCommandDescriptor = _textDescriptor(
@@ -108,6 +111,22 @@ final patchbayUiSemanticsTreeCommandDescriptor = _ui(
       inputMode: PatchbayCliInputMode.mergedJsonObject,
     ),
   ],
+  // PB-050-40: the one unbounded member and the one brief deletion this
+  // command has always had, moved off the CLI's hand-written tables and onto
+  // the descriptor the host actually publishes. `nodes` is both the member
+  // that spills to a local artifact and the member brief deletes, and the
+  // interpreter runs the artifact first, so a spilled response keeps its
+  // receipt instead of losing it to the deny-list.
+  outputProjection: const PatchbayOutputProjection(
+    brief: PatchbayOutputBriefProjection(
+      id: 'ui.semantics.tree',
+      omit: <String>[r'$.payload.nodes'],
+    ),
+    artifact: PatchbayOutputArtifactProjection.renderedMember(
+      member: r'$.payload.nodes',
+      encoding: PatchbayOutputArtifactEncoding.json,
+    ),
+  ),
 );
 
 final patchbayUiSemanticsActionCommandDescriptor = _ui(
@@ -699,6 +718,14 @@ final patchbayUiCaptureCommandDescriptor = _ui(
       artifactDisposition: PatchbayCliArtifactDisposition.payloadBlob,
     ),
   ],
+  // PB-050-40: both spellings download the same host blob metadata, so the
+  // artifact is a property of the command rather than of the spelling and
+  // moves to the descriptor. `cliSyntax.artifactDisposition` stays as the
+  // build-time fact that decides which options the CLI grants before it has a
+  // catalog to read.
+  outputProjection: const PatchbayOutputProjection(
+    artifact: PatchbayOutputArtifactProjection.payloadBlob(),
+  ),
 );
 
 final List<PatchbayCommandDescriptor> patchbayUiProtocolCliCommandDescriptors =

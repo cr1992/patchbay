@@ -9,19 +9,26 @@ void main() {
           in patchbayProtocolCliCommandDescriptors) {
         expect(descriptor.cliSyntax, isNotEmpty, reason: descriptor.name);
         expect(descriptor.toJson(), isNot(contains('cliSyntax')));
-        expect(descriptor.toJson().keys, <String>{
-          'name',
-          'summary',
-          'plane',
-          'mode',
-          'sideEffect',
-          'factSources',
-          'gates',
-          'parameters',
-          // 执行证据契约的线上字段，随 !62 进入 main：与 cliSyntax 不同，它
-          // 本就属于协议面，所以出现在这里是对的。
-          'weakConfirmationCompletes',
-        });
+        expect(
+          descriptor.toJson().keys.toSet().difference(<String>{
+            'name',
+            'summary',
+            'plane',
+            'mode',
+            'sideEffect',
+            'factSources',
+            'gates',
+            'parameters',
+            // 执行证据契约的线上字段，随 !62 进入 main：与 cliSyntax 不同，它
+            // 本就属于协议面，所以出现在这里是对的。
+            'weakConfirmationCompletes',
+            // PB-050-40：机器投影声明是松读 catalog sibling，同样属于协议面；
+            // 只有声明了投影的命令带它，所以这里是允许集而不是等值集。
+            'outputProjection',
+          }),
+          isEmpty,
+          reason: descriptor.name,
+        );
       }
     },
   );

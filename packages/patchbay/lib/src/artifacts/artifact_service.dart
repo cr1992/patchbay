@@ -9,6 +9,7 @@ import '../facts.dart';
 import '../gates.dart';
 import '../generated/core_wire.g.dart';
 import '../invocation.dart';
+import '../output_projection.dart';
 import '../ui_descriptor.dart';
 import 'log_models.dart';
 
@@ -609,6 +610,15 @@ final class PatchbayArtifactService {
       factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
       gates: _gateIds,
       parameters: _logQueryParameters(export: false),
+      // PB-050-40: `records` is the one unbounded member of a query answer;
+      // every other field is a cursor or a truncation fact a caller reads
+      // before it decides whether to expand.
+      outputProjection: const PatchbayOutputProjection(
+        brief: PatchbayOutputBriefProjection(
+          id: 'logs.query',
+          omit: <String>[r'$.payload.records'],
+        ),
+      ),
     ),
     PatchbayCommandDescriptor(
       name: 'logs.export',
@@ -619,6 +629,11 @@ final class PatchbayArtifactService {
       factSources: const <PatchbayFactSource>{PatchbayFactSource.appRecorded},
       gates: _gateIds,
       parameters: _logQueryParameters(export: true),
+      // PB-050-40: an export answers with host blob metadata under
+      // `$.payload.blob`; the CLI downloads it against an explicit `--output`.
+      outputProjection: const PatchbayOutputProjection(
+        artifact: PatchbayOutputArtifactProjection.payloadBlob(),
+      ),
     ),
     PatchbayCommandDescriptor(
       name: 'logs.tail',
