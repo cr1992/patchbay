@@ -322,13 +322,18 @@ final class HostInvokerHandler {
       return rejection;
     }
 
-    final PatchbayGateAdmission gate = await _gateStage.admit(
-      command: command,
-      requestId: requestId,
-      policy: policy,
-      onGateResult: onGateResult,
-      audit: audit,
-    );
+    // 不需要过门的命令在这里**同步**短路：`await` 只在真的要过门时求值。多让出一个
+    // 微任务就多一个取消信号能插进来的窗口，会改变只读命令的取消观察时机。
+    final PatchbayGateAdmission gate =
+        PatchbayInvocationGateStage.requiresCoreAdmission(policy)
+        ? await _gateStage.admit(
+            command: command,
+            requestId: requestId,
+            policy: policy,
+            onGateResult: onGateResult,
+            audit: audit,
+          )
+        : PatchbayInvocationGateStage.admissionNotRequired;
     if (gate.refusal case final Map<String, Object?> refusal) return refusal;
 
     final PatchbayHandlerDispatch dispatch =

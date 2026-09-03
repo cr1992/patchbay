@@ -126,8 +126,13 @@ gate → 门后复核 → handler → response validation 六段只靠局部变�
 单独失败注入。拆分保持外部语义逐字节不变，由
 `test/host/host_invoker_pipeline_characterization_test.dart` 在拆分前后各跑一次钉住，
 `test/host/host_invoker_stage_units_test.dart` 则逐阶段注入失败证明它们真的分开了——
-其中 `priorRequestObserved` 与 `requestLedgerFull` 两条分支端到端不可达，拆分后才第一次
-拿到覆盖。PB-050-38 其余四个热点在各自的 MR 里处理，本条不代它们下判断。
+其中两条分支端到端不可达、拆分后才第一次拿到覆盖，而「不可达」各有其因：门拒绝里的
+`priorRequestObserved` 是**因为** external preflight 排在门之前，命中账本记录时总会先重放
+或先拒，门看不到已有记录；账本的 `requestLedgerFull` 是**因为** `slotCapacity` 与
+`InvocationCoordinator.activeOwnerCapacity` 同为 256，并发调用总先撞上后者。两处常量都写了
+互指注释：若不再相等，该拒绝码变为可达，须补端到端测试。让步结构另由
+`test/host/host_invoker_microtask_depth_test.dart` 以实测微任务轮次钉住（4 / 6 / 3，与拆分前
+同值）——取消信号只能在让步窗口插入，多一个窗口就是改变了取消的观察时机。PB-050-38 其余四个热点在各自的 MR 里处理，本条不代它们下判断。
 
 **已复核，维持现状**：
 

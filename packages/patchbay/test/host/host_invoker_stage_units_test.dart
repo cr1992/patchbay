@@ -156,27 +156,30 @@ void main() {
   });
 
   group('gate 阶段', () {
-    test('只读且无声明门：门根本不需要，也不算评估过', () async {
-      var evaluations = 0;
-      final PatchbayGateAdmission admission =
-          await _gateStage(
-            gates: PatchbayGateEvaluator(
-              baseGate: () {
-                evaluations += 1;
-                return const PatchbayGateDecision.allow();
-              },
-              consumerGate: (String _) => const PatchbayGateDecision.allow(),
-            ),
-          ).admit(
-            command: 'device.read',
-            requestId: 'req-1',
-            policy: _policy(writes: false),
-            onGateResult: (_) {},
-          );
+    // 「需不需要过门」是**同步**判定，且必须在编排层短路：`admit` 本身是 async，
+    // 让它顺带回答「不需要」会平白多让出一个微任务，进而改变只读命令的取消观察时机。
+    // 让步轮次由 `host_invoker_microtask_depth_test.dart` 实测钉住，这里钉的是判据。
+    test('只读且无声明门：判定为不需要过门，结论是同步常量', () {
+      expect(
+        PatchbayInvocationGateStage.requiresCoreAdmission(
+          _policy(writes: false),
+        ),
+        isFalse,
+      );
+      expect(PatchbayInvocationGateStage.admissionNotRequired.refusal, isNull);
+      expect(
+        PatchbayInvocationGateStage.admissionNotRequired.coreGateEvaluated,
+        isFalse,
+      );
+    });
 
-      expect(admission.refusal, isNull);
-      expect(admission.coreGateEvaluated, isFalse);
-      expect(evaluations, 0);
+    test('只读但声明了门：仍然要过门，声明存在却从不执行才是缺口', () {
+      expect(
+        PatchbayInvocationGateStage.requiresCoreAdmission(
+          _policy(writes: false, declared: const <String>{'sealed'}),
+        ),
+        isTrue,
+      );
     });
 
     test('注入抛出的 evaluator：阶段不吞异常', () async {
@@ -422,6 +425,51 @@ void main() {
         )['schemaMode'],
         'legacyUnvalidated',
       );
+    });
+
+    test('时钟恰好读一次：accepted + executionContract 记 1 次，rejected 记 0 次', () {
+      var reads = 0;
+      int clock() {
+        reads += 1;
+        return DateTime.now().millisecondsSinceEpoch;
+      }
+
+      const PatchbayExecutionContract contract = PatchbayExecutionContract(
+        factSources: <PatchbayFactSource>{PatchbayFactSource.appRecorded},
+      );
+
+      patchbayValidateInvocationResponse(
+        result: PatchbayInvocation.accepted(requestId: 'req-clock-1').toJson(),
+        requestId: 'req-clock-1',
+        registered: false,
+        responseSchema: null,
+        executionContract: contract,
+        nowMs: clock,
+      );
+      expect(reads, 1, reason: 'accepted 且声明了执行证据契约，读且只读一次');
+
+      patchbayValidateInvocationResponse(
+        result: PatchbayInvocation.rejected(
+          requestId: 'req-clock-2',
+          rejection: const PatchbayRejection(code: 'deviceBusy'),
+        ).toJson(),
+        requestId: 'req-clock-2',
+        registered: false,
+        responseSchema: null,
+        executionContract: contract,
+        nowMs: clock,
+      );
+      expect(reads, 1, reason: 'rejected 一次都不读——执行证据只对 accepted 求值');
+
+      patchbayValidateInvocationResponse(
+        result: PatchbayInvocation.accepted(requestId: 'req-clock-3').toJson(),
+        requestId: 'req-clock-3',
+        registered: false,
+        responseSchema: null,
+        executionContract: null,
+        nowMs: clock,
+      );
+      expect(reads, 1, reason: '没有契约就没有证据要校验，同样不读');
     });
 
     test('registry handler 的 UI 阶段回填只在 rejected 上生效', () {

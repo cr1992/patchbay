@@ -54,6 +54,10 @@ final class PatchbayExternalInvocationLedger {
   PatchbayExternalInvocationLedger({required PatchbayExternalInvoke invoke})
     : _invoke = invoke;
 
+  /// PB-050-38：这个数与 `InvocationCoordinator.activeOwnerCapacity` **同为 256**
+  /// 是一条隐式耦合。正因为相等，并发调用总是先撞上 coordinator 的 owner 容量，
+  /// 下面的 `requestLedgerFull` 才在整条 host 上端到端不可达。
+  /// 若两者不再相等，`requestLedgerFull` 变为可达，须补端到端测试。
   static const int slotCapacity = 256;
 
   final PatchbayExternalInvoke _invoke;

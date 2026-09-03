@@ -26,6 +26,11 @@ final class InvocationCoordinator {
     validateConfirmationTimeout(confirmationTimeout);
   }
 
+  /// PB-050-38：这个数与 `PatchbayExternalInvocationLedger.slotCapacity`
+  /// **同为 256** 是一条隐式耦合。正因为相等，第 257 次并发调用总是先撞上这里的
+  /// `invocationRecordCapacityExceeded`，账本的 `requestLedgerFull` 才在整条 host
+  /// 上端到端不可达（它只在账本阶段单测里直接构造出来）。
+  /// 若两者不再相等，`requestLedgerFull` 变为可达，须补端到端测试。
   static const int activeOwnerCapacity = 256;
   static const int settledTombstoneCapacity = 256;
   static const Duration maximumDeadline = Duration(minutes: 5);

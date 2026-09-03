@@ -65,9 +65,19 @@ final class PatchbayInvocationGateStage {
   ///
   /// 写命令一律要过 base gate；纯只读但声明了门的行也要过——声明存在却从不执行
   /// 正是 0.5.0 修掉的那个缺口。
+  ///
+  /// 判定是**同步**的，而且必须由编排层先问一次：不需要过门的命令一个 await 都不该
+  /// 走。多让出一个微任务就多一个取消信号能插进来的窗口，`sideEffect: none` 且无
+  /// 声明门的命令会因此在 handler 前的冻结复核上被抓住，而它原本已经进 handler 了。
+  /// `host_invoker_microtask_depth_test.dart` 用实测让步轮次钉住这条结构。
   static bool requiresCoreAdmission(PatchbayCommandPolicy policy) =>
       policy.writesSideEffect || policy.declaredGates.isNotEmpty;
 
+  /// [requiresCoreAdmission] 为假时的结论。同步常量，不跨异步边界。
+  static const PatchbayGateAdmission admissionNotRequired =
+      PatchbayGateAdmission(refusal: null, coreGateEvaluated: false);
+
+  /// 只在 [requiresCoreAdmission] 为真时调用。
   Future<PatchbayGateAdmission> admit({
     required String command,
     required String requestId,
@@ -75,14 +85,10 @@ final class PatchbayInvocationGateStage {
     required void Function(String result) onGateResult,
     PatchbayInvocationAuditState? audit,
   }) async {
-    final bool required = requiresCoreAdmission(policy);
-    final bool coreGateEvaluated = required && _gates != null;
-    if (!required) {
-      return const PatchbayGateAdmission(
-        refusal: null,
-        coreGateEvaluated: false,
-      );
-    }
+    assert(
+      requiresCoreAdmission(policy),
+      'admit 只服务需要过门的命令；短路判定留在编排层，见 admissionNotRequired',
+    );
     return PatchbayGateAdmission(
       refusal: await _admit(
         command: command,
@@ -91,7 +97,7 @@ final class PatchbayInvocationGateStage {
         onGateResult: onGateResult,
         audit: audit,
       ),
-      coreGateEvaluated: coreGateEvaluated,
+      coreGateEvaluated: _gates != null,
     );
   }
 
