@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
 
 import '../fixture/flutter_bridge_fixtures.dart';
 

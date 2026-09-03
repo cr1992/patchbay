@@ -1,4 +1,4 @@
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
 
 import '../client.dart';
 import '../platform/process_utils.dart';

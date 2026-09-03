@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import 'client.dart';
 import 'performance_profile.dart';

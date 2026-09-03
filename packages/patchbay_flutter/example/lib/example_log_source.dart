@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 /// One example-authored log line, kept in the shape the example can filter on.
 ///

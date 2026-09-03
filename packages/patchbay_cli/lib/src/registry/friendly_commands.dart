@@ -1,4 +1,5 @@
 import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import 'command_spec.dart';
 

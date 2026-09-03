@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 final class PatchbayPlatformCommandResult {
   const PatchbayPlatformCommandResult({

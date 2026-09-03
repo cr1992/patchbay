@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/artifact_download.dart';
 import 'package:patchbay_cli/src/cli.dart';
 import 'package:patchbay_cli/src/result.dart';

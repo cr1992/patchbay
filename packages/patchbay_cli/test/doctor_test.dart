@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/cli.dart';
 import 'package:patchbay_cli/src/client.dart';
 import 'package:patchbay_cli/src/doctor/doctor_checks.dart';

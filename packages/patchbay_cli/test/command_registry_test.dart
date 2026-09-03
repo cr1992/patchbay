@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use_from_same_package
 
 import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/command_registry.dart';
 import 'package:patchbay_cli/src/commands/command_parser.dart';
 import 'package:test/test.dart';

@@ -1,30 +1,22 @@
-/// Patchbay 的默认 consumer 入口（PB-060-02 / DG-060-02）。
+/// Patchbay 的 host implementer 入口（PB-060-02 / DG-060-02）。
 ///
-/// 这里只有把一个 App 接进 Patchbay 所需要的东西：命令注册与 descriptor、参数与
-/// 响应 schema、gate、catalog/snapshot provider、job ledger、artifact/blob/log
-/// service，以及 navigation 与 UI 的声明类型。业务 adapter 绝大多数只需要这一个
-/// import。
+/// 内容是默认 consumer 清单的**严格超集**：`package:patchbay/patchbay.dart` 的全部
+/// 符号，再加 `PatchbayServiceHost`、audit sink/event、invocation 与 cancellation
+/// lifecycle、admission/rejection 以及响应与执行证据的 validation。组合根只需要这
+/// 一个 import，不必再叠加默认入口。
 ///
-/// 清单是**封闭**的：每一行 `show` 都逐名列出，新增公共符号必须在所属 MR 里显式
-/// 选择 consumer、host 还是 protocol，并同步 `tool/api_surface.json`。没有
-/// 「差集自动落到默认面」这回事。
+/// 这里**不** re-export protocol：既要实现 host 又要直接读写 raw wire 的高级使用者
+/// 显式再 import `package:patchbay/patchbay_protocol.dart`。两个清单互不相交，同时
+/// import 不会冲突。
 ///
-/// 另外两个角色有各自的入口，默认面不再顺带把它们暴露出来：
-///
-/// - 实现 host（`PatchbayServiceHost`、audit、invocation/cancellation、
-///   validation lifecycle）用 `package:patchbay/patchbay_host.dart`，它是本
-///   清单的严格超集；
-/// - 直接处理 raw wire、catalog capability/digest、CLI syntax、permission
-///   companion 或 canonical protocol descriptor 用
-///   `package:patchbay/patchbay_protocol.dart`。
-///
-/// 同一个文件同时扮演两个角色时显式写两个 import；本包不提供 `legacy.dart`，
-/// 也不提供任何整库 re-export 的兼容口袋。
+/// 普通 widget / 业务 adapter 不应该 import 本 library —— 它能看见 host lifecycle，
+/// 而那正是默认面刻意收窄掉的部分。
 library;
 
 export 'src/artifacts.dart'
     show
         PatchbayArtifactService,
+        PatchbayCancellationSignal,
         PatchbayLogPage,
         PatchbayLogPageState,
         PatchbayLogQuery,
@@ -33,6 +25,20 @@ export 'src/artifacts.dart'
         PatchbayLogSource,
         PatchbayLogSourceContractFailure,
         PatchbayRedactedLogRecord;
+export 'src/audit.dart'
+    show
+        PatchbayAuditDeliveryClosed,
+        PatchbayAuditDeliveryOverflow,
+        PatchbayAuditDrainOutcome,
+        PatchbayAuditDrainResult,
+        PatchbayAuditEvent,
+        PatchbayAuditSink,
+        PatchbayAuditSinkErrorHandler,
+        patchbayAuditAdmissionStages,
+        patchbayAuditExecutionClassification,
+        patchbayAuditGateDispositions,
+        patchbayAuditLegacyUnknown,
+        patchbayProjectAuditEvent;
 export 'src/blob_store.dart'
     show PatchbayBlobFailure, PatchbayBlobFailureCode, PatchbayMemoryBlobStore;
 export 'src/command_descriptor.dart'
@@ -54,8 +60,11 @@ export 'src/execution_evidence.dart'
     show
         PatchbayExecutionClassification,
         PatchbayExecutionContract,
+        PatchbayExecutionValidationResult,
         patchbayConfirmationBudgetMaxMs,
-        patchbayUnchangedEvidenceMaxAgeMs;
+        patchbayUnchangedEvidenceMaxAgeMs,
+        validatePatchbayExecutionContract,
+        validatePatchbayExecutionEvidence;
 export 'src/facts.dart' show PatchbayFactSource;
 export 'src/gates.dart'
     show
@@ -64,6 +73,24 @@ export 'src/gates.dart'
         PatchbayGateDecision,
         PatchbayGateEvaluator,
         PatchbayGateRejection;
+export 'src/invocation.dart'
+    show PatchbayAdmission, PatchbayInvocation, PatchbayRejection;
+export 'src/invocation_cancellation.dart'
+    show
+        PatchbayCancellationConfirmation,
+        PatchbayContextCommandHandler,
+        PatchbayHostInvocationHandle,
+        PatchbayInvocationCancellationOutcome,
+        PatchbayInvocationCancellationReason,
+        PatchbayInvocationCancellationResult,
+        PatchbayInvocationCancellationSignal,
+        PatchbayInvocationConfirmationState,
+        PatchbayInvocationContext,
+        PatchbayInvocationDeadline,
+        PatchbayInvocationDrainOutcome,
+        PatchbayInvocationDrainResult,
+        PatchbayMonotonicClock,
+        patchbayGenerateOwnerToken;
 export 'src/jobs.dart'
     show
         PatchbayJobBody,
@@ -87,12 +114,23 @@ export 'src/response_schema.dart'
     show
         PatchbayResponseSchema,
         PatchbayResponseType,
-        PatchbayResponseValueSchema;
+        PatchbayResponseValidationIssue,
+        PatchbayResponseValueSchema,
+        patchbayResponseSchemaMaxDepth,
+        patchbayResponseSchemaMaxFields,
+        patchbayResponseValidationMaxIssues,
+        validatePatchbayResponsePayload,
+        validatePatchbayResponseSchema,
+        validatePatchbayTerminalPayload;
 export 'src/service_host.dart'
     show
         PatchbayCatalogProvider,
         PatchbayCatalogSample,
         PatchbayCatalogSource,
+        PatchbayContextInvocationSource,
+        PatchbayExtensionRegistrar,
+        PatchbayInvocationSource,
+        PatchbayServiceHost,
         PatchbaySnapshotSample,
         PatchbaySnapshotSource,
         PatchbayVersionedSnapshotSource;

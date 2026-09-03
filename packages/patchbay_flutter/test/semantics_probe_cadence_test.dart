@@ -24,7 +24,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 // owner 来源的 debug 覆写不出现在 barrel 里：它只用来构造 widget test 里天然不可
 // 达的「root 尚不可用」状态（Flutter 3.44 在 ensureSemantics() 时同步建树）。
 import 'package:patchbay_flutter/src/semantics/semantics_bridge.dart'

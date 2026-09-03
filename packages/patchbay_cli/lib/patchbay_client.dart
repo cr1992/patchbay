@@ -12,7 +12,10 @@
 /// proposal and a golden update, never a convenience export.
 library;
 
-export 'package:patchbay/patchbay.dart' show PatchbaySnapshotRequest;
+// PB-060-02：`PatchbaySnapshotRequest` 是 protocol 面的类型，因此从
+// `patchbay_protocol.dart` 精确 re-export。这条 re-export 本身没有变——client
+// 的调用者仍然只 import 本 library 就能命名一次快照请求，不必再加一条依赖。
+export 'package:patchbay/patchbay_protocol.dart' show PatchbaySnapshotRequest;
 
 export 'src/client.dart'
     show

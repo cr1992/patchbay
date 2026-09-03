@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import 'frame_observer.dart';
 import 'lifecycle.dart';

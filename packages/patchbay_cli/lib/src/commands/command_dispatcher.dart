@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:args/args.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import '../client.dart';
 import '../command_help.dart';

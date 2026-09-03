@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 

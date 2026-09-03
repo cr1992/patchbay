@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
 import 'package:patchbay/src/host/host_catalog.dart';
 import 'package:test/test.dart';
 

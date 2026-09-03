@@ -1,5 +1,5 @@
 import 'package:flutter/rendering.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 /// Stable Patchbay names for the first supported Flutter semantics actions.
 enum PatchbaySemanticsAction {

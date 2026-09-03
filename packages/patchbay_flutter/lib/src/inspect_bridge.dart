@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 /// Consumer opt-in for the widget inspector select-mode switch.
 ///

@@ -6,7 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
 
 import '../lifecycle.dart';
 import '../occlusion/occlusion_probe.dart';

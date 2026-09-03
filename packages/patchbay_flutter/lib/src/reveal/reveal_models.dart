@@ -4,7 +4,7 @@
 // [PatchbayRevealPolicy] 进包的 barrel；其余是拆分产物，不因为被拆出来就成为
 // 公共 API（与 gesture/ 下的约定一致）。
 import 'package:flutter/rendering.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import '../semantics/semantics_models.dart';
 

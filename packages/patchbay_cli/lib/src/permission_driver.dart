@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 const String patchbayPermissionDriverEnvironment = 'PATCHBAY_PERMISSION_DRIVER';
 const String patchbayPermissionDriverExecutable = 'patchbay-permission-driver';

@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:test/test.dart';
 
 import '../tool/harmony_permission_fixture.dart';

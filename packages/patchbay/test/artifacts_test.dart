@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:test/test.dart';
 
 void main() {

@@ -1,5 +1,5 @@
 import 'package:args/args.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import 'registry/command_spec.dart';
 import 'registry/canonical_ui_registry.dart';

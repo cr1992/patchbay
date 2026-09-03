@@ -1,7 +1,7 @@
 import 'dart:math';
 
 import 'package:args/args.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import 'command_registry.dart';
 import 'permission_driver.dart';

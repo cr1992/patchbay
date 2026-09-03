@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/android_permission_adapter.dart';
 import 'package:patchbay_cli/src/client.dart';
 import 'package:patchbay_cli/src/doctor/doctor_models.dart';

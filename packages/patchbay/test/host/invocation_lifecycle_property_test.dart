@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
 import 'package:patchbay/src/host/invocation_coordinator.dart';
 import 'package:test/test.dart';
 
