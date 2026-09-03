@@ -787,8 +787,10 @@ identifier 派发动作，指针面才是真实触摸事件、还要另过接入
 遗漏（[design.md](design.md) 已固化这条立场）。`applied` 因此只证明 consumer 开放的
 controller/adapter 操作已应用，**不证明**真实用户、指针或设备当下能看到或摸到这个目标；`userLike`
 才继续执行既有的 generation、遮挡、policy 与门后二次解析，且两类之间都不提供 force 或
-ignore-occlusion。老 host 缺这个字段时按「未声明」读，不按命令名猜测；`patchbay describe <command>`
-会把这个状态如实标成 `legacyUnknown`。
+ignore-occlusion。缺这个字段时按「未声明」读，不按命令名猜测；`patchbay describe <command>` 把这个
+状态如实标成 `legacyUnknown`。`legacyUnknown` 只说明「这一行没有声明」，不说明 host 版本：它同时覆盖
+host 早于该字段、以及命令本来就不在上面那个封闭声明集合内（例如 `ui keepAwake set`）两种成因，光看
+这一行分不出是哪一种。
 
 ```console
 $ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查

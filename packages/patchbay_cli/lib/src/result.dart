@@ -162,8 +162,15 @@ String patchbayResponseSummary(Map<String, Object?> value) {
       CatalogInteractionModelReading.userLike =>
         'userLike (generation, policy and occlusion admission still apply; '
             'no force or ignoreOcclusion)',
+      // Never phrased as "this host does not declare it": the reader cannot
+      // tell the two causes apart from the row alone, and on a 0.6.0 host
+      // every command outside the closed declaring set — `ui.keepAwake.set`,
+      // say — reads legacyUnknown while the host is perfectly current. Naming
+      // both causes keeps the line from implying a host version it never
+      // observed.
       CatalogInteractionModelReading.legacyUnknown =>
-        'legacyUnknown (not declared by this host)',
+        'legacyUnknown (no interactionModel declared: host predates the '
+            'field or the command is outside the declaring set)',
     };
     return 'command=${command['name']} schemaMode=$schemaMode '
         'retryEligibility=$retryEligibility interactionModel=$interactionModel';

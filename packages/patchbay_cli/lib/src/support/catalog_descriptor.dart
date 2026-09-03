@@ -13,10 +13,10 @@ const String patchbayCatalogOutputProjectionInvalid =
 /// Validates every declaration a catalog document carries, before the CLI
 /// invokes anything against it.
 ///
-/// One named seam on purpose. PB-050-40 is the first declaration validated
-/// here and, at the time of writing, the only one; PB-050-34's interaction
-/// models are meant to land in the same function rather than beside it. The
-/// bug that motivates the shape is that a per-feature validator gets wired
+/// One named seam on purpose. PB-050-40's `outputProjection` was the first
+/// declaration validated here; PB-050-34's `interactionModel` landed in the
+/// same function rather than beside it, and any third one belongs here too.
+/// The bug that motivates the shape is that a per-feature validator gets wired
 /// into the dispatch path and then quietly misses the direct readers —
 /// `patchbay catalog` and `doctor` — so a violating host looks healthy through
 /// exactly the two commands an operator reaches for first.
@@ -129,10 +129,16 @@ final class CatalogCommandDescriptor {
     Map<String, Object?> catalog,
     String command,
   ) {
-    // Every call site funnels through here, including the ones that look up
-    // a command other than the one carrying the bad value — so a single
-    // corrupted row fails catalog-wide lookups, not just its own row
-    // (DG-060-05, matching the host-side shape).
+    // Deliberately kept, not a leftover duplicate of the fetch seam. Every
+    // catalog a *dispatch* holds has already passed
+    // [validateCatalogDeclarations] via `CatalogInvoker.fetchCatalog`, but the
+    // manifest walkthrough re-reads a fresh catalog per screen straight off
+    // `connection.catalog()` and drives `invokeAgainstCatalog` — and so this
+    // lookup — with that second, unvalidated document. Removing the call would
+    // leave a host that starts serving an unknown `interactionModel` mid-walk
+    // interpreted row by row. It also keeps the whole-catalog shape when a
+    // lookup asks for a command other than the one carrying the bad value
+    // (DG-060-05, matching the host-side fail-closed shape).
     validateCatalogInteractionModels(catalog);
     final Object? rows = catalog['commands'];
     if (rows is! List<Object?>) return null;
