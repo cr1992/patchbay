@@ -86,7 +86,9 @@ List<String> checkCommandNameParity({
 /// 文件缺失直接抛异常判红——路径失效不是「没抽到」，同样不允许恒绿。
 const String _cliLib = '../patchbay_cli/lib';
 const List<String> _hostSourcePaths = <String>[
-  '../patchbay_flutter/lib/src/flutter_service_host.dart',
+  // PB-050-38：命令声明从 `flutter_service_host.dart` 移到这里，抽取式跟着走——
+  // 路径失效会让这道闸恒绿，所以它按「抽不到就判红」自证还活着。
+  '../patchbay_flutter/lib/src/flutter_ui_command_descriptors.dart',
   'lib/src/artifacts.dart',
   'lib/src/artifacts/artifact_service.dart',
   // PB-040-06 migrates protocol-owned descriptors here; the Flutter runtime
