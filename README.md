@@ -64,6 +64,10 @@ dependencies:
 `patchbay_flutter` re-exports the core API; for pure Dart integration use `packages/patchbay`
 instead.
 
+Validating an unpublished release candidate requires all four packages to use the same immutable
+Git commit; overriding only one package can mix Git and hosted sources. Use the generated and
+lock-verified recipe in [Validate a release candidate](docs/candidate-validation.md).
+
 ### 2. Install the CLI
 
 The following installs the native AOT GitHub Release artifact on macOS arm64. See the

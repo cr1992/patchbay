@@ -73,6 +73,7 @@ const List<String> activePublicDocumentPaths = <String>[
   'packages/patchbay_flutter/README.zh-CN.md',
   'packages/patchbay_flutter/example/README.md',
   'packages/patchbay_flutter/example/README.zh-CN.md',
+  'docs/candidate-validation.md',
   'docs/design.md',
   'docs/assets/patchbay-hero.svg',
   'docs/assets/patchbay-architecture.svg',

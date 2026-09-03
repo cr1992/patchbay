@@ -41,8 +41,14 @@ List<String> manualSteps(String version, ReleaseInputs inputs) {
         '${publishOrderOf(inputs).map((name) => '      (cd packages/$name && PUB_HOSTED_URL=$canonicalPubHost dart pub publish)').join('\n')}',
     'consumer 换 pin：git pin 的接入方不能只改 tag。四包改成 hosted 约束后，'
         '「patchbay_flutter 从 git、patchbay 也从 git」会被 pub 判成 source 冲突，'
-        '接入方要么整体改用 pub.dev 版本，要么在自己仓加 `dependency_overrides` 把四包统一指回 git。'
-        '口径见 docs/release-checklist.md。',
+        '接入方要么整体改用 pub.dev 版本，要么生成四包同源的候选覆盖并校验 lock：\n'
+        '      dart run tool/repo_tasks.dart candidate-consumer '
+        '--repository \'<git-url>\' --commit \'<40-character-commit-sha>\' '
+        '--output /path/to/consumer/pubspec_overrides.yaml\n'
+        '      dart run tool/repo_tasks.dart candidate-consumer '
+        '--repository \'<git-url>\' --commit \'<40-character-commit-sha>\' '
+        '--verify-lock /path/to/consumer/pubspec.lock\n'
+        '完整口径见 docs/candidate-validation.md 与 docs/release-checklist.md。',
     '在打 tag 前确认 `documentation-current` 已绿；当前安装口径、双语入口与 SVG 不留到发布后补。',
     '真机验收：见 docs/release-checklist.md 对应一节。',
   ];

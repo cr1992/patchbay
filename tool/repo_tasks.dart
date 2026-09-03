@@ -143,6 +143,7 @@ final class RepoTaskCatalog {
     'coverage',
     'sdk-floor',
     'check',
+    'candidate-consumer',
     'release',
   ];
 
@@ -173,6 +174,13 @@ final class RepoTaskCatalog {
       ..._dartPackageCommands(includeRepositoryChecks: true),
       ..._flutterPackageCommands(),
       ..._codegenCommands(),
+    ],
+    'candidate-consumer' => <RepoCommand>[
+      RepoCommand('dart', <String>[
+        'run',
+        'tool/candidate_consumer.dart',
+        ...taskArguments,
+      ]),
     ],
     'release' => <RepoCommand>[
       RepoCommand('dart', <String>[
