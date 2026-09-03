@@ -34,6 +34,58 @@ void validateCatalogDeclarations(Map<String, Object?> catalog) {
       details: <String, Object?>{'reason': failure.message},
     );
   }
+  validateCatalogInteractionModels(catalog);
+}
+
+/// Three-state read of a catalog row's `interactionModel` key.
+///
+/// [legacyUnknown] covers both real cases the reader cannot tell apart from
+/// the row alone: a host that predates the field, and a command outside the
+/// closed declaring set (DG-060-05). The reader never infers a value from
+/// the command name — an unknown *declared* value is a provider violation
+/// (see [validateCatalogInteractionModels]), not this state.
+enum CatalogInteractionModelReading { directTarget, userLike, legacyUnknown }
+
+CatalogInteractionModelReading catalogInteractionModelReading(
+  Map<Object?, Object?> row,
+) => switch (PatchbayInteractionModel.fromCatalogRow(row)) {
+  PatchbayInteractionModel.directTarget =>
+    CatalogInteractionModelReading.directTarget,
+  PatchbayInteractionModel.userLike => CatalogInteractionModelReading.userLike,
+  null => CatalogInteractionModelReading.legacyUnknown,
+};
+
+/// Fails the *whole* catalog, not just one row, when any row declares an
+/// `interactionModel` outside the closed `directTarget`/`userLike` set
+/// (DG-060-05: "未知值使整份 catalog 按 provider 违规失效", host and CLI
+/// sides consistent). Unlike [CatalogCommandDescriptor.find]'s per-command
+/// lookup, this walks every row so a provider that corrupts one row cannot
+/// leave the rest of the catalog usable.
+void validateCatalogInteractionModels(Map<String, Object?> catalog) {
+  final Object? rows = catalog['commands'];
+  if (rows is! List<Object?>) return;
+  final List<Map<String, Object?>> violations = <Map<String, Object?>>[];
+  for (var index = 0; index < rows.length; index += 1) {
+    final Object? row = rows[index];
+    if (row is! Map<Object?, Object?>) continue;
+    try {
+      PatchbayInteractionModel.fromCatalogRow(row);
+    } on FormatException {
+      violations.add(<String, Object?>{
+        'index': index,
+        if (row['name'] case final String name) 'name': name,
+        'reason': 'invalidInteractionModel',
+      });
+    }
+  }
+  if (violations.isEmpty) return;
+  throw PatchbayProtocolException(
+    'providerProtocolViolation',
+    details: <String, Object?>{
+      'reason': 'invalidCatalogCommands',
+      'violations': violations,
+    },
+  );
 }
 
 /// One catalog row, read only for what the CLI itself has to decide.
@@ -43,12 +95,19 @@ final class CatalogCommandDescriptor {
     this._parameters,
     this.responseSchema,
     this.executionContract,
+    this.interactionModel,
   );
 
   final Duration? suggestedWaitTimeout;
   final List<Map<Object?, Object?>> _parameters;
   final PatchbayResponseSchema? responseSchema;
   final PatchbayExecutionContract executionContract;
+
+  /// `legacyUnknown` for a row with no declared value; never guessed from
+  /// the command name. Callers that reach a [CatalogCommandDescriptor] have
+  /// already passed [validateCatalogInteractionModels], so a declared value
+  /// here is always one of the two known members.
+  final CatalogInteractionModelReading interactionModel;
 
   Set<String> get sensitiveParameters => <String>{
     for (final Map<Object?, Object?> parameter in _parameters)
@@ -70,6 +129,11 @@ final class CatalogCommandDescriptor {
     Map<String, Object?> catalog,
     String command,
   ) {
+    // Every call site funnels through here, including the ones that look up
+    // a command other than the one carrying the bad value — so a single
+    // corrupted row fails catalog-wide lookups, not just its own row
+    // (DG-060-05, matching the host-side shape).
+    validateCatalogInteractionModels(catalog);
     final Object? rows = catalog['commands'];
     if (rows is! List<Object?>) return null;
     for (final Object? row in rows) {
@@ -89,6 +153,7 @@ final class CatalogCommandDescriptor {
             ? PatchbayResponseSchema.fromJson(row['responseSchema'])
             : null,
         PatchbayExecutionContract.fromCatalogRow(row),
+        catalogInteractionModelReading(row),
       );
     }
     return null;

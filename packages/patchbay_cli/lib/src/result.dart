@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'support/catalog_descriptor.dart';
 import 'ui_manifest.dart';
 
 /// The exit codes `runPatchbayCli` and the `patchbay` executable return.
@@ -141,6 +142,31 @@ String patchbayResponseSummary(Map<String, Object?> value) {
   if (value['uiTargets'] case final List<Object?> targets) {
     return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} '
         'uiTargets=${targets.length}';
+  }
+  // `describeCatalogCommand`'s shape: one catalog row plus two CLI-computed
+  // verdicts. `--json` passes the row through untouched (DG-060-05 requires
+  // machine output to stay a transparent passthrough); this line is the one
+  // place `legacyUnknown` is allowed to appear, because it is human text, not
+  // a synthesised stable-JSON key.
+  if (value case {
+    'command': final Map<Object?, Object?> command,
+    'schemaMode': final Object? schemaMode,
+    'retryEligibility': final Object? retryEligibility,
+  }) {
+    final String interactionModel = switch (catalogInteractionModelReading(
+      command,
+    )) {
+      CatalogInteractionModelReading.directTarget =>
+        'directTarget (applied proves the operation ran, not that a user, '
+            'pointer or device could reach the target)',
+      CatalogInteractionModelReading.userLike =>
+        'userLike (generation, policy and occlusion admission still apply; '
+            'no force or ignoreOcclusion)',
+      CatalogInteractionModelReading.legacyUnknown =>
+        'legacyUnknown (not declared by this host)',
+    };
+    return 'command=${command['name']} schemaMode=$schemaMode '
+        'retryEligibility=$retryEligibility interactionModel=$interactionModel';
   }
   if (value['payload'] case {
     'outcome': 'applied',

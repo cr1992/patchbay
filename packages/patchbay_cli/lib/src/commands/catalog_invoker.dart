@@ -78,6 +78,7 @@ abstract final class CatalogInvoker {
     Map<String, Object?> arguments, {
     Duration? deadline,
   }) async {
+    validateCatalogInteractionModels(catalog);
     final bool cataloged =
         CatalogCommandDescriptor.find(catalog, command) != null;
     final PatchbayRetryPolicy? retryPolicy = retryPolicyFor(catalog, command);
@@ -227,6 +228,7 @@ abstract final class CatalogInvoker {
     Map<String, Object?> catalog,
     String command,
   ) {
+    validateCatalogInteractionModels(catalog);
     final Map<Object?, Object?>? row = catalogRow(catalog, command);
     if (row == null) {
       throw PatchbayProtocolException(
