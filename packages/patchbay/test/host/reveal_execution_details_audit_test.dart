@@ -10,13 +10,69 @@ import 'package:test/test.dart';
 /// `host.auditEvents` 断言，不断言任何应答字段——`executionDetails` 从不进入
 /// invocation envelope，和 PB-050-39 的 `admissionStage` / `gateDisposition`
 /// 走同一条兼容边界。
+///
+/// 目录一律来自**生产 descriptor**（`patchbayUiRevealCommandDescriptor`）：裁决
+/// 的前提是「payload 已通过 response schema 校验」，用手写 schema 合成目录行会
+/// 把这条前提测成自证。唯一使用降级目录行的是「未声明 schema 的 host」那一格，
+/// 它测的正是投影器防御底线，不是生产路径。
 void main() {
+  group('生产 descriptor 的 responseSchema 前提', () {
+    test('ui.reveal 声明 responseSchema，且目录行可被 host 重新解析', () {
+      final Map<String, Object?> row = patchbayUiRevealCommandDescriptor
+          .toJson();
+
+      expect(patchbayUiRevealCommandDescriptor.responseSchema, isNotNull);
+      expect(row.containsKey('responseSchema'), isTrue);
+      // host 是从目录 JSON 重新解析 schema 的，声明必须能过 fromJson 与上限检查。
+      final PatchbayResponseSchema parsed = PatchbayResponseSchema.fromJson(
+        row['responseSchema'],
+      );
+      validatePatchbayResponseSchema(parsed);
+      expect(parsed.terminal, isEmpty, reason: 'reveal 是 immediate，不是 job');
+    });
+
+    test('0.5.0 冻结的 revealed / failed 受理 payload 逐字通过声明的 schema', () {
+      final PatchbayResponseSchema schema = PatchbayResponseSchema.fromJson(
+        patchbayUiRevealCommandDescriptor.toJson()['responseSchema'],
+      );
+
+      for (final Map<String, Object?> payload in <Map<String, Object?>>[
+        _frozenRevealedPayload,
+        _frozenFailedPayload,
+      ]) {
+        expect(
+          validatePatchbayResponsePayload(schema.accepted, payload)
+              .map((PatchbayResponseValidationIssue issue) => issue.toJson())
+              .toList(),
+          isEmpty,
+          reason: '$payload',
+        );
+      }
+    });
+
+    test('accepted 的 ui.reveal 自本版起是 validated，不再 legacyUnvalidated', () async {
+      final PatchbayServiceHost host = _host(
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: _frozenRevealedPayload,
+        ).toJson(),
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-schema-mode',
+      );
+
+      expect(response['admission'], 'accepted');
+      expect(response['schemaMode'], 'validated');
+    });
+  });
+
   group('absent：非 reveal 命令、拒绝、provider 违规', () {
     test('非 ui.reveal 命令即使 payload 恰好带 steps/containers 也不投影', () async {
       final PatchbayServiceHost host = _host(
-        commands: <Map<String, Object?>>[
-          _revealRow(name: 'device.status', sideEffect: 'none'),
-        ],
+        commands: <Map<String, Object?>>[_revealRow(name: 'device.status')],
         invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
           requestId: requestId,
           payload: <String, Object?>{
@@ -52,27 +108,30 @@ void main() {
       expect(host.auditEvents.single.executionDetails, isNull);
     });
 
-    test(
-      'accepted 但违反声明的 response schema 视为 provider 违规，省略 executionDetails',
-      () async {
-        final PatchbayServiceHost host = _host(
-          invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
-            requestId: requestId,
-            // 缺 schema 要求的 `containers`。
-            payload: const <String, Object?>{'steps': 3},
-          ).toJson(),
-        );
+    test('缺 containers 是 provider 违规，省略 executionDetails 且不报缺陷', () async {
+      final List<Object> reported = <Object>[];
+      final PatchbayServiceHost host = _host(
+        auditSink: (PatchbayAuditEvent _) {},
+        onAuditSinkError: (Object error, StackTrace _, PatchbayAuditEvent __) =>
+            reported.add(error),
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{'steps': 3},
+        ).toJson(),
+      );
 
-        final Map<String, Object?> response = await host.dispatchInvoke(
-          'ui.reveal',
-          const <String, Object?>{'identifier': 'a'},
-          'req-schema-violation',
-        );
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-schema-violation',
+      );
+      await host.drainAudit();
 
-        expect(_code(response), 'providerProtocolViolation');
-        expect(host.auditEvents.single.executionDetails, isNull);
-      },
-    );
+      expect(_code(response), 'providerProtocolViolation');
+      expect(response['schemaMode'], 'validated');
+      expect(host.auditEvents.single.executionDetails, isNull);
+      expect(reported, isEmpty, reason: '目录已声明 schema，这不是 host 投影缺陷');
+    });
   });
 
   group('empty：steps 0', () {
@@ -95,6 +154,41 @@ void main() {
           host.auditEvents.single.executionDetails?.reveal;
       expect(reveal?.steps, 0);
       expect(reveal?.containerNodeIds, isEmpty);
+    });
+
+    test('steps 0 却带容器：语义不变式被违反，整块省略并报告 defect', () async {
+      final List<Object> reported = <Object>[];
+      final PatchbayServiceHost host = _host(
+        auditSink: (PatchbayAuditEvent _) {},
+        onAuditSinkError: (Object error, StackTrace _, PatchbayAuditEvent __) =>
+            reported.add(error),
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{
+            'steps': 0,
+            'containers': <Map<String, Object?>>[
+              <String, Object?>{'nodeId': 7},
+            ],
+          },
+        ).toJson(),
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-zero-steps-with-containers',
+      );
+      await host.drainAudit();
+      await _waitUntil(() => reported.isNotEmpty);
+
+      // schema 只管类型，这条形状是**语义**不变式：应答本身仍然受理。
+      expect(response['admission'], 'accepted');
+      expect(host.auditEvents.single.executionDetails, isNull);
+      expect(
+        (reported.single as PatchbayAuditExecutionDetailsProjectionDefect)
+            .reason,
+        'containersPresentWithZeroSteps',
+      );
     });
   });
 
@@ -127,6 +221,41 @@ void main() {
         },
       });
     });
+
+    test('重复的 containerNodeId 不可能是首次驱动顺序，整块省略并报告 defect', () async {
+      final List<Object> reported = <Object>[];
+      final PatchbayServiceHost host = _host(
+        auditSink: (PatchbayAuditEvent _) {},
+        onAuditSinkError: (Object error, StackTrace _, PatchbayAuditEvent __) =>
+            reported.add(error),
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{
+            'steps': 2,
+            'containers': <Map<String, Object?>>[
+              <String, Object?>{'nodeId': 7},
+              <String, Object?>{'nodeId': 7},
+            ],
+          },
+        ).toJson(),
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-duplicate-node-id',
+      );
+      await host.drainAudit();
+      await _waitUntil(() => reported.isNotEmpty);
+
+      expect(response['admission'], 'accepted');
+      expect(host.auditEvents.single.executionDetails, isNull);
+      expect(
+        (reported.single as PatchbayAuditExecutionDetailsProjectionDefect)
+            .reason,
+        'containerNodeIdDuplicated',
+      );
+    });
   });
 
   group('上限 200 与 201 越界', () {
@@ -136,7 +265,9 @@ void main() {
           requestId: requestId,
           payload: const <String, Object?>{
             'steps': 200,
-            'containers': <Object?>[],
+            'containers': <Map<String, Object?>>[
+              <String, Object?>{'nodeId': 1},
+            ],
           },
         ).toJson(),
       );
@@ -158,7 +289,9 @@ void main() {
           requestId: requestId,
           payload: const <String, Object?>{
             'steps': 201,
-            'containers': <Object?>[],
+            'containers': <Map<String, Object?>>[
+              <String, Object?>{'nodeId': 1},
+            ],
           },
         ).toJson(),
       );
@@ -229,8 +362,8 @@ void main() {
     });
   });
 
-  group('负数或非 int 元素', () {
-    test('nodeId 为负数视为投影缺陷，即便通用 response schema 只检查类型', () async {
+  group('nodeId 的类型与范围：schema 在上游，范围在投影器', () {
+    test('nodeId 为负数视为投影缺陷，即便声明的 schema 只检查类型', () async {
       final List<Object> reported = <Object>[];
       final PatchbayServiceHost host = _host(
         auditSink: (PatchbayAuditEvent _) {},
@@ -247,12 +380,15 @@ void main() {
         ).toJson(),
       );
 
-      await host.dispatchInvoke('ui.reveal', const <String, Object?>{
-        'identifier': 'a',
-      }, 'req-negative-node-id');
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-negative-node-id',
+      );
       await host.drainAudit();
       await _waitUntil(() => reported.isNotEmpty);
 
+      expect(response['admission'], 'accepted');
       expect(host.auditEvents.single.executionDetails, isNull);
       expect(
         (reported.single as PatchbayAuditExecutionDetailsProjectionDefect)
@@ -261,13 +397,55 @@ void main() {
       );
     });
 
-    test('nodeId 非 int 时（未声明 response schema）投影自行判定为缺陷', () async {
+    test('生产目录下 steps 非 int 走 providerProtocolViolation，不是静默投影', () async {
       final List<Object> reported = <Object>[];
       final PatchbayServiceHost host = _host(
-        withResponseSchema: false,
         auditSink: (PatchbayAuditEvent _) {},
         onAuditSinkError: (Object error, StackTrace _, PatchbayAuditEvent __) =>
             reported.add(error),
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{
+            'steps': 'three',
+            'containers': <Object?>[],
+          },
+        ).toJson(),
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-non-int-steps',
+      );
+      await host.drainAudit();
+
+      expect(_code(response), 'providerProtocolViolation');
+      expect(_details(response)?['field'], r'$.payload.steps');
+      expect(host.auditEvents.single.executionDetails, isNull);
+      expect(reported, isEmpty);
+    });
+
+    test('生产目录下 containers 非数组走 providerProtocolViolation', () async {
+      final PatchbayServiceHost host = _host(
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{'steps': 1, 'containers': 'nope'},
+        ).toJson(),
+      );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-non-list-containers',
+      );
+
+      expect(_code(response), 'providerProtocolViolation');
+      expect(_details(response)?['field'], r'$.payload.containers');
+      expect(host.auditEvents.single.executionDetails, isNull);
+    });
+
+    test('生产目录下 nodeId 非 int 走 providerProtocolViolation', () async {
+      final PatchbayServiceHost host = _host(
         invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
           requestId: requestId,
           payload: const <String, Object?>{
@@ -284,18 +462,53 @@ void main() {
         const <String, Object?>{'identifier': 'a'},
         'req-non-int-node-id',
       );
-      await host.drainAudit();
-      await _waitUntil(() => reported.isNotEmpty);
 
-      // 未声明 responseSchema：应答本身仍是 accepted（legacyUnvalidated），
-      // 投影靠自己的类型判定拦住，不依赖通用 schema 校验先行拒绝。
-      expect(response['admission'], 'accepted');
+      expect(_code(response), 'providerProtocolViolation');
+      expect(_details(response)?['field'], r'$.payload.containers[0].nodeId');
       expect(host.auditEvents.single.executionDetails, isNull);
-      expect(
-        (reported.single as PatchbayAuditExecutionDetailsProjectionDefect)
-            .reason,
-        'containerNodeIdInvalid',
+    });
+
+    test('未声明 responseSchema 的 host：投影器沉默省略，不冒充缺陷', () async {
+      final List<Object> reported = <Object>[];
+      final PatchbayServiceHost host = _host(
+        commands: <Map<String, Object?>>[_revealRowWithoutResponseSchema()],
+        auditSink: (PatchbayAuditEvent _) {},
+        onAuditSinkError: (Object error, StackTrace _, PatchbayAuditEvent __) =>
+            reported.add(error),
+        invoke: (_, _, requestId) async => PatchbayInvocation.accepted(
+          requestId: requestId,
+          payload: const <String, Object?>{
+            'steps': 'three',
+            'containers': <Object?>[],
+          },
+        ).toJson(),
       );
+
+      final Map<String, Object?> response = await host.dispatchInvoke(
+        'ui.reveal',
+        const <String, Object?>{'identifier': 'a'},
+        'req-legacy-unvalidated',
+      );
+      await host.drainAudit();
+
+      // 缺声明是「目录没承诺校验」，不是「host 投影出错」：应答按老路径受理，
+      // 投影器保持防御式 null 而不报 defect。
+      expect(response['admission'], 'accepted');
+      expect(response['schemaMode'], 'legacyUnvalidated');
+      expect(host.auditEvents.single.executionDetails, isNull);
+      expect(reported, isEmpty);
+    });
+  });
+
+  group('缺陷 reason 词表封闭', () {
+    test('投影器只会报这五个 reason', () {
+      expect(patchbayAuditExecutionDetailsDefectReasons, <String>{
+        'stepsOutOfRange',
+        'containerNodeIdsTooLong',
+        'containersPresentWithZeroSteps',
+        'containerNodeIdInvalid',
+        'containerNodeIdDuplicated',
+      });
     });
   });
 
@@ -380,55 +593,77 @@ void main() {
   });
 }
 
-const Map<String, Object?> _revealResponseSchema = <String, Object?>{
-  'accepted': <String, Object?>{
-    'type': 'object',
-    'properties': <String, Object?>{
-      'steps': <String, Object?>{'type': 'integer'},
-      'containers': <String, Object?>{
-        'type': 'array',
-        'items': <String, Object?>{
-          'type': 'object',
-          'properties': <String, Object?>{
-            'nodeId': <String, Object?>{'type': 'integer'},
-          },
-          'required': <String>['nodeId'],
-          'additionalProperties': true,
-        },
-      },
+/// DG-050-10 冻结的 `outcome: revealed` 受理 payload（`semantics-scroll-reveal.md`
+/// 的字段表 + `PatchbayRevealResultWire.toJson`）。
+const Map<String, Object?> _frozenRevealedPayload = <String, Object?>{
+  'outcome': 'revealed',
+  'source': 'uiObserved',
+  'identifier': 'reveal.target',
+  'steps': 2,
+  'elapsedMs': 17,
+  'containers': <Map<String, Object?>>[
+    <String, Object?>{
+      'nodeId': 41,
+      'generation': 2,
+      'steps': 2,
+      'direction': 'forward',
+      'extentGrowthSteps': 1,
     },
-    'required': <String>['steps', 'containers'],
-    'additionalProperties': true,
-  },
+  ],
+  'nodeId': 11,
+  'generation': 4,
+  'reachability': 'pointer',
+  'beforeTreeRevision': 1,
+  'afterTreeRevision': 2,
 };
 
-Map<String, Object?> _revealRow({
-  String name = 'ui.reveal',
-  String sideEffect = 'external',
-  bool withResponseSchema = true,
-}) => <String, Object?>{
-  'name': name,
-  'mode': 'immediate',
-  'sideEffect': sideEffect,
-  'factSources': <String>['uiObserved'],
-  if (withResponseSchema) 'responseSchema': _revealResponseSchema,
+/// 同一张表的 `outcome: failed` 一侧：没有 `reachability`，多出 `reason` /
+/// `failureType` / `gateId` / `gateCode`。声明的 schema 不能把这一侧误判成违规。
+const Map<String, Object?> _frozenFailedPayload = <String, Object?>{
+  'outcome': 'failed',
+  'source': 'uiObserved',
+  'identifier': 'reveal.target',
+  'steps': 1,
+  'elapsedMs': 9,
+  'containers': <Map<String, Object?>>[
+    <String, Object?>{
+      'nodeId': 41,
+      'generation': 2,
+      'steps': 1,
+      'direction': 'both',
+      'extentGrowthSteps': 0,
+    },
+  ],
+  'beforeTreeRevision': 1,
+  'afterTreeRevision': 2,
+  'reason': 'gateRejected',
+  'failureType': 'StateError',
+  'gateId': 'consumer.gate',
+  'gateCode': 'uiRevealDenied',
 };
+
+/// 生产目录行。`name` 可改写，用来证明投影的闸是命令名而不是「碰巧没声明
+/// schema」——改名后的行仍然带同一份 schema。
+Map<String, Object?> _revealRow({String name = 'ui.reveal'}) =>
+    <String, Object?>{
+      ...patchbayUiRevealCommandDescriptor.toJson(),
+      'name': name,
+    };
+
+/// 同一行去掉 `responseSchema`，复刻一个还没声明校验的 host。
+Map<String, Object?> _revealRowWithoutResponseSchema() =>
+    _revealRow()..remove('responseSchema');
 
 PatchbayServiceHost _host({
   PatchbayInvocationSource? invoke,
   PatchbayAuditSink? auditSink,
   PatchbayAuditSinkErrorHandler? onAuditSinkError,
-  bool withResponseSchema = true,
   List<Map<String, Object?>>? commands,
 }) => PatchbayServiceHost(
   applicationId: 'dev.patchbay.reveal-execution-details-audit-test',
   registrar: (_, _) {},
   catalog: () async => <String, Object?>{
-    'commands':
-        commands ??
-        <Map<String, Object?>>[
-          _revealRow(withResponseSchema: withResponseSchema),
-        ],
+    'commands': commands ?? <Map<String, Object?>>[_revealRow()],
   },
   snapshot: () async => const <String, Object?>{},
   invoke:
@@ -444,6 +679,14 @@ String? _code(Map<String, Object?> response) {
   return rejection is Map<Object?, Object?>
       ? rejection['code'] as String?
       : null;
+}
+
+Map<Object?, Object?>? _details(Map<String, Object?> response) {
+  final Object? rejection = response['rejection'];
+  final Object? details = rejection is Map<Object?, Object?>
+      ? rejection['details']
+      : null;
+  return details is Map<Object?, Object?> ? details : null;
 }
 
 /// `AuditDispatcher._report` delivers through `Timer.run`, one macrotask
