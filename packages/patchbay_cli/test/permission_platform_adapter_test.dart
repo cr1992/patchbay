@@ -1151,6 +1151,144 @@ void main() {
     expect(exercise.interruption?.handled, isTrue);
   });
 
+  // BUG-20260828-02：两个 adapter 的 exercise 分流曾在 try 块里裸 `return` 一个
+  // async callee（`unawaited_return_in_try_block`）——callee 抛出的私有失败类型
+  // 因此绕过 catch 的类型化翻译，作为裸异常逃给调用方，违反「拒绝也是类型化
+  // 答复」的驱动面契约。以下两条钉住修复：失败必须以 rejected response 返回，
+  // 而不是让 `handle` 的 Future 直接炸。
+  test('Android exercise failure surfaces as a typed rejection', () async {
+    const String runner =
+        'com.example.consumer.test/androidx.test.runner.AndroidJUnitRunner';
+    Future<PatchbayPlatformCommandResult> command(
+      String executable,
+      List<String> arguments,
+      Duration timeout,
+    ) async {
+      if (arguments case ['version']) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'Android Debug Bridge version 1.0.41',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('devices')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'List of devices attached\ndevice-1\tdevice\n',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('path')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'package:/data/app/consumer/base.apk',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('pidof')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '4321',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('dumpsys')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'android.permission.CAMERA: granted=false, flags=[]\n',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('instrument')) {
+        // runner 跑完却没有输出 PATCHBAY_RESULT 标记：`_exercise` 在一次真实
+        // await 之后抛 systemUiUnexpected，正是会绕过 catch 的异步失败形态。
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'OK (1 test)\n',
+          stderr: '',
+        );
+      }
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      );
+    }
+
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayAndroidPermissionAdapter(
+          instrumentationRunner: runner,
+          runCommand: command,
+        ).handle(
+          _request(
+            PatchbayPermissionOperation.exercise,
+            decision: PatchbayPermissionDecision.allow,
+          ),
+        );
+    expect(response.accepted, isFalse);
+    expect(response.code, 'systemUiUnexpected');
+  });
+
+  test('iOS exercise failure surfaces as a typed rejection', () async {
+    Future<PatchbayPlatformCommandResult> command(
+      String executable,
+      List<String> arguments,
+      Duration timeout,
+    ) async {
+      if (arguments case ['simctl', 'help']) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'simctl',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('--json')) {
+        return PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: jsonEncode(<String, Object?>{
+            'devices': <String, Object?>{
+              'runtime': <Object?>[
+                <String, Object?>{
+                  'udid': 'device-1',
+                  'state': 'Booted',
+                  'isAvailable': true,
+                },
+              ],
+            },
+          }),
+          stderr: '',
+        );
+      }
+      if (arguments.contains('get_app_container')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: '/sim/app',
+          stderr: '',
+        );
+      }
+      if (arguments.contains('launchctl')) {
+        return const PatchbayPlatformCommandResult(
+          exitCode: 0,
+          stdout: 'UIKitApplication:com.example.consumer.debug',
+          stderr: '',
+        );
+      }
+      return const PatchbayPlatformCommandResult(
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      );
+    }
+
+    // exercise 不带 decision：`_exercise` 抛 permissionDecisionUnsupported。
+    final PatchbayPermissionDriverResponse response =
+        await PatchbayIosPermissionAdapter(
+          runCommand: command,
+        ).handle(_request(PatchbayPermissionOperation.exercise));
+    expect(response.accepted, isFalse);
+    expect(response.code, 'permissionDecisionUnsupported');
+  });
+
   test(
     'recovery reconnects, probes lifecycle and re-resolves current targets',
     () async {

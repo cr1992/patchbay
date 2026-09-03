@@ -63,7 +63,13 @@ const String _noPsReason =
 
 /// A `/proc/<pid>/stat` line whose only interesting parts are [comm] (field 2,
 /// the parsing hazard) and [startTimeTicks] (field 22, the payload).
-String _statLine({required String comm, required int startTimeTicks}) {
+String _statLine({required String comm, required int startTimeTicks}) =>
+    _statLineWithRawTicks(comm: comm, startTimeTicks: '$startTimeTicks');
+
+String _statLineWithRawTicks({
+  required String comm,
+  required String startTimeTicks,
+}) {
   // Fields 3..21 -- state through itrealvalue -- shaped after a real line so
   // an off-by-one in the parser lands on a plausible-looking number instead
   // of failing loudly.
@@ -73,6 +79,20 @@ String _statLine({required String comm, required int startTimeTicks}) {
   ];
   return '4242 ($comm) ${beforeStartTime.join(' ')} '
       '$startTimeTicks 2293760 240\n';
+}
+
+/// Makes a synthetic procfs state which PID namespace(s) it uses.
+///
+/// Linux reports `NSpid` from the namespace that mounted this procfs through
+/// successively nested namespaces. A single value equal to Dart's [pid] is
+/// the only shape that proves numeric `/proc/<pid>` lookups mean the same
+/// thing to this process.
+void _writePidNamespaceMarker(Directory procRoot, List<int> namespacePids) {
+  final File status = File('${procRoot.path}/self/status');
+  status.createSync(recursive: true);
+  status.writeAsStringSync(
+    'Name:\tpatchbay-test\nNSpid:\t${namespacePids.join('\t')}\n',
+  );
 }
 
 /// Runs the command for real, with [hostTz] planted in the child's
@@ -238,9 +258,7 @@ void main() {
 
     setUp(() {
       procRoot = Directory.systemTemp.createTempSync('patchbay-fake-proc-');
-      // A procfs that knows this process is the precondition for trusting it
-      // at all -- see the bind-mounted-foreign-procfs test below.
-      Directory('${procRoot.path}/$pid').createSync();
+      _writePidNamespaceMarker(procRoot, <int>[pid]);
     });
 
     tearDown(() {
@@ -307,6 +325,31 @@ void main() {
       expect(fake.executedSync.single.executable, 'kill');
     });
 
+    test('procfs without NSpid evidence falls back, never guesses', () {
+      final Directory unproven = Directory.systemTemp.createTempSync(
+        'patchbay-unproven-proc-',
+      );
+      addTearDown(() => unproven.deleteSync(recursive: true));
+      File('${unproven.path}/self/status')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('Name:\tpatchbay-test\n');
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) => ProcessResult(123, 0, '', ''),
+      );
+
+      expect(
+        PlatformProcessUtils.isProcessAlive(
+          4242,
+          runner: fake,
+          isWindows: false,
+          isLinux: true,
+          procRoot: unproven.path,
+        ),
+        isTrue,
+      );
+      expect(fake.executedSync.single.executable, 'kill');
+    });
+
     test('a procfs from another PID namespace is refused, not believed', () {
       // A container that bind-mounts the parent namespace's /proc into a
       // child PID namespace: `<procRoot>/self` still resolves -- it is a
@@ -319,8 +362,11 @@ void main() {
         'patchbay-foreign-proc-',
       );
       addTearDown(() => foreign.deleteSync(recursive: true));
-      Directory('${foreign.path}/self').createSync();
-      Directory('${foreign.path}/1').createSync();
+      // The old guard was merely `$procRoot/$pid`. Create that exact numeric
+      // collision: it proves only that the *foreign* namespace allocated the
+      // same number, not that the mount uses our PID numbering.
+      Directory('${foreign.path}/$pid').createSync();
+      _writePidNamespaceMarker(foreign, <int>[99999, pid]);
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) => ProcessResult(123, 0, '', ''),
       );
@@ -383,7 +429,7 @@ void main() {
     test('POSIX: pins TZ and LC_ALL, and tags the scheme', () {
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) =>
-            ProcessResult(123, 0, 'Mon Aug 25 09:00:00 2026\n', ''),
+            ProcessResult(123, 0, 'Tue Aug 25 09:00:00 2026\n', ''),
       );
       final signature = PlatformProcessUtils.processStartTimeSignature(
         4242,
@@ -391,7 +437,7 @@ void main() {
         isWindows: false,
         isLinux: false,
       );
-      expect(signature, 'v2-posix:Mon Aug 25 09:00:00 2026');
+      expect(signature, 'v2-posix:Tue Aug 25 09:00:00 2026');
       expect(fake.executedSync, hasLength(1));
       expect(fake.executedSync.single.executable, 'ps');
       expect(fake.executedSync.single.arguments, [
@@ -416,7 +462,7 @@ void main() {
       // otherwise be frozen into a persisted identity.
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) =>
-            ProcessResult(123, 0, '  Fri Aug  8 09:00:00 2026    \n', ''),
+            ProcessResult(123, 0, '  Sat Aug  8 09:00:00 2026    \n', ''),
       );
       expect(
         PlatformProcessUtils.processStartTimeSignature(
@@ -425,7 +471,23 @@ void main() {
           isWindows: false,
           isLinux: false,
         ),
-        'v2-posix:Fri Aug 8 09:00:00 2026',
+        'v2-posix:Sat Aug 8 09:00:00 2026',
+      );
+    });
+
+    test('POSIX: refuses a date shape the pinned ps writer cannot produce', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) =>
+            ProcessResult(123, 0, 'Xxx Yyy 99 99:99:99 0000\n', ''),
+      );
+      expect(
+        PlatformProcessUtils.processStartTimeSignature(
+          4242,
+          runner: fake,
+          isWindows: false,
+          isLinux: false,
+        ),
+        isNull,
       );
     });
 
@@ -498,6 +560,21 @@ void main() {
       );
     });
 
+    test('Windows: refuses a width-correct but impossible instant', () {
+      final fake = FakeProcessRunner(
+        syncHandler: (exe, args) =>
+            ProcessResult(123, 0, '2026-99-99T99:99:99.0000000Z\n', ''),
+      );
+      expect(
+        PlatformProcessUtils.processStartTimeSignature(
+          4242,
+          runner: fake,
+          isWindows: true,
+        ),
+        isNull,
+      );
+    });
+
     test('Windows: returns null on non-zero exit code', () {
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) => ProcessResult(123, 1, '', 'not found'),
@@ -529,7 +606,7 @@ void main() {
 
     setUp(() {
       procRoot = Directory.systemTemp.createTempSync('patchbay-fake-proc-sig-');
-      Directory('${procRoot.path}/$pid').createSync();
+      _writePidNamespaceMarker(procRoot, <int>[pid]);
       File(
         '${procRoot.path}/sys/kernel/random/boot_id',
       ).createSync(recursive: true);
@@ -607,7 +684,7 @@ void main() {
       writeStat(4245, '4245 (sleep) S 1 1 1 0 -1\n');
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) =>
-            ProcessResult(123, 0, 'Mon Aug 25 09:00:00 2026\n', ''),
+            ProcessResult(123, 0, 'Tue Aug 25 09:00:00 2026\n', ''),
       );
 
       expect(
@@ -618,10 +695,39 @@ void main() {
           isLinux: true,
           procRoot: procRoot.path,
         ),
-        'v2-posix:Mon Aug 25 09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026',
       );
       expect(fake.executedSync.single.executable, 'ps');
     });
+
+    test(
+      'ticks outside the kernel decimal shape fall back, never get written',
+      () {
+        for (final String ticks in <String>['+7', '-7', '7x']) {
+          writeStat(
+            4245,
+            _statLineWithRawTicks(comm: 'sleep', startTimeTicks: ticks),
+          );
+          final fake = FakeProcessRunner(
+            syncHandler: (exe, args) =>
+                ProcessResult(123, 0, 'Tue Aug 25 09:00:00 2026\n', ''),
+          );
+
+          expect(
+            PlatformProcessUtils.processStartTimeSignature(
+              4245,
+              runner: fake,
+              isWindows: false,
+              isLinux: true,
+              procRoot: procRoot.path,
+            ),
+            'v2-posix:Tue Aug 25 09:00:00 2026',
+            reason: 'kernel field 22 cannot render $ticks',
+          );
+          expect(fake.executedSync.single.executable, 'ps');
+        }
+      },
+    );
 
     test('a missing boot_id falls back -- ticks alone can collide', () {
       // Ticks are counted from boot, so without a boot identity a PID
@@ -631,7 +737,7 @@ void main() {
       writeStat(4246, _statLine(comm: 'sleep', startTimeTicks: 42));
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) =>
-            ProcessResult(123, 0, 'Mon Aug 25 09:00:00 2026\n', ''),
+            ProcessResult(123, 0, 'Tue Aug 25 09:00:00 2026\n', ''),
       );
 
       expect(
@@ -642,7 +748,7 @@ void main() {
           isLinux: true,
           procRoot: procRoot.path,
         ),
-        'v2-posix:Mon Aug 25 09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026',
       );
     });
 
@@ -657,7 +763,7 @@ void main() {
       writeStat(4247, _statLine(comm: 'sleep', startTimeTicks: 42));
       final fake = FakeProcessRunner(
         syncHandler: (exe, args) =>
-            ProcessResult(123, 0, 'Mon Aug 25 09:00:00 2026\n', ''),
+            ProcessResult(123, 0, 'Tue Aug 25 09:00:00 2026\n', ''),
       );
 
       expect(
@@ -668,7 +774,7 @@ void main() {
           isLinux: true,
           procRoot: procRoot.path,
         ),
-        'v2-posix:Mon Aug 25 09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026',
       );
       expect(fake.executedSync.single.executable, 'ps');
     });
@@ -678,7 +784,8 @@ void main() {
         'patchbay-foreign-proc-sig-',
       );
       addTearDown(() => foreign.deleteSync(recursive: true));
-      Directory('${foreign.path}/self').createSync();
+      Directory('${foreign.path}/$pid').createSync();
+      _writePidNamespaceMarker(foreign, <int>[99999, pid]);
       Directory('${foreign.path}/4242').createSync();
       File(
         '${foreign.path}/4242/stat',
@@ -690,8 +797,9 @@ void main() {
         '${foreign.path}/sys/kernel/random/boot_id',
       ).writeAsStringSync('$_bootId\n');
       final fake = FakeProcessRunner(
-        syncHandler: (exe, args) =>
-            ProcessResult(123, 0, 'Mon Aug 25 09:00:00 2026\n', ''),
+        syncHandler: (exe, args) => fail(
+          'Linux ps reads the same foreign procfs and is not a safe fallback',
+        ),
       );
 
       expect(
@@ -702,9 +810,10 @@ void main() {
           isLinux: true,
           procRoot: foreign.path,
         ),
-        'v2-posix:Mon Aug 25 09:00:00 2026',
-        reason: 'those PIDs mean nothing here; `ps` runs in our namespace',
+        isNull,
+        reason: 'neither procfs nor ps can establish a local launch identity',
       );
+      expect(fake.executedSync, isEmpty);
     });
 
     test('the real /proc answers for this process, stably', () {
@@ -743,8 +852,8 @@ void main() {
       );
       expect(
         PlatformProcessUtils.compareStartTimeSignatures(
-          'v2-posix:Mon Aug 25 09:00:00 2026',
-          'v2-posix:Mon Aug 25 09:00:01 2026',
+          'v2-posix:Tue Aug 25 09:00:00 2026',
+          'v2-posix:Tue Aug 25 09:00:01 2026',
         ),
         PatchbayStartTimeMatch.different,
       );
@@ -786,7 +895,7 @@ void main() {
       expect(
         PlatformProcessUtils.compareStartTimeSignatures(
           'v9-something:abc',
-          'v2-posix:Mon Aug 25 09:00:00 2026',
+          'v2-posix:Tue Aug 25 09:00:00 2026',
         ),
         PatchbayStartTimeMatch.unverifiable,
       );
@@ -799,7 +908,7 @@ void main() {
       expect(
         PlatformProcessUtils.compareStartTimeSignatures(
           'v2-linux:$_bootId:7128607',
-          'v2-posix:Mon Aug 25 09:00:00 2026',
+          'v2-posix:Tue Aug 25 09:00:00 2026',
         ),
         PatchbayStartTimeMatch.unverifiable,
       );
@@ -807,9 +916,9 @@ void main() {
 
     test('an empty or scheme-less string is unverifiable, not different', () {
       for (final pair in <List<String>>[
-        <String>['', 'v2-posix:Mon Aug 25 09:00:00 2026'],
-        <String>[':leading', 'v2-posix:Mon Aug 25 09:00:00 2026'],
-        <String>['v2-posix:Mon Aug 25 09:00:00 2026', 'no-colon-at-all'],
+        <String>['', 'v2-posix:Tue Aug 25 09:00:00 2026'],
+        <String>[':leading', 'v2-posix:Tue Aug 25 09:00:00 2026'],
+        <String>['v2-posix:Tue Aug 25 09:00:00 2026', 'no-colon-at-all'],
       ]) {
         expect(
           PlatformProcessUtils.compareStartTimeSignatures(pair[0], pair[1]),
@@ -849,7 +958,7 @@ void main() {
 
     // One signature per scheme, in exactly the form this build writes.
     const String linuxOk = 'v2-linux:$_bootId:7128607';
-    const String posixOk = 'v2-posix:Mon Aug 25 09:00:00 2026';
+    const String posixOk = 'v2-posix:Tue Aug 25 09:00:00 2026';
     const String winOk = 'v2-win:2026-08-25T16:00:00.0000000Z';
 
     // Each healthy signature against the corruptions of its own scheme.
@@ -872,6 +981,12 @@ void main() {
       ],
       posixOk: <String>[
         'v2-posix:',
+        'v2-posix:Xxx Yyy 99 99:99:99 0000',
+        'v2-posix:Tue Aug 0 09:00:00 2026',
+        'v2-posix:Tue Feb 30 09:00:00 2026',
+        'v2-posix:Tue Aug 25 24:00:00 2026',
+        'v2-posix:Tue Aug 25 09:60:00 2026',
+        'v2-posix:Mon Aug 25 09:00:00 2026',
         // An opaque placeholder is not an `lstart`. Listed first because it
         // is what this repo's own session fixtures used to hold: a value
         // that looks harmless and was trusted as a comparable identity.
@@ -879,31 +994,35 @@ void main() {
         // Truncation, one field at a time. A half-written record compared
         // against the intact one it came from is exactly the shape that used
         // to reach `different`.
-        'v2-posix:Mon Aug 25 09:00:00',
-        'v2-posix:Mon Aug 25 09:00:00 202',
-        'v2-posix:Mon Aug 25 09:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00',
+        'v2-posix:Tue Aug 25 09:00:00 202',
+        'v2-posix:Tue Aug 25 09:00 2026',
         'v2-posix:Aug 25 09:00:00 2026',
         'v2-posix:Mon Aug 09:00:00 2026',
         'v2-posix:on Aug 25 09:00:00 2026',
-        'v2-posix:Mon Aug 25 09:00:00 2026 extra',
+        'v2-posix:Tue Aug 25 09:00:00 2026 extra',
         // Field widths `ps` cannot produce under the pinned `LC_ALL=C`: the
         // clock is two-digit, the day at most two.
         'v2-posix:Mon Aug 125 09:00:00 2026',
-        'v2-posix:Mon Aug 25 9:00:00 2026',
+        'v2-posix:Tue Aug 25 9:00:00 2026',
         // The writer trims and collapses, so none of these three can be its
         // output -- each is a value that was mangled after it was written.
-        'v2-posix: Mon Aug 25 09:00:00 2026',
-        'v2-posix:Mon Aug 25 09:00:00 2026 ',
+        'v2-posix: Tue Aug 25 09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026 ',
         'v2-posix:Mon Aug  25 09:00:00 2026',
         // Control characters are not `\s`, so the collapse would have left
         // them in place: seeing one means the value is not ours.
-        'v2-posix:Mon Aug 25\u000009:00:00 2026',
-        'v2-posix:Mon Aug 25\n09:00:00 2026',
-        'v2-posix:Mon Aug 25 09:00:00 2026\u007f',
+        'v2-posix:Tue Aug 25\u000009:00:00 2026',
+        'v2-posix:Tue Aug 25\n09:00:00 2026',
+        'v2-posix:Tue Aug 25 09:00:00 2026\u007f',
       ],
       winOk: <String>[
         'v2-win:',
         'v2-win:garbage',
+        'v2-win:0000-08-25T16:00:00.0000000Z',
+        'v2-win:2026-13-25T16:00:00.0000000Z',
+        'v2-win:2026-02-30T16:00:00.0000000Z',
+        'v2-win:2026-08-25T24:00:00.0000000Z',
         // A local offset instead of `Z` is the Windows shape of the
         // PB-050-31 defect itself: two readers in two timezones would
         // disagree about one live process. Not comparable, by construction.
@@ -972,7 +1091,7 @@ void main() {
       // a single `same` or `different` verdict the fix already earned.
       const Map<String, String> otherLaunch = <String, String>{
         linuxOk: 'v2-linux:$_bootId:9000000',
-        posixOk: 'v2-posix:Mon Aug 25 09:00:01 2026',
+        posixOk: 'v2-posix:Tue Aug 25 09:00:01 2026',
         winOk: 'v2-win:2026-08-25T16:00:01.0000000Z',
       };
       otherLaunch.forEach((String healthy, String reused) {
@@ -1007,12 +1126,12 @@ void main() {
         // really does emit -- on exactly the platform this suite usually
         // runs on.
         <String>[
-          'v2-posix:Fri Aug 8 09:00:00 2026',
-          'v2-posix:Fri Aug 8 09:00:00 2026',
+          'v2-posix:Sat Aug 8 09:00:00 2026',
+          'v2-posix:Sat Aug 8 09:00:00 2026',
         ],
         <String>[
-          'v2-posix:Mon Aug 25 09:00:00 2026',
-          'v2-posix:Mon Aug 25 09:00:00 2026',
+          'v2-posix:Tue Aug 25 09:00:00 2026',
+          'v2-posix:Tue Aug 25 09:00:00 2026',
         ],
         // Midnight, where every field is at its low end: still full width,
         // because `LC_ALL=C` zero-pads the clock.
@@ -1020,11 +1139,22 @@ void main() {
           'v2-posix:Thu Jan 1 00:00:00 2026',
           'v2-posix:Thu Jan 1 00:00:00 2026',
         ],
+        // POSIX permits 60 for a rendered leap second. The calendar and
+        // weekday still have to agree even though Dart DateTime itself does
+        // not model that extra second.
+        <String>[
+          'v2-posix:Thu Feb 29 23:59:60 2024',
+          'v2-posix:Thu Feb 29 23:59:60 2024',
+        ],
         // `"o"` renders seven fractional digits, and a whole second renders
         // them as zeros rather than omitting them.
         <String>[
           'v2-win:2026-08-25T16:00:00.0000000Z',
           'v2-win:2026-08-25T16:00:00.0000000Z',
+        ],
+        <String>[
+          'v2-win:2024-02-29T23:59:59.9999999Z',
+          'v2-win:2024-02-29T23:59:59.9999999Z',
         ],
       ];
       for (final List<String> pair in sameLaunch) {
