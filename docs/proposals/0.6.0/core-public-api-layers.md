@@ -8,10 +8,14 @@
 >
 > 裁决修订：2026-09-03 重锚定基线摘要，并把 PB-050-39 新增的三个 audit 词表符号归入 host-only 集
 > `H`（41 → 44）。详见下文「裁决修订」。**待仓主确认。**
+>
+> 裁决修订②：2026-09-03 引入**入口自足规则**（公共签名闭包），导出清单改由机械闭包算出；
+> 五个入口的最终计数为 98 / 136 / 141 / 102 / 195。详见下文「裁决修订②」。**待仓主确认。**
 
 ## 问题
 
-`package:patchbay/patchbay.dart` 当前公开 247 个符号，混合 consumer DTO/descriptor、host lifecycle、
+`package:patchbay/patchbay.dart` 在本 Proposal 被接受时公开 247 个符号（基线重锚定后为 250，见
+「裁决修订」），混合 consumer DTO/descriptor、host lifecycle、
 invocation internals 与生成 wire 类型；`patchbay_flutter.dart` 又整体 re-export core。API golden 能防止
 意外漂移，却不能让普通 App 接入者只看到自己需要的表面。0.6.0 若是 1.0 候选，必须先冻结使用者分层。
 
@@ -195,7 +199,11 @@ host 入口。
 
 实现 MR 把 `C` 逐名写进 `patchbay.dart` 的 `show` 清单；`patchbay_host.dart` 精确导出 `C ∪ H`；
 `patchbay_protocol.dart` 精确导出 `P`。不能把上述集合公式留成运行时代码或生成时的后缀猜测；公式只用于
-冻结本次 247 符号的裁决，落地后由每个 library 的显式清单与 golden 成为真源。
+冻结本次 250 符号的裁决，落地后由每个 library 的显式清单与 golden 成为真源。
+
+> **本段已被「裁决修订②：入口自足规则」取代。** `C` / `H` / `P` 仍是角色分组，但每个 library 导出的
+> 是**该角色种子的闭包**，三份导出清单因此有意重叠；导出集合由 `tool/check_api_closure.dart` 机械算出，
+> 不再等于角色集合。最终计数见修订②。
 
 DG-060-03 后续新增的 `PatchbayOutputProjection` 一组 Dart descriptor 类型属于 `C`；对应 raw parser/wire
 类型属于 `P`。任何在本 Proposal 后新增的公共符号都必须在所属 MR 中显式选择 consumer、host 或 protocol，
@@ -227,6 +235,121 @@ Flutter 自有全集 `F` 仍是 48 个符号。
 - 基线摘要重锚定为 `835c329c32acf38997d79a683a7e35e575562f3335252fec85d3c42a3284a6e7`。此后再出现
   摘要不符仍按原规则处理：回到本节修订，不在实现 MR 里重算。
 
+### 裁决修订②：入口自足规则（2026-09-03，DG-060-02）
+
+**待仓主确认。**
+
+修订①之后的第一版实现忠实执行了「按角色手写三份清单」，独立证伪却发现清单本身不自洽：
+**只 import `patchbay.dart` 实现一个 `PatchbayLogSource` 会拿到 `undefined_class`。**
+`PatchbayLogSource.query` 的形参类型 `PatchbayCancellationSignal` 在 `H`，`PatchbayLogQuery`
+的构造函数收 `PatchbayLogLevelWire` / `PatchbayLogDirectionWire`、`PatchbayRedactedLogRecord`
+公开 `PatchbayLogRecordWire wire`，这三个在 `P`；`PatchbayCommandRegistration.contextAware`
+的必填形参 `PatchbayContextCommandHandler` 在 `H`；`PatchbayCommandDescriptor.cliSyntax` 的元素
+类型 `PatchbayCliSyntax` 及其三个枚举在 `P`；`PatchbayServiceHost` 三个 factory 的形参
+`Set<PatchbayFeature>` 也在 `P`。仓内 example 五个 lib 文件里只有纯 widget 的那一个活在默认面，
+其余全叠 host/protocol —— 与本 Proposal「不把业务 adapter 逼进 host 入口」的原意矛盾。
+
+因此重新接受下面的结论，而不是由实现 MR 自行取舍：
+
+#### 入口自足规则
+
+> 每个公共 library 导出的符号，其**公共签名**里引用到的 Patchbay 类型必须由**同一个** library
+> 导出。公共签名 = 超类 / `implements` / `with` / `on` 子句、公共构造函数的形参、公共字段与
+> getter 的类型、公共 setter 与方法的形参和返回类型、类型参数上界、typedef 的 aliased type、
+> extension 的 extendedType，以及上述类型的全部类型实参。`dart:` 与 `package:flutter` 的类型
+> 不计。
+
+**闭包优先于「`Wire` 后缀归 protocol」这类命名规则。** 命名规则只是初始分组，自足是硬约束：
+被闭包拉进 `C` 的 wire 类型不是「raw wire 泄漏」，而是接入方实现 provider 时必须能命名的类型。
+
+规则由 `tool/check_api_closure.dart` 机检，它用 analyzer 的 element model（编译器口径，不是正则
+口径）逐个入口算闭包，要求五个入口的违规集合都为空；这条进门禁，不是一次性核对。
+
+#### 集合变化（工具算出，不是人工挑选）
+
+`C` / `H` / `P` 仍然是**角色分组**（77 / 44 / 129，互不相交）；每个 library 导出的是**该角色种子的
+闭包**，因此三份导出清单**有意重叠**。原「三集合互不相交、导出集合等于角色集合」的表述不再成立
+——它正是让默认入口不自足的那条规则。
+
+`closure(C)` 相对 `C` 多出 21 个符号，其中 7 个来自 `H`、14 个来自 `P`：
+
+```text
+PatchbayCancellationConfirmation      （原 H）
+PatchbayCancellationSignal            （原 H）
+PatchbayContextCommandHandler         （原 H）
+PatchbayInvocationCancellationReason  （原 H）
+PatchbayInvocationCancellationSignal  （原 H）
+PatchbayInvocationContext             （原 H）
+PatchbayInvocationDeadline            （原 H）
+PatchbayBlobChunkWire                 （原 P）
+PatchbayBlobMetadataWire              （原 P）
+PatchbayBlobSourceWire                （原 P）
+PatchbayCliArtifactDisposition        （原 P）
+PatchbayCliEqualsCondition            （原 P）
+PatchbayCliInputMode                  （原 P）
+PatchbayCliSyntax                     （原 P）
+PatchbayDestinationDescriptorWire     （原 P）
+PatchbayFactSourceWire                （原 P）
+PatchbayLogDirectionWire              （原 P）
+PatchbayLogLevelWire                  （原 P）
+PatchbayLogRecordWire                 （原 P）
+PatchbayLogRedactionWire              （原 P）
+PatchbayNavigationOperationWire       （原 P）
+```
+
+`closure(C ∪ H)` 相对 `C ∪ H` 多出 15 个：上表 14 个 `P` 来源的（与 consumer 面重合），加上唯一
+一个 host 独有的新增 `PatchbayFeature`（`PatchbayServiceHost` 三个 factory 的形参）。
+
+`closure(P)` 相对 `P` 多出 12 个 —— canonical descriptor 常量的类型链：
+
+```text
+PatchbayCommandDescriptor
+PatchbayCommandMode
+PatchbayExecutionContract
+PatchbayFactSource
+PatchbayParameterDescriptor
+PatchbayParameterType
+PatchbayPlane
+PatchbayResponseSchema
+PatchbayResponseType
+PatchbayResponseValueSchema
+PatchbayRetryPolicy
+PatchbaySideEffect
+```
+
+Flutter 侧：`patchbay_flutter.dart` = `closure(C)` 加原定的四个 widget 侧符号；
+`patchbay_flutter_host.dart` = `closure(C ∪ H)` 加 Flutter 自有全集，再加 bridge 公共签名需要的
+10 个 protocol 类型（`PatchbayCaptureRequestWire`、`PatchbayCaptureDiffRequestWire`、
+`PatchbayInspectSelectRequestWire`、`PatchbayInspectUnavailableWire`、
+`PatchbayKeepAwakeRequestWire`、`PatchbayRevealDirectionWire`、`PatchbayUiWaitCondition`、
+`PatchbayUiWaitConditionWire`、`PatchbayUiWaitRequest`、`PatchbayUiWaitRequestWire`）。
+
+Flutter 自有全集由 48 变 49：`PatchbaySemanticsBridge.observe` 返回
+`PatchbaySemanticsEntry`，而 0.5.0 的 `patchbay_flutter.dart` 从未导出它 —— 这是本规则暴露出的
+既有漏洞，不是本次新造的。修复方式是导出该类型（只进 Flutter host 面），而不是改签名。
+
+#### 修订后的精确计数
+
+| 入口 | 符号数 | 组成 |
+|---|---|---|
+| `patchbay.dart` | 98 | `closure(C)` = 77 + 21 |
+| `patchbay_host.dart` | 136 | `closure(C ∪ H)`；相对 `patchbay.dart` 多 38 个 host-only |
+| `patchbay_protocol.dart` | 141 | `closure(P)` = 129 + 12 |
+| `patchbay_flutter.dart` | 102 | `closure(C)` + 四个 widget 侧符号 |
+| `patchbay_flutter_host.dart` | 195 | `closure(C ∪ H)` + Flutter 自有 49 + 10 个 protocol 类型 |
+
+`patchbay_cli.dart`（2）、`patchbay_client.dart`（8）与 `patchbay_transport.dart`（22）不变。
+
+#### 「未分类默认判红」的落地方式
+
+本 Proposal 原文写了「未分类默认判红」，但封闭 `show` 之后它并不成立：`lib/src/` 里新增一个公共
+class **谁也看不见**——它不在任何入口的展开集合里，golden diff 为 0。这比封闭前更弱（封闭前那一行
+整库 re-export 至少会让新符号进 golden 判红）。因此 golden 为每个包增加一份 `internal` 清单：
+`lib/src/**` 里未被任何公共 library 导出的公共顶层名。新名字没登记就判红，`--update` **不代作者
+登记**（需要 `--accept-internal <name>`；首次建账用一次性的 `--bootstrap-internal`）。同时增加一条
+测试：`core_wire.g.dart` 里全部公共 `*Wire` 名必须是 `patchbay_protocol.dart` 导出集的子集——
+codegen 不感知 barrel，新增 wire 类型必须显式表态。
+
 ## 精确 Flutter 集合
 
 同一基线 golden 中 Flutter 自有全集 `F` 为 48 个符号。默认 Flutter 自有集合固定为：
@@ -240,7 +363,8 @@ PatchbayUiRegistry
 
 Flutter host 自有集合为 `F` 减去上述四项，即现有其余 44 个 bridge、service host、policy、inspector、
 lifecycle、navigation、gesture、semantics、reveal 与 capture symbol。实现时 `patchbay_flutter.dart` 精确导出
-`C` 和这四项；`patchbay_flutter_host.dart` 精确导出 `C ∪ H ∪ F`。其中
+`C` 和这四项；`patchbay_flutter_host.dart` 精确导出 `C ∪ H ∪ F`（两者的实际导出集合按修订②取闭包，且
+`F` 由 48 变 49，见该节）。其中
 `PatchbayFlutterServiceHost`、`PatchbayFlutterBridge`、`PatchbayRevealPolicy`、
 `PatchbaySemanticsActionPolicy` 与 `PatchbayGesturePolicy` 都是 host 面，不因普通 App 需要在组合根配置它们
 就重新塞回每个 widget 文件默认可见的 consumer 面。
@@ -248,7 +372,12 @@ lifecycle、navigation、gesture、semantics、reveal 与 capture symbol。实�
 ## API checker 与 golden
 
 - `_closedSurfacePackages` 扩为四个 package；任何公共 library 出现无法展开的跨包整库 export，普通检查与
-  `--update` 都必须先失败。
+  `--update` 都必须先失败。展开前先剥掉整行 `//` / `///` 注释——barrel 的文档注释里举例写 `export '…';`
+  不是 export。
+- golden 为每个包多记一份 `internal` 清单（`lib/src/**` 里未被任何公共 library 导出的公共顶层名）。封闭
+  `show` 之后这是「src 新增公共符号」唯一会被发现的地方；未登记的新名字判红，`--update` 不代作者登记。
+- 新增 `tool/check_api_closure.dart`：用 analyzer 的 element model 校验五个公共入口的自足闭包，违规即
+  判红。它与 checker 是两条独立口径（element model / 正则展开），互为对账。
 - checker 按 `package + library` 展开本地 export/part 和跨包 `show`，新增 library 本身、符号新增与符号
   移除分别报告；不能把两个入口折成包级并集。
 - `tool/api_surface.json` 同一实现 MR 新增 core 两个、Flutter 一个 library 的清单，并记录默认入口大量
@@ -257,6 +386,10 @@ lifecycle、navigation、gesture、semantics、reveal 与 capture symbol。实�
 - 增加角色编译 fixture：consumer fixture 只导入默认入口；host fixture 只导入 host 入口；protocol fixture
   只导入 protocol 入口。每个 fixture 同时有正向可见与反向不可见断言，防止 `show` 漏项或旁路扩大。
 - API checker 自身测试必须覆盖带 `show` 跨包 re-export 的展开，以及无 `show` export 在四包均判红。
+- 反向不可见断言必须按加引号的**精确名**匹配 analyzer 消息：裸子串会让 `PatchbayInvocation` 被
+  `'PatchbayInvocationWire'` 的错误消息顺手满足，那条断言就永远绿。
+- 生成的 wire 类型必须表态：`core_wire.g.dart` 里全部公共 `*Wire` 名是 `patchbay_protocol.dart` 导出集的
+  子集，由测试冻结——codegen 不感知 barrel。
 
 ## Source 迁移
 

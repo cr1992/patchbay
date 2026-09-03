@@ -29,15 +29,25 @@ App，读取 runtime identity、catalog 和 snapshot，并调用 App 明确注�
 0.6.0 起本 package 按角色发布三个入口，每个都是逐名列出的封闭 `show` 清单——没有兜底默认面，
 也没有 `legacy.dart`：
 
-| import | 角色 | 内容 |
-|---|---|---|
-| `package:patchbay/patchbay.dart` | 默认 consumer | 命令注册与 descriptor、参数与响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
-| `package:patchbay/patchbay_host.dart` | host implementer | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit sink/event、invocation 与 cancellation lifecycle、admission/rejection 与响应校验 |
-| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 生成的 `*Wire` 类型、catalog capability 与 digest、CLI syntax 词汇、permission companion 协议、client 请求类型与 canonical protocol descriptor |
+| import | 角色 | 符号数 | 内容 |
+|---|---|---|---|
+| `package:patchbay/patchbay.dart` | 默认 consumer | 98 | 命令注册与 descriptor、参数与响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
+| `package:patchbay/patchbay_host.dart` | host implementer | 136 | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit sink/event、invocation 与 cancellation lifecycle、admission/rejection 与响应校验 |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 141 | 生成的 `*Wire` 类型、catalog capability 与 digest、CLI syntax 词汇、permission companion 协议、client 请求类型与 canonical protocol descriptor |
 
-`patchbay_host.dart` **不** re-export protocol：实现 host 与直接读写 raw wire 是两个角色，同一文件
-两者都做就写两个显式 import。除「host ⊃ consumer」外三份清单互不相交，因此同时 import host 与
-protocol 不会冲突。
+每个入口都是**自足**的：导出符号的公共签名——构造函数形参、公共字段与 getter 的类型、方法形参与返回
+类型、超类与接口——里出现的 Patchbay 类型一定由同一个 library 导出。这条不变量按 analyzer 的
+element model 机检，所以照迁移表改完不会拿到 `undefined_class`。
+
+两个直接后果值得点名。其一，几份清单**有意重叠**：`PatchbayCommandDescriptor` 既是 consumer 类型，
+也是每个 canonical protocol descriptor 常量的类型，因此它同时出现在两个入口；同时 import 不会冲突
+——同一个声明从两个 library 到达仍是同一个类型。其二，默认 consumer 面里有少量 `*Wire` 与 CLI syntax
+类型：`PatchbayLogQuery` 的构造函数收 `PatchbayLogLevelWire`，`PatchbayRedactedLogRecord` 公开
+`PatchbayLogRecordWire wire`。它们不是 raw wire 泄漏，而是实现 `PatchbayLogSource` 时必须能命名的
+类型。
+
+`patchbay_host.dart` **不** re-export 完整 protocol 面：实现 host 与直接读写 raw wire 是两个角色，
+同一文件两者都做就写两个显式 import。
 
 ### 0.5.x → 0.6.0 source 迁移
 

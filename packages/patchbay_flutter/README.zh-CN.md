@@ -35,14 +35,19 @@ Widget/Render/Semantics 三树、标准 action、节点 generation、脱敏与 D
 0.6.0 起本 package 发布两个入口，且都不再整库 re-export `patchbay`。两者都是逐名列出的封闭
 `show` 清单：
 
-| import | 谁写它 | 内容 |
-|---|---|---|
-| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | core 默认 consumer 清单，加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
-| `package:patchbay_flutter/patchbay_flutter_host.dart` | 组合根 | 严格超集：core host 清单，加全部 Flutter service host、bridge、policy、inspector、lifecycle、navigation、gesture、semantics、reveal 与 capture 符号 |
+| import | 谁写它 | 符号数 | 内容 |
+|---|---|---|---|
+| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | 102 | core 默认 consumer 清单，加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | 组合根 | 195 | 严格超集：core host 清单，加全部 Flutter service host、bridge、policy、inspector、lifecycle、navigation、gesture、semantics、reveal 与 capture 符号 |
+
+两个入口都是**自足**的：导出符号的公共签名里出现的 Patchbay 类型一定由同一个 library 导出，按
+analyzer 的 element model 机检。因此 host 入口还带上了 bridge 签名点名的那一小组 wire 与 wait 类型
+（`PatchbayUiWaitRequest`、`PatchbayCaptureRequestWire` 等共 10 个）；`PatchbaySemanticsEntry`
+——`PatchbaySemanticsBridge.observe` 的返回类型，0.5.x 的任何入口都没导出过它——也从 0.6.0 起公开。
 
 host 入口是超集，所以 `main.dart` 只写一个 import，widget 文件继续只写默认面——「这个文件能不能碰
-host」在 import 行上一眼可读。raw wire 仍需显式 `package:patchbay/patchbay_protocol.dart`；不存在
-`patchbay_flutter_protocol.dart`。
+host」在 import 行上一眼可读。完整 protocol 面仍需显式
+`package:patchbay/patchbay_protocol.dart`；不存在 `patchbay_flutter_protocol.dart`。
 
 `packages/patchbay_flutter/example` 就按这条线拆开：`lib/example_app.dart` 只 import 默认面，
 `lib/main.dart` 用 host 入口。

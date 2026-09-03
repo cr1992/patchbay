@@ -67,13 +67,19 @@ dependencies:
 Since 0.6.0 the public Dart surface is split by role, and every entry point is a closed, name-by-name
 `show` list:
 
-| Import | Role |
-|---|---|
-| `package:patchbay/patchbay.dart` | Default consumer: command registry, descriptors and schemas, gates, catalog/snapshot providers, jobs, artifacts, logs, navigation and UI declarations |
-| `package:patchbay/patchbay_host.dart` | Host implementer: a strict superset of the default list, plus `PatchbayServiceHost`, audit, invocation/cancellation and validation lifecycle |
-| `package:patchbay/patchbay_protocol.dart` | Protocol/wire implementer: generated wire types, catalog capability and digest, CLI syntax, permission companion, client requests and canonical descriptors |
-| `package:patchbay_flutter/patchbay_flutter.dart` | Widget files: the core consumer list plus `PatchbayKey`, `PatchbayRoot`, `PatchbayRootController` and `PatchbayUiRegistry` |
-| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter composition root: the core host list plus every Flutter service host, bridge and policy symbol |
+| Import | Role | Symbols |
+|---|---|---|
+| `package:patchbay/patchbay.dart` | Default consumer: command registry, descriptors and schemas, gates, catalog/snapshot providers, jobs, artifacts, logs, navigation and UI declarations | 98 |
+| `package:patchbay/patchbay_host.dart` | Host implementer: a strict superset of the default list, plus `PatchbayServiceHost`, audit, invocation/cancellation and validation lifecycle | 136 |
+| `package:patchbay/patchbay_protocol.dart` | Protocol/wire implementer: generated wire types, catalog capability and digest, CLI syntax, permission companion, client requests and canonical descriptors | 141 |
+| `package:patchbay_flutter/patchbay_flutter.dart` | Widget files: the core consumer list plus `PatchbayKey`, `PatchbayRoot`, `PatchbayRootController` and `PatchbayUiRegistry` | 102 |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter composition root: the core host list plus every Flutter service host, bridge and policy symbol | 195 |
+
+Every entry point is *self-sufficient*: any Patchbay type named in the public signature of an
+exported symbol is exported by the same library, so following the migration table can never leave
+you with an `undefined_class`. That is a checked invariant, not an intention. It also means the
+lists overlap on purpose, and that a few `*Wire` types live in the default surface — they are the
+ones a `PatchbayLogSource` implementation has to name.
 
 Narrowing the default entry points is a deliberate source breaking change in 0.6.0; there is no
 `legacy.dart`. Old imports fail to compile and the

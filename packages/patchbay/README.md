@@ -32,15 +32,28 @@ business conclusions from free text, widget state, or command names.
 Since 0.6.0 this package publishes three entry points, one per role. Each one is a closed,
 name-by-name `show` list — there is no catch-all default and no `legacy.dart`:
 
-| Import | Role | What it holds |
-|---|---|---|
-| `package:patchbay/patchbay.dart` | Default consumer | Command registry, descriptors, parameter and response schemas, gates, catalog and snapshot providers, job ledger, artifact/blob/log services, navigation and UI declarations |
-| `package:patchbay/patchbay_host.dart` | Host implementer | A strict superset of the default list, plus `PatchbayServiceHost`, audit sinks and events, invocation/cancellation lifecycle, admission/rejection and response validation |
-| `package:patchbay/patchbay_protocol.dart` | Protocol / wire implementer | Generated `*Wire` types, catalog capability and digest, CLI syntax vocabulary, permission companion protocol, client request types and canonical protocol descriptors |
+| Import | Role | Symbols | What it holds |
+|---|---|---|---|
+| `package:patchbay/patchbay.dart` | Default consumer | 98 | Command registry, descriptors, parameter and response schemas, gates, catalog and snapshot providers, job ledger, artifact/blob/log services, navigation and UI declarations |
+| `package:patchbay/patchbay_host.dart` | Host implementer | 136 | A strict superset of the default list, plus `PatchbayServiceHost`, audit sinks and events, invocation/cancellation lifecycle, admission/rejection and response validation |
+| `package:patchbay/patchbay_protocol.dart` | Protocol / wire implementer | 141 | Generated `*Wire` types, catalog capability and digest, CLI syntax vocabulary, permission companion protocol, client request types and canonical protocol descriptors |
 
-`patchbay_host.dart` does **not** re-export the protocol library: implementing a host and writing raw
-wire documents are two roles, so a file that does both writes two explicit imports. The three lists
-are disjoint apart from host ⊃ consumer, so importing host and protocol together never collides.
+Every entry point is **self-sufficient**: any Patchbay type named in the public signature of an
+exported symbol — constructor parameters, public fields and getters, method parameters and return
+types, supertypes — is exported by the same library. That invariant is checked mechanically against
+the analyzer's element model, so following the migration table can never leave you holding an
+`undefined_class`.
+
+Two consequences worth naming. First, the lists **overlap on purpose**: `PatchbayCommandDescriptor`
+is both a consumer type and the type of every canonical protocol descriptor constant, so it appears
+in two entry points. Importing both never collides — one declaration reached through two libraries
+is still one type. Second, a handful of `*Wire` and CLI-syntax types live in the default consumer
+surface: `PatchbayLogQuery` takes `PatchbayLogLevelWire`, `PatchbayRedactedLogRecord` exposes
+`PatchbayLogRecordWire wire`. They are not raw-wire leakage — they are what a `PatchbayLogSource`
+implementation has to be able to name.
+
+`patchbay_host.dart` does **not** re-export the whole protocol surface: implementing a host and
+writing raw wire documents are two roles, so a file that does both writes two explicit imports.
 
 ### 0.5.x → 0.6.0 source migration
 

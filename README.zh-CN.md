@@ -61,13 +61,17 @@ dependencies:
 
 0.6.0 起公共 Dart 面按角色分层，每个入口都是逐名列出的封闭 `show` 清单：
 
-| import | 角色 |
-|---|---|
-| `package:patchbay/patchbay.dart` | 默认 consumer：命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job、artifact、log、navigation 与 UI 声明 |
-| `package:patchbay/patchbay_host.dart` | host implementer：默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
-| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer：生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical descriptor |
-| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件：core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
-| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根：core host 清单加全部 Flutter service host、bridge 与 policy 符号 |
+| import | 角色 | 符号数 |
+|---|---|---|
+| `package:patchbay/patchbay.dart` | 默认 consumer：命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job、artifact、log、navigation 与 UI 声明 | 98 |
+| `package:patchbay/patchbay_host.dart` | host implementer：默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle | 136 |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer：生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical descriptor | 141 |
+| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件：core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` | 102 |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根：core host 清单加全部 Flutter service host、bridge 与 policy 符号 | 195 |
+
+每个入口都是**自足**的：导出符号的公共签名里出现的 Patchbay 类型一定由同一个入口导出，所以照迁移表
+改完不会拿到 `undefined_class`。这是被机检的不变量，不是意图。它也意味着几份清单**有意重叠**，并且
+默认面里会有少量 `*Wire` 类型——它们正是实现 `PatchbayLogSource` 时必须能命名的那些。
 
 默认入口收窄是 0.6.0 明示的 source breaking，不提供 `legacy.dart`：旧 import 会编译失败，按
 [迁移表](docs/guide.md#05x--060-source-迁移表)逐项替换即可。wire、错误码、稳定 JSON 与 CLI 输出

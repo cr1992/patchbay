@@ -144,27 +144,39 @@ App 或只需要协议层时，改为引用同一仓库的 `packages/patchbay`�
 
 #### 选择公共入口（0.6.0 起分层）
 
-0.6.0 把原来一个 247 符号的默认 library 按使用者角色拆成三个 core 入口和两个 Flutter 入口。每个
+0.6.0 把原来一个 250 符号的默认 library 按使用者角色拆成三个 core 入口和两个 Flutter 入口。每个
 入口都是逐名列出的封闭清单，不存在「差集自动落到默认面」：
 
-| 入口 | 角色 | 内容 |
-|---|---|---|
-| `package:patchbay/patchbay.dart` | 默认 consumer | 命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
-| `package:patchbay/patchbay_host.dart` | host implementer | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
-| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical protocol descriptor |
-| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
-| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根 | core host 清单加全部 Flutter service host、bridge、policy、inspector、navigation、gesture、semantics、reveal 与 capture 符号 |
+| 入口 | 角色 | 符号数 | 内容 |
+|---|---|---|---|
+| `package:patchbay/patchbay.dart` | 默认 consumer | 98 | 命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
+| `package:patchbay/patchbay_host.dart` | host implementer | 136 | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 141 | 生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical protocol descriptor |
+| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | 102 | core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根 | 195 | core host 清单加全部 Flutter service host、bridge、policy、inspector、navigation、gesture、semantics、reveal 与 capture 符号 |
 
-`patchbay_host.dart` **不** re-export protocol，`patchbay_flutter_host.dart` 也不；同时需要两个角色时
-写两个显式 import。`patchbay_flutter_host.dart` 是 `patchbay_flutter.dart` 与 `patchbay_host.dart` 的
-严格超集，所以组合根只写一个 import 就够，widget 文件继续只写默认面——「这个文件能不能碰 host」在
-import 行上一眼可读。仓内 example 就按这条拆开：`lib/example_app.dart` 只 import 默认 Flutter 面，
-`lib/main.dart` 用 host 入口。
+**每个入口都是自足的**：导出符号的公共签名（构造函数形参、公共字段与 getter 的类型、方法形参与返回
+类型、超类/接口）里出现的 Patchbay 类型，一定由同一个入口导出。这条由
+`dart run tool/check_api_closure.dart` 用 analyzer 机检。它的直接后果是：默认面里能看到少量
+`*Wire` 与 CLI syntax 类型——`PatchbayLogQuery` 的构造函数收 `PatchbayLogLevelWire`、
+`PatchbayRedactedLogRecord` 公开 `PatchbayLogRecordWire wire`——它们不是「raw wire 泄漏」，而是你实现
+`PatchbayLogSource` 时**必须能命名**的类型。同理，三份清单**有意重叠**（例如
+`PatchbayCommandDescriptor` 同时在 consumer 与 protocol 面），同时 import 两个入口不会冲突：同一个
+声明从两个 library 到达仍是同一个类型。
+
+`patchbay_host.dart` **不** re-export 完整 protocol 面，`patchbay_flutter_host.dart` 也不；需要全部
+wire 类型时写两个显式 import。`patchbay_flutter_host.dart` 是 `patchbay_flutter.dart` 与
+`patchbay_host.dart` 的严格超集，所以组合根只写一个 import 就够，widget 文件继续只写默认面——「这个
+文件能不能碰 host」在 import 行上一眼可读。仓内 example 就按这条拆开：`lib/example_app.dart` 只
+import 默认 Flutter 面，`lib/main.dart` 用 host 入口。
 
 ##### 0.5.x → 0.6.0 source 迁移表
 
 默认入口收窄是 0.6.0 明示的 source breaking：旧 import 编译失败，按下表逐项迁移即可，没有
 `legacy.dart` 兼容口袋。wire、错误码、稳定 JSON 与 CLI 输出都不受影响，只有 Dart 源码可见性变化。
+
+表里没有「wire 类型一律去 protocol 入口」这一行，因为自足闭包已经把 provider 签名用得到的那些
+wire 类型留在了默认面。按报错点名的符号查表即可，不必按名字后缀猜。
 
 | 0.5.x 使用方式 | 0.6.0 import |
 |---|---|
