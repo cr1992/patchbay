@@ -87,6 +87,48 @@ final class RepoCommand {
   }
 }
 
+final class CoverageReport {
+  const CoverageReport({
+    required this.name,
+    required this.workingDirectory,
+    required this.usesFlutter,
+    required this.requiresRawJson,
+  });
+
+  final String name;
+  final String workingDirectory;
+  final bool usesFlutter;
+  final bool requiresRawJson;
+
+  String get outputDirectory {
+    if (workingDirectory == '.') return 'coverage/$name';
+    final int depth = workingDirectory
+        .split('/')
+        .where((segment) => segment.isNotEmpty && segment != '.')
+        .length;
+    return '${List<String>.filled(depth, '..').join('/')}/coverage/$name';
+  }
+
+  String get rootRelativeDirectory => 'coverage/$name';
+}
+
+List<CoverageReport> coverageReportsFor(RepoWorkspace workspace) =>
+    <CoverageReport>[
+      for (final RepoPackage package in workspace.members)
+        CoverageReport(
+          name: package.name,
+          workingDirectory: package.path,
+          usesFlutter: package.usesFlutter,
+          requiresRawJson: !package.usesFlutter,
+        ),
+      const CoverageReport(
+        name: 'patchbay_flutter_example',
+        workingDirectory: 'packages/patchbay_flutter/example',
+        usesFlutter: true,
+        requiresRawJson: false,
+      ),
+    ];
+
 final class RepoTaskCatalog {
   RepoTaskCatalog(this.workspace, {Map<String, String>? environment})
     : environment = environment ?? Platform.environment;
@@ -98,6 +140,7 @@ final class RepoTaskCatalog {
     'dart-packages',
     'flutter-package',
     'codegen-drift',
+    'coverage',
     'sdk-floor',
     'check',
     'release',
@@ -119,6 +162,7 @@ final class RepoTaskCatalog {
     'dart-packages' => _dartPackageCommands(includeRepositoryChecks: true),
     'flutter-package' => _flutterPackageCommands(),
     'codegen-drift' => _codegenCommands(),
+    'coverage' => _coverageCommands(),
     'sdk-floor' => <RepoCommand>[
       const RepoCommand('flutter', <String>['--version']),
       const RepoCommand('dart', <String>['pub', 'get']),
@@ -191,6 +235,32 @@ final class RepoTaskCatalog {
     ], workingDirectory: 'packages/patchbay_flutter/example'),
   ];
 
+  List<RepoCommand> _coverageCommands() {
+    final String? timeout = environment['PATCHBAY_DART_TEST_TIMEOUT'];
+    return <RepoCommand>[
+      for (final CoverageReport report in coverageReportsFor(workspace))
+        if (report.usesFlutter)
+          RepoCommand('flutter', <String>[
+            'test',
+            '--coverage',
+            '--branch-coverage',
+            '--coverage-path=${report.outputDirectory}/lcov.info',
+            '--reporter=failures-only',
+          ], workingDirectory: report.workingDirectory)
+        else
+          RepoCommand('dart', <String>[
+            'run',
+            'coverage:test_with_coverage',
+            '--branch-coverage',
+            '--scope-output=${report.name}',
+            '--out=${report.outputDirectory}',
+            '--',
+            '--reporter=failures-only',
+            if (timeout != null && timeout.isNotEmpty) '--timeout=$timeout',
+          ], workingDirectory: report.workingDirectory),
+    ];
+  }
+
   List<RepoCommand> _codegenCommands() => const <RepoCommand>[
     RepoCommand('dart', <String>[
       'run',
@@ -229,6 +299,12 @@ Future<int> runRepoTask(
   List<String> taskArguments,
 ) async {
   final RepoTaskCatalog catalog = RepoTaskCatalog(RepoWorkspace.discover(root));
+  final List<CoverageReport> coverageReports = task == 'coverage'
+      ? coverageReportsFor(catalog.workspace)
+      : const <CoverageReport>[];
+  if (coverageReports.isNotEmpty) {
+    prepareCoverageReports(root, coverageReports);
+  }
   for (final RepoCommand command in catalog.commandsFor(
     task,
     taskArguments: taskArguments,
@@ -249,8 +325,124 @@ Future<int> runRepoTask(
       return result;
     }
   }
+  if (coverageReports.isNotEmpty) {
+    normalizeCoverageReports(root, coverageReports);
+    for (final String summary in validateCoverageReports(
+      root,
+      coverageReports,
+    )) {
+      stdout.writeln(summary);
+    }
+  }
   stdout.writeln('仓库任务 $task 通过');
   return 0;
+}
+
+void prepareCoverageReports(String root, Iterable<CoverageReport> reports) {
+  for (final CoverageReport report in reports) {
+    final Directory directory = Directory(
+      '$root/${report.rootRelativeDirectory}',
+    )..createSync(recursive: true);
+    for (final String name in <String>[
+      'lcov.info',
+      if (report.requiresRawJson) 'coverage.json',
+    ]) {
+      final File stale = File('${directory.path}/$name');
+      if (stale.existsSync()) stale.deleteSync();
+    }
+  }
+}
+
+void normalizeCoverageReports(String root, Iterable<CoverageReport> reports) {
+  final String rootPath = Directory(root).absolute.path;
+  final String rootPrefix = rootPath.endsWith(Platform.pathSeparator)
+      ? rootPath
+      : '$rootPath${Platform.pathSeparator}';
+  for (final CoverageReport report in reports) {
+    final File lcov = File('$root/${report.rootRelativeDirectory}/lcov.info');
+    if (!lcov.existsSync()) continue;
+    final Uri packageRoot = Directory(
+      '$root/${report.workingDirectory}',
+    ).absolute.uri;
+    final List<String> normalized = lcov
+        .readAsLinesSync()
+        .map((line) {
+          if (!line.startsWith('SF:')) return line;
+          final String source = line.substring('SF:'.length);
+          final Uri sourceUri = Uri.file(source, windows: Platform.isWindows);
+          final Uri resolvedSource =
+              (sourceUri.isAbsolute
+                      ? sourceUri
+                      : packageRoot.resolveUri(sourceUri))
+                  .normalizePath();
+          final String absolute = File.fromUri(resolvedSource).absolute.path;
+          if (!absolute.startsWith(rootPrefix)) {
+            throw FormatException('${report.name} 的 LCOV source 不在仓库内：$source');
+          }
+          final String relative = absolute
+              .substring(rootPrefix.length)
+              .replaceAll(Platform.pathSeparator, '/');
+          return 'SF:$relative';
+        })
+        .toList(growable: false);
+    lcov.writeAsStringSync('${normalized.join('\n')}\n');
+  }
+}
+
+List<String> validateCoverageReports(
+  String root,
+  Iterable<CoverageReport> reports,
+) {
+  final List<String> summaries = <String>[];
+  for (final CoverageReport report in reports) {
+    final String directory = '$root/${report.rootRelativeDirectory}';
+    final File lcov = File('$directory/lcov.info');
+    if (!lcov.existsSync()) {
+      throw FormatException('${report.name} 缺 coverage/lcov.info');
+    }
+    final String contents = lcov.readAsStringSync();
+    final List<String> sources = RegExp(
+      r'^SF:(.+)$',
+      multiLine: true,
+    ).allMatches(contents).map((match) => match.group(1)!).toList();
+    final String expectedPrefix = report.workingDirectory == '.'
+        ? 'lib/'
+        : '${report.workingDirectory}/lib/';
+    if (sources.isEmpty || !contents.contains('end_of_record')) {
+      throw FormatException('${report.name} 的 coverage/lcov.info 为空或格式无效');
+    }
+    if (sources.any((source) => !source.startsWith(expectedPrefix))) {
+      throw FormatException('${report.name} 的 LCOV source 未规范化到包内 lib/');
+    }
+    if (report.requiresRawJson) {
+      final File raw = File('$directory/coverage.json');
+      if (!raw.existsSync() || raw.lengthSync() == 0) {
+        throw FormatException('${report.name} 缺 coverage/coverage.json');
+      }
+    }
+    final List<RegExpMatch> lines = RegExp(
+      r'^DA:\d+,(\d+)',
+      multiLine: true,
+    ).allMatches(contents).toList(growable: false);
+    final int coveredLines = lines
+        .where((match) => int.parse(match.group(1)!) > 0)
+        .length;
+    final List<RegExpMatch> branches = RegExp(
+      r'^BRDA:[^,]+,[^,]+,[^,]+,([^\r\n]+)$',
+      multiLine: true,
+    ).allMatches(contents).toList(growable: false);
+    final int coveredBranches = branches.where((match) {
+      final String taken = match.group(1)!;
+      return taken != '-' && (int.tryParse(taken) ?? 0) > 0;
+    }).length;
+    final int branchCount = branches.length;
+    summaries.add(
+      'coverage ${report.name}: ${sources.length} files, '
+      'lines $coveredLines/${lines.length}, '
+      'branches $coveredBranches/$branchCount',
+    );
+  }
+  return summaries;
 }
 
 String? _readTopLevelScalar(String yaml, String key) {

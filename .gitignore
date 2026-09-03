@@ -2,6 +2,7 @@
 build/
 *.iml
 /pubspec.lock
+/coverage/
 
 # 四个发布包由根 pub workspace 解析；workspace 外的 example 保持独立 consumer lock，
 # 根 lock 与发布包 lock 一样按 SDK 组合现解，避免当前 SDK 锁阻断 sdk_floor；example

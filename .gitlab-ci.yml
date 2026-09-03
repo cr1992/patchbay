@@ -45,6 +45,8 @@ stages: [check, sdk_floor_check]
 # 并选择同一个 `repo_tasks.dart sdk-floor` 任务。
 sdk_floor:
   stage: sdk_floor_check
+  # coverage 是供人下载的报告，不是下限验证输入；避免 GitLab 跨 stage 默认拉取。
+  dependencies: []
   variables:
     SDK_FLOOR_ARCHIVE_URL: https://storage.flutter-io.cn/flutter_infra_release/releases/stable/linux/flutter_linux_3.44.0-stable.tar.xz
     SDK_FLOOR_ARCHIVE_CACHE_URL: $CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/flutter-sdk-floor/3.44.0/flutter_linux_3.44.0-stable.tar.xz
@@ -94,3 +96,19 @@ codegen_drift:
   stage: check
   script:
     - dart run tool/repo_tasks.dart codegen-drift
+
+# PB-060-07：只建立逐包 branch coverage 地图，不设百分比硬门。采集失败会把
+# job 标成 warning 并保留已有 artifact，但不阻断 0.6.0；形成稳定基线后再另行
+# 裁决生成代码、平台不可达分支与分包下限。
+coverage:
+  stage: check
+  allow_failure: true
+  variables:
+    PATCHBAY_DART_TEST_TIMEOUT: 90s
+  script:
+    - dart run tool/repo_tasks.dart coverage
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - coverage/

@@ -68,6 +68,32 @@ jobs:
       - name: 四个 codegen / docs 零漂移
         run: dart run tool/repo_tasks.dart codegen-drift
 
+  # PB-060-07：逐包 branch coverage 是 informational lane，失败可见但不阻断；
+  # 无论采集是否完整都上传已有报告，方便从失败点继续诊断。
+  coverage:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: 生成逐包 LCOV 与 raw coverage
+        env:
+          PATCHBAY_DART_TEST_TIMEOUT: 90s
+        run: dart run tool/repo_tasks.dart coverage
+      - name: 上传 coverage 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patchbay-coverage
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 30
+
   # needs：GitHub Actions 默认每个 job 各自一台 runner，本不存在 GitLab 那种同机资源
   # 争用；这里加 needs 纯粹是为了两边 job 结构与调度顺序保持对应（.gitlab-ci.yml 的
   # sdk_floor 因为实测在 GitLab 共享 runner 上和其余三条 job 抢 CPU/内存/磁盘 I/O、
@@ -77,7 +103,7 @@ jobs:
   # 不再成立，必须阻断——因此没有 continue-on-error。修复方向只有「修代码让下限重新
   # 成立」或「再走一次 Proposal 调整下限数字」，不允许挂回 continue-on-error 消音。
   sdk_floor:
-    needs: [dart_packages, flutter_package, codegen_drift]
+    needs: [dart_packages, flutter_package, codegen_drift, coverage]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
