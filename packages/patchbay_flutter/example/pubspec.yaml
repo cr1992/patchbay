@@ -12,7 +12,8 @@ dependencies:
     sdk: flutter
   # PB-060-02：组合根直接命名 `package:patchbay/patchbay_protocol.dart` 里的 wire 与
   # 请求类型，所以 example 必须显式声明这条依赖，而不是靠 patchbay_flutter 传递。
-  # 解析仍由 pubspec_overrides.yaml 落到当前工作树。
+  # 解析仍由 pubspec_overrides.yaml 落到当前工作树；定版时这条约束要和
+  # patchbay_flutter 的同名约束一起 bump（release_prep 只管四个发布包，不改这里）。
   patchbay: ^0.5.0
   patchbay_flutter:
     path: ..

@@ -62,12 +62,16 @@ golden 按**公开 library** 记录：递归 `packages/<pkg>/lib/**.dart` 各一
 公共面、默认判红。
 
 `patchbay_cli` 的两个入口是 DG-050-07 冻结的封闭清单（canonical 2 个、
-`patchbay_client.dart` 8 个），扩表要先改
-[CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md) 再改 golden，
-不能在实现 MR 里顺手 `--update`。封闭清单的包额外守一条：无 `show` 子句的
-`export 'package:…'` 当场判红，`--update` 也挡——本工具不展开整库跨包 re-export，
-所以那一行会把对方包的整张公共面带进本包而 golden diff 恒为 0。另外三个包保持 0.4.1
-口径（`patchbay_flutter` 本来就整库 re-export `patchbay`），本版不动它们的公共面。
+`patchbay_client.dart` 8 个）；`patchbay` 的三个入口与 `patchbay_flutter` 的两个入口是
+DG-060-02 冻结的封闭清单（consumer 77、host 121、protocol 129；Flutter 默认 81、
+Flutter host 169）。扩表要先改对应 Proposal（[CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)、
+[Core 公共 Dart API 分层](proposals/0.6.0/core-public-api-layers.md)）再改 golden，
+不能在实现 MR 里顺手 `--update`。
+
+封闭清单的包额外守一条：无 `show` 子句的 `export 'package:…'` 当场判红，`--update` 也挡——
+本工具不展开整库跨包 re-export，所以那一行会把对方包的整张公共面带进本包而 golden diff 恒为 0。
+PB-060-02 起**四个发布包全部**采用封闭清单口径：`patchbay_flutter` 过去的整库 re-export 正是
+分层要消灭的那一行，现在它改成逐名 `show`，因此每个公开 library 的集合都算得出来。
 
 硬规则挑的都是"评审用肉眼很难稳定抓住、但一旦发生就确定是错"的结构错误。
 警戒线挑的是"值得在评审里解释一句"的地方。

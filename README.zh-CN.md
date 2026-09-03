@@ -57,7 +57,21 @@ dependencies:
   patchbay_flutter: ^0.5.0
 ```
 
-`patchbay_flutter` 已导出 core API；纯 Dart 接入可改用 `packages/patchbay`。
+`patchbay_flutter` 已导出 core 的默认 consumer API；纯 Dart 接入可改用 `packages/patchbay`。
+
+0.6.0 起公共 Dart 面按角色分层，每个入口都是逐名列出的封闭 `show` 清单：
+
+| import | 角色 |
+|---|---|
+| `package:patchbay/patchbay.dart` | 默认 consumer：命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job、artifact、log、navigation 与 UI 声明 |
+| `package:patchbay/patchbay_host.dart` | host implementer：默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer：生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical descriptor |
+| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件：core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根：core host 清单加全部 Flutter service host、bridge 与 policy 符号 |
+
+默认入口收窄是 0.6.0 明示的 source breaking，不提供 `legacy.dart`：旧 import 会编译失败，按
+[迁移表](docs/guide.md#05x--060-source-迁移表)逐项替换即可。wire、错误码、稳定 JSON 与 CLI 输出
+都不受影响。
 
 ### 2. 安装 CLI
 
@@ -85,7 +99,8 @@ $ dart pub global activate patchbay_cli 0.5.0
 ```dart
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+// 组合根属于 host 角色：这一个 import 同时覆盖 widget 面。
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
 
 void main() {
   if (!kReleaseMode) {

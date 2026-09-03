@@ -138,16 +138,51 @@ $ dart run packages/patchbay_cli/tool/build_cli.dart   # 仓根或包内调用�
 
 ### 1. 选择 package
 
-Flutter App 通常只依赖 `patchbay_flutter`，它已经导出 `patchbay` 的 core API。纯 Dart App 或只需要
-协议层时，改为引用同一仓库的 `packages/patchbay`。只有需要 direct HTTP 时才额外依赖
+Flutter App 通常只依赖 `patchbay_flutter`，它 re-export 了 `patchbay` 的默认 consumer 清单。纯 Dart
+App 或只需要协议层时，改为引用同一仓库的 `packages/patchbay`。只有需要 direct HTTP 时才额外依赖
 `packages/patchbay_transport`。
+
+#### 选择公共入口（0.6.0 起分层）
+
+0.6.0 把原来一个 247 符号的默认 library 按使用者角色拆成三个 core 入口和两个 Flutter 入口。每个
+入口都是逐名列出的封闭清单，不存在「差集自动落到默认面」：
+
+| 入口 | 角色 | 内容 |
+|---|---|---|
+| `package:patchbay/patchbay.dart` | 默认 consumer | 命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
+| `package:patchbay/patchbay_host.dart` | host implementer | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical protocol descriptor |
+| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根 | core host 清单加全部 Flutter service host、bridge、policy、inspector、navigation、gesture、semantics、reveal 与 capture 符号 |
+
+`patchbay_host.dart` **不** re-export protocol，`patchbay_flutter_host.dart` 也不；同时需要两个角色时
+写两个显式 import。`patchbay_flutter_host.dart` 是 `patchbay_flutter.dart` 与 `patchbay_host.dart` 的
+严格超集，所以组合根只写一个 import 就够，widget 文件继续只写默认面——「这个文件能不能碰 host」在
+import 行上一眼可读。仓内 example 就按这条拆开：`lib/example_app.dart` 只 import 默认 Flutter 面，
+`lib/main.dart` 用 host 入口。
+
+##### 0.5.x → 0.6.0 source 迁移表
+
+默认入口收窄是 0.6.0 明示的 source breaking：旧 import 编译失败，按下表逐项迁移即可，没有
+`legacy.dart` 兼容口袋。wire、错误码、稳定 JSON 与 CLI 输出都不受影响，只有 Dart 源码可见性变化。
+
+| 0.5.x 使用方式 | 0.6.0 import |
+|---|---|
+| 业务 descriptor、schema、gate、provider、job/artifact/log adapter | `package:patchbay/patchbay.dart`，多数代码不改 |
+| `PatchbayServiceHost`、audit、invocation/cancellation 或 validation lifecycle | `package:patchbay/patchbay_host.dart` |
+| 生成 wire、capability/digest、permission companion、client request、canonical descriptor | `package:patchbay/patchbay_protocol.dart` |
+| Widget 中的 `PatchbayKey`、`PatchbayRoot`、controller、registry | `package:patchbay_flutter/patchbay_flutter.dart` |
+| Flutter 组合根的 service host、bridge、policy 与 adapter | `package:patchbay_flutter/patchbay_flutter_host.dart` |
+
+`package:patchbay_cli/patchbay_cli.dart` 与 `package:patchbay_cli/patchbay_client.dart` 的符号集合
+不变；`package:patchbay_transport/patchbay_transport.dart` 同样不变。
 
 ### 2. 组合根注册（唯一必做项）
 
 ```dart
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
 
 /// 接入方的编译期边界。release 下不构造 host、bridge 或 adapter。
 const bool kMyDebugToolsEnabled = !kReleaseMode && bool.fromEnvironment('MY_DEBUG');

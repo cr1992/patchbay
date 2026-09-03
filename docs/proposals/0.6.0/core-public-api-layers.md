@@ -5,6 +5,9 @@
 > 关联：PB-060-02
 >
 > 设计闸门：DG-060-02（已裁决）
+>
+> 裁决修订：2026-09-03 重锚定基线摘要，并把 PB-050-39 新增的三个 audit 词表符号归入 host-only 集
+> `H`（41 → 44）。详见下文「裁决修订」。**待仓主确认。**
 
 ## 问题
 
@@ -60,9 +63,12 @@ invocation internals 与生成 wire 类型；`patchbay_flutter.dart` 又整体 r
 
 ## 精确 core 集合
 
-本裁决的基线全集 `U` 是 `tool/api_surface.json` 中 `patchbay/lib/patchbay.dart` 的 247 个符号；该文件内容
-SHA-256 为 `4fe8cfb9f6fb81cc9ef460a18e895f9dc020b053313110d10793b729fb6e29f3`。实现 MR 必须先核对
+本裁决的基线全集 `U` 是 `tool/api_surface.json` 中 `patchbay/lib/patchbay.dart` 的 250 个符号；该文件内容
+SHA-256 为 `835c329c32acf38997d79a683a7e35e575562f3335252fec85d3c42a3284a6e7`。实现 MR 必须先核对
 该摘要，摘要不符说明基线已漂移，必须回到 Proposal 修订，不能自行重算集合掩盖并发公共面变化。
+
+本节的基线由 2026-09-03 的「裁决修订」重锚定；原锚定是 247 个符号、摘要
+`4fe8cfb9f6fb81cc9ef460a18e895f9dc020b053313110d10793b729fb6e29f3`。
 
 ### protocol 集 `P`
 
@@ -131,7 +137,7 @@ patchbayUiWaitCommandDescriptor
 
 ### host-only 集 `H`
 
-`H` 是下列 41 个精确符号：
+`H` 是下列 44 个精确符号（41 个原始符号，加 2026-09-03「裁决修订」追加的三个 audit 词表符号）：
 
 ```text
 PatchbayAdmission
@@ -164,7 +170,10 @@ PatchbayMonotonicClock
 PatchbayRejection
 PatchbayResponseValidationIssue
 PatchbayServiceHost
+patchbayAuditAdmissionStages
 patchbayAuditExecutionClassification
+patchbayAuditGateDispositions
+patchbayAuditLegacyUnknown
 patchbayGenerateOwnerToken
 patchbayProjectAuditEvent
 patchbayResponseSchemaMaxDepth
@@ -191,6 +200,32 @@ host 入口。
 DG-060-03 后续新增的 `PatchbayOutputProjection` 一组 Dart descriptor 类型属于 `C`；对应 raw parser/wire
 类型属于 `P`。任何在本 Proposal 后新增的公共符号都必须在所属 MR 中显式选择 consumer、host 或 protocol，
 更新相应 `show` 与 golden；未分类默认判红，不能自动落入差集。
+
+### 裁决修订（2026-09-03，DG-060-02）
+
+**待仓主确认。** 本 Proposal 接受时锚定的 `tool/api_surface.json` 摘要
+（`4fe8cfb9…`，247 个符号）在实现开工时已不成立：当前基线摘要是 `835c329c…`，
+`patchbay/lib/patchbay.dart` 为 250 个符号。逐符号 diff 只有一处差异——PB-050-39 在
+`patchbay.dart` 新增了三个 audit 词表符号：
+
+```text
+patchbayAuditAdmissionStages
+patchbayAuditGateDispositions
+patchbayAuditLegacyUnknown
+```
+
+其余四个公开 library（`patchbay_cli` 两个、`patchbay_flutter`、`patchbay_transport`）逐符号无变化，
+Flutter 自有全集 `F` 仍是 48 个符号。
+
+本次重新接受以下结论，而不是由实现 MR 静默重算集合：
+
+- 这三个符号只被 audit sink 与 audit reader 消费，与已经归入 `H` 的 `PatchbayAuditEvent`、
+  `PatchbayAuditSink`、`patchbayAuditExecutionClassification` 同属一组词表，因此归入 host-only 集
+  `H`，不进入默认 consumer 面。
+- 修订后的精确计数是 `U = 250`、`P = 129`、`H = 44`、`C = 250 − 129 − 44 = 77`。`P` 与 `C` 均不变，
+  因此本 Proposal 正文里 protocol 与 consumer 两节的清单与计数原样有效。
+- 基线摘要重锚定为 `835c329c32acf38997d79a683a7e35e575562f3335252fec85d3c42a3284a6e7`。此后再出现
+  摘要不符仍按原规则处理：回到本节修订，不在实现 MR 里重算。
 
 ## 精确 Flutter 集合
 
