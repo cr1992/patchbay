@@ -176,6 +176,41 @@ codegen/golden 迁移；拆成“只加 wire”和“只换 CLI”会产生两�
 - 失败注入：超限、缺成员、错类型、JSON 编码失败、artifact 写失败、摘要不符、老 host 与目录漂移。
 - consumer 真机只验证真实大响应和本地 artifact 链；它不能替代协议/CLI 投影的确定性测试。
 
+### 裁决修订（2026-09-03，DG-060-03）
+
+**待仓主确认。** PB-050-40 实现期间发现本 Proposal 的两处措辞与 0.5.0 已冻结契约冲突。两处修订都按
+同一原则处理：**0.5.0 冻结契约优先于本 Proposal 的措辞**，实现不得为了贴合措辞而改动已发布行为。
+
+**一、`artifact.encoding` 的封闭集与 CLI-local 第三值。** 本 Proposal「Wire 契约 / artifact」把
+`encoding` 定为 `json` / `utf8Text` 两值，各自钉死一个 `mediaType` 与一个 `extension`。已接受的
+[树类 artifact 输出](../0.5.0/tree-artifact-output.md) 则裁决：**同一条** `ui widget-tree` /
+`ui render-tree` / `ui focus-tree` 在 inspector 应答时写 `application/json` + `.json`，在 `debugDumpApp`
+类文本 dump 应答时写 `text/plain; charset=utf-8` + `.txt`，并写明第二条「不是可选的润色……等于落了个
+假 artifact」。两个值都表达不了这条按运行时形状分支的规则。
+
+裁决：
+
+- **wire 上的封闭集保持 `json` / `utf8Text` 两值不变。** provider 在 catalog 行里能声明的词表逐字不变；
+  `PatchbayOutputArtifactProjection.fromJson` 拒绝其他值，`toJson` 不产生其他值。
+- **CLI-local 声明允许第三值 `jsonOrDecodedText`。** 适用范围限于不进 host catalog 的 CLI-local 声明——
+  `catalog` 与三棵 Flutter diagnostic tree。其语义就是沿用 0.5.0 `tree-artifact-output.md` 的既有规则：
+  inspector JSON 写 `application/json` + `.json`，`debugDumpApp` 文本写 `text/plain; charset=utf-8` +
+  `.txt`。**这是既有冻结行为的表达方式，不是新能力**：0.6.0 不改变这三条命令写盘的内容、content type
+  或扩展名。
+- 两条方向都由测试钉住：`packages/patchbay/test/output_projection_test.dart` 的
+  `the CLI-local encoding is refused on the wire in both directions`（`fromJson` 拒绝、`toJson` 抛错）与
+  `it resolves the 0.5.0 shape-directed media type`（两种形状各自的 mediaType/extension）。
+- 将来若要把 `jsonOrDecodedText` 开放给 host 声明，必须另走 Proposal；本次修订不预留该口子。
+
+**二、brief `id` 字符集。** 本 Proposal「Wire 契约 / brief」把 `id` 写成「1 至 64 个 ASCII 小写字母、
+数字、点或连字符」。但 0.5.0 已把 `diagnosticTree`（含大写 `T`）冻结进稳定 JSON 的
+`localView.projection`（`packages/patchbay_cli/test/golden/view_brief/diagnostic_tree.brief.json`）。按
+字面措辞实现将无法复刻该冻结字节，而重命名冻结 id 是本 Proposal 自身禁止的。
+
+裁决：字符集在原措辞之上**只放宽大写 ASCII 字母这一个字符类**，即 `[A-Za-z0-9.-]`。1 至 64 的长度上限
+不变，仍不允许分隔符、空白或任何运行时派生文本，`localView.omitted` / `localView.projection` 只回显
+声明里的静态字面量这一性质不变。
+
 ## 被否决方案
 
 - brief 改用保留清单：与 0.5.0 冻结的未知字段透传和 `localView.omitted` 稳定语义冲突；脱敏也不应依赖
