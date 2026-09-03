@@ -62,12 +62,28 @@ golden 按**公开 library** 记录：递归 `packages/<pkg>/lib/**.dart` 各一
 公共面、默认判红。
 
 `patchbay_cli` 的两个入口是 DG-050-07 冻结的封闭清单（canonical 2 个、
-`patchbay_client.dart` 8 个），扩表要先改
-[CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md) 再改 golden，
-不能在实现 MR 里顺手 `--update`。封闭清单的包额外守一条：无 `show` 子句的
-`export 'package:…'` 当场判红，`--update` 也挡——本工具不展开整库跨包 re-export，
-所以那一行会把对方包的整张公共面带进本包而 golden diff 恒为 0。另外三个包保持 0.4.1
-口径（`patchbay_flutter` 本来就整库 re-export `patchbay`），本版不动它们的公共面。
+`patchbay_client.dart` 8 个）；`patchbay` 的三个入口与 `patchbay_flutter` 的两个入口是
+DG-060-02 冻结的封闭清单（consumer 98、host 136、protocol 141；Flutter 默认 102、
+Flutter host 195；这些数字是角色种子的**自足闭包**，见修订②）。扩表要先改对应 Proposal（[CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)、
+[Core 公共 Dart API 分层](proposals/0.6.0/core-public-api-layers.md)）再改 golden，
+不能在实现 MR 里顺手 `--update`。
+
+封闭清单的包额外守一条：无 `show` 子句的 `export 'package:…'` 当场判红，`--update` 也挡——
+本工具不展开整库跨包 re-export，所以那一行会把对方包的整张公共面带进本包而 golden diff 恒为 0。
+PB-060-02 起**四个发布包全部**采用封闭清单口径：`patchbay_flutter` 过去的整库 re-export 正是
+分层要消灭的那一行，现在它改成逐名 `show`，因此每个公开 library 的集合都算得出来。展开前先剥掉整行
+`//` / `///` 注释——barrel 的文档注释里举例写 `export '…';` 不是 export。
+
+封闭 `show` 会带出第二个洞：`lib/src/` 里新增一个公共 class **谁也看不见**（不在任何入口的展开集合
+里，golden diff 为 0），这比封闭前更弱。因此 golden 为每个包多记一份 `internal` 清单——`lib/src/**`
+里未被任何公共 library 导出的公共顶层名。新名字没登记就判红，作者必须二选一：加进某个入口的 `show`
+清单，或显式登记（`--update --accept-internal <name>`；`--update` 自己不代人表态，首次建账用一次性的
+`--bootstrap-internal`）。
+
+`dart run tool/check_api_closure.dart` 是同一档的第三条硬规则，但换了一条口径：它用 analyzer 的
+element model 校验**入口自足**——每个公共 library 导出符号的公共签名里引用到的 Patchbay 类型必须由同一
+入口导出。正则口径答不了这个问题，而它正是「按角色手写清单」最容易出的错。两条口径互相对账：
+`test/api_closure_test.dart` 断言 analyzer 算出的导出集合与 golden 逐名一致。
 
 硬规则挑的都是"评审用肉眼很难稳定抓住、但一旦发生就确定是错"的结构错误。
 警戒线挑的是"值得在评审里解释一句"的地方。

@@ -35,6 +35,39 @@ redaction, and the DevTools diagnostic proxy are in
 That document makes it explicit that tree-driven actions are the default low-intrusion path, and
 semantic navigation is only a stable enhancement on top.
 
+## Public Libraries
+
+Since 0.6.0 this package publishes two entry points, and neither of them re-exports `patchbay`
+wholesale. Both are closed, name-by-name `show` lists:
+
+| Import | Who writes it | Symbols | What it holds |
+|---|---|---|---|
+| `package:patchbay_flutter/patchbay_flutter.dart` | Widget files | 102 | The core consumer list plus `PatchbayKey`, `PatchbayRoot`, `PatchbayRootController` and `PatchbayUiRegistry` |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | The composition root | 195 | A strict superset: the core host list plus every Flutter service host, bridge, policy, inspector, lifecycle, navigation, gesture, semantics, reveal and capture symbol |
+
+Both are self-sufficient — any Patchbay type named in an exported symbol's public signature is
+exported by the same library, checked against the analyzer's element model. That is why the host
+entry point also carries the handful of wire and wait types the bridges name in their signatures
+(`PatchbayUiWaitRequest`, `PatchbayCaptureRequestWire`, and eight more), and why
+`PatchbaySemanticsEntry` — the return type of `PatchbaySemanticsBridge.observe`, which no 0.5.x
+entry point ever exported — is public from 0.6.0.
+
+Because the host library is a superset, `main.dart` needs exactly one import while widget files keep
+the default one — so "may this file touch the host?" is readable on the import line. The full
+protocol surface still requires an explicit `package:patchbay/patchbay_protocol.dart`; there is no
+`patchbay_flutter_protocol.dart`.
+
+`packages/patchbay_flutter/example` is split along that line: `lib/example_app.dart` imports only the
+default surface, and `lib/main.dart` uses the host entry point.
+
+### 0.5.x → 0.6.0 source migration
+
+| 0.5.x usage | 0.6.0 import |
+|---|---|
+| `PatchbayKey`, `PatchbayRoot`, the root controller and the UI registry inside widgets | `package:patchbay_flutter/patchbay_flutter.dart` |
+| `PatchbayFlutterServiceHost`, `PatchbayFlutterBridge`, reveal/gesture/semantics policies and adapters | `package:patchbay_flutter/patchbay_flutter_host.dart` |
+| Generated wire types reached through the old whole-library re-export | `package:patchbay/patchbay_protocol.dart` |
+
 ## Intrusion Levels
 
 | Integration level | Consumer change | Capabilities |

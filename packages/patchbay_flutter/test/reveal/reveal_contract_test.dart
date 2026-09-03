@@ -10,7 +10,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_flutter/src/reveal/reveal_engine.dart';
 import 'package:patchbay_flutter/src/reveal/reveal_models.dart';
 

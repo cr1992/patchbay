@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 final class PatchbayArtifactDownloadException implements Exception {
   const PatchbayArtifactDownloadException(this.code);

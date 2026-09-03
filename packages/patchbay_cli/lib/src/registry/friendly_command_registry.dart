@@ -1,5 +1,5 @@
 import 'package:args/args.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import '../sensitive_input.dart';
 import 'argument_decoder.dart';

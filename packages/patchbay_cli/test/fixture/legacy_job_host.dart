@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
 
 void main() {
   final PatchbayServiceHost host = PatchbayServiceHost(

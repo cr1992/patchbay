@@ -15,10 +15,24 @@
 //
 // 封闭清单的包（见 `_closedSurfacePackages`）额外要求「每个 library 的集合都算得
 // 出来」：无 `show` 的 `export 'package:…'` 当场判红，`--update` 也挡，否则那一行
-// 就是一个 golden diff 恒为 0 的绕过口子。
+// 就是一个 golden diff 恒为 0 的绕过口子。PB-060-02 起四个发布包全在封闭清单里。
+//
+// 封闭清单还有第二个洞：改成逐名 `show` 之后，`lib/src/` 里新增一个公共 class **谁也
+// 看不见**——它不在任何入口的展开集合里，golden diff 为 0，门禁全绿。这比封闭前更弱：
+// 封闭前那一行整库 re-export 至少会让新符号进 golden 判红。所以 golden 为每个包多记一份
+// `internal` 清单：`lib/src/**` 里未被任何公共 library 导出的公共顶层名。新名字没登记就
+// 判红，必须由作者表态——加进某个入口的 `show` 清单，或显式登记为 internal
+// （`--update --accept-internal <name>`，`--update` 自己不会代作者登记）。
+//
+// 另外：注释里出现的 `export '…';`（比如 barrel 顶上的文档注释举例）不是 export。
+// 展开前先剥掉整行 `//` / `///` 注释，否则文档注释会污染公共面计算。
 //
 //   dart run tool/check_api_surface.dart            比对 golden
 //   dart run tool/check_api_surface.dart --update   重写 golden（需在 MR 中解释）
+//   dart run tool/check_api_surface.dart --update --accept-internal <name>
+//                                                   额外登记一个包内公共名（可重复）
+//   dart run tool/check_api_surface.dart --update --bootstrap-internal
+//                                                   仅当 golden 尚无 internal 键时建账一次
 import 'dart:convert';
 import 'dart:io';
 
@@ -43,6 +57,7 @@ final RegExp _var = RegExp(
   r'^(?:const|final)\s+(?:[A-Za-z_][\w<>,?\[\]\. ]*\s+)?([A-Za-z_]\w*)\s*=',
 );
 final RegExp _export = RegExp(r"export\s+'([^']+)'([^;]*);", dotAll: true);
+final RegExp _lineComment = RegExp(r'^[ \t]*//.*$', multiLine: true);
 final RegExp _part = RegExp(r"^part\s+'([^']+)'\s*;", multiLine: true);
 final RegExp _showClause = RegExp(r'show\s+([\w\s,]+)');
 final RegExp _hideClause = RegExp(r'hide\s+([\w\s,]+)');
@@ -82,6 +97,13 @@ String _resolve(String from, String target) {
   return out.join('/');
 }
 
+/// 去掉整行 `//` / `///` 注释后的源码。
+///
+/// 只剥**整行**注释：行尾注释里几乎不会出现 `export '…';`，而行内剥离会破坏包含 `//`
+/// 的字符串字面量（`'https://…'`）。文档注释里举例写 export 才是现实脚坑——本仓的五个
+/// barrel 都带大段文档注释。
+String stripLineComments(String text) => text.replaceAll(_lineComment, '');
+
 /// 一个文件自身声明的顶层公开符号。
 Set<String> _ownPublics(String text) {
   final out = <String>{};
@@ -118,9 +140,10 @@ Set<String> surfaceOf(
   if (!seen.add(entry)) return <String>{};
   final file = File('$repoRoot/$entry');
   if (!file.existsSync()) return <String>{};
-  final text = file.readAsStringSync();
-
-  final out = <String>{..._ownPublics(text)};
+  final raw = file.readAsStringSync();
+  final out = <String>{..._ownPublics(raw)};
+  // 注释里的 `export '…';` 不是 export；`_ownPublics` 自己按行跳注释，所以只有这里要剥。
+  final text = stripLineComments(raw);
   // part 的顶层声明属于本库。
   for (final m in _part.allMatches(text)) {
     final p = File('$repoRoot/${_resolve(entry, m.group(1)!)}');
@@ -201,9 +224,11 @@ List<String> librariesOf(String repoRoot, String pkg) {
 /// 清单的证据。因此它们不允许出现无 `show` 的跨包整库 re-export——那一行会让对方
 /// 包的整张表进入本包公共面，而 golden diff 恒为 0。
 ///
-/// 另外三个包保持 0.4.1 口径：`patchbay_flutter` 本来就整库 re-export `patchbay`，
-/// PB-050-13 明确不动它们的公共面。
-const Set<String> _closedSurfacePackages = <String>{'patchbay_cli'};
+/// PB-050-13 只把 `patchbay_cli` 纳进来，另外三个包留着 0.4.1 口径；PB-060-02 把
+/// core 拆成 consumer / host / protocol 三个入口后，`patchbay_flutter.dart` 的整库
+/// re-export 正是分层要消灭的那一行，所以四个包一起纳入：现在**每个**发布包的每个
+/// 公开 library 都必须逐名 `show`，golden 才是那份清单的证据。
+const Set<String> _closedSurfacePackages = <String>{..._packages};
 
 /// 封闭清单包里所有算不出集合的跨包 re-export，人读格式，每行一条。
 List<String> opaquePackageReexports(String repoRoot) {
@@ -219,6 +244,53 @@ List<String> opaquePackageReexports(String repoRoot) {
     }
   }
   return violations..sort();
+}
+
+/// golden 里保存 internal 清单的保留键；它不是 library 路径，所以不会和 `lib/…` 撞名。
+const String internalKey = 'internal';
+
+/// `packages/<pkg>/lib/src/**.dart`，按包相对路径排序。
+List<String> internalFilesOf(String repoRoot, String pkg) {
+  final root = Directory('$repoRoot/packages/$pkg/lib/src');
+  if (!root.existsSync()) return const <String>[];
+  final out = <String>[];
+  void walk(Directory dir, String prefix) {
+    for (final entity in dir.listSync(followLinks: false)) {
+      final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      if (entity is Directory) {
+        walk(entity, '$prefix$name/');
+      } else if (entity is File && name.endsWith('.dart')) {
+        out.add('lib/src/$prefix$name');
+      }
+    }
+  }
+
+  walk(root, '');
+  return out..sort();
+}
+
+/// `lib/src/**` 里**没有**被本包任何公开 library 导出的公共顶层名。
+///
+/// 封闭清单把「新增一个 src 公共符号」变成了零 diff：它不在任何入口的 `show` 里，
+/// 展开集合看不见它。这份清单把它重新变成必须表态的事——要么进某个入口，要么登记在这里。
+Map<String, List<String>> computeInternal(String repoRoot) {
+  final surface = computeSurface(repoRoot);
+  return <String, List<String>>{
+    for (final pkg in _packages)
+      pkg: () {
+        final exported = <String>{
+          for (final names in surface[pkg]!.values) ...names,
+        };
+        final declared = <String>{};
+        for (final file in internalFilesOf(repoRoot, pkg)) {
+          final f = File('$repoRoot/packages/$pkg/$file');
+          if (f.existsSync()) {
+            declared.addAll(_ownPublics(f.readAsStringSync()));
+          }
+        }
+        return (declared.difference(exported).toList()..sort());
+      }(),
+  };
 }
 
 Map<String, Map<String, List<String>>> computeSurface(String repoRoot) =>
@@ -257,6 +329,11 @@ Map<String, Map<String, List<String>>> _readGolden(String text) {
 void main(List<String> args) {
   final repoRoot = Directory.current.path;
   final update = args.contains('--update');
+  final accepted = <String>{
+    for (var i = 0; i < args.length - 1; i++)
+      if (args[i] == '--accept-internal') args[i + 1],
+  };
+  final bootstrapInternal = args.contains('--bootstrap-internal');
 
   // 先于一切：算不出集合的 re-export 会让后面的 diff 全部失去意义，而且必须**同样
   // 挡住 `--update`** —— 否则「加一行整库 re-export，跑一次 --update」正是这条规则
@@ -277,32 +354,77 @@ void main(List<String> args) {
   }
 
   final current = computeSurface(repoRoot);
+  final currentInternal = computeInternal(repoRoot);
 
   final goldenFile = File('$repoRoot/$_goldenPath');
+  if (!goldenFile.existsSync() && !update) {
+    stderr.writeln('缺少 $_goldenPath，先跑一次 --update 并在 MR 中说明。');
+    exitCode = 1;
+    return;
+  }
+  final golden = goldenFile.existsSync()
+      ? _readGolden(goldenFile.readAsStringSync())
+      : const <String, Map<String, List<String>>>{};
+
   if (update) {
+    // internal 清单**不由 `--update` 代作者登记**：新出现的 src 公共名必须逐个用
+    // `--accept-internal <name>` 点名，否则「加一个公共 class、跑一次 --update」又是
+    // 一个零成本绕过口子。已消失的名字可以静默清理——那不是公共面变化。
+    final unaccepted = <String>[];
+    final merged = <String, Map<String, List<String>>>{};
+    for (final pkg in _packages) {
+      // 首次建账：golden 里**根本没有** internal 键时，允许一次性用
+      // `--bootstrap-internal` 落一份基线——这不是「新增了一个符号」，而是把既有实现面
+      // 记下来。它是显式的、可 grep 的一次性动作；键存在之后 `--update` 再也不会代
+      // 作者登记任何新名字。
+      final bootstrapping =
+          bootstrapInternal &&
+          !(golden[pkg]?.containsKey(internalKey) ?? false);
+      final known = (golden[pkg]?[internalKey] ?? const <String>[]).toSet();
+      final actual = currentInternal[pkg]!.toSet();
+      if (!bootstrapping) {
+        for (final name in (actual.difference(known).toList()..sort())) {
+          if (!accepted.contains(name)) unaccepted.add('$pkg $name');
+        }
+      }
+      merged[pkg] = <String, List<String>>{
+        ...current[pkg]!,
+        internalKey: (actual.toList()..sort()),
+      };
+    }
+    if (unaccepted.isNotEmpty) {
+      stderr.writeln('`lib/src/**` 出现未登记的公共顶层名，--update 不代你表态：');
+      for (final line in unaccepted) {
+        stderr.writeln('  - $line');
+      }
+      stderr.writeln(
+        '\n把它加进 consumer / host / protocol 某个入口的 `show` 清单，'
+        '或确认它只是包内实现后\n显式登记：'
+        '`dart run tool/check_api_surface.dart --update '
+        '--accept-internal <name>`（可重复）。',
+      );
+      exitCode = 1;
+      return;
+    }
     goldenFile.writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert(current)}\n',
+      '${const JsonEncoder.withIndent('  ').convert(merged)}\n',
     );
     stdout.writeln('已重写 $_goldenPath');
-    for (final e in current.entries) {
+    for (final e in merged.entries) {
       for (final l in e.value.entries) {
-        stdout.writeln('  ${e.key} ${l.key}: ${l.value.length} 个公开符号');
+        stdout.writeln(
+          '  ${e.key} ${l.key}: ${l.value.length} 个'
+          '${l.key == internalKey ? '包内公共名' : '公开符号'}',
+        );
       }
     }
     return;
   }
 
-  if (!goldenFile.existsSync()) {
-    stderr.writeln('缺少 $_goldenPath，先跑一次 --update 并在 MR 中说明。');
-    exitCode = 1;
-    return;
-  }
-
-  final golden = _readGolden(goldenFile.readAsStringSync());
-
   final failures = <String>[];
   for (final pkg in _packages) {
-    final expectedLibraries = golden[pkg] ?? const <String, List<String>>{};
+    final expectedLibraries = <String, List<String>>{...?golden[pkg]}
+      ..remove(internalKey);
     final actualLibraries = current[pkg]!;
     // 先比 library 集合：新增入口和删除入口都是公共面变化，且必须在符号 diff 之前
     // 报出来——否则一个新入口会被读成「凭空多了一堆符号」。
@@ -334,6 +456,30 @@ void main(List<String> args) {
         '${removed.isEmpty ? '' : '    移除: ${removed.join(', ')}'}',
       );
     }
+
+    // 再比 internal：封闭 `show` 之后，src 里新增的公共名对入口展开是不可见的，
+    // 这份清单是它唯一会被发现的地方。
+    final knownInternal = (golden[pkg]?[internalKey] ?? const <String>[])
+        .toSet();
+    final actualInternal = currentInternal[pkg]!.toSet();
+    final newInternal = (actualInternal.difference(knownInternal).toList()
+      ..sort());
+    final goneInternal = (knownInternal.difference(actualInternal).toList()
+      ..sort());
+    if (newInternal.isNotEmpty) {
+      failures.add(
+        '$pkg：`lib/src/**` 新增 ${newInternal.length} 个未登记的公共顶层名\n'
+        '    ${newInternal.join(', ')}\n'
+        '    → 加入 consumer/host/protocol 的 show 清单，或登记为 internal',
+      );
+    }
+    if (goneInternal.isNotEmpty) {
+      failures.add(
+        '$pkg：golden 的 internal 清单里有 ${goneInternal.length} 个已不存在的名字\n'
+        '    ${goneInternal.join(', ')}\n'
+        '    → 跑 --update 清理（删除包内实现不是公共面变化）',
+      );
+    }
   }
 
   if (failures.isNotEmpty) {
@@ -353,6 +499,8 @@ void main(List<String> args) {
     '公共 API surface 与 golden 一致'
     '（${current.entries.map((e) => '${e.key} '
         '${e.value.values.fold<int>(0, (n, s) => n + s.length)}'
-        '${e.value.length == 1 ? '' : ' in ${e.value.length} libraries'}').join(' / ')}）',
+        '${e.value.length == 1 ? '' : ' in ${e.value.length} libraries'}').join(' / ')}'
+    '；internal '
+    '${currentInternal.values.fold<int>(0, (n, s) => n + s.length)} 个）',
   );
 }

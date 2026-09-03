@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/artifact_download.dart';
 import 'package:patchbay_cli/src/output/local_artifact.dart';
 import 'package:patchbay_cli/src/registry/command_spec.dart';

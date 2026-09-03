@@ -19,7 +19,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
 import 'package:test/test.dart';
 
 const String _contractPath = 'contracts/core_wire.json';

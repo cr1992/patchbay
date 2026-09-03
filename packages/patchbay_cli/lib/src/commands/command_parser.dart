@@ -1,5 +1,5 @@
 import 'package:args/args.dart';
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import '../output/local_artifact.dart' show patchbayDefaultMaxInlineBytes;
 import '../rpc_timeout.dart';

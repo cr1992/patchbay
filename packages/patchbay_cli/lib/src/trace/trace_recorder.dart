@@ -1,6 +1,7 @@
 import 'dart:io';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import 'trace_models.dart';
 import 'trace_redaction.dart';

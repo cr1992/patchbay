@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 const String _outputPath = 'lib/src/generated/protocol_cli_commands.g.dart';
 

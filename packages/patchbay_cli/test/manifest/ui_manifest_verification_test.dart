@@ -1,4 +1,5 @@
 import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/manifest/manifest_models.dart';
 import 'package:patchbay_cli/src/manifest/manifest_report.dart';
 import 'package:patchbay_cli/src/manifest/manifest_verifier.dart';

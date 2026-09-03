@@ -274,12 +274,16 @@ full 恒等，artifact 先于 brief，canonical CLI façade 复用最终 service
 手工规则。完整 wire、顺序与降级见已接受的
 [Descriptor 驱动的输出投影](proposals/0.6.0/descriptor-output-projection.md)。
 
-公共 Dart 面按使用者而不是实现文件分层。`patchbay.dart` 是 77 符号的默认 consumer façade；
-`patchbay_host.dart` 显式追加 41 个 host lifecycle 符号；`patchbay_protocol.dart` 独占 129 个 raw wire 与
-protocol 符号。Flutter 默认入口只在 core consumer 上追加 `PatchbayKey`、`PatchbayRoot`、
-`PatchbayRootController`、`PatchbayUiRegistry`，service host、bridge 与 policy 进入显式
-`patchbay_flutter_host.dart`。公共 barrel 必须用封闭 `show`，API checker 按 library 展开跨包 re-export；
-新符号未分类即判红。精确基线集合与 source 迁移见已接受的
+公共 Dart 面按使用者而不是实现文件分层，且每个入口必须**自足**：导出符号的公共签名里引用到的
+Patchbay 类型必须由同一入口导出，否则接入方按迁移表改完只会拿到 `undefined_class`。角色分组是种子，
+实际导出清单是它的闭包，由 `tool/check_api_closure.dart` 用 analyzer 的 element model 机检。
+`patchbay.dart` 是 98 符号的默认 consumer façade；`patchbay_host.dart` 在它之上追加 38 个 host
+lifecycle 符号（共 136）；`patchbay_protocol.dart` 是 141 个 raw wire 与 protocol 符号，与前两者有意
+重叠。Flutter 默认入口只在 core consumer 上追加 `PatchbayKey`、`PatchbayRoot`、
+`PatchbayRootController`、`PatchbayUiRegistry`（共 102），service host、bridge 与 policy 进入显式
+`patchbay_flutter_host.dart`（195）。公共 barrel 必须用封闭 `show`，API checker 按 library 展开跨包
+re-export，并为每个包记一份 `internal` 清单，使 `lib/src/**` 新增的公共符号必须表态。精确基线集合、
+闭包规则与 source 迁移见已接受的
 [Core 公共 Dart API 分层](proposals/0.6.0/core-public-api-layers.md)。
 
 ### 4. release 必须可裁除

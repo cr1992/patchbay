@@ -6,6 +6,7 @@ export 'semantics/semantics_models.dart'
         PatchbaySemanticsAction,
         PatchbaySemanticsActionDecision,
         PatchbaySemanticsActionPolicy,
+        PatchbaySemanticsEntry,
         PatchbaySemanticsIdentifierMatch,
         PatchbaySemanticsIdentifierObservation,
         PatchbaySemanticsTarget;

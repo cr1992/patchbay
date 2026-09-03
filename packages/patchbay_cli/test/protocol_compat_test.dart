@@ -19,7 +19,8 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/artifact_download.dart';
 import 'package:patchbay_cli/src/cli.dart';
 import 'package:patchbay_cli/src/client.dart';

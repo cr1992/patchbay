@@ -5,7 +5,7 @@
 // absence 逐条断言。整条矩阵还共用一条机检——从未派发 `showOnScreen`。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
 
 import 'reveal_fixtures.dart';
 

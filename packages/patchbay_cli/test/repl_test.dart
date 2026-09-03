@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/cli.dart';
 import 'package:patchbay_cli/src/client.dart';
 import 'package:patchbay_cli/src/repl.dart';

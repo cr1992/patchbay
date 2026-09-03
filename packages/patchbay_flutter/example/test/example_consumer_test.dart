@@ -4,7 +4,8 @@ import 'dart:developer';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
+import 'package:patchbay_flutter_example/example_app.dart';
 import 'package:patchbay_flutter_example/example_domain.dart';
 import 'package:patchbay_flutter_example/example_log_source.dart';
 import 'package:patchbay_flutter_example/main.dart';

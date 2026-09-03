@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/cli.dart';
 import 'package:patchbay_cli/src/manifest/manifest_models.dart';
 import 'package:patchbay_cli/src/result.dart';

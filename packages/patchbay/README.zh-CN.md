@@ -24,6 +24,43 @@ App，读取 runtime identity、catalog 和 snapshot，并调用 App 明确注�
 领域 DTO、品牌命令别名、设备 SDK、路由映射和日志源都留在接入方工程。通用 package 不依赖这些类型，
 也不从自由文本、Widget 状态或命令名推导业务结论。
 
+## 公共入口
+
+0.6.0 起本 package 按角色发布三个入口，每个都是逐名列出的封闭 `show` 清单——没有兜底默认面，
+也没有 `legacy.dart`：
+
+| import | 角色 | 符号数 | 内容 |
+|---|---|---|---|
+| `package:patchbay/patchbay.dart` | 默认 consumer | 98 | 命令注册与 descriptor、参数与响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
+| `package:patchbay/patchbay_host.dart` | host implementer | 136 | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit sink/event、invocation 与 cancellation lifecycle、admission/rejection 与响应校验 |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 141 | 生成的 `*Wire` 类型、catalog capability 与 digest、CLI syntax 词汇、permission companion 协议、client 请求类型与 canonical protocol descriptor |
+
+每个入口都是**自足**的：导出符号的公共签名——构造函数形参、公共字段与 getter 的类型、方法形参与返回
+类型、超类与接口——里出现的 Patchbay 类型一定由同一个 library 导出。这条不变量按 analyzer 的
+element model 机检，所以照迁移表改完不会拿到 `undefined_class`。
+
+两个直接后果值得点名。其一，几份清单**有意重叠**：`PatchbayCommandDescriptor` 既是 consumer 类型，
+也是每个 canonical protocol descriptor 常量的类型，因此它同时出现在两个入口；同时 import 不会冲突
+——同一个声明从两个 library 到达仍是同一个类型。其二，默认 consumer 面里有少量 `*Wire` 与 CLI syntax
+类型：`PatchbayLogQuery` 的构造函数收 `PatchbayLogLevelWire`，`PatchbayRedactedLogRecord` 公开
+`PatchbayLogRecordWire wire`。它们不是 raw wire 泄漏，而是实现 `PatchbayLogSource` 时必须能命名的
+类型。
+
+`patchbay_host.dart` **不** re-export 完整 protocol 面：实现 host 与直接读写 raw wire 是两个角色，
+同一文件两者都做就写两个显式 import。
+
+### 0.5.x → 0.6.0 source 迁移
+
+默认入口收窄是有意的 source breaking：旧 import 会编译失败，报错里点名的符号唯一对应一行替换。
+
+| 0.5.x 使用方式 | 0.6.0 import |
+|---|---|
+| 业务 descriptor、schema、gate、provider、job/artifact/log adapter | `package:patchbay/patchbay.dart`，多数代码不改 |
+| `PatchbayServiceHost`、audit、invocation/cancellation 或 validation lifecycle | `package:patchbay/patchbay_host.dart` |
+| 生成 wire、capability/digest、permission companion、client request、canonical descriptor | `package:patchbay/patchbay_protocol.dart` |
+
+wire、错误码、稳定 JSON、资源上限与运行时行为都没有变化，本项只改 Dart 源码可见性。
+
 ## 核心能力
 
 - `PatchbayServiceHost`：注册 identity、catalog、snapshot、invoke 与 invocation cancel；

@@ -61,8 +61,30 @@ dependencies:
   patchbay_flutter: ^0.5.0
 ```
 
-`patchbay_flutter` re-exports the core API; for pure Dart integration use `packages/patchbay`
-instead.
+`patchbay_flutter` re-exports the core consumer API; for pure Dart integration use
+`packages/patchbay` instead.
+
+Since 0.6.0 the public Dart surface is split by role, and every entry point is a closed, name-by-name
+`show` list:
+
+| Import | Role | Symbols |
+|---|---|---|
+| `package:patchbay/patchbay.dart` | Default consumer: command registry, descriptors and schemas, gates, catalog/snapshot providers, jobs, artifacts, logs, navigation and UI declarations | 98 |
+| `package:patchbay/patchbay_host.dart` | Host implementer: a strict superset of the default list, plus `PatchbayServiceHost`, audit, invocation/cancellation and validation lifecycle | 136 |
+| `package:patchbay/patchbay_protocol.dart` | Protocol/wire implementer: generated wire types, catalog capability and digest, CLI syntax, permission companion, client requests and canonical descriptors | 141 |
+| `package:patchbay_flutter/patchbay_flutter.dart` | Widget files: the core consumer list plus `PatchbayKey`, `PatchbayRoot`, `PatchbayRootController` and `PatchbayUiRegistry` | 102 |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter composition root: the core host list plus every Flutter service host, bridge and policy symbol | 195 |
+
+Every entry point is *self-sufficient*: any Patchbay type named in the public signature of an
+exported symbol is exported by the same library, so following the migration table can never leave
+you with an `undefined_class`. That is a checked invariant, not an intention. It also means the
+lists overlap on purpose, and that a few `*Wire` types live in the default surface — they are the
+ones a `PatchbayLogSource` implementation has to name.
+
+Narrowing the default entry points is a deliberate source breaking change in 0.6.0; there is no
+`legacy.dart`. Old imports fail to compile and the
+[migration table](docs/guide.md#05x--060-source-迁移表) names the replacement for each case. Wire
+format, error codes, stable JSON and CLI output are unaffected.
 
 Validating an unpublished release candidate requires all four packages to use the same immutable
 Git commit; overriding only one package can mix Git and hosted sources. Use the generated and
@@ -96,7 +118,8 @@ $ dart pub global activate patchbay_cli 0.5.0
 ```dart
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:patchbay_flutter/patchbay_flutter.dart';
+// The composition root is the host role: one import covers the widget surface too.
+import 'package:patchbay_flutter/patchbay_flutter_host.dart';
 
 void main() {
   if (!kReleaseMode) {

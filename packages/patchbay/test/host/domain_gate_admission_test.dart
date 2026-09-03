@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
 import 'package:test/test.dart';
 
 /// PB-050-25：domain-plane 写命令的 gate 强制执行。
