@@ -1,6 +1,6 @@
 # 0.6.0 Semantics 拒绝 details 对齐
 
-> 状态：提案中
+> 状态：已接受
 >
 > 关联：PB-060-09
 >
@@ -85,7 +85,23 @@
 
 ## 待裁决
 
-- 候选表是否按上表冻结，`enabled` 是否只在 `hasEnabledState` 为真时出现（推荐是，理由见非目标第二条）。
+无。
+
+## 裁决结论（DG-060-06，2026-09-03）
+
+仓主授权代理裁决，结论如下：
+
+- 候选表按上文封闭：`nodeId`、`generation`、`label` / `labelRedacted`、`actions`、`enabled`、`invisible`、
+  `userActionsBlocked`，两条解析路径共用同一构造，不允许任何一条路径再退回裸码。
+- `enabled` 只在 Flutter `SemanticsFlags.isEnabled` 不为 `none` 时出现，值为 `isTrue`；没有 enabled 状态的
+  节点不带这个键。理由：拒绝 details 是事实投影，不是推断面，替 Flutter 编造 `true` 会让调用方在 Flutter
+  从未表态的地方读到「已启用」。
+- 不新增 `reason: disabled` 一类词表。`enabled: false` 与空 `actions` 已经指明恢复方向，再加一层枚举只会
+  多一处需要维护和误读的词表，与 0.6.0「不扩表面」的定位相悖。
+- nodeId 路径的 `uiSemanticsGenerationStale` 补 `nodeId` 与 `expectedGeneration`，与 identifier 路径只差
+  `identifier` 一键；`uiSemanticsIdentifierAmbiguous` 的 `candidates` 元素随候选表一起带 `enabled`。
+- 全部为 additive：错误码 ratchet 零变化，退出码不变，老 reader 忽略新键，VM/direct 在 host 侧同一构造。
+- 跨版本立场同步进 `design.md`「拒绝 details 是事实投影」一句；其余为 0.6.0 单版本实现细节，不进 design。
 
 ## 被否决方案
 

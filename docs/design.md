@@ -102,6 +102,12 @@ sequenceDiagram
 两种信封字段同构（稳定 `code` + 自由 `details`），所以一个解析器读两种；但"谁拒绝的"要看
 它出现在哪一种里。
 
+`details` 是事实投影，不是推断面。同一个稳定 code 不论从哪条解析路径抵达，都带同一份 details：按 nodeId
+与按 identifier 派发的 Semantics 拒绝共用同一张候选表，任何一条路径都不许退回裸码。表里只放 host 或
+Flutter 已经表态的事实，没有的事实就不带键——`enabled` 只在语义节点声明了 enabled 状态时出现，不替
+Flutter 编造 `true`；拒绝也不另起 `reason` 一类枚举去解释已经能从事实读出的结论。裁决见
+[Semantics 拒绝 details 对齐](proposals/0.6.0/semantics-rejection-details.md)。
+
 目录违规是**整份**失效而不是跳过坏行：host 发现命令名非法或重名时，应答里干脆没有 `commands`
 键，并在 `details.violations` 里一次列全所有违规项。跳过坏行会让接入方以为自己只是少注册了几条
 命令，而不是目录本身坏了。
