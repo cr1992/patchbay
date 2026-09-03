@@ -11,6 +11,8 @@ import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/src/client.dart';
 import 'package:patchbay_cli/src/command_registry.dart';
 import 'package:patchbay_cli/src/output/brief_view.dart';
+import 'package:patchbay_cli/src/doctor/doctor_checks.dart';
+import 'package:patchbay_cli/src/doctor/doctor_models.dart';
 import 'package:patchbay_cli/src/output/output_projection_resolver.dart';
 import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
@@ -23,6 +25,47 @@ Map<String, Object?> _catalogDeclaring(
     <String, Object?>{'name': command, 'outputProjection': projection},
   ],
 };
+
+/// `logs.query` / `logs.export` / `blob.metadata` are registered by
+/// [PatchbayArtifactService] rather than declared as top-level constants, so
+/// the ratchet below reaches them the way a host does. The log commands only
+/// register when a source is injected, hence the stub.
+Map<String, PatchbayCommandDescriptor> _artifactServiceDescriptors() {
+  final PatchbayArtifactService service = PatchbayArtifactService(
+    blobs: PatchbayMemoryBlobStore(),
+    gates: const PatchbayGateEvaluator(
+      baseGate: _allow,
+      consumerGate: _allowConsumer,
+    ),
+    logs: const _NoLogs(),
+  );
+  return <String, PatchbayCommandDescriptor>{
+    for (final PatchbayCommandDescriptor descriptor in service.descriptors)
+      descriptor.name: descriptor,
+  };
+}
+
+PatchbayGateDecision _allow() => const PatchbayGateDecision.allow();
+PatchbayGateDecision _allowConsumer(Object? _) =>
+    const PatchbayGateDecision.allow();
+
+/// Registers the log commands without answering any of them; this file only
+/// reads their descriptors.
+final class _NoLogs implements PatchbayLogSource {
+  const _NoLogs();
+
+  @override
+  Future<PatchbayLogPage> query(
+    PatchbayLogQuery query,
+    PatchbayCancellationSignal cancellation,
+  ) async => const PatchbayLogPage.records();
+
+  @override
+  Future<PatchbayLogPage> tail(
+    PatchbayLogQuery query,
+    PatchbayCancellationSignal cancellation,
+  ) async => const PatchbayLogPage.records();
+}
 
 PatchbayFriendlyCommandSpec _spec(List<String> path) {
   final PatchbayFriendlyCommandSpec? spec =
@@ -148,16 +191,25 @@ void main() {
       );
     });
 
-    test('each entry equals the descriptor declaration it stands in for', () {
-      final Map<String, PatchbayCommandDescriptor?> descriptors =
-          <String, PatchbayCommandDescriptor?>{
+    test('every entry equals the descriptor declaration it stands in for', () {
+      final Map<String, PatchbayCommandDescriptor> fromService =
+          _artifactServiceDescriptors();
+      final Map<String, PatchbayCommandDescriptor> descriptors =
+          <String, PatchbayCommandDescriptor>{
             'ui.semantics.tree': patchbayUiSemanticsTreeCommandDescriptor,
             'ui.capture': patchbayUiCaptureCommandDescriptor,
+            'logs.query': fromService['logs.query']!,
+            'logs.export': fromService['logs.export']!,
           };
-      for (final MapEntry<String, PatchbayCommandDescriptor?> entry
+      expect(
+        descriptors.keys.toSet(),
+        patchbayFrozen050OutputProjections.keys.toSet(),
+        reason: 'every frozen entry needs a descriptor to be checked against',
+      );
+      for (final MapEntry<String, PatchbayCommandDescriptor> entry
           in descriptors.entries) {
         expect(
-          entry.value!.outputProjection!.toJson(),
+          entry.value.outputProjection!.toJson(),
           patchbayFrozen050OutputProjections[entry.key]!.toJson(),
           reason:
               '${entry.key}: a 0.5.0 host and a 0.6.0 host must project the '
@@ -166,17 +218,74 @@ void main() {
       }
     });
 
-    test('every CLI-local declaration is within its own bounds', () {
-      var declared = 0;
-      for (final PatchbayFriendlyCommand command
-          in PatchbayFriendlyCommand.values) {
-        final PatchbayOutputProjection? projection =
-            command.localOutputProjection;
-        if (projection == null) continue;
-        declared += 1;
-        expect(projection.validate, returnsNormally, reason: command.name);
+    test('the reachable CLI-local declarations are a closed set', () {
+      final Set<String> local = <String>{
+        for (final PatchbayFriendlyCommandSpec spec
+            in PatchbayFriendlyCommandRegistry.commands)
+          if (spec is PatchbayLocallyProjectedCommand &&
+              (spec as PatchbayLocallyProjectedCommand).localOutputProjection !=
+                  null)
+            spec.path.join(' '),
+      };
+      expect(local, <String>{
+        // No host catalog can describe these four.
+        'catalog',
+        'ui widget-tree',
+        'ui render-tree',
+        'ui focus-tree',
+        // Two spellings whose artifact the CLI owns or has to know before it
+        // can connect.
+        'blob get',
+        'logs export',
+      });
+    });
+
+    test('the one CLI-local copy of a service declaration cannot drift', () {
+      // D6: `logs export` keeps a static copy because argv is parsed before a
+      // connection exists, so the option surface cannot wait for a catalog. A
+      // copy is a second writable source of truth unless something pins it.
+      final Map<String, PatchbayCommandDescriptor> fromService =
+          _artifactServiceDescriptors();
+      final PatchbayFriendlyCommandSpec logsExport = _spec(<String>[
+        'logs',
+        'export',
+      ]);
+      expect(
+        (logsExport as PatchbayLocallyProjectedCommand).localOutputProjection!
+            .toJson(),
+        fromService['logs.export']!.outputProjection!.toJson(),
+      );
+
+      // `capture root|target` deliberately keep *no* copy: the reachable
+      // spellings are generated, so they resolve `ui.capture`'s declaration and
+      // the frozen-entry ratchet above already pins that against the descriptor.
+      for (final List<String> path in <List<String>>[
+        <String>['capture', 'root'],
+        <String>['capture', 'target'],
+      ]) {
+        final PatchbayFriendlyCommandSpec spec = _spec(path);
+        expect(
+          (spec as PatchbayLocallyProjectedCommand).localOutputProjection,
+          isNull,
+          reason: path.join(' '),
+        );
+        expect(
+          patchbayStaticOutputProjection(spec)!.toJson(),
+          patchbayUiCaptureCommandDescriptor.outputProjection!.toJson(),
+          reason: path.join(' '),
+        );
       }
-      expect(declared, greaterThanOrEqualTo(6));
+
+      // `blob get` has no counterpart on purpose: declaring the download on
+      // `blob.metadata` would hand it to `blob metadata` as well.
+      expect(
+        (_spec(<String>['blob', 'get']) as PatchbayLocallyProjectedCommand)
+            .localOutputProjection!
+            .artifact!
+            .kind,
+        PatchbayOutputArtifactKind.responseBlob,
+      );
+      expect(fromService['blob.metadata']!.outputProjection, isNull);
     });
 
     test('every frozen entry is within its own bounds', () {
@@ -221,23 +330,26 @@ void main() {
       }
     });
 
-    test('the blob dispositions are unchanged', () {
-      expect(
-        _spec(<String>['logs', 'export']).artifact,
-        PatchbayArtifactDisposition.payloadBlob,
-      );
-      expect(
-        _spec(<String>['capture', 'root']).artifact,
-        PatchbayArtifactDisposition.payloadBlob,
-      );
-      expect(
-        _spec(<String>['capture', 'target']).artifact,
-        PatchbayArtifactDisposition.payloadBlob,
-      );
-      expect(
-        _spec(<String>['blob', 'get']).artifact,
-        PatchbayArtifactDisposition.responseBlob,
-      );
+    test('the reachable blob commands are exactly the 0.5.0 four', () {
+      // D2: the fallback used to be able to *derive* a blob disposition from
+      // any spelling that set `cliSyntax.artifactDisposition`, which is the
+      // "add one more line" habit in a new spelling. With that branch gone the
+      // set is closed, so this asserts the whole set rather than four
+      // memberships that would still pass if a fifth appeared.
+      final Map<String, PatchbayArtifactDisposition> blobs =
+          <String, PatchbayArtifactDisposition>{
+            for (final PatchbayFriendlyCommandSpec spec
+                in PatchbayFriendlyCommandRegistry.commands)
+              if (spec.artifact == PatchbayArtifactDisposition.payloadBlob ||
+                  spec.artifact == PatchbayArtifactDisposition.responseBlob)
+                spec.path.join(' '): spec.artifact,
+          };
+      expect(blobs, <String, PatchbayArtifactDisposition>{
+        'logs export': PatchbayArtifactDisposition.payloadBlob,
+        'capture root': PatchbayArtifactDisposition.payloadBlob,
+        'capture target': PatchbayArtifactDisposition.payloadBlob,
+        'blob get': PatchbayArtifactDisposition.responseBlob,
+      });
     });
 
     test('blob metadata calls the same service command and still downloads '
@@ -300,9 +412,7 @@ void main() {
     }.entries) {
       test('${entry.key} is refused, and no row survives it', () {
         expect(
-          () => validatePatchbayCatalogOutputProjections(
-            catalogWith(entry.value),
-          ),
+          () => validateCatalogDeclarations(catalogWith(entry.value)),
           throwsA(
             isA<PatchbayProtocolException>().having(
               (PatchbayProtocolException failure) => failure.code,
@@ -315,9 +425,38 @@ void main() {
       });
     }
 
+    test('every direct catalog reader goes through the same seam', () {
+      // The PB-050-34 lesson this MR is meant not to repeat: a per-feature
+      // validator gets wired into the dispatch path and quietly misses the two
+      // commands an operator reaches for first. `patchbay catalog` goes through
+      // `CatalogInvoker.fetchCatalog`; doctor reads first and judges second, so
+      // it keeps the document and names the violation instead of just failing.
+      final PatchbayDoctorFinding finding = patchbayCatalogFinding(
+        catalogWith(const <String, Object?>{'brief': 7}),
+      );
+      expect(finding.verdict, PatchbayCheckVerdict.failed);
+      expect(finding.details['code'], 'providerProtocolViolation');
+      expect(
+        finding.details['declaration'],
+        patchbayCatalogOutputProjectionInvalid,
+      );
+    });
+
+    test('doctor still reports a clean catalog normally', () {
+      final PatchbayDoctorFinding finding = patchbayCatalogFinding(
+        catalogWith(const <String, Object?>{
+          'brief': <String, Object?>{
+            'id': 'ui.semantics.tree',
+            'omit': <String>[r'$.payload.nodes'],
+          },
+        }),
+      );
+      expect(finding.verdict, isNot(PatchbayCheckVerdict.failed));
+    });
+
     test('a clean catalog passes', () {
       expect(
-        () => validatePatchbayCatalogOutputProjections(
+        () => validateCatalogDeclarations(
           catalogWith(const <String, Object?>{
             'brief': <String, Object?>{
               'id': 'ui.semantics.tree',
@@ -339,6 +478,83 @@ void main() {
         reason:
             'silently dropping to the frozen fallback would let a broken host '
             'look like an old one',
+      );
+    });
+  });
+
+  group('CLI-local facts are appended after the projection', () {
+    test('a declaration may not name the CLI-reserved local root namespace', () {
+      // D7: `localRoute` used to be merged into the host response before
+      // projection, so a host declaring `omit: ["$.localRoute"]` could delete
+      // the CLI's own report of which service command it routed to — and have
+      // `localView.omitted` echo the deletion as if the host had owned it. The
+      // grammar now refuses the namespace, and the evaluation order below makes
+      // the rule redundant rather than load-bearing.
+      for (final String reserved in <String>[
+        r'$.localRoute',
+        r'$.localView',
+        r'$.localArtifact',
+        r'$.localKeepAwake',
+      ]) {
+        expect(
+          () => PatchbayOutputProjection.fromJson(<String, Object?>{
+            'brief': <String, Object?>{
+              'id': 'x',
+              'omit': <String>[reserved],
+            },
+          }),
+          throwsFormatException,
+          reason: reserved,
+        );
+      }
+      expect(
+        () => PatchbayOutputProjection.fromJson(<String, Object?>{
+          'artifact': <String, Object?>{
+            'kind': 'renderedMember',
+            'member': r'$.localArtifact',
+            'encoding': 'json',
+            'mediaType': 'application/json',
+            'extension': 'json',
+            'automaticSpill': true,
+          },
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('localRoute is appended after brief, so no rule can reach it', () {
+      const PatchbayOutputProjection hostile = PatchbayOutputProjection(
+        brief: PatchbayOutputBriefProjection(
+          id: 'hostile',
+          omit: <String>[r'$.notice'],
+        ),
+      );
+      const Map<String, Object?> route = <String, Object?>{
+        'service': 'ui.text.set',
+        'via': 'semantics',
+      };
+      final Map<String, Object?> rendered = withPatchbayLocalRoute(
+        projectPatchbayBriefView(
+          projection: hostile,
+          response: <String, Object?>{'notice': 'gone', 'payload': 1},
+          exitCode: PatchbayExitCode.accepted,
+        ),
+        route,
+      );
+      expect(rendered['localRoute'], route);
+      expect(
+        (rendered['localView']! as Map<String, Object?>)['omitted'],
+        <String>[r'$.notice'],
+        reason: 'localRoute was never a candidate, so it is never reported',
+      );
+      expect(rendered.keys.last, 'localRoute');
+    });
+
+    test('withPatchbayLocalRoute is identity for a non-routed command', () {
+      final Map<String, Object?> response = <String, Object?>{'payload': 1};
+      expect(
+        identical(withPatchbayLocalRoute(response, null), response),
+        isTrue,
       );
     });
   });
