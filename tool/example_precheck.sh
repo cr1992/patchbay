@@ -601,15 +601,13 @@ else
   FAIL=$((FAIL + 1)); FAILED_STEPS+=('gesture target generation')
 fi
 
-# setText 可能让系统键盘占据视口；若放在手势前，较矮设备上的两个手势节点存在被裁出
+# 文本输入可能让系统键盘占据视口；若放在手势前，较矮设备上的两个手势节点存在被裁出
 # Semantics 树的风险。手势证据固定后再测文本输入，后续 navigation 会离开当前页，
-# 不再依赖这三个节点。
-check 'ui perform set-text' 0 \
-  "doc['localRoute']['executionPath'] == 'directTarget'" \
-  --json ui perform set-text target:example.note "$NOTE_GENERATION" 'precheck note'
+# 不再依赖这三个节点。canonical 家族只有 enter-text（跑 formatter 与 onChanged）；
+# 只写 controller 的 set 没有 canonical 拼写，不在这里出现。
 check 'ui perform enter-text' 0 \
-  "doc['localRoute']['serviceCommand'] == 'ui.text.enter'" \
-  --json ui perform enter-text target:example.note "$NOTE_GENERATION" ' entered'
+  "doc['localRoute']['executionPath'] == 'directTarget' and doc['localRoute']['serviceCommand'] == 'ui.text.enter'" \
+  --json ui perform enter-text target:example.note "$NOTE_GENERATION" 'precheck note'
 
 echo
 echo "== 导航 =="

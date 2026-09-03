@@ -127,6 +127,7 @@ abstract final class PatchbayCommandHelp {
       );
     }
     _writeUiMigrations(output, sorted);
+    _writeGenerationSources(output, sorted);
     _writeConditions(output, sorted);
     _writeOptions(output, parser, optionNames);
     // A group name can also be a command of its own — `snapshot` is both — and
@@ -247,6 +248,7 @@ abstract final class PatchbayCommandHelp {
       path: command.path,
     );
     _writeUiMigrations(output, <PatchbayFriendlyCommandSpec>[command]);
+    _writeGenerationSources(output, <PatchbayFriendlyCommandSpec>[command]);
     if (command.fencesNavigationRevision) {
       output
         ..writeln(
@@ -423,6 +425,42 @@ abstract final class PatchbayCommandHelp {
         '  ${migration.legacyCommand} -> ${migration.replacement}',
       );
     }
+  }
+
+  /// Where a canonical `ui perform` `<generation>` comes from.
+  ///
+  /// The two identity domains keep separate counters and reject staleness
+  /// with different codes; a caller who feeds one domain's value to the other
+  /// sees `uiGenerationStale` / `uiSemanticsGenerationStale` with no obvious
+  /// cause. Saying the source here is cheaper than a runbook footnote, and
+  /// the CLI deliberately never resends with `currentGeneration` on its own:
+  /// the fence exists so a write only lands on state the caller has seen.
+  static void _writeGenerationSources(
+    StringBuffer output,
+    List<PatchbayFriendlyCommandSpec> commands,
+  ) {
+    final bool applies = commands.any(
+      (PatchbayFriendlyCommandSpec command) =>
+          command is PatchbayCanonicalUiCommandSpec &&
+          command.usageSuffix.contains('<generation>'),
+    );
+    if (!applies) return;
+    output
+      ..writeln()
+      ..writeln('<generation> is the value observed before this write:')
+      ..writeln('  target:<id>        that target in `patchbay ui targets`')
+      ..writeln(
+        '  semantics:/node:   that node in `patchbay ui semantics tree`',
+      )
+      ..writeln(
+        'A stale rejection (uiGenerationStale, uiSemanticsGenerationStale) '
+        'carries',
+      )
+      ..writeln(
+        'currentGeneration; observe again and resend it yourself. The CLI '
+        'never',
+      )
+      ..writeln('retries with it.');
   }
 
   /// Where the command's availability is actually decided.

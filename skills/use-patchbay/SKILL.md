@@ -67,7 +67,7 @@ The table is generated from the same registry that resolves commands and emits r
 <!-- PATCHBAY_UI_MIGRATION:START -->
 | Deprecated in 0.6.0 | Canonical replacement | Removal |
 |---|---|---|
-| `ui text set` | `ui perform set-text target:<id> <generation> [text]` | 1.0 |
+| `ui text set` | `ui perform enter-text target:<id> <generation> [text]` | 1.0 |
 | `ui text enter` | `ui perform enter-text target:<id> <generation> [text]` | 1.0 |
 | `ui tap` | `ui perform tap semantics:<identifier> <generation> --via semantics` | 1.0 |
 | `ui action` | `ui perform action semantics:<identifier> <generation> <action> [text]` | 1.0 |

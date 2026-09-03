@@ -151,7 +151,6 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay ui perform fling semantics:<identifier> <generation> --start <json> --velocity <json> [--duration-ms <ms>]` | local 显式声明 | `ui.gesture.fling` | 当前入口 |
 | `patchbay ui perform press-hold semantics:<identifier> <generation> --start <json> [--duration-ms <ms>]` | local 显式声明 | `ui.gesture.pressHold` | 当前入口 |
 | `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | local 显式声明 | `ui.reveal` | 当前入口 |
-| `patchbay ui perform set-text target:<id> <generation> [text]` | local 显式声明 | `ui.text.set` | 当前入口 |
 | `patchbay ui perform tap semantics:<identifier> <generation> --via <semantics\|pointer> [--start <json>]` | local 显式声明 | `ui.gesture.tap` / `ui.semantics.tap` | 当前入口 |
 | `patchbay ui render-tree [--output <path>] [--force] [--max-inline-bytes <n>]` | client 显式声明 | — | 当前入口 |
 | `patchbay ui reveal <identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]` | 协议 descriptor | `ui.reveal` | 0.6.0 deprecated；改用 `patchbay ui perform reveal semantics:<identifier> [--container <identifier>] [--direction <forward\|backward\|both>] [--max-steps <n>] [--timeout-ms <ms>]`；1.0 删除 |
@@ -160,7 +159,7 @@ help topic 接受三种写法：CLI 路径（`ui wait`）、catalog 协议名（
 | `patchbay ui tap <identifier> [--generation <generation>]` | 协议 descriptor | `ui.semantics.tap` | 0.6.0 deprecated；改用 `patchbay ui perform tap semantics:<identifier> <generation> --via semantics`；1.0 删除 |
 | `patchbay ui targets --emit-manifest` | local 显式声明 | — | 当前入口 |
 | `patchbay ui text enter <target-id> <generation> [text]` | 协议 descriptor | `ui.text.enter` | 0.6.0 deprecated；改用 `patchbay ui perform enter-text target:<id> <generation> [text]`；1.0 删除 |
-| `patchbay ui text set <target-id> <generation> [text]` | 协议 descriptor | `ui.text.set` | 0.6.0 deprecated；改用 `patchbay ui perform set-text target:<id> <generation> [text]`；1.0 删除 |
+| `patchbay ui text set <target-id> <generation> [text]` | 协议 descriptor | `ui.text.set` | 0.6.0 deprecated；改用 `patchbay ui perform enter-text target:<id> <generation> [text]`；1.0 删除 |
 | `patchbay ui verify-manifest <manifest-file> [--navigate] [--continue-on-error] [--restore]` | local 显式声明 | — | 当前入口 |
 | `patchbay ui wait destination <destination-id>` | 协议 descriptor | `ui.wait` | 当前入口 |
 | `patchbay ui wait frame-revision <revision>` | 协议 descriptor | `ui.wait` | 当前入口 |

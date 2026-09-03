@@ -112,25 +112,18 @@ final class PatchbayUiCommandMigration {
 
 /// The single source for canonical UI routes and old-entry migration text.
 abstract final class PatchbayCanonicalUiRegistry {
-  static const PatchbayCanonicalUiCommandSpec setText =
-      PatchbayCanonicalUiCommandSpec(
-        name: 'canonicalUiPerformSetText',
-        action: 'set-text',
-        summary: 'Replace text through an explicit registered target.',
-        usageSuffix: 'target:<id> <generation> [text]',
-        routes: <PatchbayCanonicalUiRoute>[
-          PatchbayCanonicalUiRoute(
-            selectorKind: PatchbayUiSelectorKind.target,
-            executionPath: PatchbayUiExecutionPath.directTarget,
-            serviceCommand: 'ui.text.set',
-          ),
-        ],
-      );
+  // `set-text` is deliberately absent. `ui.text.set` writes the controller
+  // without running inputFormatters or onChanged, and nothing in the name
+  // says so; a consumer reached for it first and watched their form stay
+  // disabled. The canonical family keeps the one spelling that behaves like
+  // input. The wire command and the deprecated `ui text set` remain until 1.0.
   static const PatchbayCanonicalUiCommandSpec enterText =
       PatchbayCanonicalUiCommandSpec(
         name: 'canonicalUiPerformEnterText',
         action: 'enter-text',
-        summary: 'Enter text through an explicit registered target.',
+        summary:
+            'Enter text through an explicit registered target; runs its '
+            'inputFormatters and onChanged.',
         usageSuffix: 'target:<id> <generation> [text]',
         routes: <PatchbayCanonicalUiRoute>[
           PatchbayCanonicalUiRoute(
@@ -252,7 +245,6 @@ abstract final class PatchbayCanonicalUiRegistry {
 
   static const List<PatchbayCanonicalUiCommandSpec> commands =
       <PatchbayCanonicalUiCommandSpec>[
-        setText,
         enterText,
         tap,
         action,
@@ -264,9 +256,12 @@ abstract final class PatchbayCanonicalUiRegistry {
 
   static const List<PatchbayUiCommandMigration> migrations =
       <PatchbayUiCommandMigration>[
+        // Points at enter-text on purpose: that is the write a caller almost
+        // always meant. The controller-only write keeps its deprecated
+        // spelling until 1.0 and has no canonical entry.
         PatchbayUiCommandMigration(
           legacyPath: <String>['ui', 'text', 'set'],
-          replacement: 'ui perform set-text target:<id> <generation> [text]',
+          replacement: 'ui perform enter-text target:<id> <generation> [text]',
         ),
         PatchbayUiCommandMigration(
           legacyPath: <String>['ui', 'text', 'enter'],
