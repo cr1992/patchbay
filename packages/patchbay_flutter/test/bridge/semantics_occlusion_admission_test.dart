@@ -457,18 +457,45 @@ void main() {
     });
 
     test('nothing awaits between the re-check and performAction', () {
-      // 复核结论只对这一次派发有效。一个 await 落在这两行之间，结论就可能
+      // 复核结论只对这一次派发有效。一个 await 落在这两步之间，结论就可能
       // 在派发前失效，而本闸没有 bypass 可救。这条断言是结构性的，因为
       // 「门后没有让步点」用行为测试造不出确定性的反例。
-      final String source = File(
+      //
+      // PB-050-38 把管线拆成阶段之后，这段「无让步点」跨了两个文件，于是断言
+      // 也拆成三段：桥里从遮挡准入调用到派发调用、遮挡准入本身是同步的、派发
+      // 阶段从函数体开始到 performAction。三段合起来仍然覆盖原来那一段。
+      final String bridge = File(
         'lib/src/semantics/semantics_bridge.dart',
       ).readAsStringSync();
-      final int gate = source.indexOf('if (action._isPointLike) {');
-      final int dispatch = source.indexOf('owner.performAction(');
-      expect(gate, greaterThan(0));
-      expect(dispatch, greaterThan(gate));
+      final int revalidate = bridge.indexOf('patchbaySemanticsRevalidate(');
+      final int fence = bridge.indexOf('patchbaySemanticsOcclusionFence(');
+      final int perform = bridge.indexOf('patchbaySemanticsPerformAction(');
+      expect(revalidate, greaterThan(0));
+      expect(fence, greaterThan(revalidate));
+      expect(perform, greaterThan(fence));
+      final String orchestration = bridge.substring(fence, perform);
+      expect(orchestration, isNot(contains('await ')));
+      expect(orchestration, isNot(contains('yield ')));
 
-      final String between = source.substring(gate, dispatch);
+      final String stage = File(
+        'lib/src/semantics/semantics_dispatch_stage.dart',
+      ).readAsStringSync();
+      final int fenceBody = stage.indexOf(
+        'PatchbayInvocation? patchbaySemanticsOcclusionFence(',
+      );
+      final int performBody = stage.indexOf(
+        'Future<PatchbayInvocation> patchbaySemanticsPerformAction(',
+      );
+      final int dispatch = stage.indexOf('owner.performAction(');
+      expect(fenceBody, greaterThan(0));
+      expect(performBody, greaterThan(fenceBody));
+      expect(dispatch, greaterThan(performBody));
+      // 遮挡准入必须是同步函数：它的整段声明里不得出现 await。
+      expect(
+        stage.substring(fenceBody, performBody),
+        isNot(contains('await ')),
+      );
+      final String between = stage.substring(performBody, dispatch);
       expect(between, isNot(contains('await ')));
       expect(between, isNot(contains('yield ')));
     });

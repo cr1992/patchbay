@@ -1,67 +1,34 @@
-import 'dart:ui' show Tristate;
-
+// `ui.semantics.*` 的公共门面与准入管线编排。
+//
+// PB-050-38：这个文件只留三件事——对外的命令入口、语义树的采样与代际账本、以及
+// 把准入阶段按冻结顺序串起来。每个阶段本身住在自己的文件里，可以脱离本桥单独
+// 构造、单独失败注入、单独回退：
+//
+// - `semantics_resolve_stage.dart`：identifier / nodeId 两条路径的目标解析；
+// - `semantics_preflight_stage.dart`：生命周期围栏与 gate 求值；
+// - `semantics_policy_stage.dart`：门前 policy 与门后二次复核；
+// - `semantics_dispatch_stage.dart`：遮挡准入与实际派发；
+// - `semantics_evidence.dart`：拒绝 `details` 与 accepted 载荷的投影；
+// - `semantics_action_taxonomy.dart`：两处封闭的 action 分类。
+//
+// 阶段顺序是 DG-060-04 冻结的口径，`_dispatch` 只负责按那个顺序走一遍，不再自己
+// 决定任何一步长什么样。
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:patchbay/patchbay_host.dart';
 import 'package:patchbay/patchbay_protocol.dart';
 
 import '../frame_observer.dart';
 import '../lifecycle.dart';
-import '../occlusion/occlusion_probe.dart';
+import 'semantics_action_taxonomy.dart';
+import 'semantics_dispatch_stage.dart';
+import 'semantics_evidence.dart';
 import 'semantics_models.dart';
-
-/// PB-050-16 / DG-050-09：点性 action 的封闭分类。
-///
-/// 判据：真实用户对应物是一次落在目标边界内单点上的指针接触——有指针对应物、
-/// 对应物是单点而不是路径或方向、覆盖该点即改变真实用户的可达性，三条同时
-/// 成立才算点性。`tap` 与 `longPress` 是单点 down/(hold)/up；`focus` 与
-/// `setText` 没有位置对应物；`scroll*` 的对应物是拖动，部分覆盖也应可滚动；
-/// `showOnScreen` 按定义要在目标尚不可达时工作；其余是纯辅助功能语义。
-/// `longPress` 还不在 0.5.0 的公开 allowlist 内，提前分类只为它将来进
-/// allowlist 时按构造继承本闸。
-///
-/// 穷尽 switch、**无 `default` 分支**：`PatchbaySemanticsAction` 新增值时
-/// 编译期就必须显式分类，而不是靠后来的记忆。库私有 extension，不构成公共
-/// API 成员。
-extension on PatchbaySemanticsAction {
-  bool get _isPointLike => switch (this) {
-    PatchbaySemanticsAction.tap => true,
-    PatchbaySemanticsAction.longPress => true,
-    PatchbaySemanticsAction.focus => false,
-    PatchbaySemanticsAction.dismiss => false,
-    PatchbaySemanticsAction.showOnScreen => false,
-    PatchbaySemanticsAction.scrollUp => false,
-    PatchbaySemanticsAction.scrollDown => false,
-    PatchbaySemanticsAction.scrollLeft => false,
-    PatchbaySemanticsAction.scrollRight => false,
-    PatchbaySemanticsAction.increase => false,
-    PatchbaySemanticsAction.decrease => false,
-    PatchbaySemanticsAction.expand => false,
-    PatchbaySemanticsAction.collapse => false,
-    PatchbaySemanticsAction.setText => false,
-  };
-
-  bool get _isPublicIdentifierAction => switch (this) {
-    PatchbaySemanticsAction.tap ||
-    PatchbaySemanticsAction.focus ||
-    PatchbaySemanticsAction.scrollUp ||
-    PatchbaySemanticsAction.scrollDown ||
-    PatchbaySemanticsAction.scrollLeft ||
-    PatchbaySemanticsAction.scrollRight ||
-    PatchbaySemanticsAction.setText => true,
-    PatchbaySemanticsAction.longPress ||
-    PatchbaySemanticsAction.dismiss ||
-    PatchbaySemanticsAction.showOnScreen ||
-    PatchbaySemanticsAction.increase ||
-    PatchbaySemanticsAction.decrease ||
-    PatchbaySemanticsAction.expand ||
-    PatchbaySemanticsAction.collapse => false,
-  };
-}
+import 'semantics_policy_stage.dart';
+import 'semantics_preflight_stage.dart';
+import 'semantics_resolve_stage.dart';
 
 /// 读取「当前 semantics owner」的来源。见 [debugPatchbaySemanticsOwnerSource]。
 typedef PatchbaySemanticsOwnerSource = SemanticsOwner? Function();
@@ -120,6 +87,22 @@ final class PatchbaySemanticsBridge {
   final bool Function() _isAppResumed;
   final PatchbayLifecycleStateReader _lifecycleState;
   final String Function() _newRequestId;
+
+  /// 生命周期围栏阶段。桥只提供两个接缝，判据住在阶段里。
+  late final PatchbaySemanticsLifecycleFence _fence =
+      PatchbaySemanticsLifecycleFence(
+        isAppResumed: _isAppResumed,
+        lifecycleState: _lifecycleState,
+      );
+
+  /// 目标解析阶段。owner、代际账本与树版本号都以接缝注入，阶段自己不持有状态。
+  late final PatchbaySemanticsTargetResolver _resolver =
+      PatchbaySemanticsTargetResolver(
+        ensureOwner: () => ensureOwner(),
+        observe: observe,
+        entryFor: (int nodeId) => _entries[nodeId],
+        treeRevision: () => _treeRevision,
+      );
 
   SemanticsHandle? _semanticsHandle;
   SemanticsOwner? _owner;
@@ -210,17 +193,14 @@ final class PatchbaySemanticsBridge {
         ),
       );
     }
-    final PatchbayGateRejection? gate = await _gates.evaluate(const <String>{});
-    if (gate != null) return _gateRejected(id, gate);
-    if (!_isAppResumed()) {
-      return PatchbayInvocation.rejected(
-        requestId: id,
-        rejection: PatchbayRejection(
-          code: 'uiLifecycleNotResumed',
-          details: patchbayLifecycleDetails(_lifecycleState),
-        ),
-      );
-    }
+    final PatchbayInvocation? gate = await patchbaySemanticsGateFence(
+      _gates,
+      requestId: id,
+      gateIds: const <String>{},
+    );
+    if (gate != null) return gate;
+    final PatchbayInvocation? lifecycle = _fence.evaluate(id);
+    if (lifecycle != null) return lifecycle;
 
     final SemanticsOwner? owner = await ensureOwner();
     final SemanticsNode? root = owner?.rootSemanticsNode;
@@ -254,8 +234,11 @@ final class PatchbaySemanticsBridge {
     action: action,
     text: text,
     inputWasStdin: inputWasStdin,
-    resolve: (int? _) =>
-        _resolve(nodeId: nodeId, generation: generation, action: action),
+    resolve: (int? _) => _resolver.byNodeId(
+      nodeId: nodeId,
+      generation: generation,
+      action: action,
+    ),
   );
 
   /// Resolves a stable Semantics [identifier] and dispatches one public
@@ -272,7 +255,7 @@ final class PatchbaySemanticsBridge {
     final List<String> invalid = <String>[
       if (identifier.isEmpty) 'identifier',
       if (generation < 0) 'generation',
-      if (!action._isPublicIdentifierAction) 'action',
+      if (!action.isPublicIdentifierAction) 'action',
     ];
     if (invalid.isNotEmpty) {
       return Future<PatchbayInvocation>.value(
@@ -294,7 +277,7 @@ final class PatchbaySemanticsBridge {
       identifier: identifier,
       text: text,
       inputWasStdin: inputWasStdin,
-      resolve: (int? pinnedGeneration) => _resolveIdentifier(
+      resolve: (int? pinnedGeneration) => _resolver.byIdentifier(
         identifier: identifier,
         expectedGeneration: pinnedGeneration ?? generation,
         action: action,
@@ -329,7 +312,7 @@ final class PatchbaySemanticsBridge {
       requestId: id,
       action: PatchbaySemanticsAction.tap,
       identifier: identifier,
-      resolve: (int? pinnedGeneration) => _resolveIdentifier(
+      resolve: (int? pinnedGeneration) => _resolver.byIdentifier(
         identifier: identifier,
         expectedGeneration: pinnedGeneration ?? expectedGeneration,
         action: PatchbaySemanticsAction.tap,
@@ -338,6 +321,13 @@ final class PatchbaySemanticsBridge {
   }
 
   /// Shared admission pipeline for every Semantics action.
+  ///
+  /// 顺序是冻结的，本方法只做编排：policy 存在性 → base gate → 生命周期围栏 →
+  /// 解析目标 → 门前 policy（含文本与敏感输入判据）→ 声明门 → 生命周期围栏 →
+  /// **再解析一次** → 门后复核 → 遮挡准入 → 派发。
+  ///
+  /// 「再解析、再决策」不是冗余：声明门的 `await` 是现场唯一能变的窗口，门前的
+  /// 结论过了那个窗口就不再权威。
   Future<PatchbayInvocation> _dispatch({
     required String requestId,
     required PatchbaySemanticsAction action,
@@ -355,337 +345,81 @@ final class PatchbaySemanticsBridge {
         rejection: const PatchbayRejection(code: 'uiSemanticsActionsDisabled'),
       );
     }
-    final PatchbayGateRejection? baseGate = await _gates.evaluate(
-      const <String>{},
+    final PatchbayInvocation? baseGate = await patchbaySemanticsGateFence(
+      _gates,
+      requestId: id,
+      gateIds: const <String>{},
     );
-    if (baseGate != null) return _gateRejected(id, baseGate);
-    if (!_isAppResumed()) {
-      return PatchbayInvocation.rejected(
-        requestId: id,
-        rejection: PatchbayRejection(
-          code: 'uiLifecycleNotResumed',
-          details: patchbayLifecycleDetails(_lifecycleState),
-        ),
-      );
-    }
+    if (baseGate != null) return baseGate;
+    final PatchbayInvocation? preflight = _fence.evaluate(id);
+    if (preflight != null) return preflight;
 
     PatchbaySemanticsResolution resolution = await resolve(null);
-    if (!resolution.resolved) return _resolutionRejected(id, resolution);
+    if (!resolution.resolved) {
+      return patchbaySemanticsResolutionRejected(id, resolution);
+    }
     final int pinnedGeneration = resolution.target!.generation;
 
-    PatchbaySemanticsActionDecision decision = policy(
-      resolution.target!,
-      action,
-    );
-    if (!decision.allowed) return _policyRejected(id, decision);
-    final Set<String> initialGateIds = Set<String>.of(decision.gateIds);
-    var sensitive = resolution.target!.obscured || decision.sensitiveInput;
-    final bool initialSensitiveInput = decision.sensitiveInput;
-    if (action == PatchbaySemanticsAction.setText) {
-      if (text == null) {
-        return PatchbayInvocation.rejected(
+    final PatchbaySemanticsPolicyAdmission admission =
+        patchbaySemanticsAdmitPolicy(
           requestId: id,
-          rejection: const PatchbayRejection(code: 'uiSemanticsTextRequired'),
+          policy: policy,
+          target: resolution.target!,
+          action: action,
+          text: text,
+          inputWasStdin: inputWasStdin,
         );
-      }
-      if (sensitive && !inputWasStdin) {
-        return PatchbayInvocation.rejected(
-          requestId: id,
-          rejection: const PatchbayRejection(
-            code: 'sensitiveInputRequiresStdin',
-          ),
-        );
-      }
-    } else if (text != null) {
-      return PatchbayInvocation.rejected(
-        requestId: id,
-        rejection: const PatchbayRejection(code: 'uiSemanticsUnexpectedText'),
-      );
-    }
+    if (!admission.admitted) return admission.rejection!;
 
-    final PatchbayGateRejection? gate = await _gates.evaluate(decision.gateIds);
-    if (gate != null) return _gateRejected(id, gate);
-    if (!_isAppResumed()) {
-      return PatchbayInvocation.rejected(
-        requestId: id,
-        rejection: PatchbayRejection(
-          code: 'uiLifecycleNotResumed',
-          details: patchbayLifecycleDetails(_lifecycleState),
-        ),
-      );
-    }
+    final PatchbayInvocation? declaredGate = await patchbaySemanticsGateFence(
+      _gates,
+      requestId: id,
+      gateIds: admission.gateIds,
+    );
+    if (declaredGate != null) return declaredGate;
+    final PatchbayInvocation? postGateFence = _fence.evaluate(id);
+    if (postGateFence != null) return postGateFence;
 
     resolution = await resolve(pinnedGeneration);
-    if (!resolution.resolved) return _resolutionRejected(id, resolution);
-    decision = policy(resolution.target!, action);
-    if (!decision.allowed) return _policyRejected(id, decision);
-    if (!setEquals(initialGateIds, decision.gateIds) ||
-        initialSensitiveInput != decision.sensitiveInput) {
-      return PatchbayInvocation.rejected(
-        requestId: id,
-        rejection: const PatchbayRejection(code: 'uiSemanticsPolicyChanged'),
-      );
-    }
-    sensitive = sensitive || resolution.target!.obscured;
-    if (action == PatchbaySemanticsAction.setText &&
-        sensitive &&
-        !inputWasStdin) {
-      return PatchbayInvocation.rejected(
-        requestId: id,
-        rejection: const PatchbayRejection(code: 'sensitiveInputRequiresStdin'),
-      );
-    }
+    final PatchbaySemanticsRevalidation revalidated =
+        patchbaySemanticsRevalidate(
+          requestId: id,
+          policy: policy,
+          action: action,
+          admitted: admission,
+          resolution: resolution,
+          inputWasStdin: inputWasStdin,
+        );
+    if (!revalidated.admitted) return revalidated.rejection!;
 
     final SemanticsOwner owner = resolution.owner!;
     final int nodeId = resolution.target!.nodeId;
     final int generation = resolution.target!.generation;
-    // PB-050-16 / DG-050-09：点性 action 的固定采样遮挡准入。位置是冻结的
-    // ——门后二次 policy 与敏感输入复核之后、`performAction` 之前，全程只有
-    // 这一处（门前的判定不权威：声明 gate 的 await 恰恰是覆盖层出现的窗口）。
-    // **复核与派发之间不得存在任何 await/yield**：两者必须在同一微任务内，用
-    // 同一次 resolve 得到的 owner/节点。结论只对这一次派发有效，不缓存、不跨调
-    // 用复用，也不因为遮挡而重解析、等待或重试（写操作不重放）。
-    if (action._isPointLike) {
-      final String? obscuredReason = patchbaySampledOcclusionReason(
-        owner: owner,
-        node: resolution.node!,
-      );
-      if (obscuredReason != null) {
-        return PatchbayInvocation.rejected(
-          requestId: id,
-          rejection: PatchbayRejection(
-            code: 'uiSemanticsTargetObscured',
-            details: <String, Object?>{
-              'reason': obscuredReason,
-              'nodeId': nodeId,
-              'generation': generation,
-              'identifier': ?identifier,
-            },
-          ),
-        );
-      }
-    }
-
-    final int beforeRevision = _treeRevision;
-    try {
-      owner.performAction(
-        nodeId,
-        action.flutterAction,
-        action == PatchbaySemanticsAction.setText ? text : null,
-      );
-      SchedulerBinding.instance.scheduleFrame();
-      await SchedulerBinding.instance.endOfFrame;
-      _refreshOwner();
-      return PatchbayInvocation.accepted(
-        requestId: id,
-        payload: <String, Object?>{
-          'outcome': 'dispatched',
-          'source': PatchbayFactSource.uiObserved.name,
-          'identifier': ?identifier,
-          'nodeId': nodeId,
-          'generation': generation,
-          'action': action.name,
-          'beforeTreeRevision': beforeRevision,
-          'afterTreeRevision': _treeRevision,
-          if (action == PatchbaySemanticsAction.setText)
-            if (sensitive) ...<String, Object?>{
-              'valueRedacted': true,
-              'length': text!.length,
-            } else ...<String, Object?>{'length': text!.length},
-        },
-      );
-    } catch (error) {
-      return PatchbayInvocation.accepted(
-        requestId: id,
-        payload: <String, Object?>{
-          'outcome': 'failed',
-          'source': PatchbayFactSource.uiObserved.name,
-          'identifier': ?identifier,
-          'nodeId': nodeId,
-          'generation': generation,
-          'action': action.name,
-          'failureType': error.runtimeType.toString(),
-        },
-      );
-    }
-  }
-
-  static const int _maxReportedIdentifiers = 20;
-
-  Future<PatchbaySemanticsResolution> _resolveIdentifier({
-    required String identifier,
-    required int? expectedGeneration,
-    required PatchbaySemanticsAction action,
-  }) async {
-    final SemanticsOwner? owner = await ensureOwner();
-    final SemanticsNode? root = owner?.rootSemanticsNode;
-    if (owner == null || root == null) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsUnavailable',
-        details: <String, Object?>{'identifier': identifier},
-      );
-    }
-
-    final List<SemanticsNode> matches = <SemanticsNode>[];
-    final Set<String> mounted = <String>{};
-    void visit(SemanticsNode node) {
-      final SemanticsData data = node.getSemanticsData();
-      if (data.identifier.isNotEmpty) mounted.add(data.identifier);
-      if (data.identifier == identifier) matches.add(node);
-      node.visitChildren((SemanticsNode child) {
-        visit(child);
-        return true;
-      });
-    }
-
-    visit(root);
-
-    if (matches.isEmpty) {
-      final List<String> reported = mounted.toList()..sort();
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsIdentifierNotFound',
-        details: <String, Object?>{
-          'identifier': identifier,
-          'treeRevision': _treeRevision,
-          'matchCount': 0,
-          'mountedIdentifierCount': reported.length,
-          'mountedIdentifiers': reported
-              .take(_maxReportedIdentifiers)
-              .toList(growable: false),
-          'mountedIdentifiersTruncated':
-              reported.length > _maxReportedIdentifiers,
-        },
-      );
-    }
-    if (matches.length > 1) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsIdentifierAmbiguous',
-        details: <String, Object?>{
-          'identifier': identifier,
-          'treeRevision': _treeRevision,
-          'matchCount': matches.length,
-          'candidates': <Object?>[
-            for (final SemanticsNode node in matches)
-              _candidate(node, node.getSemanticsData()),
-          ],
-        },
-      );
-    }
-
-    final SemanticsNode node = matches.single;
-    final PatchbaySemanticsEntry entry = observe(node);
-    if (expectedGeneration != null && entry.generation != expectedGeneration) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsGenerationStale',
-        details: <String, Object?>{
-          'identifier': identifier,
-          'nodeId': node.id,
-          'expectedGeneration': expectedGeneration,
-          'currentGeneration': entry.generation,
-        },
-      );
-    }
-    final SemanticsData data = node.getSemanticsData();
-    if (node.isInvisible || node.areUserActionsBlocked) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsActionBlocked',
-        details: _candidate(node, data),
-      );
-    }
-    if (!data.hasAction(action.flutterAction)) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsActionUnavailable',
-        details: <String, Object?>{
-          ..._candidate(node, data),
-          'requestedAction': action.name,
-        },
-      );
-    }
-    return PatchbaySemanticsResolution.resolved(
-      owner,
-      _target(node, entry.generation, data),
-      node,
+    // 复核与派发之间**不得存在任何 await/yield**：遮挡准入是同步的，
+    // `patchbaySemanticsPerformAction` 的 `performAction` 在第一个 `await` 之前，
+    // 因此两者与上面这次 resolve 处在同一个微任务里。
+    final PatchbayInvocation? obscured = patchbaySemanticsOcclusionFence(
+      requestId: id,
+      action: action,
+      owner: owner,
+      node: resolution.node!,
+      nodeId: nodeId,
+      generation: generation,
+      identifier: identifier,
     );
-  }
+    if (obscured != null) return obscured;
 
-  Map<String, Object?> _candidate(SemanticsNode node, SemanticsData data) {
-    final bool obscured = data.flagsCollection.isObscured;
-    return <String, Object?>{
-      'nodeId': node.id,
-      'generation': observe(node).generation,
-      if (obscured) 'labelRedacted': true else 'label': data.label,
-      'actions': <String>[
-        for (final PatchbaySemanticsAction candidate
-            in PatchbaySemanticsAction.values)
-          if (data.hasAction(candidate.flutterAction)) candidate.name,
-      ]..sort(),
-      // Only nodes that declare an enabled state carry the key: a plain label
-      // has no such fact, and inventing `true` for it would let a caller read
-      // "enabled" where Flutter never said so.
-      if (data.flagsCollection.isEnabled != Tristate.none)
-        'enabled': data.flagsCollection.isEnabled == Tristate.isTrue,
-      'invisible': node.isInvisible,
-      'userActionsBlocked': node.areUserActionsBlocked,
-    };
-  }
-
-  Future<PatchbaySemanticsResolution> _resolve({
-    required int nodeId,
-    required int generation,
-    required PatchbaySemanticsAction action,
-  }) async {
-    final SemanticsOwner? owner = await ensureOwner();
-    final SemanticsNode? root = owner?.rootSemanticsNode;
-    if (owner == null || root == null) {
-      return const PatchbaySemanticsResolution.rejected(
-        'uiSemanticsUnavailable',
-      );
-    }
-    final SemanticsNode? node = _findNode(root, nodeId);
-    if (node == null) {
-      return const PatchbaySemanticsResolution.rejected(
-        'uiSemanticsNodeNotFound',
-      );
-    }
-    final PatchbaySemanticsEntry? entry = _entries[nodeId];
-    if (entry == null || entry.node.target == null) {
-      return const PatchbaySemanticsResolution.rejected(
-        'uiSemanticsNodeNotObserved',
-      );
-    }
-    if (entry.generation != generation || !identical(entry.node.target, node)) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsGenerationStale',
-        details: <String, Object?>{
-          'nodeId': nodeId,
-          'expectedGeneration': generation,
-          'currentGeneration': entry.generation,
-        },
-      );
-    }
-    // From here the nodeId path answers with the same candidate details as
-    // the identifier path: a caller who chose a node by id gets told why that
-    // node cannot take the action, not just that it cannot.
-    final SemanticsData data = node.getSemanticsData();
-    if (node.isInvisible || node.areUserActionsBlocked) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsActionBlocked',
-        details: _candidate(node, data),
-      );
-    }
-    if (!data.hasAction(action.flutterAction)) {
-      return PatchbaySemanticsResolution.rejected(
-        'uiSemanticsActionUnavailable',
-        details: <String, Object?>{
-          ..._candidate(node, data),
-          'requestedAction': action.name,
-        },
-      );
-    }
-    return PatchbaySemanticsResolution.resolved(
-      owner,
-      _target(node, entry.generation, data),
-      node,
+    return patchbaySemanticsPerformAction(
+      requestId: id,
+      owner: owner,
+      action: action,
+      nodeId: nodeId,
+      generation: generation,
+      sensitive: revalidated.sensitive,
+      treeRevision: () => _treeRevision,
+      refreshOwner: _refreshOwner,
+      identifier: identifier,
+      text: text,
     );
   }
 
@@ -911,69 +645,6 @@ final class PatchbaySemanticsBridge {
       children: childIds,
     );
   }
-
-  static PatchbaySemanticsTarget _target(
-    SemanticsNode node,
-    int generation,
-    SemanticsData data,
-  ) => PatchbaySemanticsTarget(
-    nodeId: node.id,
-    generation: generation,
-    identifier: data.identifier,
-    label: data.label,
-    flags: Set<String>.unmodifiable(data.flagsCollection.toStrings()),
-    actions:
-        Set<PatchbaySemanticsAction>.unmodifiable(<PatchbaySemanticsAction>{
-          for (final PatchbaySemanticsAction action
-              in PatchbaySemanticsAction.values)
-            if (data.hasAction(action.flutterAction)) action,
-        }),
-    obscured: data.flagsCollection.isObscured,
-  );
-
-  static SemanticsNode? _findNode(SemanticsNode root, int id) {
-    if (root.id == id) return root;
-    SemanticsNode? found;
-    root.visitChildren((SemanticsNode child) {
-      found = _findNode(child, id);
-      return found == null;
-    });
-    return found;
-  }
-
-  static PatchbayInvocation _gateRejected(
-    String requestId,
-    PatchbayGateRejection gate,
-  ) => PatchbayInvocation.rejected(
-    requestId: requestId,
-    rejection: PatchbayRejection(
-      code: gate.code,
-      notice: gate.notice,
-      details: <String, Object?>{'gateId': gate.gateId},
-    ),
-  );
-
-  static PatchbayInvocation _resolutionRejected(
-    String requestId,
-    PatchbaySemanticsResolution resolution,
-  ) => PatchbayInvocation.rejected(
-    requestId: requestId,
-    rejection: PatchbayRejection(
-      code: resolution.code!,
-      details: resolution.details,
-    ),
-  );
-
-  static PatchbayInvocation _policyRejected(
-    String requestId,
-    PatchbaySemanticsActionDecision decision,
-  ) => PatchbayInvocation.rejected(
-    requestId: requestId,
-    rejection: PatchbayRejection(
-      code: decision.rejectionCode!,
-      notice: decision.rejectionNotice,
-    ),
-  );
 
   void dispose() {
     if (_disposed) return;
