@@ -4,7 +4,6 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter_host.dart';
-import 'package:patchbay/patchbay_protocol.dart';
 
 final class RecordingDelegate {
   RecordingDelegate({this.failOn, this.before});

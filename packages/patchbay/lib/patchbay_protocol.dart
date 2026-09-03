@@ -1,15 +1,18 @@
 /// Patchbay 的 protocol / wire implementer 入口（PB-060-02 / DG-060-02）。
 ///
-/// 内容是生成的 `*Wire` 类型、catalog capability 与 digest、CLI syntax 词汇、
-/// permission companion 协议、client 侧请求类型，以及 canonical protocol command
-/// descriptor。写第三方 transport、复刻 CLI 行为或直接构造 wire 文档时用它。
+/// 内容是生成的 `*Wire` 类型、catalog capability 与 digest、CLI syntax 词汇、permission
+/// companion 协议、client 侧请求类型，以及 canonical protocol command descriptor。写第三方
+/// transport、复刻 CLI 行为或直接构造 wire 文档时用它。
 ///
-/// 本 library 与默认 consumer 面、host 面都不相交：它既不 re-export
-/// `package:patchbay/patchbay.dart`，也不 re-export
-/// `package:patchbay/patchbay_host.dart`。需要多个角色就写多个显式 import。
+/// 它同样是自足闭包：canonical descriptor 常量的类型是 `PatchbayCommandDescriptor`，所以
+/// descriptor / schema 这一组 consumer 类型也在本清单里。**本入口与默认 consumer 入口有意
+/// 重叠**——重叠的是两个闭包都真正需要的类型，不是把默认面整库带过来。同时 import 两个入口
+/// 不会冲突。
 ///
-/// 这里的类型跟着 wire 走：字段与 JSON 形态由协议决定，不是给业务代码当 DTO 用的
-/// 便利类型。
+/// 本 library 不 re-export host 面：`PatchbayServiceHost`、audit 与 invocation lifecycle
+/// 只在 `package:patchbay/patchbay_host.dart`。
+///
+/// 这里的类型跟着 wire 走：字段与 JSON 形态由协议决定，不是给业务代码当 DTO 用的便利类型。
 library;
 
 export 'src/audit.dart' show patchbayParameterShape;
@@ -24,7 +27,14 @@ export 'src/command_descriptor.dart'
         PatchbayCliArtifactDisposition,
         PatchbayCliEqualsCondition,
         PatchbayCliInputMode,
-        PatchbayCliSyntax;
+        PatchbayCliSyntax,
+        PatchbayCommandDescriptor,
+        PatchbayCommandMode,
+        PatchbayParameterDescriptor,
+        PatchbayParameterType,
+        PatchbayRetryPolicy;
+export 'src/execution_evidence.dart' show PatchbayExecutionContract;
+export 'src/facts.dart' show PatchbayFactSource;
 export 'src/features.dart' show PatchbayFeature;
 export 'src/generated/core_wire.g.dart'
     show
@@ -125,6 +135,11 @@ export 'src/protocol_commands.dart'
         patchbayNavigationGoCommandDescriptor,
         patchbayNavigationPushCommandDescriptor,
         patchbayProtocolCliCommandDescriptors;
+export 'src/response_schema.dart'
+    show
+        PatchbayResponseSchema,
+        PatchbayResponseType,
+        PatchbayResponseValueSchema;
 export 'src/snapshot.dart'
     show
         PatchbaySnapshotCondition,
@@ -133,6 +148,7 @@ export 'src/snapshot.dart'
         PatchbaySnapshotRequest,
         PatchbaySnapshotSelection,
         patchbayJsonEquals;
+export 'src/ui_descriptor.dart' show PatchbayPlane, PatchbaySideEffect;
 export 'src/ui_protocol_commands.dart'
     show
         patchbayUiCaptureCommandDescriptor,

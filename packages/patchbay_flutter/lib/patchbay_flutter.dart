@@ -1,27 +1,36 @@
 /// Patchbay 的默认 Flutter 入口（PB-060-02 / DG-060-02）。
 ///
-/// widget 文件只需要这一个 import：core 的默认 consumer 清单，加上四个 widget 侧
-/// 自有符号 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController` 与
-/// `PatchbayUiRegistry`。
+/// widget 文件只需要这一个 import：core 的默认 consumer 清单，加上四个 widget 侧自有符号
+/// `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController` 与 `PatchbayUiRegistry`。
 ///
-/// service host、bridge、policy、inspector、lifecycle、navigation、gesture、
-/// semantics、reveal 与 capture 都是组合根的事，走
-/// `package:patchbay_flutter/patchbay_flutter_host.dart`；它是本清单与 core host
-/// 清单的严格超集，因此组合根只需要那一个 import。
+/// service host、bridge、policy、inspector、lifecycle、navigation、gesture、semantics、
+/// reveal 与 capture 都是组合根的事，走
+/// `package:patchbay_flutter/patchbay_flutter_host.dart`；它是本清单与 core host 清单的
+/// 严格超集，因此组合根只需要那一个 import。
 ///
-/// 本 library 不再整库 re-export `package:patchbay/patchbay.dart`：raw wire 与
-/// host lifecycle 不从最常用的入口泄漏出去。
+/// 本 library 不再整库 re-export `package:patchbay/patchbay.dart`：host lifecycle 与
+/// 与业务无关的 raw wire 不从最常用的入口泄漏出去。它同样受
+/// `tool/check_api_closure.dart` 的自足约束。
 library;
 
 export 'package:patchbay/patchbay.dart'
     show
         PatchbayArtifactService,
         PatchbayBaseGate,
+        PatchbayBlobChunkWire,
         PatchbayBlobFailure,
         PatchbayBlobFailureCode,
+        PatchbayBlobMetadataWire,
+        PatchbayBlobSourceWire,
+        PatchbayCancellationConfirmation,
+        PatchbayCancellationSignal,
         PatchbayCatalogProvider,
         PatchbayCatalogSample,
         PatchbayCatalogSource,
+        PatchbayCliArtifactDisposition,
+        PatchbayCliEqualsCondition,
+        PatchbayCliInputMode,
+        PatchbayCliSyntax,
         PatchbayCommandDecoder,
         PatchbayCommandDescriptor,
         PatchbayCommandFailureHandler,
@@ -31,13 +40,20 @@ export 'package:patchbay/patchbay.dart'
         PatchbayCommandRegistration,
         PatchbayCommandRegistry,
         PatchbayConsumerGate,
+        PatchbayContextCommandHandler,
         PatchbayDestinationDescriptor,
+        PatchbayDestinationDescriptorWire,
         PatchbayExecutionClassification,
         PatchbayExecutionContract,
         PatchbayFactSource,
+        PatchbayFactSourceWire,
         PatchbayGateDecision,
         PatchbayGateEvaluator,
         PatchbayGateRejection,
+        PatchbayInvocationCancellationReason,
+        PatchbayInvocationCancellationSignal,
+        PatchbayInvocationContext,
+        PatchbayInvocationDeadline,
         PatchbayJobBody,
         PatchbayJobCancelOutcome,
         PatchbayJobCancellation,
@@ -50,16 +66,21 @@ export 'package:patchbay/patchbay.dart'
         PatchbayJobSnapshot,
         PatchbayJobWaitOutcome,
         PatchbayJobWaitResult,
+        PatchbayLogDirectionWire,
+        PatchbayLogLevelWire,
         PatchbayLogPage,
         PatchbayLogPageState,
         PatchbayLogQuery,
         PatchbayLogRecordTooLarge,
+        PatchbayLogRecordWire,
         PatchbayLogRedactionFailure,
+        PatchbayLogRedactionWire,
         PatchbayLogSource,
         PatchbayLogSourceContractFailure,
         PatchbayMemoryBlobStore,
         PatchbayNavigationObservation,
         PatchbayNavigationOperation,
+        PatchbayNavigationOperationWire,
         PatchbayParameterDescriptor,
         PatchbayParameterType,
         PatchbayPlane,

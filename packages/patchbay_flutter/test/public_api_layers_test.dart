@@ -2,12 +2,15 @@
 //
 // 与 `packages/patchbay/test/public_api_layers_test.dart` 同一套机制：正向把整份
 // golden 清单写进一条 `import ... show ...` 让编译器逐名复核，反向直接引用别的角色
-// 的符号让分析器拒绝。这里额外要证明的是两条 Flutter 侧的裁决：
+// 的符号让分析器拒绝。反向断言按**加引号的精确名**匹配 analyzer 消息，避免
+// `PatchbayInvocation` 被 `'PatchbayInvocationWire'` 的消息顺手满足。
 //
-// - 默认面 `patchbay_flutter.dart` 只多出四个 widget 侧符号，service host、bridge
-//   与 policy 都不在；
-// - `patchbay_flutter_host.dart` 是 core host 面与 Flutter 自有全集的并集，但仍然
-//   不 re-export protocol。
+// 这里额外要证明的是两条 Flutter 侧的裁决：
+//
+// - 默认面 `patchbay_flutter.dart` 只比 core 默认面多出四个 widget 侧符号，service
+//   host、bridge 与 policy 都不在；
+// - `patchbay_flutter_host.dart` 是 core host 面与 Flutter 自有全集的超集，但仍然
+//   不 re-export 完整 protocol 面（只按自足闭包带上 bridge 签名真正用到的那几个）。
 //
 // `flutter test` 跑在 `flutter_tester` 里，所以 `Platform.resolvedExecutable` 不是
 // dart——分析器可执行文件从 `FLUTTER_ROOT` 取。
@@ -41,10 +44,11 @@ Map<String, List<String>> _goldenLibraries(String root, String package) {
   final byLibrary = decoded[package]! as Map<String, Object?>;
   return <String, List<String>>{
     for (final entry in byLibrary.entries)
-      entry.key: <String>[
-        for (final Object? name in entry.value! as List<Object?>)
-          name.toString(),
-      ],
+      if (entry.key != 'internal')
+        entry.key: <String>[
+          for (final Object? name in entry.value! as List<Object?>)
+            name.toString(),
+        ],
   };
 }
 
@@ -53,6 +57,8 @@ final class _Analysis {
 
   final int exitCode;
   final String output;
+
+  bool mentions(String symbol) => output.contains("'$symbol'");
 }
 
 Future<_Analysis> _analyzeFixture(
@@ -123,7 +129,7 @@ void main() {
     }, timeout: const Timeout(Duration(minutes: 3)));
 
     test(
-      '默认 Flutter 面看不见 service host、bridge、policy 与 raw wire',
+      '默认 Flutter 面看不见 service host、bridge、policy 与 host lifecycle',
       () async {
         final _Analysis analysis = await _analyzeFixture(
           dart!,
@@ -133,21 +139,25 @@ void main() {
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
 void main() {
-  // 正向：widget 文件真正需要的四个符号在这里。
+  // 正向：widget 文件真正需要的四个符号，加上 core 默认面。
   print(PatchbayKey);
   print(PatchbayRoot);
   print(PatchbayRootController);
   print(PatchbayUiRegistry);
+  print(PatchbayCommandRegistry);
+  print(PatchbayLogSource);
   // 反向：组合根才该看见的东西。
   PatchbayFlutterServiceHost host;
   PatchbayFlutterBridge bridge;
   PatchbayRevealPolicy reveal;
   PatchbaySemanticsActionPolicy semantics;
   PatchbayGesturePolicy gesture;
+  PatchbaySemanticsEntry entry;
   PatchbayServiceHost core;
   PatchbayInvocation invocation;
-  // 反向：raw wire 不从最常用的入口泄漏。
+  // 反向：与业务签名无关的 raw wire 不从最常用的入口泄漏。
   PatchbayInvocationWire wire;
+  PatchbayCatalogDigest digest;
 }
 ''',
         );
@@ -159,24 +169,29 @@ void main() {
           'PatchbayRevealPolicy',
           'PatchbaySemanticsActionPolicy',
           'PatchbayGesturePolicy',
+          'PatchbaySemanticsEntry',
           'PatchbayServiceHost',
           'PatchbayInvocation',
           'PatchbayInvocationWire',
+          'PatchbayCatalogDigest',
         ]) {
           expect(
-            analysis.output,
-            contains(symbol),
+            analysis.mentions(symbol),
+            isTrue,
             reason: '$symbol 必须无法从默认 Flutter 入口解析',
           );
         }
         for (final String symbol in const <String>[
           'PatchbayKey',
           'PatchbayRoot',
+          'PatchbayRootController',
           'PatchbayUiRegistry',
+          'PatchbayCommandRegistry',
+          'PatchbayLogSource',
         ]) {
           expect(
-            analysis.output,
-            isNot(contains(symbol)),
+            analysis.mentions(symbol),
+            isFalse,
             reason: '$symbol 是 widget 文件的默认词汇，必须留在默认面',
           );
         }
@@ -185,7 +200,7 @@ void main() {
     );
 
     test(
-      'Flutter host 面覆盖 core host，但仍不 re-export protocol',
+      'Flutter host 面覆盖 core host，但不 re-export 完整 protocol 面',
       () async {
         final _Analysis analysis = await _analyzeFixture(
           dart!,
@@ -195,15 +210,19 @@ void main() {
 import 'package:patchbay_flutter/patchbay_flutter_host.dart';
 
 void main() {
-  // 正向：组合根只要这一个 import 就够——widget 词汇、Flutter host 与 core host
-  // 都在。
+  // 正向：组合根只要这一个 import 就够——widget 词汇、Flutter host、core host，
+  // 以及 bridge 签名真正需要的那几个 wire/wait 类型。
   print(PatchbayRoot);
   print(PatchbayFlutterServiceHost);
   print(PatchbayServiceHost);
   print(PatchbayCommandRegistry);
-  // 反向：raw wire 仍然要显式再 import protocol 入口。
+  print(PatchbaySemanticsEntry);
+  print(PatchbayUiWaitRequest);
+  print(PatchbayFeature);
+  // 反向：完整 protocol 面仍要显式再 import protocol 入口。
   PatchbayInvocationWire wire;
   PatchbayCatalogDigest digest;
+  PatchbaySnapshotRequest request;
 }
 ''',
         );
@@ -212,10 +231,11 @@ void main() {
         for (final String symbol in const <String>[
           'PatchbayInvocationWire',
           'PatchbayCatalogDigest',
+          'PatchbaySnapshotRequest',
         ]) {
           expect(
-            analysis.output,
-            contains(symbol),
+            analysis.mentions(symbol),
+            isTrue,
             reason: '$symbol 必须留在 protocol 入口',
           );
         }
@@ -224,11 +244,14 @@ void main() {
           'PatchbayFlutterServiceHost',
           'PatchbayServiceHost',
           'PatchbayCommandRegistry',
+          'PatchbaySemanticsEntry',
+          'PatchbayUiWaitRequest',
+          'PatchbayFeature',
         ]) {
           expect(
-            analysis.output,
-            isNot(contains(symbol)),
-            reason: 'Flutter host 面必须同时覆盖默认面与 core host 面',
+            analysis.mentions(symbol),
+            isFalse,
+            reason: 'Flutter host 面必须同时覆盖默认面、core host 面与自足闭包',
           );
         }
       },

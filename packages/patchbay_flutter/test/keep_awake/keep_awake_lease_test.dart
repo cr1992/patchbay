@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter_host.dart';
-import 'package:patchbay/patchbay_protocol.dart';
 
 import '../fixture/keep_awake_fixtures.dart';
 

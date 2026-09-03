@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:developer';
 
 import 'package:patchbay/patchbay_host.dart';
-import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay/src/host/host_snapshot.dart';
 import 'package:patchbay/src/host/snapshot_payload.dart';
 import 'package:test/test.dart';

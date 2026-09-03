@@ -1,17 +1,18 @@
 /// Patchbay 的 Flutter host 入口（PB-060-02 / DG-060-02）。
 ///
-/// 组合根用它：core 的 host 清单（默认 consumer 面加 host lifecycle）加上
-/// `patchbay_flutter` 的全部自有符号 —— `PatchbayFlutterServiceHost`、
-/// `PatchbayFlutterBridge`、inspector / navigation / gesture / semantics /
-/// reveal / capture / keep-awake bridge 与它们的 policy。
+/// 组合根用它：core 的 host 清单（默认 consumer 面加 host lifecycle）、
+/// `patchbay_flutter` 的全部自有符号（`PatchbayFlutterServiceHost`、
+/// `PatchbayFlutterBridge`、inspector / navigation / gesture / semantics / reveal /
+/// capture / keep-awake bridge 与它们的 policy），以及这些 bridge 的公共签名真正需要的那
+/// 一小组 wire 与 wait 类型。
 ///
-/// 它是 `package:patchbay_flutter/patchbay_flutter.dart` 的严格超集，所以
-/// `main.dart` 这类装配文件只写这一个 import 即可；widget 文件继续只 import 默认
-/// 面，让「这个文件能不能碰 host」在 import 行上一眼可读。
+/// 它是 `package:patchbay_flutter/patchbay_flutter.dart` 的严格超集，所以 `main.dart`
+/// 这类装配文件只写这一个 import 即可；widget 文件继续只 import 默认面，让「这个文件能不能
+/// 碰 host」在 import 行上一眼可读。
 ///
-/// 需要直接读写 raw wire 时再显式加 `package:patchbay/patchbay_protocol.dart`；
-/// 本 library 不 re-export protocol，也不存在
-/// `patchbay_flutter_protocol.dart`。
+/// 需要完整 protocol 面（全部 71 个 `*Wire`、digest、permission companion）时再显式加
+/// `package:patchbay/patchbay_protocol.dart`；本 library 只按自足闭包带上它用得到的那几个，
+/// 也不存在 `patchbay_flutter_protocol.dart`。
 library;
 
 export 'package:patchbay/patchbay_host.dart'
@@ -26,13 +27,20 @@ export 'package:patchbay/patchbay_host.dart'
         PatchbayAuditSink,
         PatchbayAuditSinkErrorHandler,
         PatchbayBaseGate,
+        PatchbayBlobChunkWire,
         PatchbayBlobFailure,
         PatchbayBlobFailureCode,
+        PatchbayBlobMetadataWire,
+        PatchbayBlobSourceWire,
         PatchbayCancellationConfirmation,
         PatchbayCancellationSignal,
         PatchbayCatalogProvider,
         PatchbayCatalogSample,
         PatchbayCatalogSource,
+        PatchbayCliArtifactDisposition,
+        PatchbayCliEqualsCondition,
+        PatchbayCliInputMode,
+        PatchbayCliSyntax,
         PatchbayCommandDecoder,
         PatchbayCommandDescriptor,
         PatchbayCommandFailureHandler,
@@ -45,11 +53,14 @@ export 'package:patchbay/patchbay_host.dart'
         PatchbayContextCommandHandler,
         PatchbayContextInvocationSource,
         PatchbayDestinationDescriptor,
+        PatchbayDestinationDescriptorWire,
         PatchbayExecutionClassification,
         PatchbayExecutionContract,
         PatchbayExecutionValidationResult,
         PatchbayExtensionRegistrar,
         PatchbayFactSource,
+        PatchbayFactSourceWire,
+        PatchbayFeature,
         PatchbayGateDecision,
         PatchbayGateEvaluator,
         PatchbayGateRejection,
@@ -77,17 +88,22 @@ export 'package:patchbay/patchbay_host.dart'
         PatchbayJobSnapshot,
         PatchbayJobWaitOutcome,
         PatchbayJobWaitResult,
+        PatchbayLogDirectionWire,
+        PatchbayLogLevelWire,
         PatchbayLogPage,
         PatchbayLogPageState,
         PatchbayLogQuery,
         PatchbayLogRecordTooLarge,
+        PatchbayLogRecordWire,
         PatchbayLogRedactionFailure,
+        PatchbayLogRedactionWire,
         PatchbayLogSource,
         PatchbayLogSourceContractFailure,
         PatchbayMemoryBlobStore,
         PatchbayMonotonicClock,
         PatchbayNavigationObservation,
         PatchbayNavigationOperation,
+        PatchbayNavigationOperationWire,
         PatchbayParameterDescriptor,
         PatchbayParameterType,
         PatchbayPlane,
@@ -137,6 +153,19 @@ export 'package:patchbay/patchbay_host.dart'
         validatePatchbayResponsePayload,
         validatePatchbayResponseSchema,
         validatePatchbayTerminalPayload;
+
+export 'package:patchbay/patchbay_protocol.dart'
+    show
+        PatchbayCaptureDiffRequestWire,
+        PatchbayCaptureRequestWire,
+        PatchbayInspectSelectRequestWire,
+        PatchbayInspectUnavailableWire,
+        PatchbayKeepAwakeRequestWire,
+        PatchbayRevealDirectionWire,
+        PatchbayUiWaitCondition,
+        PatchbayUiWaitConditionWire,
+        PatchbayUiWaitRequest,
+        PatchbayUiWaitRequestWire;
 
 export 'src/flutter_bridge.dart'
     show
@@ -194,6 +223,7 @@ export 'src/semantics_bridge.dart'
         PatchbaySemanticsActionDecision,
         PatchbaySemanticsActionPolicy,
         PatchbaySemanticsBridge,
+        PatchbaySemanticsEntry,
         PatchbaySemanticsIdentifierMatch,
         PatchbaySemanticsIdentifierObservation,
         PatchbaySemanticsTarget;

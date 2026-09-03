@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_flutter/patchbay_flutter_host.dart';
 
 import 'example_app.dart';

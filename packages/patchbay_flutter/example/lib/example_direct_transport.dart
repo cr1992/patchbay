@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:patchbay_flutter/patchbay_flutter_host.dart';
-import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_transport/patchbay_transport.dart';
 
 /// Serves the **same** host dispatch over the optional direct HTTP transport.
