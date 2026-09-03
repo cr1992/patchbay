@@ -239,6 +239,21 @@ to perform the same bounded drain while closing the host-owned delivery resource
 expose only recursive JSON types, object keys, and coarse length buckets; scalar values and the
 internal argument digest never leave the host.
 
+`ui.reveal` declares a `responseSchema` for its accepted payload (`steps`, and `containers` entries
+carrying a `nodeId`; every other frozen key stays on the lenient read surface through an explicit
+`additionalProperties`). That command therefore reports `schemaMode: validated` rather than
+`legacyUnvalidated`, and a provider answer missing or mistyping those two fields is a stable
+`providerProtocolViolation` on both the host and the CLI side. The catalog key is additive: the
+digest still covers `["commands"]` and an older CLI ignores it.
+
+An accepted `ui.reveal` response that has passed that schema and the projector's semantic invariants
+additionally projects `executionDetails.reveal` (`steps` 0–200, at most 200 distinct
+`containerNodeIds` in first-drive order, empty exactly when `steps` is 0 — never identifier, rect,
+generation, or policy text) into the audit event. Every other command, a rejection, a provider
+violation, and any out-of-bound or invariant-violating projection all omit the whole
+`executionDetails` block instead of truncating it; the latter is also reported through the existing
+`onAuditSinkError` observer as `PatchbayAuditExecutionDetailsProjectionDefect`.
+
 All registry and external invocations share `maxConcurrentInvocations` (default 8, range 1–256).
 Existing `invoke` handlers remain valid; cancellation returns a typed rejection but keeps capacity
 until that handler settles. A consumer that can prove its underlying work stopped may instead use

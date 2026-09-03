@@ -1,6 +1,7 @@
 import 'command_descriptor.dart';
 import 'facts.dart';
 import 'output_projection.dart';
+import 'response_schema.dart';
 import 'ui_descriptor.dart';
 
 const _uiFacts = <PatchbayFactSource>{PatchbayFactSource.uiObserved};
@@ -36,6 +37,7 @@ PatchbayCommandDescriptor _ui(
   Set<String> gates = const {},
   PatchbayOutputProjection? outputProjection,
   PatchbayInteractionModel? interactionModel,
+  PatchbayResponseSchema? responseSchema,
 }) => PatchbayCommandDescriptor(
   name: name,
   summary: summary,
@@ -48,6 +50,7 @@ PatchbayCommandDescriptor _ui(
   gates: gates,
   outputProjection: outputProjection,
   interactionModel: interactionModel,
+  responseSchema: responseSchema,
 );
 
 final patchbayUiTextSetCommandDescriptor = _textDescriptor(
@@ -447,6 +450,56 @@ final patchbayUiRevealCommandDescriptor = _ui(
       positiveParameters: <String>{'maxSteps', 'timeoutMs'},
     ),
   ],
+  responseSchema: _revealResponseSchema,
+);
+
+/// PB-050-26 / DG-060-04：`ui.reveal` 受理 payload 的**部分**声明。
+///
+/// 裁决要求 core host 只从「已通过 response schema 与语义校验」的应答投影
+/// `executionDetails`。没有这份声明，`host_invoker` 会按 `legacyUnvalidated`
+/// 原样受理，前提永远不成立，投影器自己的边界检查就成了唯一守门——那和冻结的
+/// 契约不是同一件事。
+///
+/// 只声明投影真正依赖的两个字段：顶层 `steps`（integer）与 `containers`
+/// （array of object，每项含 integer `nodeId`）。0.5.0 冻结的受理 payload 还有
+/// `outcome` / `source` / `identifier` / `elapsedMs` / `nodeId` / `generation` /
+/// `reachability` / `beforeTreeRevision` / `afterTreeRevision` / `reason` /
+/// `failureType` / `gateId` / `gateCode`，以及 `containers[]` 里的 `generation`
+/// / `steps` / `direction` / `extentGrowthSteps`；这些键**按 DG-050-10 的
+/// revealed / failed 两种形状按需出现**，用一份静态 schema 表达就要么把
+/// 「revealed 不得出现 reason」这类互斥变体钉进 wire，要么把可选键写成
+/// nullable 而失去「不得出现」的语义。因此这里显式开放
+/// `additionalProperties`——0.4.0 command-contracts 为这种「确需开放扩展」预留的
+/// 正是这个开关——让未声明键继续走松读面，schema 只承担「投影读的两个字段确实
+/// 是它们该有的类型」这一件事，语义不变式（`steps == 0 ⇒ containers 为空`、
+/// nodeId 去重与范围）留在 host 投影器里按 defect 通道处理。
+///
+/// 后果是 `ui.reveal` 的 `schemaMode` 自本版起为 `validated`（逐命令，不是逐
+/// host）：`steps` / `containers` 缺失或类型错误从此是 `providerProtocolViolation`
+/// 而不是被静默受理。老 CLI 忽略目录里这个 additive 键，`catalogDigest` 的
+/// `covers` 不变。
+const PatchbayResponseSchema _revealResponseSchema = PatchbayResponseSchema(
+  accepted: PatchbayResponseValueSchema(
+    type: PatchbayResponseType.object,
+    properties: <String, PatchbayResponseValueSchema>{
+      'steps': PatchbayResponseValueSchema(type: PatchbayResponseType.integer),
+      'containers': PatchbayResponseValueSchema(
+        type: PatchbayResponseType.array,
+        items: PatchbayResponseValueSchema(
+          type: PatchbayResponseType.object,
+          properties: <String, PatchbayResponseValueSchema>{
+            'nodeId': PatchbayResponseValueSchema(
+              type: PatchbayResponseType.integer,
+            ),
+          },
+          required: <String>{'nodeId'},
+          additionalProperties: true,
+        ),
+      ),
+    },
+    required: <String>{'steps', 'containers'},
+    additionalProperties: true,
+  ),
 );
 
 final patchbayUiWaitCommandDescriptor = _ui(

@@ -17,6 +17,11 @@ void main() {
           'sideEffect',
           'factSources',
           'gates',
+          // PB-050-26 / DG-060-04：`ui.reveal` 起，协议自有命令也可以声明
+          // `responseSchema`。它和 cliSyntax 相反——本就是协议面字段，且是
+          // 可选的，所以按 descriptor 是否声明纳入期望键集，而不是放宽成
+          // 「包含即可」。
+          if (descriptor.responseSchema != null) 'responseSchema',
           'parameters',
           // 执行证据契约的线上字段，随 !62 进入 main：与 cliSyntax 不同，它
           // 本就属于协议面，所以出现在这里是对的。

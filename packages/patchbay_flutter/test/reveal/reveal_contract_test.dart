@@ -311,6 +311,12 @@ void main() {
       );
       bridge.semantics.dispose();
 
+      // PB-050-26 / DG-060-04：`ui.reveal` 自本版起声明 responseSchema，因此
+      // core host 真的跑了响应校验。这一条断言的是**真实 bridge 的 revealed
+      // payload 通过了那份声明**，不是又一次形状快照——声明如果收得比冻结形状
+      // 紧，这里会变成 providerProtocolViolation 而不是 accepted。
+      expect(response['admission'], 'accepted');
+      expect(response['schemaMode'], 'validated');
       final Map<String, Object?> payload =
           response['payload']! as Map<String, Object?>;
       expect(payload.keys.toList(), <String>[
@@ -381,6 +387,10 @@ void main() {
       bridge.semantics.dispose();
 
       expect(response['admission'], 'accepted');
+      // failed 一侧的键集与 revealed 不同（无 reachability，多 reason）。同一份
+      // 声明必须同时受理两侧，否则 PB-050-26 的 schema 就把 0.5.0 冻结的失败
+      // 形状判成了 provider 违规。
+      expect(response['schemaMode'], 'validated');
       final Map<String, Object?> payload =
           response['payload']! as Map<String, Object?>;
       expect(payload['outcome'], 'failed');

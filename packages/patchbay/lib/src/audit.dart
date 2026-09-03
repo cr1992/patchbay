@@ -62,6 +62,7 @@ final class PatchbayAuditEvent {
     required this.executionClassification,
     this.admissionStage,
     this.gateDisposition,
+    this.executionDetails,
   });
 
   final String command;
@@ -82,6 +83,10 @@ final class PatchbayAuditEvent {
   /// One of [patchbayAuditGateDispositions], or null on a host that predates it.
   final String? gateDisposition;
 
+  /// Host-only projection of confirmed execution facts, or null when it does
+  /// not apply. See [PatchbayAuditExecutionDetails]. PB-050-26 / DG-060-04.
+  final PatchbayAuditExecutionDetails? executionDetails;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'command': command,
     'requestId': requestId,
@@ -92,8 +97,99 @@ final class PatchbayAuditEvent {
     'executionClassification': executionClassification,
     if (admissionStage != null) 'admissionStage': admissionStage,
     if (gateDisposition != null) 'gateDisposition': gateDisposition,
+    if (executionDetails != null)
+      'executionDetails': executionDetails!.toJson(),
   };
 }
+
+/// Host-only, additive projection of confirmed execution facts for one
+/// accepted command. PB-050-26 / DG-060-04.
+///
+/// Nested under a command-family key (`reveal` today) so a future command
+/// can gain its own projection without another [PatchbayAuditEvent] field.
+/// Absence — at either this level or [PatchbayAuditRevealExecutionDetails]'s
+/// — always means "not applicable", never "zero facts confirmed": a
+/// rejected invocation, a non-`ui.reveal` command, a host that predates this
+/// field, and an out-of-bounds projection all omit the whole block the same
+/// way.
+final class PatchbayAuditExecutionDetails {
+  const PatchbayAuditExecutionDetails({this.reveal});
+
+  final PatchbayAuditRevealExecutionDetails? reveal;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    if (reveal != null) 'reveal': reveal!.toJson(),
+  };
+}
+
+/// `steps` and the driven container node ids for one accepted `ui.reveal`
+/// call. PB-050-26 / DG-060-04.
+///
+/// Projected only from a response that already passed schema and semantic
+/// validation, and only the closed shape DG-060-04 fixed: no generation,
+/// identifier, rect, copy, or policy text crosses into audit. [steps] is
+/// `0..200`; [containerNodeIds] holds at most 200 distinct non-negative ids
+/// in the order containers were first driven, and is empty exactly when
+/// [steps] is 0.
+final class PatchbayAuditRevealExecutionDetails {
+  const PatchbayAuditRevealExecutionDetails({
+    required this.steps,
+    required this.containerNodeIds,
+  });
+
+  final int steps;
+  final List<int> containerNodeIds;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'steps': steps,
+    'containerNodeIds': containerNodeIds,
+  };
+}
+
+/// Closed reasons [PatchbayAuditExecutionDetailsProjectionDefect] reports.
+///
+/// A host never writes these into [PatchbayAuditEvent] itself — they only
+/// label why `executionDetails` came back `null` for a response that
+/// otherwise looked like an accepted `ui.reveal` result.
+const Set<String> patchbayAuditExecutionDetailsDefectReasons = <String>{
+  'stepsOutOfRange',
+  'containerNodeIdsTooLong',
+  'containersPresentWithZeroSteps',
+  'containerNodeIdInvalid',
+  'containerNodeIdDuplicated',
+};
+
+/// Reports that an accepted `ui.reveal` response could not be safely
+/// projected into [PatchbayAuditEvent.executionDetails].
+///
+/// The accompanying event's `executionDetails` is always `null` when this
+/// fires: the projector omits the whole block rather than truncate an
+/// out-of-bounds value and report it as if it were complete. [reason] is one
+/// of [patchbayAuditExecutionDetailsDefectReasons].
+final class PatchbayAuditExecutionDetailsProjectionDefect implements Exception {
+  const PatchbayAuditExecutionDetailsProjectionDefect({
+    required this.command,
+    required this.requestId,
+    required this.reason,
+  });
+
+  final String command;
+  final String requestId;
+  final String reason;
+
+  @override
+  String toString() =>
+      'PatchbayAuditExecutionDetailsProjectionDefect('
+      'command: $command, requestId: $requestId, reason: $reason)';
+}
+
+/// Signature for [patchbayProjectAuditEvent]'s `onExecutionDetailsDefect`
+/// callback: fired with one of [patchbayAuditExecutionDetailsDefectReasons]
+/// when a recognisably reveal-shaped accepted response violates a closed
+/// DG-060-04 bound. The projected event always omits `executionDetails` in
+/// that case regardless of whether a callback is supplied.
+typedef PatchbayAuditExecutionDetailsDefectHandler =
+    void Function(String reason);
 
 typedef PatchbayAuditSink = FutureOr<void> Function(PatchbayAuditEvent event);
 
@@ -200,6 +296,7 @@ PatchbayAuditEvent patchbayProjectAuditEvent({
   required Map<String, Object?> response,
   String? admissionStage,
   String? gateDisposition,
+  PatchbayAuditExecutionDetailsDefectHandler? onExecutionDetailsDefect,
 }) => PatchbayAuditEvent(
   command: command,
   requestId: requestId,
@@ -208,7 +305,99 @@ PatchbayAuditEvent patchbayProjectAuditEvent({
   executionClassification: patchbayAuditExecutionClassification(response),
   admissionStage: admissionStage,
   gateDisposition: gateDisposition,
+  executionDetails: _projectExecutionDetails(
+    command: command,
+    response: response,
+    onDefect: onExecutionDetailsDefect,
+  ),
 );
+
+/// The closed step and container-count ceiling DG-060-04 fixed for
+/// [PatchbayAuditRevealExecutionDetails] — the same hard budget the Flutter
+/// side enforces as `PatchbayRevealBudget.maxSteps`, restated here because
+/// this package does not depend on that one.
+const int _revealExecutionDetailsMaxSteps = 200;
+const int _revealExecutionDetailsMaxContainerNodeIds = 200;
+
+/// Projects [PatchbayAuditEvent.executionDetails] from an already-served
+/// response, or `null` when it does not apply.
+///
+/// PB-050-26 / DG-060-04: only `ui.reveal`, only an `accepted` admission.
+/// DG-060-04 conditions the projection on a payload that already passed
+/// response-schema validation, and `ui.reveal` declares that schema
+/// (`patchbayUiRevealCommandDescriptor`), so on a production catalog a
+/// non-integer `steps` or a non-array `containers` is already a
+/// `providerProtocolViolation` and never reaches here at all. What is left
+/// for this function is the *semantic* half the schema cannot express:
+/// closed numeric bounds, `steps == 0 ⇒ containers empty`, and
+/// first-driven-order node ids being distinct.
+///
+/// Reads structurally so a malformed payload never throws. [onDefect] fires
+/// (with the block still coming back `null`) only when the shape is
+/// recognisably a reveal result but violates one of those closed bounds;
+/// every other reason the block does not apply (wrong command, rejected,
+/// absent or mistyped fields on a host that declared no schema) stays
+/// silent, because those are legitimate "not applicable" facts rather than a
+/// host-side defect.
+PatchbayAuditExecutionDetails? _projectExecutionDetails({
+  required String command,
+  required Map<String, Object?> response,
+  required PatchbayAuditExecutionDetailsDefectHandler? onDefect,
+}) {
+  if (command != 'ui.reveal') return null;
+  if (response['admission'] != 'accepted') return null;
+  final Object? payload = response['payload'];
+  if (payload is! Map<Object?, Object?>) return null;
+  final Object? rawSteps = payload['steps'];
+  final Object? rawContainers = payload['containers'];
+  // Defensive floor only: the declared schema rejects both of these upstream
+  // on any catalog that carries `ui.reveal`'s descriptor. Staying silent here
+  // keeps a schema-less host — a hand-built catalog row, or a future host
+  // that drops the declaration — from being reported as a projection defect
+  // for something that is really a missing declaration.
+  if (rawSteps is! int || rawContainers is! List<Object?>) return null;
+
+  if (rawSteps < 0 || rawSteps > _revealExecutionDetailsMaxSteps) {
+    onDefect?.call('stepsOutOfRange');
+    return null;
+  }
+  if (rawContainers.length > _revealExecutionDetailsMaxContainerNodeIds) {
+    onDefect?.call('containerNodeIdsTooLong');
+    return null;
+  }
+  // DG-060-04 fixes the list as empty exactly when `steps` is 0. A container
+  // element is appended on its first dispatch, so containers without a single
+  // step is not a shape the engine can produce.
+  if (rawSteps == 0 && rawContainers.isNotEmpty) {
+    onDefect?.call('containersPresentWithZeroSteps');
+    return null;
+  }
+  final List<int> containerNodeIds = <int>[];
+  final Set<int> seen = <int>{};
+  for (final Object? container in rawContainers) {
+    final Object? nodeId = container is Map<Object?, Object?>
+        ? container['nodeId']
+        : null;
+    if (nodeId is! int || nodeId < 0) {
+      onDefect?.call('containerNodeIdInvalid');
+      return null;
+    }
+    // DG-060-04 fixes the list as first-driven order; a container is appended
+    // once, so the same node id cannot legitimately appear twice. Projecting
+    // it anyway would publish a step distribution nothing produced.
+    if (!seen.add(nodeId)) {
+      onDefect?.call('containerNodeIdDuplicated');
+      return null;
+    }
+    containerNodeIds.add(nodeId);
+  }
+  return PatchbayAuditExecutionDetails(
+    reveal: PatchbayAuditRevealExecutionDetails(
+      steps: rawSteps,
+      containerNodeIds: List<int>.unmodifiable(containerNodeIds),
+    ),
+  );
+}
 
 /// Produces a recursively redacted JSON shape without retaining scalar values.
 Map<String, Object?> patchbayParameterShape(Map<String, Object?> arguments) =>

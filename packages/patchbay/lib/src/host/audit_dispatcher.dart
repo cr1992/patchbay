@@ -174,6 +174,16 @@ final class AuditDispatcher {
     );
   }
 
+  /// Reports a defect through the same observer as delivery failures,
+  /// without touching delivery state — the defect is about how [event] was
+  /// built (PB-050-26's `executionDetails` projection), not about whether it
+  /// reaches the sink.
+  void reportProjectionDefect(
+    Object error,
+    StackTrace stackTrace,
+    PatchbayAuditEvent event,
+  ) => _report(error, stackTrace, event);
+
   void _report(Object error, StackTrace stackTrace, PatchbayAuditEvent event) {
     final PatchbayAuditSinkErrorHandler? observer = _onError;
     if (observer == null) return;
