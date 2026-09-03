@@ -239,6 +239,13 @@ to perform the same bounded drain while closing the host-owned delivery resource
 expose only recursive JSON types, object keys, and coarse length buckets; scalar values and the
 internal argument digest never leave the host.
 
+An accepted `ui.reveal` response that has already passed response schema and semantic validation
+additionally projects `executionDetails.reveal` (`steps` 0–200, at most 200 `containerNodeIds` in
+first-drive order — never identifier, rect, generation, or policy text) into the audit event. Every
+other command, a rejection, a provider violation, and an out-of-bound projection all omit the whole
+`executionDetails` block instead of truncating it; an out-of-bound value is also reported through the
+existing `onAuditSinkError` observer as `PatchbayAuditExecutionDetailsProjectionDefect`.
+
 All registry and external invocations share `maxConcurrentInvocations` (default 8, range 1–256).
 Existing `invoke` handlers remain valid; cancellation returns a typed rejection but keeps capacity
 until that handler settles. A consumer that can prove its underlying work stopped may instead use

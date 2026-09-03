@@ -13,6 +13,7 @@ import '../invocation.dart';
 import '../invocation_cancellation.dart';
 import '../response_schema.dart';
 import 'audit_dispatcher.dart';
+import 'audit_execution_details.dart';
 import 'host_catalog.dart';
 import 'host_models.dart';
 import 'invocation_coordinator.dart';
@@ -687,7 +688,8 @@ final class HostInvokerHandler {
     String admissionStage = 'dispatch',
     String gateDisposition = 'notReached',
   }) {
-    final PatchbayAuditEvent event = patchbayProjectAuditEvent(
+    final PatchbayAuditEvent event = projectAuditEventAndReportDefects(
+      dispatcher: _auditDispatcher,
       command: command,
       requestId: requestId,
       arguments: arguments,
