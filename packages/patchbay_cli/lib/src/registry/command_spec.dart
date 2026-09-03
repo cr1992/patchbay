@@ -1,6 +1,8 @@
 import 'package:patchbay/patchbay.dart';
 import 'package:patchbay/patchbay_protocol.dart';
 
+import 'output_projection_declarations.dart';
+
 enum PatchbayArtifactDisposition {
   none,
   payloadBlob,
@@ -25,19 +27,22 @@ abstract interface class PatchbayFriendlyCommandSpec {
   PatchbayCommandDescriptor? get protocolDescriptor;
   PatchbayCliSyntax? get protocolSyntax;
 
-  /// The dot path to this command's one unbounded response member; `null`
-  /// means it does not participate in local-artifact spilling.
+  /// The restricted path to this command's one unbounded response member;
+  /// `null` means it does not participate in local-artifact spilling.
   ///
   /// Only meaningful when [artifact] is
-  /// [PatchbayArtifactDisposition.renderedMember]. The path is declared
-  /// against the document this command would otherwise print, e.g.
-  /// `payload.nodes` for `ui semantics tree` or `data` for the Flutter
-  /// diagnostic tree passthroughs.
+  /// [PatchbayArtifactDisposition.renderedMember]. PB-050-40 made this a
+  /// derived reading of the command's `outputProjection`, so it is now a
+  /// restricted projection path against the document this command would
+  /// otherwise print — `$.payload.nodes` for `ui semantics tree`, `$.data`
+  /// for the Flutter diagnostic tree passthroughs — rather than a bare dot
+  /// path maintained beside the disposition.
   String? get spilledMember;
 }
 
 /// Generated protocol command adapter implementing [PatchbayFriendlyCommandSpec].
-final class GeneratedProtocolCommand implements PatchbayFriendlyCommandSpec {
+final class GeneratedProtocolCommand
+    implements PatchbayFriendlyCommandSpec, PatchbayLocallyProjectedCommand {
   const GeneratedProtocolCommand({
     required this.descriptor,
     required this.serviceName,
@@ -66,51 +71,34 @@ final class GeneratedProtocolCommand implements PatchbayFriendlyCommandSpec {
   @override
   String get summary => syntax.summary;
 
-  /// F8 (PB-050-20 follow-up): `ui semantics tree` accepts `--output`,
-  /// `--force` and `--max-inline-bytes` exactly the way the plain
-  /// `uiWidgetTree`/`uiRenderTree`/`uiFocusTree` declarations in
+  /// F8 (PB-050-20 follow-up): a spelling that spills a rendered member
+  /// accepts `--output`, `--force` and `--max-inline-bytes` exactly the way
+  /// the `uiWidgetTree`/`uiRenderTree`/`uiFocusTree` declarations in
   /// `friendly_commands.dart` do — `friendly_command_registry.dart`'s
-  /// `allowedOptions` already grants all three whenever [artifact] is
-  /// `renderedMember` — but the wire-declared `syntax.usageSuffix` has no way
-  /// to know about this CLI-only PB-050-20 decision, the same reason
-  /// [artifact] below cannot live on the wire descriptor either. This
-  /// literal is deliberately kept identical to those three siblings' own
-  /// `usageSuffix` so a `--help ui semantics tree` line reads the same way
-  /// theirs does.
+  /// `allowedOptions` grants all three whenever [artifact] is
+  /// `renderedMember` — but the wire-declared `syntax.usageSuffix` cannot know
+  /// which rendering the CLI will pick. PB-050-40 keys this off the resolved
+  /// disposition rather than off the literal service name it used to compare
+  /// against, so `ui semantics tree` reads its declaration like every other
+  /// command instead of being a name special case.
   @override
   String get usageSuffix {
-    if (serviceName == _renderedMemberServiceCommand) {
+    if (artifact == PatchbayArtifactDisposition.renderedMember) {
       return '[--output <path>] [--force] [--max-inline-bytes <n>]';
     }
     return syntax.usageSuffix;
   }
 
-  /// PB-050-20: `ui semantics tree`'s only reachable CLI declaration is this
-  /// generated wrapper. `PatchbayFriendlyCommand.uiSemanticsTree` is a
-  /// `.compatibilityFrozen` stub, and `_patchbayFriendlyCommands` filters
-  /// every stub out before path matching ever runs, so `renderedMember`
-  /// cannot live on the friendly enum entry the way it does for
-  /// `ui widget-tree` / `render-tree` / `focus-tree` (plain, non-stub
-  /// declarations). The wire descriptor's own `cliSyntax.artifactDisposition`
-  /// deliberately stays `none` — this is a CLI-only rendering decision, not a
-  /// protocol change (see docs/proposals/0.5.0/tree-artifact-output.md,
-  /// "判定位置：CLI 侧", reason 4).
-  static const String _renderedMemberServiceCommand = 'ui.semantics.tree';
-  static const String _renderedMemberSpilledMember = 'payload.nodes';
+  /// PB-050-40: a generated spelling carries no CLI-local declaration of its
+  /// own. Its projection is the service descriptor's — read from the live host
+  /// catalog at render time, and from the frozen 0.5.0 table here, which is
+  /// all the option surface can consult while argv is still being parsed.
+  @override
+  PatchbayOutputProjection? get localOutputProjection => null;
 
   @override
-  PatchbayArtifactDisposition get artifact {
-    if (serviceName == _renderedMemberServiceCommand) {
-      return PatchbayArtifactDisposition.renderedMember;
-    }
-    return switch (syntax.artifactDisposition) {
-      PatchbayCliArtifactDisposition.none => PatchbayArtifactDisposition.none,
-      PatchbayCliArtifactDisposition.payloadBlob =>
-        PatchbayArtifactDisposition.payloadBlob,
-      PatchbayCliArtifactDisposition.responseBlob =>
-        PatchbayArtifactDisposition.responseBlob,
-    };
-  }
+  PatchbayArtifactDisposition get artifact =>
+      patchbayDispositionOf(patchbayStaticOutputProjection(this));
 
   @override
   PatchbayCommandTarget get target =>
@@ -127,9 +115,8 @@ final class GeneratedProtocolCommand implements PatchbayFriendlyCommandSpec {
   @override
   PatchbayCliSyntax get protocolSyntax => syntax;
   @override
-  String? get spilledMember => serviceName == _renderedMemberServiceCommand
-      ? _renderedMemberSpilledMember
-      : null;
+  String? get spilledMember =>
+      patchbayStaticOutputProjection(this)?.artifact?.member;
 }
 
 /// What the CLI actually calls once a declared path has been resolved.

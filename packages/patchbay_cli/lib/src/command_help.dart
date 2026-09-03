@@ -1,4 +1,5 @@
 import 'package:args/args.dart';
+import 'package:patchbay/patchbay.dart';
 
 import 'command_registry.dart';
 import 'output/local_artifact.dart' show patchbayDefaultMaxInlineBytes;
@@ -184,6 +185,12 @@ abstract final class PatchbayCommandHelp {
         '  ${usages[index].padRight(width)}  ${sorted[index].summary}',
       );
     }
+    if (_interactionModelLine(sorted.first.protocolDescriptor)
+        case final String line) {
+      output
+        ..writeln()
+        ..writeln(line);
+    }
     _writeUiMigrations(output, sorted);
     _writeDiscoverabilityNotes(output, serviceCommand: serviceCommand);
     _writeConditions(output, sorted);
@@ -242,6 +249,10 @@ abstract final class PatchbayCommandHelp {
       ..writeln()
       ..writeln(command.summary)
       ..writeln(protocolLine(command));
+    if (_interactionModelLine(command.protocolDescriptor)
+        case final String line) {
+      output.writeln(line);
+    }
     _writeDiscoverabilityNotes(
       output,
       serviceCommand: command.serviceCommand,
@@ -571,6 +582,26 @@ abstract final class PatchbayCommandHelp {
       'Uses the versioned JSON Lines external driver protocol. The CLI '
           'does not operate native system UI itself.',
   };
+
+  /// DG-060-05: the canonical descriptor's `interactionModel`, when it
+  /// declares one. This reads the build-time protocol descriptor, not a live
+  /// catalog, so it states what the canonical command always declares — it
+  /// cannot say `legacyUnknown` for a particular running host; that live
+  /// distinction belongs to `describe`, which does read the catalog.
+  static String? _interactionModelLine(PatchbayCommandDescriptor? descriptor) {
+    return switch (descriptor?.interactionModel) {
+      PatchbayInteractionModel.directTarget =>
+        'Interaction model: directTarget — operates a controller/adapter '
+            'surface the consumer explicitly opened for automation. Applied '
+            'proves only that the operation ran, never that a user, pointer '
+            'or device could reach the target; it adds no occlusion gate.',
+      PatchbayInteractionModel.userLike =>
+        'Interaction model: userLike — keeps generation, policy and '
+            'hit-test/occlusion admission with post-gate re-resolution; no '
+            'force or ignoreOcclusion.',
+      null => null,
+    };
+  }
 
   static String _usage(PatchbayFriendlyCommandSpec command) => <String>[
     ...command.path,

@@ -109,6 +109,16 @@ export 'src/generated/core_wire.g.dart'
         PatchbayUiWaitConditionWire,
         PatchbayUiWaitRequestWire,
         PatchbayUiWaitResultWire;
+export 'src/output_projection.dart'
+    show
+        PatchbayOutputArtifactEncoding,
+        PatchbayOutputArtifactKind,
+        PatchbayOutputArtifactProjection,
+        PatchbayOutputBriefProjection,
+        PatchbayOutputProjection,
+        PatchbayOutputProjectionPath,
+        PatchbayOutputProjectionPathSegment,
+        patchbayDecodeCatalogOutputProjections;
 export 'src/permissions.dart'
     show
         PatchbayPermissionAction,
@@ -148,7 +158,8 @@ export 'src/snapshot.dart'
         PatchbaySnapshotRequest,
         PatchbaySnapshotSelection,
         patchbayJsonEquals;
-export 'src/ui_descriptor.dart' show PatchbayPlane, PatchbaySideEffect;
+export 'src/ui_descriptor.dart'
+    show PatchbayInteractionModel, PatchbayPlane, PatchbaySideEffect;
 export 'src/ui_protocol_commands.dart'
     show
         patchbayUiCaptureCommandDescriptor,

@@ -19,6 +19,24 @@ import '../ui_manifest.dart';
 
 /// Invoker responsible for catalog command dispatch, RPC execution, retries, trace admission, and validation.
 abstract final class CatalogInvoker {
+  /// Reads the host catalog and refuses it whole if any declaration in it is
+  /// one the CLI cannot interpret.
+  ///
+  /// The check belongs here, at the one place a dispatch obtains a catalog,
+  /// rather than at the render seam: a declaration the CLI cannot read is a
+  /// provider protocol violation, and the caller must find that out *before*
+  /// it invokes a command against that catalog, not after the side effect has
+  /// happened. Every direct reader — including `patchbay catalog` itself and
+  /// `doctor` — goes through this or calls
+  /// [validateCatalogDeclarations] explicitly.
+  static Future<Map<String, Object?>> fetchCatalog(
+    PatchbayClient connection,
+  ) async {
+    final Map<String, Object?> catalog = await connection.catalog();
+    validateCatalogDeclarations(catalog);
+    return catalog;
+  }
+
   /// Invokes a command against the catalog, optionally waiting for job termination.
   static Future<Map<String, Object?>> invokeCataloged(
     PatchbayClient connection,
@@ -60,6 +78,7 @@ abstract final class CatalogInvoker {
     Map<String, Object?> arguments, {
     Duration? deadline,
   }) async {
+    validateCatalogInteractionModels(catalog);
     final bool cataloged =
         CatalogCommandDescriptor.find(catalog, command) != null;
     final PatchbayRetryPolicy? retryPolicy = retryPolicyFor(catalog, command);
@@ -209,6 +228,7 @@ abstract final class CatalogInvoker {
     Map<String, Object?> catalog,
     String command,
   ) {
+    validateCatalogInteractionModels(catalog);
     final Map<Object?, Object?>? row = catalogRow(catalog, command);
     if (row == null) {
       throw PatchbayProtocolException(

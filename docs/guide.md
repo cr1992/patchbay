@@ -149,11 +149,11 @@ App 或只需要协议层时，改为引用同一仓库的 `packages/patchbay`�
 
 | 入口 | 角色 | 符号数 | 内容 |
 |---|---|---|---|
-| `package:patchbay/patchbay.dart` | 默认 consumer | 98 | 命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
-| `package:patchbay/patchbay_host.dart` | host implementer | 136 | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
-| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 141 | 生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical protocol descriptor |
-| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | 102 | core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
-| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根 | 195 | core host 清单加全部 Flutter service host、bridge、policy、inspector、navigation、gesture、semantics、reveal 与 capture 符号 |
+| `package:patchbay/patchbay.dart` | 默认 consumer | 114 | 命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
+| `package:patchbay/patchbay_host.dart` | host implementer | 152 | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 150 | 生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical protocol descriptor |
+| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | 118 | core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根 | 211 | core host 清单加全部 Flutter service host、bridge、policy、inspector、navigation、gesture、semantics、reveal 与 capture 符号 |
 
 **每个入口都是自足的**：导出符号的公共签名（构造函数形参、公共字段与 getter 的类型、方法形参与返回
 类型、超类/接口）里出现的 Patchbay 类型，一定由同一个入口导出。这条由
@@ -779,6 +779,18 @@ UI 写入口最容易混淆的是下面四套，先按需求选对入口，再�
 四条入口的安全语义刻意不同：注册目标面是接入方显式开放的自动化面，语义面是「装成用户」按
 identifier 派发动作，指针面才是真实触摸事件、还要另过接入方自己的手势策略。按需求选对应入口
 即可，不必先弄懂全部分类再动手。
+
+这条差异从 0.6.0 起也是 catalog 上可机读的事实（DG-060-05）：`ui text set/enter` 在 catalog 声明
+`interactionModel: directTarget`，`ui action` / `ui tap` / `ui gesture.*` / `ui reveal` 声明
+`interactionModel: userLike`；只读命令与非 UI 命令不带这个字段。`directTarget` **不查遮挡**——对被
+浮层完全盖住的注册文本目标执行 `ui text set` 仍会返回 `applied` 且文本确实写入，这是有意设计，不是
+遗漏（[design.md](design.md) 已固化这条立场）。`applied` 因此只证明 consumer 开放的
+controller/adapter 操作已应用，**不证明**真实用户、指针或设备当下能看到或摸到这个目标；`userLike`
+才继续执行既有的 generation、遮挡、policy 与门后二次解析，且两类之间都不提供 force 或
+ignore-occlusion。缺这个字段时按「未声明」读，不按命令名猜测；`patchbay describe <command>` 把这个
+状态如实标成 `legacyUnknown`。`legacyUnknown` 只说明「这一行没有声明」，不说明 host 版本：它同时覆盖
+host 早于该字段、以及命令本来就不在上面那个封闭声明集合内（例如 `ui keepAwake set`）两种成因，光看
+这一行分不出是哪一种。
 
 ```console
 $ patchbay doctor                           # 出问题先跑：会话/连接/catalog/lifecycle 逐项查

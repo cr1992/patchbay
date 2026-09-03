@@ -1,5 +1,6 @@
 import 'command_descriptor.dart';
 import 'facts.dart';
+import 'output_projection.dart';
 import 'ui_descriptor.dart';
 
 const _uiFacts = <PatchbayFactSource>{PatchbayFactSource.uiObserved};
@@ -33,6 +34,8 @@ PatchbayCommandDescriptor _ui(
   List<PatchbayParameterDescriptor> parameters = const [],
   List<PatchbayCliSyntax> cliSyntax = const [],
   Set<String> gates = const {},
+  PatchbayOutputProjection? outputProjection,
+  PatchbayInteractionModel? interactionModel,
 }) => PatchbayCommandDescriptor(
   name: name,
   summary: summary,
@@ -43,6 +46,8 @@ PatchbayCommandDescriptor _ui(
   parameters: parameters,
   cliSyntax: cliSyntax,
   gates: gates,
+  outputProjection: outputProjection,
+  interactionModel: interactionModel,
 );
 
 final patchbayUiTextSetCommandDescriptor = _textDescriptor(
@@ -69,6 +74,7 @@ PatchbayCommandDescriptor _textDescriptor(
 ) => _ui(
   name,
   summary,
+  interactionModel: PatchbayInteractionModel.directTarget,
   parameters: <PatchbayParameterDescriptor>[
     _p('id', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -108,11 +114,28 @@ final patchbayUiSemanticsTreeCommandDescriptor = _ui(
       inputMode: PatchbayCliInputMode.mergedJsonObject,
     ),
   ],
+  // PB-050-40: the one unbounded member and the one brief deletion this
+  // command has always had, moved off the CLI's hand-written tables and onto
+  // the descriptor the host actually publishes. `nodes` is both the member
+  // that spills to a local artifact and the member brief deletes, and the
+  // interpreter runs the artifact first, so a spilled response keeps its
+  // receipt instead of losing it to the deny-list.
+  outputProjection: const PatchbayOutputProjection(
+    brief: PatchbayOutputBriefProjection(
+      id: 'ui.semantics.tree',
+      omit: <String>[r'$.payload.nodes'],
+    ),
+    artifact: PatchbayOutputArtifactProjection.renderedMember(
+      member: r'$.payload.nodes',
+      encoding: PatchbayOutputArtifactEncoding.json,
+    ),
+  ),
 );
 
 final patchbayUiSemanticsActionCommandDescriptor = _ui(
   'ui.semantics.action',
   'Invoke an allowed action on an observed Semantics node.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('nodeId', PatchbayParameterType.integer, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -155,6 +178,7 @@ final patchbayUiSemanticsActionCommandDescriptor = _ui(
 final patchbayUiSemanticsActionByIdentifierCommandDescriptor = _ui(
   'ui.semantics.actionByIdentifier',
   'Resolve a stable Semantics identifier and invoke an allowed action.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -197,6 +221,7 @@ final patchbayUiSemanticsActionByIdentifierCommandDescriptor = _ui(
 final patchbayUiSemanticsTapCommandDescriptor = _ui(
   'ui.semantics.tap',
   'Resolve a stable Semantics identifier and tap it in one request.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer),
@@ -300,6 +325,7 @@ PatchbayCommandDescriptor _gesture(
 }) => _ui(
   name,
   summary,
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -339,6 +365,7 @@ final patchbayUiRevealCommandDescriptor = _ui(
   'ui.reveal',
   'Drive a scroll container until a Semantics identifier is mounted and '
       'exposed.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     const PatchbayParameterDescriptor(
       name: 'identifier',
@@ -699,6 +726,14 @@ final patchbayUiCaptureCommandDescriptor = _ui(
       artifactDisposition: PatchbayCliArtifactDisposition.payloadBlob,
     ),
   ],
+  // PB-050-40: both spellings download the same host blob metadata, so the
+  // artifact is a property of the command rather than of the spelling and
+  // moves to the descriptor. `cliSyntax.artifactDisposition` stays as the
+  // build-time fact that decides which options the CLI grants before it has a
+  // catalog to read.
+  outputProjection: const PatchbayOutputProjection(
+    artifact: PatchbayOutputArtifactProjection.payloadBlob(),
+  ),
 );
 
 final List<PatchbayCommandDescriptor> patchbayUiProtocolCliCommandDescriptors =

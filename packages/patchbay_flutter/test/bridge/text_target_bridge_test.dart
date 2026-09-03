@@ -325,6 +325,94 @@ void main() {
       expect(result.rejection?.code, 'uiGenerationStale');
       expect(secondController.text, isEmpty);
     });
+
+    // DG-060-05 (`interactionModel: directTarget`) and the sentence
+    // docs/guide.md now states outright: the registered-target surface
+    // deliberately runs no occlusion check, so a text target buried under an
+    // opaque overlay still applies. Without this case that claim is unverified
+    // prose, and adding a hit-test to this channel later — the change the
+    // proposal rejects as "把显式 controller 自动化错误伪装成用户触摸" — would
+    // land silently. `ui.gesture.*` / `ui.semantics.*` keep their own
+    // occlusion admission; this covers only the direct surface.
+    testWidgets('an opaque overlay does not block a direct text write', (
+      tester,
+    ) async {
+      final PatchbayUiRegistry registry = PatchbayUiRegistry();
+      final PatchbayKey key = PatchbayKey.text('form.code', registry: registry);
+      final TextEditingController controller = TextEditingController(
+        text: 'old',
+      );
+      addTearDown(controller.dispose);
+      final FocusNode focus = FocusNode();
+      addTearDown(focus.dispose);
+      final List<String> changed = <String>[];
+      var overlayTaps = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Stack(
+              children: <Widget>[
+                Positioned.fill(
+                  child: TextField(
+                    key: key,
+                    controller: controller,
+                    focusNode: focus,
+                    onChanged: changed.add,
+                  ),
+                ),
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => overlayTaps += 1,
+                    child: const ColoredBox(color: Color(0xFF202020)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // The overlay really occludes rather than merely sitting nearby: a
+      // pointer aimed at the field lands on the overlay and the field never
+      // takes focus. That is the situation a userLike channel refuses on.
+      await tester.tap(find.byType(TextField), warnIfMissed: false);
+      await tester.pump();
+      expect(overlayTaps, 1);
+      expect(focus.hasFocus, isFalse);
+
+      final PatchbayFlutterBridge bridge = allowedBridge(registry);
+      final PatchbayUiTargetDescriptor descriptor = bridge.catalog().single;
+      // Covered is not unmounted: the catalog keeps offering both operations.
+      expect(descriptor.mounted, isTrue);
+      expect(descriptor.operations, <PatchbayUiOperation>{
+        PatchbayUiOperation.textSet,
+        PatchbayUiOperation.textEnter,
+      });
+
+      final PatchbayInvocation set = await bridge.setText(
+        id: 'form.code',
+        generation: descriptor.generation,
+        text: 'abc',
+      );
+      await tester.pump();
+      expect(set.admission, PatchbayAdmission.accepted);
+      expect(set.payload['value'], 'abc');
+      expect(controller.text, 'abc');
+
+      final PatchbayInvocation entered = await bridge.enterText(
+        id: 'form.code',
+        generation: bridge.catalog().single.generation,
+        text: 'xyz',
+      );
+      await tester.pump();
+      expect(entered.admission, PatchbayAdmission.accepted);
+      expect(controller.text, 'xyz');
+      expect(changed, <String>['xyz']);
+      // Still unreachable by pointer throughout: applied never implied reach.
+      expect(focus.hasFocus, isFalse);
+    });
   });
 
   testWidgets(

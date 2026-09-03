@@ -9,7 +9,7 @@ void main() {
           in patchbayProtocolCliCommandDescriptors) {
         expect(descriptor.cliSyntax, isNotEmpty, reason: descriptor.name);
         expect(descriptor.toJson(), isNot(contains('cliSyntax')));
-        expect(descriptor.toJson().keys, <String>{
+        expect(descriptor.toJson().keys.toSet(), <String>{
           'name',
           'summary',
           'plane',
@@ -21,7 +21,14 @@ void main() {
           // 执行证据契约的线上字段，随 !62 进入 main：与 cliSyntax 不同，它
           // 本就属于协议面，所以出现在这里是对的。
           'weakConfirmationCompletes',
-        });
+          // DG-060-05 additive sibling，只在声明了 interactionModel 的
+          // 命令上出现——见 ui_interaction_model_descriptor_test.dart 对
+          // 「恰好那 10 条」的机检。
+          if (descriptor.interactionModel != null) 'interactionModel',
+          // PB-050-40：机器投影声明同样是松读 catalog sibling，只在声明了
+          // 投影的命令上出现；这里保持等值集，不退化成允许集。
+          if (descriptor.outputProjection != null) 'outputProjection',
+        }, reason: descriptor.name);
       }
     },
   );

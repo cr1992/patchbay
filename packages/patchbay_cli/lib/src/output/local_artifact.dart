@@ -12,10 +12,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:patchbay/patchbay.dart';
 
 import '../artifact_download.dart';
-import '../registry/command_spec.dart';
 import '../result.dart';
+import 'brief_view.dart';
 import '../session/session_models.dart' show createRestrictedFileSync;
 import '../trace/trace_context.dart';
 
@@ -226,30 +227,19 @@ final class PatchbayLocalArtifactWriter {
   }
 }
 
-/// Sentinel distinguishing "the dot path does not resolve" from "it resolves
-/// to a JSON `null`" — the two are indistinguishable to a caller reading the
-/// document, but only the former means the command declared a member it does
-/// not actually publish.
-const Object _missingDotPathMember = Object();
+/// Sentinel distinguishing "the declared path does not resolve" from "it
+/// resolves to a JSON `null`" — the two are indistinguishable to a caller
+/// reading the document, but only the former means the command declared a
+/// member it does not actually publish.
+const Object _missingMember = Object();
 
-/// Whether the declared member carries nothing worth moving to a file.
-///
-/// Mirrors `brief_view.dart`'s rule of the same name deliberately: the two
-/// layers must agree on what "there was nothing there" looks like, or a
-/// response could be spilled by one and reported as present by the other.
-bool _isEmptyMember(Object? value) =>
-    value == null ||
-    (value is String && value.isEmpty) ||
-    (value is Iterable && value.isEmpty) ||
-    (value is Map && value.isEmpty);
-
-Object? _getAtDotPath(Map<String, Object?> root, List<String> segments) {
+Object? _getAtPath(Map<String, Object?> root, List<String> segments) {
   Object? current = root;
   for (final String segment in segments) {
     if (current is Map && current.containsKey(segment)) {
       current = current[segment];
     } else {
-      return _missingDotPathMember;
+      return _missingMember;
     }
   }
   return current;
@@ -260,7 +250,7 @@ Object? _getAtDotPath(Map<String, Object?> root, List<String> segments) {
 /// [root] untouched by the caller — when the path does not resolve to an
 /// existing member, so a missing member renders inline rather than
 /// fabricating structure.
-Map<String, Object?>? _replaceAtDotPath(
+Map<String, Object?>? _replaceAtPath(
   Map<String, Object?> root,
   List<String> segments,
   Object? replacement,
@@ -273,7 +263,7 @@ Map<String, Object?>? _replaceAtDotPath(
   }
   final Object? child = root[key];
   if (child is! Map<String, Object?>) return null;
-  final Map<String, Object?>? updatedChild = _replaceAtDotPath(
+  final Map<String, Object?>? updatedChild = _replaceAtPath(
     child,
     segments.sublist(1),
     replacement,
@@ -295,8 +285,14 @@ final class PatchbayRenderedMemberSpillResult {
   final PatchbayDownloadedArtifact? artifact;
 }
 
-/// Spills [spec]'s declared `spilledMember` out of [response] into a local
-/// artifact when it must, and returns the response to actually render.
+/// Spills [projection]'s declared rendered member out of [response] into a
+/// local artifact when it must, and returns the response to actually render.
+///
+/// PB-050-40 replaced the `spec.artifact` / `spec.spilledMember` pair this used
+/// to read with the command's resolved [PatchbayOutputProjection], so the
+/// member and its encoding come from one declaration — the host descriptor's,
+/// the CLI-local one, or the frozen 0.5.0 fallback — instead of from two fields
+/// a new command had to keep in step by hand. The behaviour below is unchanged.
 ///
 /// Order matters and is fixed by the proposal: [exitCode] must already be
 /// the response's final classification (computed against the unspilled
@@ -305,13 +301,15 @@ final class PatchbayRenderedMemberSpillResult {
 /// pretty, one-shot human summary, repl compact line, or repl human line —
 /// so the threshold measures what the operator would actually have seen.
 ///
-/// A non-`renderedMember` command, a command with no `spilledMember`, a
-/// non-accepted [exitCode], or a `spilledMember` path that does not resolve
-/// in [response] all return [response] unchanged: spilling never invents
-/// structure and never hides a response that was not accepted.
+/// A declaration with no artifact, an artifact of a blob kind (those are host
+/// downloads, resolved before rendering), a non-accepted [exitCode], or a
+/// declared member path that does not resolve in [response] all return
+/// [response] unchanged: spilling never invents structure and never hides a
+/// response that was not accepted.
 Future<PatchbayRenderedMemberSpillResult> maybeSpillRenderedMember({
   required PatchbayLocalArtifactWriter writer,
-  required PatchbayFriendlyCommandSpec? spec,
+  required PatchbayOutputProjection? projection,
+  required String commandSlug,
   required Map<String, Object?> response,
   required int exitCode,
   required String? explicitOutputPath,
@@ -320,20 +318,21 @@ Future<PatchbayRenderedMemberSpillResult> maybeSpillRenderedMember({
   required String Function(Map<String, Object?> response) renderDocument,
   Map<String, String>? environment,
 }) async {
-  if (spec == null ||
-      spec.artifact != PatchbayArtifactDisposition.renderedMember) {
-    return PatchbayRenderedMemberSpillResult(response: response);
-  }
-  final String? dotPath = spec.spilledMember;
-  if (dotPath == null) {
+  final PatchbayOutputArtifactProjection? declared = projection?.artifact;
+  if (declared == null ||
+      declared.kind != PatchbayOutputArtifactKind.renderedMember) {
     return PatchbayRenderedMemberSpillResult(response: response);
   }
   if (exitCode != PatchbayExitCode.accepted) {
     return PatchbayRenderedMemberSpillResult(response: response);
   }
-  final List<String> segments = dotPath.split('.');
-  final Object? member = _getAtDotPath(response, segments);
-  if (identical(member, _missingDotPathMember)) {
+  final List<String> segments = <String>[
+    for (final PatchbayOutputProjectionPathSegment segment
+        in declared.memberPath!.segments)
+      segment.field,
+  ];
+  final Object? member = _getAtPath(response, segments);
+  if (identical(member, _missingMember)) {
     return PatchbayRenderedMemberSpillResult(response: response);
   }
 
@@ -355,7 +354,7 @@ Future<PatchbayRenderedMemberSpillResult> maybeSpillRenderedMember({
     // An explicit `--output` is deliberately still unconditional: the
     // proposal freezes that path as "write the member to that path, whatever
     // its size", and the operator naming a file has asked for one.
-    if (_isEmptyMember(member)) {
+    if (patchbayIsEmptyProjectedMember(member)) {
       return PatchbayRenderedMemberSpillResult(response: response);
     }
     final int documentBytes = utf8.encode(renderDocument(response)).length;
@@ -364,30 +363,42 @@ Future<PatchbayRenderedMemberSpillResult> maybeSpillRenderedMember({
     }
   }
 
+  // The declaration decides how the member becomes bytes; the runtime shape
+  // only decides whether the declaration is satisfiable. A `utf8Text` member
+  // that is not a String, or a `json` member that will not encode, is a
+  // declaration this response does not honour — answered the same way a
+  // missing member is, by rendering inline, never by guessing an encoding.
+  final bool memberIsString = member is String;
+  final (String contentType, String extension) = declared.encoding!.resolveFor(
+    memberIsString: memberIsString,
+  );
   final List<int> bytes;
-  final String contentType;
-  final String extension;
-  if (member is String) {
+  if (extension == 'txt') {
+    if (member is! String) {
+      return PatchbayRenderedMemberSpillResult(response: response);
+    }
     bytes = utf8.encode(member);
-    contentType = 'text/plain; charset=utf-8';
-    extension = 'txt';
   } else {
-    bytes = utf8.encode(const JsonEncoder.withIndent('  ').convert(member));
-    contentType = 'application/json';
-    extension = 'json';
+    final String encoded;
+    try {
+      encoded = const JsonEncoder.withIndent('  ').convert(member);
+    } on JsonUnsupportedObjectError {
+      return PatchbayRenderedMemberSpillResult(response: response);
+    }
+    bytes = utf8.encode(encoded);
   }
 
-  final PatchbayDownloadedArtifact artifact = await writer.write(
+  final PatchbayDownloadedArtifact written = await writer.write(
     bytes: bytes,
     contentType: contentType,
     extension: extension,
-    commandSlug: spec.path.join('-'),
+    commandSlug: commandSlug,
     outputPath: explicitOutput ? explicitOutputPath : null,
     force: force,
     environment: environment,
   );
-  final Map<String, Object?> receipt = artifact.toJson();
-  final Map<String, Object?>? replaced = _replaceAtDotPath(
+  final Map<String, Object?> receipt = written.toJson();
+  final Map<String, Object?>? replaced = _replaceAtPath(
     response,
     segments,
     receipt,
@@ -398,7 +409,7 @@ Future<PatchbayRenderedMemberSpillResult> maybeSpillRenderedMember({
   };
   return PatchbayRenderedMemberSpillResult(
     response: spilledResponse,
-    artifact: artifact,
+    artifact: written,
   );
 }
 

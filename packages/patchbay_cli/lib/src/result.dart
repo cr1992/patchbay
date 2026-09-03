@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'support/catalog_descriptor.dart';
 import 'ui_manifest.dart';
 
 /// The exit codes `runPatchbayCli` and the `patchbay` executable return.
@@ -141,6 +142,38 @@ String patchbayResponseSummary(Map<String, Object?> value) {
   if (value['uiTargets'] case final List<Object?> targets) {
     return 'commands=${(value['commands'] as List<Object?>?)?.length ?? 0} '
         'uiTargets=${targets.length}';
+  }
+  // `describeCatalogCommand`'s shape: one catalog row plus two CLI-computed
+  // verdicts. `--json` passes the row through untouched (DG-060-05 requires
+  // machine output to stay a transparent passthrough); this line is the one
+  // place `legacyUnknown` is allowed to appear, because it is human text, not
+  // a synthesised stable-JSON key.
+  if (value case {
+    'command': final Map<Object?, Object?> command,
+    'schemaMode': final Object? schemaMode,
+    'retryEligibility': final Object? retryEligibility,
+  }) {
+    final String interactionModel = switch (catalogInteractionModelReading(
+      command,
+    )) {
+      CatalogInteractionModelReading.directTarget =>
+        'directTarget (applied proves the operation ran, not that a user, '
+            'pointer or device could reach the target)',
+      CatalogInteractionModelReading.userLike =>
+        'userLike (generation, policy and occlusion admission still apply; '
+            'no force or ignoreOcclusion)',
+      // Never phrased as "this host does not declare it": the reader cannot
+      // tell the two causes apart from the row alone, and on a 0.6.0 host
+      // every command outside the closed declaring set — `ui.keepAwake.set`,
+      // say — reads legacyUnknown while the host is perfectly current. Naming
+      // both causes keeps the line from implying a host version it never
+      // observed.
+      CatalogInteractionModelReading.legacyUnknown =>
+        'legacyUnknown (no interactionModel declared: host predates the '
+            'field or the command is outside the declaring set)',
+    };
+    return 'command=${command['name']} schemaMode=$schemaMode '
+        'retryEligibility=$retryEligibility interactionModel=$interactionModel';
   }
   if (value['payload'] case {
     'outcome': 'applied',

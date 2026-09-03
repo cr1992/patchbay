@@ -7,47 +7,31 @@ import 'package:patchbay/patchbay.dart';
 import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/artifact_download.dart';
 import 'package:patchbay_cli/src/output/local_artifact.dart';
-import 'package:patchbay_cli/src/registry/command_spec.dart';
 import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
 
-/// A minimal [PatchbayFriendlyCommandSpec] the test controls directly,
-/// rather than resolving one through the registry — these tests are about
-/// the spill mechanics themselves, not path resolution (that is covered
-/// end to end in `tree_artifact_output_test.dart`).
-final class _FakeSpec implements PatchbayFriendlyCommandSpec {
-  const _FakeSpec({
-    this.artifact = PatchbayArtifactDisposition.renderedMember,
-    this.spilledMember = 'payload.nodes',
-  });
+/// The declarations these tests spill under, written directly rather than
+/// resolved through the registry — these tests are about the spill mechanics
+/// themselves, not about resolution (covered in
+/// `output_projection_resolution_test.dart`) or path matching (covered end to
+/// end in `tree_artifact_output_test.dart`).
+const PatchbayOutputProjection _nodesProjection = PatchbayOutputProjection(
+  artifact: PatchbayOutputArtifactProjection.renderedMember(
+    member: r'$.payload.nodes',
+    encoding: PatchbayOutputArtifactEncoding.json,
+  ),
+);
 
-  @override
-  final PatchbayArtifactDisposition artifact;
-  @override
-  final String? spilledMember;
-  @override
-  List<String> get path => const <String>['fake', 'tree'];
+/// The three Flutter diagnostic passthroughs' declaration: one member whose
+/// media type follows the runtime shape, as 0.5.0 froze it.
+const PatchbayOutputProjection _dataProjection = PatchbayOutputProjection(
+  artifact: PatchbayOutputArtifactProjection.renderedMember(
+    member: r'$.data',
+    encoding: PatchbayOutputArtifactEncoding.jsonOrDecodedText,
+  ),
+);
 
-  @override
-  String get name => 'fakeTree';
-  @override
-  String? get serviceCommand => null;
-  @override
-  String get summary => 'fake';
-  @override
-  String get usageSuffix => '';
-  @override
-  PatchbayCommandTarget get target =>
-      PatchbayCommandTarget.declaredServiceCommand;
-  @override
-  String? get waitCondition => null;
-  @override
-  bool get fencesNavigationRevision => false;
-  @override
-  PatchbayCommandDescriptor? get protocolDescriptor => null;
-  @override
-  PatchbayCliSyntax? get protocolSyntax => null;
-}
+const String _slug = 'fake-tree';
 
 void main() {
   group('PatchbayLocalArtifactWriter', () {
@@ -321,12 +305,13 @@ void main() {
     String _prettyJson(Map<String, Object?> response) =>
         const JsonEncoder.withIndent('  ').convert(response);
 
-    test('non-renderedMember spec is always identity', () async {
+    test('a declaration without an artifact is always identity', () async {
       final Map<String, Object?> response = _responseWithNodeCount(1);
       final PatchbayRenderedMemberSpillResult result =
           await maybeSpillRenderedMember(
             writer: writer,
-            spec: const _FakeSpec(artifact: PatchbayArtifactDisposition.none),
+            projection: null,
+            commandSlug: _slug,
             response: response,
             exitCode: PatchbayExitCode.accepted,
             explicitOutputPath: null,
@@ -339,26 +324,30 @@ void main() {
       expect(result.artifact, isNull);
     });
 
-    test('a missing spilledMember path renders inline without error', () async {
-      final Map<String, Object?> response = <String, Object?>{
-        'admission': 'accepted',
-        'payload': <String, Object?>{'outcome': 'observed'},
-      };
-      final PatchbayRenderedMemberSpillResult result =
-          await maybeSpillRenderedMember(
-            writer: writer,
-            spec: const _FakeSpec(),
-            response: response,
-            exitCode: PatchbayExitCode.accepted,
-            explicitOutputPath: null,
-            force: false,
-            maxInlineBytes: 1,
-            renderDocument: _prettyJson,
-            environment: environment,
-          );
-      expect(result.response, response);
-      expect(result.artifact, isNull);
-    });
+    test(
+      'a declared member that is absent renders inline without error',
+      () async {
+        final Map<String, Object?> response = <String, Object?>{
+          'admission': 'accepted',
+          'payload': <String, Object?>{'outcome': 'observed'},
+        };
+        final PatchbayRenderedMemberSpillResult result =
+            await maybeSpillRenderedMember(
+              writer: writer,
+              projection: _nodesProjection,
+              commandSlug: _slug,
+              response: response,
+              exitCode: PatchbayExitCode.accepted,
+              explicitOutputPath: null,
+              force: false,
+              maxInlineBytes: 1,
+              renderDocument: _prettyJson,
+              environment: environment,
+            );
+        expect(result.response, response);
+        expect(result.artifact, isNull);
+      },
+    );
 
     test(
       'a non-accepted exit code never spills, however large the document',
@@ -367,7 +356,8 @@ void main() {
         final PatchbayRenderedMemberSpillResult result =
             await maybeSpillRenderedMember(
               writer: writer,
-              spec: const _FakeSpec(),
+              projection: _nodesProjection,
+              commandSlug: _slug,
               response: response,
               exitCode: PatchbayExitCode.typedFailure,
               explicitOutputPath: null,
@@ -385,7 +375,8 @@ void main() {
       final PatchbayRenderedMemberSpillResult result =
           await maybeSpillRenderedMember(
             writer: writer,
-            spec: const _FakeSpec(),
+            projection: _nodesProjection,
+            commandSlug: _slug,
             response: response,
             exitCode: PatchbayExitCode.accepted,
             explicitOutputPath: null,
@@ -408,7 +399,8 @@ void main() {
       final PatchbayRenderedMemberSpillResult atCeiling =
           await maybeSpillRenderedMember(
             writer: writer,
-            spec: const _FakeSpec(),
+            projection: _nodesProjection,
+            commandSlug: _slug,
             response: response,
             exitCode: PatchbayExitCode.accepted,
             explicitOutputPath: null,
@@ -430,7 +422,8 @@ void main() {
       final PatchbayRenderedMemberSpillResult overCeiling =
           await maybeSpillRenderedMember(
             writer: writer,
-            spec: const _FakeSpec(),
+            projection: _nodesProjection,
+            commandSlug: _slug,
             response: response,
             exitCode: PatchbayExitCode.accepted,
             explicitOutputPath: null,
@@ -464,7 +457,8 @@ void main() {
       final PatchbayRenderedMemberSpillResult result =
           await maybeSpillRenderedMember(
             writer: writer,
-            spec: const _FakeSpec(),
+            projection: _nodesProjection,
+            commandSlug: _slug,
             response: response,
             exitCode: PatchbayExitCode.accepted,
             explicitOutputPath: null,
@@ -495,7 +489,8 @@ void main() {
         final PatchbayRenderedMemberSpillResult result =
             await maybeSpillRenderedMember(
               writer: writer,
-              spec: const _FakeSpec(spilledMember: 'data'),
+              projection: _dataProjection,
+              commandSlug: _slug,
               response: response,
               exitCode: PatchbayExitCode.accepted,
               explicitOutputPath: null,
@@ -521,7 +516,8 @@ void main() {
       final PatchbayRenderedMemberSpillResult result =
           await maybeSpillRenderedMember(
             writer: writer,
-            spec: const _FakeSpec(),
+            projection: _nodesProjection,
+            commandSlug: _slug,
             response: response,
             exitCode: PatchbayExitCode.accepted,
             explicitOutputPath: null,
@@ -556,7 +552,8 @@ void main() {
           final PatchbayRenderedMemberSpillResult result =
               await maybeSpillRenderedMember(
                 writer: writer,
-                spec: const _FakeSpec(spilledMember: 'data'),
+                projection: _dataProjection,
+                commandSlug: _slug,
                 response: response,
                 exitCode: PatchbayExitCode.accepted,
                 explicitOutputPath: null,
@@ -583,7 +580,8 @@ void main() {
         final PatchbayRenderedMemberSpillResult result =
             await maybeSpillRenderedMember(
               writer: writer,
-              spec: const _FakeSpec(spilledMember: 'data'),
+              projection: _dataProjection,
+              commandSlug: _slug,
               response: <String, Object?>{'data': const <Object?>[]},
               exitCode: PatchbayExitCode.accepted,
               explicitOutputPath: output.path,
@@ -605,7 +603,8 @@ void main() {
         final PatchbayRenderedMemberSpillResult result =
             await maybeSpillRenderedMember(
               writer: writer,
-              spec: const _FakeSpec(),
+              projection: _nodesProjection,
+              commandSlug: _slug,
               response: response,
               exitCode: PatchbayExitCode.accepted,
               explicitOutputPath: output.path,

@@ -1,10 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/src/command_registry.dart';
 import 'package:patchbay_cli/src/output/brief_view.dart';
+import 'package:patchbay_cli/src/output/output_projection_resolver.dart';
 import 'package:patchbay_cli/src/result.dart';
 import 'package:test/test.dart';
+
+/// The projection a spelling runs under with no host catalog in play — the
+/// CLI-local declaration for `catalog` and the diagnostic trees, the frozen
+/// 0.5.0 fallback for `ui.semantics.tree` and `logs.query`, nothing at all for
+/// `identity`. PB-050-40 moved the rules there; these goldens still pin the
+/// exact bytes PB-050-21 froze.
+PatchbayOutputProjection? _projectionFor(List<String> path) =>
+    resolvePatchbayOutputProjection(
+      spec: PatchbayFriendlyCommandRegistry.specFor(path),
+      catalog: null,
+    );
 
 /// PB-050-21: `--view brief` projection.
 ///
@@ -22,26 +35,20 @@ Map<String, Object?> _readGolden(String name) =>
 
 void main() {
   group('golden pairs (frozen projection contract)', () {
-    final Map<String, PatchbayFriendlyCommandSpec?>
-    specByFixture = <String, PatchbayFriendlyCommandSpec?>{
-      'catalog': PatchbayFriendlyCommandRegistry.specFor(<String>['catalog']),
-      'ui_semantics_tree': PatchbayFriendlyCommandRegistry.specFor(<String>[
-        'ui',
-        'semantics',
-        'tree',
-      ]),
-      'diagnostic_tree': PatchbayFriendlyCommandRegistry.specFor(<String>[
-        'ui',
-        'widget-tree',
-      ]),
-      'logs_query': PatchbayFriendlyCommandRegistry.specFor(<String>[
-        'logs',
-        'query',
-      ]),
-      'identity': PatchbayFriendlyCommandRegistry.specFor(<String>['identity']),
-    };
+    final Map<String, PatchbayOutputProjection?> specByFixture =
+        <String, PatchbayOutputProjection?>{
+          'catalog': _projectionFor(<String>['catalog']),
+          'ui_semantics_tree': _projectionFor(<String>[
+            'ui',
+            'semantics',
+            'tree',
+          ]),
+          'diagnostic_tree': _projectionFor(<String>['ui', 'widget-tree']),
+          'logs_query': _projectionFor(<String>['logs', 'query']),
+          'identity': _projectionFor(<String>['identity']),
+        };
 
-    for (final MapEntry<String, PatchbayFriendlyCommandSpec?> entry
+    for (final MapEntry<String, PatchbayOutputProjection?> entry
         in specByFixture.entries) {
       test('${entry.key}: brief matches the checked-in golden', () {
         final Map<String, Object?> full = _readGolden('${entry.key}.full');
@@ -49,7 +56,7 @@ void main() {
           '${entry.key}.brief',
         );
         final Map<String, Object?> actualBrief = projectPatchbayBriefView(
-          spec: entry.value,
+          projection: entry.value,
           response: full,
           exitCode: PatchbayExitCode.accepted,
         );
@@ -64,7 +71,7 @@ void main() {
         <String>['ui', 'focus-tree'],
       ]) {
         final Map<String, Object?> brief = projectPatchbayBriefView(
-          spec: PatchbayFriendlyCommandRegistry.specFor(path),
+          projection: _projectionFor(path),
           response: full,
           exitCode: PatchbayExitCode.accepted,
         );
@@ -76,12 +83,12 @@ void main() {
       }
     });
 
-    test('table <-> golden ratchet: every rule has golden coverage, every '
-        'golden deletion is in the table', () {
-      final Map<String, List<String>> table =
-          patchbayBriefViewRulePatternsForTesting();
+    test('declaration <-> golden ratchet: every declared rule has golden '
+        'coverage, every golden deletion is declared', () {
       final Set<String> tablePatterns = <String>{
-        for (final List<String> patterns in table.values) ...patterns,
+        patchbayBriefNoticeRule.pattern,
+        for (final PatchbayOutputProjection? projection in specByFixture.values)
+          ...?projection?.brief?.omit,
       };
       final Set<String> goldenPatterns = <String>{};
       for (final String fixture in specByFixture.keys) {
@@ -110,7 +117,7 @@ void main() {
   group('catalog keeps commands[].summary (2026-08-25 ruling)', () {
     test('summary survives the projection and is not reported as omitted', () {
       final Map<String, Object?> brief = projectPatchbayBriefView(
-        spec: PatchbayFriendlyCommandRegistry.specFor(<String>['catalog']),
+        projection: _projectionFor(<String>['catalog']),
         response: _readGolden('catalog.full'),
         exitCode: PatchbayExitCode.accepted,
       );
@@ -130,9 +137,9 @@ void main() {
       );
     });
 
-    test('the frozen table declares no rule that touches summary', () {
+    test('the catalog declaration carries no rule that touches summary', () {
       expect(
-        patchbayBriefViewRulePatternsForTesting()['catalog'],
+        _projectionFor(<String>['catalog'])!.brief!.omit,
         isNot(contains(r'$.commands[].summary')),
       );
     });
@@ -147,10 +154,7 @@ void main() {
       // leave an empty member in place and report no deletion.
       Map<String, Object?> diagnosticBrief(Object? data) =>
           projectPatchbayBriefView(
-            spec: PatchbayFriendlyCommandRegistry.specFor(<String>[
-              'ui',
-              'widget-tree',
-            ]),
+            projection: _projectionFor(<String>['ui', 'widget-tree']),
             response: <String, Object?>{
               'source': 'uiObserved',
               'plane': 'flutterDiagnostic',
@@ -208,11 +212,7 @@ void main() {
 
       test('an empty payload.nodes survives the semantics-tree rule', () {
         final Map<String, Object?> brief = projectPatchbayBriefView(
-          spec: PatchbayFriendlyCommandRegistry.specFor(<String>[
-            'ui',
-            'semantics',
-            'tree',
-          ]),
+          projection: _projectionFor(<String>['ui', 'semantics', 'tree']),
           response: <String, Object?>{
             'admission': 'accepted',
             'payload': <String, Object?>{
@@ -234,7 +234,7 @@ void main() {
 
       test('an array rule skips the empty members and prunes the rest', () {
         final Map<String, Object?> brief = projectPatchbayBriefView(
-          spec: PatchbayFriendlyCommandRegistry.specFor(<String>['catalog']),
+          projection: _projectionFor(<String>['catalog']),
           response: <String, Object?>{
             'commands': const <Object?>[
               <String, Object?>{'name': 'a.empty', 'parameters': <Object?>[]},
@@ -267,9 +267,19 @@ void main() {
   );
 
   group('table self-assertions', () {
-    test('no rule touches a redaction or admission-identity key', () {
-      final Map<String, List<String>> table =
-          patchbayBriefViewRulePatternsForTesting();
+    test('no declared rule touches a redaction or admission-identity key', () {
+      final Map<String, List<String>> table = <String, List<String>>{
+        'general': <String>[patchbayBriefNoticeRule.pattern],
+        for (final MapEntry<String, PatchbayOutputProjection> entry
+            in patchbayFrozen050OutputProjections.entries)
+          if (entry.value.brief case final PatchbayOutputBriefProjection brief)
+            entry.key: brief.omit,
+        for (final PatchbayFriendlyCommand command
+            in PatchbayFriendlyCommand.values)
+          if (command.localOutputProjection?.brief
+              case final PatchbayOutputBriefProjection brief)
+            command.name: brief.omit,
+      };
       const Set<String> forbiddenLeafNames = <String>{
         'redaction',
         'valueRedacted',
@@ -317,11 +327,7 @@ void main() {
             'notice': 'should never be pruned on this path',
           };
           final Map<String, Object?> brief = projectPatchbayBriefView(
-            spec: PatchbayFriendlyCommandRegistry.specFor(<String>[
-              'ui',
-              'semantics',
-              'tree',
-            ]),
+            projection: _projectionFor(<String>['ui', 'semantics', 'tree']),
             response: response,
             exitCode: exitCode,
           );
@@ -345,7 +351,7 @@ void main() {
         'uiTargets': const <Object?>[],
       };
       final Map<String, Object?> brief = projectPatchbayBriefView(
-        spec: PatchbayFriendlyCommandRegistry.specFor(<String>['catalog']),
+        projection: _projectionFor(<String>['catalog']),
         response: response,
         exitCode: PatchbayExitCode.accepted,
       );
@@ -361,11 +367,7 @@ void main() {
           'payload': 'not-a-map',
         };
         final Map<String, Object?> brief = projectPatchbayBriefView(
-          spec: PatchbayFriendlyCommandRegistry.specFor(<String>[
-            'ui',
-            'semantics',
-            'tree',
-          ]),
+          projection: _projectionFor(<String>['ui', 'semantics', 'tree']),
           response: response,
           exitCode: PatchbayExitCode.accepted,
         );
@@ -386,11 +388,7 @@ void main() {
         'futureProtocolField': 'kept',
       };
       final Map<String, Object?> brief = projectPatchbayBriefView(
-        spec: PatchbayFriendlyCommandRegistry.specFor(<String>[
-          'ui',
-          'semantics',
-          'tree',
-        ]),
+        projection: _projectionFor(<String>['ui', 'semantics', 'tree']),
         response: response,
         exitCode: PatchbayExitCode.accepted,
       );
@@ -414,7 +412,7 @@ void main() {
           'payload': <String, Object?>{'anything': 'here'},
         };
         final Map<String, Object?> brief = projectPatchbayBriefView(
-          spec: PatchbayFriendlyCommandRegistry.specFor(path),
+          projection: _projectionFor(path),
           response: response,
           exitCode: PatchbayExitCode.accepted,
         );
@@ -430,7 +428,7 @@ void main() {
 
   test('localView is a stable four-key shape appended at the end', () {
     final Map<String, Object?> brief = projectPatchbayBriefView(
-      spec: PatchbayFriendlyCommandRegistry.specFor(<String>['identity']),
+      projection: _projectionFor(<String>['identity']),
       response: const <String, Object?>{'schemaVersion': 1},
       exitCode: PatchbayExitCode.accepted,
     );

@@ -1,6 +1,39 @@
 import 'package:patchbay/patchbay_protocol.dart';
 
 import 'command_spec.dart';
+import 'output_projection_declarations.dart';
+
+/// PB-050-40: the diagnostic-tree passthroughs' shared declaration.
+///
+/// `ui widget-tree` / `render-tree` / `focus-tree` are CLI-local: they are
+/// Flutter SDK service extensions the CLI calls directly, so no host catalog
+/// row can ever carry their declaration. They still use the same
+/// [PatchbayOutputProjection] type and the same interpreter as a protocol
+/// command — the proposal's rule that a non-protocol command is not a second
+/// projection model, only a declaration with nowhere on the wire to live.
+///
+/// `data` is both the member that spills and the member brief deletes. The
+/// interpreter runs the artifact first, so a spilled response keeps the
+/// receipt and reports no deletion for it.
+///
+/// The encoding is [PatchbayOutputArtifactEncoding.jsonOrDecodedText] because
+/// `docs/proposals/0.5.0/tree-artifact-output.md` fixed it that way: the same
+/// command answers with inspector JSON on one Flutter build and with a
+/// `debugDumpApp` text dump on another, and that proposal rules that storing
+/// the text dump as a quoted JSON string is a fake artifact. That value is
+/// CLI-local only and is never published in a catalog row — see its own
+/// comment in `package:patchbay`.
+const PatchbayOutputProjection _diagnosticTreeProjection =
+    PatchbayOutputProjection(
+      brief: PatchbayOutputBriefProjection(
+        id: 'diagnosticTree',
+        omit: <String>[r'$.data'],
+      ),
+      artifact: PatchbayOutputArtifactProjection.renderedMember(
+        member: r'$.data',
+        encoding: PatchbayOutputArtifactEncoding.jsonOrDecodedText,
+      ),
+    );
 
 const GeneratedProtocolCommand _navigationCatalogProtocolCommand =
     GeneratedProtocolCommand(
@@ -38,7 +71,8 @@ const GeneratedProtocolCommand _navigationBackProtocolCommand =
     );
 
 /// Explicit declarations for local and client-only CLI commands.
-enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
+enum PatchbayFriendlyCommand
+    implements PatchbayFriendlyCommandSpec, PatchbayLocallyProjectedCommand {
   launch(
     null,
     <String>['launch'],
@@ -57,6 +91,22 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     <String>['catalog'],
     summary: 'List the commands and UI targets the App registers.',
     target: PatchbayCommandTarget.clientCatalog,
+    // PB-050-40: `catalog` answers from the client handshake, not from a
+    // cataloged command, so its declaration is CLI-local by necessity.
+    // `summary` is deliberately absent from the deny-list (the 2026-08-25
+    // ruling on brief-view.md's open question 3): it is the only clue an
+    // agent has about what a command does before it spends a `describe`.
+    localOutputProjection: PatchbayOutputProjection(
+      brief: PatchbayOutputBriefProjection(
+        id: 'catalog',
+        omit: <String>[
+          r'$.commands[].parameters',
+          r'$.commands[].responseSchema',
+          r'$.commands[].executionContract',
+          r'$.commands[].retryPolicy',
+        ],
+      ),
+    ),
   ),
   describe(
     null,
@@ -326,8 +376,9 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
   // Never matched: `_patchbayFriendlyCommands` filters every
   // `.compatibilityFrozen` stub out, so path resolution for `ui semantics
   // tree` always lands on the generated `_uiSemanticsTreeProtocolCommand`
-  // instead. Its `renderedMember` disposition and `spilledMember` therefore
-  // live on `GeneratedProtocolCommand` (see the comment there), not here.
+  // instead. Its projection therefore comes from the `ui.semantics.tree`
+  // descriptor — the host's declaration at render time, the frozen 0.5.0
+  // entry when the host publishes none — and not from a declaration here.
   @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
   uiSemanticsTree.compatibilityFrozen('ui.semantics.tree', <String>[
     'ui',
@@ -409,8 +460,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     summary: 'Read the Flutter widget tree diagnostic (SDK passthrough).',
     usageSuffix: '[--output <path>] [--force] [--max-inline-bytes <n>]',
     target: PatchbayCommandTarget.clientWidgetTree,
-    artifact: PatchbayArtifactDisposition.renderedMember,
-    spilledMember: 'data',
+    localOutputProjection: _diagnosticTreeProjection,
   ),
   uiRenderTree(
     null,
@@ -418,8 +468,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     summary: 'Read the Flutter render tree diagnostic (SDK passthrough).',
     usageSuffix: '[--output <path>] [--force] [--max-inline-bytes <n>]',
     target: PatchbayCommandTarget.clientRenderTree,
-    artifact: PatchbayArtifactDisposition.renderedMember,
-    spilledMember: 'data',
+    localOutputProjection: _diagnosticTreeProjection,
   ),
   uiFocusTree(
     null,
@@ -427,8 +476,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     summary: 'Read the Flutter focus tree diagnostic (SDK passthrough).',
     usageSuffix: '[--output <path>] [--force] [--max-inline-bytes <n>]',
     target: PatchbayCommandTarget.clientFocusTree,
-    artifact: PatchbayArtifactDisposition.renderedMember,
-    spilledMember: 'data',
+    localOutputProjection: _diagnosticTreeProjection,
   ),
   performanceProfile(
     null,
@@ -456,15 +504,24 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     <String>['logs', 'export'],
     summary: 'Export structured logs to a verified artifact.',
     usageSuffix: '--output <path>',
-    artifact: PatchbayArtifactDisposition.payloadBlob,
+    // PB-050-40: `logs.export` also declares this on its descriptor. The
+    // spelling repeats it because the CLI has to know which options to accept
+    // before it has a catalog to read.
+    localOutputProjection: PatchbayOutputProjection(
+      artifact: PatchbayOutputArtifactProjection.payloadBlob(),
+    ),
   ),
+  // PB-050-40: these two stubs deliberately declare nothing. They are filtered
+  // out before path matching, so the reachable `capture root|target` spellings
+  // are the generated ones, which resolve `ui.capture`'s declaration — from the
+  // host catalog at render time, from the frozen table before that. A copy here
+  // would be a second writable truth that nothing reads.
   @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
   captureRoot.compatibilityFrozen(
     'ui.capture',
     <String>['capture', 'root'],
     summary: 'Capture the Flutter root repaint boundary.',
     usageSuffix: '--output <path>',
-    artifact: PatchbayArtifactDisposition.payloadBlob,
   ),
   @Deprecated('Use PatchbayFriendlyCommandRegistry.commands by path.')
   captureTarget.compatibilityFrozen(
@@ -472,7 +529,6 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     <String>['capture', 'target'],
     summary: 'Capture a registered Flutter UI target.',
     usageSuffix: '<target-id> <generation> --output <path>',
-    artifact: PatchbayArtifactDisposition.payloadBlob,
   ),
   captureDiff(
     'ui.capture.diff',
@@ -485,7 +541,13 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     <String>['blob', 'get'],
     summary: 'Download and verify a blob artifact.',
     usageSuffix: '<blob-id> --output <path>',
-    artifact: PatchbayArtifactDisposition.responseBlob,
+    // PB-050-40: this artifact belongs to the *spelling*, not to
+    // `blob.metadata`: `blob metadata` calls the same service command and must
+    // keep answering with metadata only. That is why the declaration is
+    // CLI-local and why `blob.metadata`'s descriptor deliberately carries none.
+    localOutputProjection: PatchbayOutputProjection(
+      artifact: PatchbayOutputArtifactProjection.responseBlob(),
+    ),
   ),
   blobMetadata(
     'blob.metadata',
@@ -499,10 +561,9 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
     this._path, {
     required String summary,
     String usageSuffix = '',
-    this.artifact = PatchbayArtifactDisposition.none,
+    this.localOutputProjection,
     this.target = PatchbayCommandTarget.declaredServiceCommand,
     this.waitCondition,
-    this.spilledMember,
     bool fencesNavigationRevision = false,
   }) : _summary = summary,
        _usageSuffix = usageSuffix,
@@ -518,11 +579,6 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
          (waitCondition != null) == (_serviceCommand == 'ui.wait'),
          'every ui.wait declaration names the condition it sends, and only '
          'those declarations have one',
-       ),
-       assert(
-         (spilledMember != null) ==
-             (artifact == PatchbayArtifactDisposition.renderedMember),
-         'spilledMember is declared exactly for renderedMember commands',
        );
 
   const PatchbayFriendlyCommand.compatibility(this._compatibilityProtocol)
@@ -530,19 +586,21 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
       _path = const <String>[],
       _summary = null,
       _usageSuffix = '',
-      artifact = PatchbayArtifactDisposition.none,
+      localOutputProjection = null,
       target = PatchbayCommandTarget.declaredServiceCommand,
       waitCondition = null,
-      spilledMember = null,
       _fencesNavigationRevision = false,
       _isCompatibilityStub = true;
 
+  /// PB-050-40: a frozen stub takes no projection. Every one of them is
+  /// filtered out before path matching, so a declaration here would be a copy
+  /// nothing reads — and a second writable truth beside the reachable
+  /// spelling's. The reachable spellings resolve their service descriptor.
   const PatchbayFriendlyCommand.compatibilityFrozen(
     this._serviceCommand,
     this._path, {
     required String summary,
     String usageSuffix = '',
-    this.artifact = PatchbayArtifactDisposition.none,
     this.waitCondition,
     bool fencesNavigationRevision = false,
   }) : _summary = summary,
@@ -550,7 +608,7 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
        _fencesNavigationRevision = fencesNavigationRevision,
        _compatibilityProtocol = null,
        _isCompatibilityStub = true,
-       spilledMember = null,
+       localOutputProjection = null,
        target = PatchbayCommandTarget.declaredServiceCommand;
 
   final String? _serviceCommand;
@@ -576,14 +634,31 @@ enum PatchbayFriendlyCommand implements PatchbayFriendlyCommandSpec {
   String get summary => _compatibilityProtocol?.summary ?? _summary!;
   @override
   String get usageSuffix => _compatibilityProtocol?.usageSuffix ?? _usageSuffix;
+
+  /// PB-050-40: this spelling's own projection declaration, when it owns one.
+  ///
+  /// Non-null for exactly the commands no host catalog can describe (`catalog`,
+  /// the three Flutter diagnostic trees) and the one spelling whose artifact is
+  /// not a property of its service command (`blob get`). Everything else reads
+  /// the service descriptor.
   @override
-  final PatchbayArtifactDisposition artifact;
+  final PatchbayOutputProjection? localOutputProjection;
+
+  /// Derived from [localOutputProjection] and the frozen 0.5.0 fallback: the
+  /// disposition is no longer a second hand-maintained fact beside the
+  /// declaration, it is a reading of it.
+  @override
+  PatchbayArtifactDisposition get artifact =>
+      patchbayDispositionOf(patchbayStaticOutputProjection(this));
+
   @override
   final PatchbayCommandTarget target;
   @override
   final String? waitCondition;
+
   @override
-  final String? spilledMember;
+  String? get spilledMember =>
+      patchbayStaticOutputProjection(this)?.artifact?.member;
 
   @override
   bool get fencesNavigationRevision =>

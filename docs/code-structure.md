@@ -63,8 +63,10 @@ golden 按**公开 library** 记录：递归 `packages/<pkg>/lib/**.dart` 各一
 
 `patchbay_cli` 的两个入口是 DG-050-07 冻结的封闭清单（canonical 2 个、
 `patchbay_client.dart` 8 个）；`patchbay` 的三个入口与 `patchbay_flutter` 的两个入口是
-DG-060-02 冻结的封闭清单（consumer 98、host 136、protocol 141；Flutter 默认 102、
-Flutter host 195；这些数字是角色种子的**自足闭包**，见修订②）。扩表要先改对应 Proposal（[CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)、
+DG-060-02 冻结口径的封闭清单（当前 consumer 114、host 152、protocol 150；Flutter 默认 118、
+Flutter host 211；这些数字是角色种子的**自足闭包**，见修订②。DG-060-02 定版时是
+98 / 136 / 141 / 102 / 195，其后新增的公共符号按同一规则在所属实现 MR 里归类，计数随之增长）。
+扩表要先改对应 Proposal（[CLI 公共 API 收口](proposals/0.5.0/cli-public-api-surface.md)、
 [Core 公共 Dart API 分层](proposals/0.6.0/core-public-api-layers.md)）再改 golden，
 不能在实现 MR 里顺手 `--update`。
 

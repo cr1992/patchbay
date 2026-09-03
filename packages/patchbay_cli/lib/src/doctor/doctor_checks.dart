@@ -7,6 +7,7 @@ import '../client.dart';
 import '../rpc_timeout.dart';
 import '../session.dart';
 import '../session/workspace_selection.dart';
+import '../support/catalog_descriptor.dart';
 import '../trace/trace_redaction.dart';
 import 'doctor_models.dart';
 
@@ -463,6 +464,35 @@ PatchbayDoctorFinding patchbayCatalogFinding(Map<String, Object?> catalog) {
       details: <String, Object?>{
         if (code is String) 'code': code,
         if (envelope['details'] case final Object value) 'rejection': value,
+      },
+    );
+  }
+  // PB-050-40: doctor deliberately reads first and judges second. Every other
+  // catalog reader refuses a catalog whose declarations it cannot interpret and
+  // stops; doctor exists to say *why* the App looks broken, so it keeps the
+  // document, names the violation and lets the operator see the command count
+  // and digest that surround it. Without this branch a host shipping a
+  // malformed `outputProjection` would pass the one check an operator runs to
+  // find out what is wrong with it.
+  try {
+    validateCatalogDeclarations(catalog);
+  } on PatchbayProtocolException catch (failure) {
+    return PatchbayDoctorFinding(
+      check: PatchbayDoctorCheck.catalog,
+      verdict: PatchbayCheckVerdict.failed,
+      observed: 'the App serves a catalog declaration this CLI cannot read',
+      cause:
+          'a command descriptor carries a malformed declaration; the whole '
+          'catalog is refused rather than partly interpreted, so no client '
+          'guesses a projection the provider did not publish',
+      action:
+          'read `patchbay --json catalog` and fix the offending descriptor in '
+          'the App',
+      details: <String, Object?>{
+        'code': 'providerProtocolViolation',
+        'declaration': failure.code,
+        if (failure.details['reason'] case final Object reason)
+          'reason': reason,
       },
     );
   }

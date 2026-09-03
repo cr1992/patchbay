@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:args/args.dart';
+import 'package:patchbay/patchbay.dart';
 
 import 'artifact_download.dart';
 import 'command_help.dart';
@@ -8,6 +9,7 @@ import 'command_registry.dart';
 import 'doctor.dart';
 import 'output/brief_view.dart';
 import 'output/local_artifact.dart';
+import 'output/output_projection_resolver.dart';
 import 'registry/argument_decoder.dart';
 import 'result.dart';
 import 'ui_manifest.dart';
@@ -15,10 +17,22 @@ import 'ui_manifest.dart';
 /// One command's result, classified exactly as the same command would be
 /// classified when run standalone.
 final class PatchbayReplOutcome {
-  const PatchbayReplOutcome(this.response, this.exitCode);
+  const PatchbayReplOutcome(
+    this.response,
+    this.exitCode, {
+    this.catalog,
+    this.localRoute,
+  });
 
   final Map<String, Object?> response;
   final int exitCode;
+
+  /// PB-050-40: the host catalog this line ran against, so the render seam can
+  /// resolve the line's projection from the host's own declaration.
+  final Map<String, Object?>? catalog;
+
+  /// PB-050-40: CLI-only routing facts, appended after the projection.
+  final Map<String, Object?>? localRoute;
 }
 
 /// Runs one already-parsed command line against the session's connection.
@@ -379,10 +393,13 @@ final class PatchbayReplSession {
     final int maxInlineBytes =
         ArgumentDecoder.optionalInt(parsed, 'max-inline-bytes') ??
         patchbayDefaultMaxInlineBytes;
+    final PatchbayOutputProjection? projection =
+        resolvePatchbayOutputProjection(spec: spec, catalog: outcome.catalog);
     final PatchbayRenderedMemberSpillResult spilled =
         await maybeSpillRenderedMember(
           writer: _outputWriter,
-          spec: spec,
+          projection: projection,
+          commandSlug: spec?.path.join('-') ?? '',
           response: outcome.response,
           exitCode: outcome.exitCode,
           explicitOutputPath: parsed.option('output'),
@@ -400,12 +417,15 @@ final class PatchbayReplSession {
           environment: _environment,
         );
     attachSpilledArtifactToTrace(spilled.artifact);
-    if (_resolvedView(parsed) != patchbayViewBrief) return spilled.response;
-    return projectPatchbayBriefView(
-      spec: spec,
-      response: spilled.response,
-      exitCode: outcome.exitCode,
-    );
+    final Map<String, Object?> projected =
+        _resolvedView(parsed) == patchbayViewBrief
+        ? projectPatchbayBriefView(
+            projection: projection,
+            response: spilled.response,
+            exitCode: outcome.exitCode,
+          )
+        : spilled.response;
+    return withPatchbayLocalRoute(projected, outcome.localRoute);
   }
 
   String _resolvedView(ArgResults parsed) =>

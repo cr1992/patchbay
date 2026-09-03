@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:patchbay/patchbay.dart';
 
 import 'artifact_download.dart';
 import 'client.dart';
@@ -21,6 +22,7 @@ import 'legacy_payload_confirmation.dart';
 import 'output/brief_view.dart';
 import 'output/local_artifact.dart';
 import 'output/output_formatter.dart';
+import 'output/output_projection_resolver.dart';
 import 'permission_command.dart';
 import 'permission_driver.dart';
 import 'registry/argument_decoder.dart';
@@ -264,7 +266,11 @@ Future<int> runPatchbayCliWithSeams(
           lineTrace = trace;
           lineRunId = runId;
           lineExitCode = outcome.exitCode;
-          return PatchbayReplOutcome(outcome.response, outcome.exitCode);
+          return PatchbayReplOutcome(
+            outcome.response,
+            outcome.exitCode,
+            catalog: outcome.catalog,
+          );
         },
         onLineRendered: () {
           final String? runId = lineRunId;
@@ -297,6 +303,8 @@ Future<int> runPatchbayCliWithSeams(
     final Map<String, Object?> rendered = await _finishRendering(
       writer: outputWriter,
       spec: PatchbayFriendlyCommandRegistry.specFor(parsed.rest),
+      catalog: outcome.catalog,
+      localRoute: outcome.localRoute,
       response: outcome.response,
       exitCode: outcome.exitCode,
       outputPath: parsed.option('output'),
@@ -650,6 +658,8 @@ Future<Outcome> _executeOnce(
       output,
       execution.exitCode ?? patchbayExitCodeFor(output),
       summary: execution.summary,
+      catalog: execution.catalog,
+      localRoute: execution.localRoute,
     );
   } on PatchbayArtifactRejected catch (rejected) {
     return Outcome(rejected.response, patchbayExitCodeFor(rejected.response));
@@ -686,6 +696,8 @@ Future<Outcome> _renewKeepAwakeAfterSuccess(
     <String, Object?>{...outcome.response, 'localKeepAwake': renewal.toJson()},
     renewal.success ? outcome.exitCode : PatchbayExitCode.typedFailure,
     summary: '$originalSummary $keepAwakeSummary',
+    catalog: outcome.catalog,
+    localRoute: outcome.localRoute,
   );
 }
 
@@ -769,6 +781,8 @@ int _fail(
 Future<Map<String, Object?>> _finishRendering({
   required PatchbayLocalArtifactWriter writer,
   required PatchbayFriendlyCommandSpec? spec,
+  required Map<String, Object?>? catalog,
+  required Map<String, Object?>? localRoute,
   required Map<String, Object?> response,
   required int exitCode,
   required String? outputPath,
@@ -778,10 +792,15 @@ Future<Map<String, Object?>> _finishRendering({
   required String Function(Map<String, Object?> response) renderDocument,
   required Map<String, String>? environment,
 }) async {
+  final PatchbayOutputProjection? projection = resolvePatchbayOutputProjection(
+    spec: spec,
+    catalog: catalog,
+  );
   final PatchbayRenderedMemberSpillResult spilled =
       await maybeSpillRenderedMember(
         writer: writer,
-        spec: spec,
+        projection: projection,
+        commandSlug: spec?.path.join('-') ?? '',
         response: response,
         exitCode: exitCode,
         explicitOutputPath: outputPath,
@@ -791,12 +810,14 @@ Future<Map<String, Object?>> _finishRendering({
         environment: environment,
       );
   attachSpilledArtifactToTrace(spilled.artifact);
-  if (view != patchbayViewBrief) return spilled.response;
-  return projectPatchbayBriefView(
-    spec: spec,
-    response: spilled.response,
-    exitCode: exitCode,
-  );
+  final Map<String, Object?> projected = view == patchbayViewBrief
+      ? projectPatchbayBriefView(
+          projection: projection,
+          response: spilled.response,
+          exitCode: exitCode,
+        )
+      : spilled.response;
+  return withPatchbayLocalRoute(projected, localRoute);
 }
 
 PatchbayErrorEnvelope _usageEnvelope(FormatException failure) =>

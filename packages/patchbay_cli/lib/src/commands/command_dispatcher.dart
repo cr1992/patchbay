@@ -31,11 +31,11 @@ abstract final class CommandDispatcher {
       case PatchbayCommandTarget.clientIdentity:
         return ExecutionResult(await connection.identity());
       case PatchbayCommandTarget.clientCatalog:
-        return ExecutionResult(await connection.catalog());
+        return ExecutionResult(await CatalogInvoker.fetchCatalog(connection));
       case PatchbayCommandTarget.localCatalogDescription:
         return ExecutionResult(
           CatalogInvoker.describeCatalogCommand(
-            await connection.catalog(),
+            await CatalogInvoker.fetchCatalog(connection),
             friendly.arguments['command']! as String,
           ),
         );
@@ -84,13 +84,17 @@ abstract final class CommandDispatcher {
       case PatchbayCommandTarget.localManifestVerification:
         final PatchbayUiManifest verified =
             manifest ?? CatalogInvoker.readUiManifest(friendly.manifestPath!);
-        final Map<String, Object?> catalog = await connection.catalog();
+        final Map<String, Object?> catalog = await CatalogInvoker.fetchCatalog(
+          connection,
+        );
         if (parsed.flag('navigate')) {
           return walkUiManifest(connection, catalog, verified, parsed);
         }
         return verifyManifestCurrent(connection, catalog, verified);
       case PatchbayCommandTarget.localManifestEmission:
-        final Map<String, Object?> catalog = await connection.catalog();
+        final Map<String, Object?> catalog = await CatalogInvoker.fetchCatalog(
+          connection,
+        );
         final Map<String, Object?> current =
             await CatalogInvoker.invokeAgainstCatalog(
               connection,
@@ -162,7 +166,9 @@ abstract final class CommandDispatcher {
       case PatchbayCommandTarget.callerServiceCommand:
       case PatchbayCommandTarget.routedServiceCommand:
         final String command = friendly.serviceCommand!;
-        final Map<String, Object?> catalog = await connection.catalog();
+        final Map<String, Object?> catalog = await CatalogInvoker.fetchCatalog(
+          connection,
+        );
         CatalogInvoker.refuseSensitiveArgv(
           catalog,
           command,
@@ -219,14 +225,18 @@ abstract final class CommandDispatcher {
                   'immediate mode',
           };
         }
-        if (friendly.localRoute case final Map<String, Object?> localRoute) {
-          response = <String, Object?>{...response, 'localRoute': localRoute};
-        }
+        // PB-050-40: `localRoute` is *not* merged into the response here any
+        // more. Evaluation order step 4 puts every CLI-local fact after the
+        // projection; leaving it in the host response let a descriptor declare
+        // `omit: ["$.localRoute"]` and delete the CLI's own report of which
+        // service command it routed to. It travels beside the response instead
+        // and is appended once rendering is done.
         return ExecutionResult(
           friendly.resolvesRevision
               ? CatalogInvoker.withRevisionSource(response)
               : response,
           catalog: catalog,
+          localRoute: friendly.localRoute,
           // `renderedMember` commands never go through `ArtifactRequest` /
           // `PatchbayArtifactDownloader`: there is no host blob to fetch, the
           // member is already in `response`. `_executeOnce` renders and

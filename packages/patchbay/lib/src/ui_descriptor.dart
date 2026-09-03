@@ -19,6 +19,53 @@ enum PatchbaySideEffect { none, appState, external }
 
 enum PatchbaySensitivePolicy { public, redacted }
 
+/// Closed catalog-wire classification distinguishing an explicit consumer
+/// automation surface from an action that must still satisfy user-like
+/// reachability (DG-060-05, "交互模型进入 catalog").
+///
+/// Declared only on UI commands with write side effects or reachability
+/// semantics: `ui.text.set`/`ui.text.enter` declare [directTarget];
+/// Semantics action/tap, pointer gesture and `ui.reveal` declare [userLike].
+/// Read commands and non-UI commands carry no `interactionModel` at all —
+/// absence is not a third value, it means the field does not apply or the
+/// host predates it (a reader must never infer one from the command name).
+///
+/// [directTarget] means the command operates a controller/adapter surface
+/// the consumer explicitly opened for automation. Success proves only that
+/// the operation was applied, never that a real user, pointer or device
+/// could reach the target, and it adds no occlusion gate.
+///
+/// [userLike] keeps the existing generation, policy, hit-test/occlusion
+/// admission and post-gate re-resolution. There is no `force`,
+/// `ignoreOcclusion` or cross-channel fallback for either value.
+enum PatchbayInteractionModel {
+  directTarget,
+  userLike;
+
+  /// Decodes the optional `interactionModel` catalog-row key.
+  ///
+  /// Returns `null` when the row does not declare the key at all — absence
+  /// is not an error, it is the additive-field default every older host and
+  /// every command outside the closed declaring set produces. Throws
+  /// [FormatException] for any declared value outside the two-member closed
+  /// set, which callers must treat as a whole-catalog provider violation
+  /// (DG-060-05), not a single bad row.
+  static PatchbayInteractionModel? fromCatalogRow(Map<Object?, Object?> row) {
+    if (!row.containsKey('interactionModel')) return null;
+    final Object? raw = row['interactionModel'];
+    if (raw is! String) {
+      throw const FormatException('interactionModel must be a string');
+    }
+    for (final PatchbayInteractionModel candidate in values) {
+      if (candidate.name == raw) return candidate;
+    }
+    throw FormatException('unknown interactionModel: $raw');
+  }
+
+  /// Encodes this value using its stable catalog-wire name.
+  String toJson() => name;
+}
+
 /// Consumer declaration stored by a `PatchbayKey` without Widget callbacks.
 final class PatchbayUiTargetDeclaration {
   PatchbayUiTargetDeclaration.text({

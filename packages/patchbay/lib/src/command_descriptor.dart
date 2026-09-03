@@ -1,6 +1,7 @@
 import 'facts.dart';
 import 'execution_evidence.dart';
 import 'generated/core_wire.g.dart';
+import 'output_projection.dart';
 import 'response_schema.dart';
 import 'ui_descriptor.dart';
 
@@ -193,7 +194,9 @@ final class PatchbayCommandDescriptor {
     this.confirmationBudgetMs,
     this.weakConfirmationCompletes = false,
     this.retryPolicy,
+    this.outputProjection,
     this.cliSyntax = const <PatchbayCliSyntax>[],
+    this.interactionModel,
   });
 
   final String name;
@@ -228,8 +231,33 @@ final class PatchbayCommandDescriptor {
   /// fallback is the boundary that owns requestId de-duplication.
   final PatchbayRetryPolicy? retryPolicy;
 
+  /// PB-050-40: how a machine consumer's `--view brief` and local artifact are
+  /// derived from this command's accepted response.
+  ///
+  /// Optional, and deliberately a **loose sibling** of the strict descriptor
+  /// wire rather than a field of [PatchbayCommandDescriptorWire]: catalog rows
+  /// already travel as loosely-read JSON (`responseSchema`, `retryPolicy` and
+  /// `weakConfirmationCompletes` are appended the same way), so an old reader
+  /// ignores this key instead of failing on it, `schemaVersion` stays `1`, and
+  /// no request or envelope a shipped client decodes strictly grows a field.
+  /// The catalog digest covers it for free, because that digest is taken over
+  /// whole command objects.
+  ///
+  /// Absent means "descriptor-less legacy", which is not the same as an empty
+  /// projection: the CLI falls back to its frozen 0.5.0 table for a command it
+  /// already knew, and leaves everything else untouched.
+  final PatchbayOutputProjection? outputProjection;
+
   /// Build-time CLI syntax. It is intentionally absent from the wire form.
   final List<PatchbayCliSyntax> cliSyntax;
+
+  /// Optional DG-060-05 direct-target/user-like classification.
+  ///
+  /// Additive catalog-wire sibling, same shape as [responseSchema] and
+  /// [retryPolicy]: absent for every command outside the closed declaring
+  /// set, and for any host that predates the field. See
+  /// [PatchbayInteractionModel] for the full contract.
+  final PatchbayInteractionModel? interactionModel;
 
   /// Applies the only catalog fields a runtime adapter may specialize.
   ///
@@ -271,7 +299,9 @@ final class PatchbayCommandDescriptor {
             parameter,
       ],
       gates: gates ?? this.gates,
+      outputProjection: outputProjection,
       cliSyntax: cliSyntax,
+      interactionModel: interactionModel,
     );
   }
 
@@ -304,6 +334,12 @@ final class PatchbayCommandDescriptor {
     json['weakConfirmationCompletes'] = weakConfirmationCompletes;
     if (retryPolicy case final PatchbayRetryPolicy policy) {
       json['retryPolicy'] = policy.toJson();
+    }
+    if (outputProjection case final PatchbayOutputProjection projection) {
+      json['outputProjection'] = projection.toJson();
+    }
+    if (interactionModel case final PatchbayInteractionModel model) {
+      json['interactionModel'] = model.toJson();
     }
     return json;
   }

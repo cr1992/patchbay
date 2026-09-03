@@ -240,6 +240,48 @@ void main() {
     expect(run.response['error'], isA<Map<Object?, Object?>>());
     expect(host.client.calls, isEmpty);
   });
+
+  test('a declaration the CLI cannot read mid-walk refuses the whole catalog, '
+      'it is not interpreted row by row', () async {
+    // PB-050-40: the walkthrough re-reads the catalog once per screen. Before
+    // this, only the *first* read went through the declaration seam, so a host
+    // that started publishing a malformed `outputProjection` after the walk
+    // began got read row by row here while every other reader refused it.
+    final _WalkthroughHost host = _WalkthroughHost(
+      malformedProjectionAfterFirstGo: true,
+    );
+    final _Run run = await _run(host.client, const <String>['--navigate']);
+
+    expect(run.exitCode, PatchbayExitCode.protocol);
+    final Map<String, Object?> envelope = Map<String, Object?>.from(
+      run.response['error']! as Map<Object?, Object?>,
+    );
+    expect(envelope['code'], 'catalogOutputProjectionInvalid');
+    expect(
+      (envelope['details']! as Map<Object?, Object?>)['reason'],
+      contains('device.declaring'),
+      reason: 'the refusal names the row that violated, not the screen',
+    );
+    expect(
+      run.response.containsKey('visited'),
+      isFalse,
+      reason:
+          "a provider violation is not one screen's reasonCode; the walk "
+          'reports no per-destination verdicts at all',
+    );
+  });
+
+  test('a clean walk still re-reads the catalog per screen', () async {
+    final _WalkthroughHost host = _WalkthroughHost();
+    final _Run run = await _run(host.client, const <String>['--navigate']);
+
+    expect(run.exitCode, PatchbayExitCode.accepted);
+    expect(
+      host.client.catalogReads,
+      greaterThan(1),
+      reason: 'the per-screen re-read is the path this validation guards',
+    );
+  });
 }
 
 Map<String, Object?> _destination(_Run run, String id) =>
@@ -280,6 +322,7 @@ final class _WalkthroughHost {
     this.restoreReject = false,
     this.initialDestination = 'screen.first',
     this.catalogDelay = Duration.zero,
+    this.malformedProjectionAfterFirstGo = false,
     this.goDelay = Duration.zero,
     this.includeGo = true,
     this.uiTargets = const <Object?>[],
@@ -305,6 +348,11 @@ final class _WalkthroughHost {
   final bool restoreReject;
   final String initialDestination;
   final Duration catalogDelay;
+
+  /// PB-050-40: makes the App start publishing a declaration the CLI cannot
+  /// interpret half way through the walk, so the per-screen catalog re-read
+  /// meets a document the initial read never contained.
+  final bool malformedProjectionAfterFirstGo;
   final Duration goDelay;
   final bool includeGo;
   final List<Object?> uiTargets;
@@ -361,6 +409,18 @@ final class _WalkthroughHost {
         }
         current = destination;
         revision += 1;
+        if (malformedProjectionAfterFirstGo) {
+          client.commands.add(const <String, Object?>{
+            'name': 'device.declaring',
+            'outputProjection': <String, Object?>{
+              'brief': <String, Object?>{
+                'id': 'x',
+                'omit': <String>[r'$.a'],
+              },
+              'formatter': 'shell',
+            },
+          });
+        }
         return fakeAccepted(
           PatchbayNavigationResultWire(
             outcome: 'arrived',
