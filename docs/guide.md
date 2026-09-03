@@ -149,11 +149,11 @@ App 或只需要协议层时，改为引用同一仓库的 `packages/patchbay`�
 
 | 入口 | 角色 | 符号数 | 内容 |
 |---|---|---|---|
-| `package:patchbay/patchbay.dart` | 默认 consumer | 98 | 命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
-| `package:patchbay/patchbay_host.dart` | host implementer | 136 | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
-| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 141 | 生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical protocol descriptor |
-| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | 102 | core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
-| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根 | 195 | core host 清单加全部 Flutter service host、bridge、policy、inspector、navigation、gesture、semantics、reveal 与 capture 符号 |
+| `package:patchbay/patchbay.dart` | 默认 consumer | 114 | 命令注册与 descriptor、参数/响应 schema、gate、catalog 与 snapshot provider、job ledger、artifact/blob/log service、navigation 与 UI 声明 |
+| `package:patchbay/patchbay_host.dart` | host implementer | 152 | 默认清单的严格超集，再加 `PatchbayServiceHost`、audit、invocation/cancellation 与 validation lifecycle |
+| `package:patchbay/patchbay_protocol.dart` | protocol / wire implementer | 150 | 生成 wire 类型、catalog capability 与 digest、CLI syntax、permission companion、client 请求与 canonical protocol descriptor |
+| `package:patchbay_flutter/patchbay_flutter.dart` | widget 文件 | 118 | core 默认清单加 `PatchbayKey`、`PatchbayRoot`、`PatchbayRootController`、`PatchbayUiRegistry` |
+| `package:patchbay_flutter/patchbay_flutter_host.dart` | Flutter 组合根 | 211 | core host 清单加全部 Flutter service host、bridge、policy、inspector、navigation、gesture、semantics、reveal 与 capture 符号 |
 
 **每个入口都是自足的**：导出符号的公共签名（构造函数形参、公共字段与 getter 的类型、方法形参与返回
 类型、超类/接口）里出现的 Patchbay 类型，一定由同一个入口导出。这条由

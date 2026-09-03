@@ -2,7 +2,7 @@
 //
 // 放在中立的 `support/` 层：`commands/` 与 `output/` 都要用它，
 // 若继续住在 `commands/` 里就会形成 commands -> output -> commands 的领域环。
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 
 import '../client.dart';
 

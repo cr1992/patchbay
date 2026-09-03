@@ -10,6 +10,7 @@
 import 'dart:io';
 
 import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:patchbay_cli/src/client.dart';
 import 'package:patchbay_cli/src/command_registry.dart';
 import 'package:patchbay_cli/src/output/brief_view.dart';
@@ -155,22 +156,22 @@ void main() {
       final PatchbayFriendlyCommandSpec spec = _spec(<String>[
         'ui',
         'perform',
-        'set-text',
+        'enter-text',
       ]);
-      expect(spec.serviceCommand, 'ui.text.set');
+      expect(spec.serviceCommand, 'ui.text.enter');
       final PatchbayOutputProjection? resolved =
           resolvePatchbayOutputProjection(
             spec: spec,
-            catalog: _catalogDeclaring('ui.text.set', <String, Object?>{
+            catalog: _catalogDeclaring('ui.text.enter', <String, Object?>{
               'brief': <String, Object?>{
-                'id': 'ui.text.set',
+                'id': 'ui.text.enter',
                 'omit': <String>[r'$.payload.diff'],
               },
             }),
           );
       expect(
         resolved?.brief?.id,
-        'ui.text.set',
+        'ui.text.enter',
         reason:
             'the façade is a CLI route; DG-060-01 maps it onto an existing '
             'service command, so it reuses that descriptor rather than '

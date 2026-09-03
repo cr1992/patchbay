@@ -7,7 +7,7 @@ library;
 
 import 'dart:math';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:test/test.dart';
 
 /// Deterministic-seed convention for malformed-input cases, mirroring

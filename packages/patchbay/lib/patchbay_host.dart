@@ -130,6 +130,23 @@ export 'src/navigation.dart'
         PatchbayDestinationDescriptor,
         PatchbayNavigationObservation,
         PatchbayNavigationOperation;
+export 'src/output_projection.dart'
+    show
+        PatchbayOutputArtifactEncoding,
+        PatchbayOutputArtifactKind,
+        PatchbayOutputArtifactProjection,
+        PatchbayOutputBriefProjection,
+        PatchbayOutputProjection,
+        PatchbayOutputProjectionPath,
+        PatchbayOutputProjectionPathSegment,
+        patchbayOutputProjectionJsonExtension,
+        patchbayOutputProjectionJsonMediaType,
+        patchbayOutputProjectionMaxIdLength,
+        patchbayOutputProjectionMaxOmitRules,
+        patchbayOutputProjectionMaxPathBytes,
+        patchbayOutputProjectionReservedRootPrefix,
+        patchbayOutputProjectionTextExtension,
+        patchbayOutputProjectionTextMediaType;
 export 'src/response_schema.dart'
     show
         PatchbayResponseSchema,
@@ -170,6 +187,7 @@ export 'src/snapshot.dart'
         patchbaySnapshotWaitCeiling;
 export 'src/ui_descriptor.dart'
     show
+        PatchbayInteractionModel,
         PatchbayPlane,
         PatchbaySensitivePolicy,
         PatchbaySideEffect,

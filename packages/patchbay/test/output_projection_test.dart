@@ -11,7 +11,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:patchbay/patchbay.dart';
+import 'package:patchbay/patchbay_host.dart';
+import 'package:patchbay/patchbay_protocol.dart';
 import 'package:test/test.dart';
 
 /// Same default as `packages/patchbay_transport/test/malformed_payload_harness.dart`:
