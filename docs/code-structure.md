@@ -106,9 +106,23 @@ element model 校验**入口自足**——每个公共 library 导出符号的�
 | `patchbay_cli/lib/src/launcher.dart` 的 `run` | 360 行 | 32 个分支的多阶段编排：参数校验 → 启动 → 监督 → keep-awake → 取消 → 收敛 |
 | `patchbay_cli/.../registry/friendly_command_registry.dart` 的 `resolve` | 310 行 | 别名展开、路径规范化、选项校验、规格匹配四件事混在一起 |
 
+**已拆分**（PB-050-38，按状态机阶段拆而不是按行数横切）：
+
+| 位置 | 拆分前后 | 拆法 |
+|---|---|---|
+| `patchbay_flutter/lib/src/semantics/semantics_bridge.dart` | 989 → 660 行 | 准入管线的六个阶段各自独立成文件（`semantics_resolve_stage` / `semantics_preflight_stage` / `semantics_policy_stage` / `semantics_dispatch_stage` / `semantics_evidence` / `semantics_action_taxonomy`），桥只留公共门面、语义树采样与代际账本，以及按冻结顺序的编排 |
+
+这条推翻了下面「已复核，维持现状」里对 `semantics_bridge` 的旧判断，理由不是它变得更长，而是
+读法换了：按「成员是否同构」看它是一个内聚类，按「一个函数是否串起多个阶段」看，`_dispatch`
+（171 行）正是「必须拆分」第 1 条的样本——resolve → gate → policy → 遮挡判定 → 再 resolve →
+再 policy → dispatch 七段只靠局部变量串起来，任何一段都无法单独失败注入。拆分保持外部语义
+逐字节不变，由 `test/bridge/semantics_pipeline_characterization_test.dart` 在拆分前后各跑一次
+钉住。PB-050-38 还有四个热点（`flutter_service_host` / `reveal_engine` / `host_invoker` /
+`snapshot_payload`）在后续 MR 里各自处理，本条不代它们下判断。
+
 **已复核，维持现状**：
 
-- 因文件长度被点过名的 `manifest_parser` / `semantics_bridge` / `gesture_bridge` /
+- 因文件长度被点过名的 `manifest_parser` / `gesture_bridge` /
   `artifact_service` / `trace_store` / `doctor_checks` / `release_checker`——
   长度来自同构成员集合与内聚类，属「不该拆分」第 1、2 条；
 - `flutter_service_host` 的 `_uiCommandRegistry`（254 行）与 `command_codegen` 的
