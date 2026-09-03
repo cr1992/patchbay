@@ -25,6 +25,13 @@ export 'registry/canonical_ui_registry.dart'
         PatchbayUiExecutionPath,
         PatchbayUiSelectorKind;
 export 'registry/friendly_commands.dart';
+export 'registry/output_projection_declarations.dart'
+    show
+        PatchbayLocallyProjectedCommand,
+        patchbayDispositionOf,
+        patchbayFrozen050OutputProjections,
+        patchbayFrozenOutputProjection,
+        patchbayStaticOutputProjection;
 
 part 'generated/protocol_cli_commands.g.dart';
 

@@ -31,11 +31,11 @@ abstract final class CommandDispatcher {
       case PatchbayCommandTarget.clientIdentity:
         return ExecutionResult(await connection.identity());
       case PatchbayCommandTarget.clientCatalog:
-        return ExecutionResult(await connection.catalog());
+        return ExecutionResult(await CatalogInvoker.fetchCatalog(connection));
       case PatchbayCommandTarget.localCatalogDescription:
         return ExecutionResult(
           CatalogInvoker.describeCatalogCommand(
-            await connection.catalog(),
+            await CatalogInvoker.fetchCatalog(connection),
             friendly.arguments['command']! as String,
           ),
         );
@@ -84,13 +84,17 @@ abstract final class CommandDispatcher {
       case PatchbayCommandTarget.localManifestVerification:
         final PatchbayUiManifest verified =
             manifest ?? CatalogInvoker.readUiManifest(friendly.manifestPath!);
-        final Map<String, Object?> catalog = await connection.catalog();
+        final Map<String, Object?> catalog = await CatalogInvoker.fetchCatalog(
+          connection,
+        );
         if (parsed.flag('navigate')) {
           return walkUiManifest(connection, catalog, verified, parsed);
         }
         return verifyManifestCurrent(connection, catalog, verified);
       case PatchbayCommandTarget.localManifestEmission:
-        final Map<String, Object?> catalog = await connection.catalog();
+        final Map<String, Object?> catalog = await CatalogInvoker.fetchCatalog(
+          connection,
+        );
         final Map<String, Object?> current =
             await CatalogInvoker.invokeAgainstCatalog(
               connection,
@@ -162,7 +166,9 @@ abstract final class CommandDispatcher {
       case PatchbayCommandTarget.callerServiceCommand:
       case PatchbayCommandTarget.routedServiceCommand:
         final String command = friendly.serviceCommand!;
-        final Map<String, Object?> catalog = await connection.catalog();
+        final Map<String, Object?> catalog = await CatalogInvoker.fetchCatalog(
+          connection,
+        );
         CatalogInvoker.refuseSensitiveArgv(
           catalog,
           command,

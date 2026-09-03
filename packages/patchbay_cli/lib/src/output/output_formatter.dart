@@ -41,10 +41,16 @@ final class ExecutionResult {
 
 /// Final outcome of a CLI execution.
 final class Outcome {
-  const Outcome(this.response, this.exitCode, {this.summary});
+  const Outcome(this.response, this.exitCode, {this.summary, this.catalog});
 
   final Map<String, Object?> response;
   final int exitCode;
+
+  /// PB-050-40: the host catalog this dispatch ran against, carried to the
+  /// render seam so the projection can be resolved from the host's own
+  /// declaration. `null` for a command that never reads a catalog — the
+  /// CLI-local declaration and the frozen fallback still answer for those.
+  final Map<String, Object?>? catalog;
 
   /// Human rendering for the one-shot path, when one line cannot carry the
   /// result. `null` keeps the shared per-response summary.
