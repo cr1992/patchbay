@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -616,6 +618,11 @@ final class PatchbaySemanticsBridge {
             in PatchbaySemanticsAction.values)
           if (data.hasAction(candidate.flutterAction)) candidate.name,
       ]..sort(),
+      // Only nodes that declare an enabled state carry the key: a plain label
+      // has no such fact, and inventing `true` for it would let a caller read
+      // "enabled" where Flutter never said so.
+      if (data.flagsCollection.isEnabled != Tristate.none)
+        'enabled': data.flagsCollection.isEnabled == Tristate.isTrue,
       'invisible': node.isInvisible,
       'userActionsBlocked': node.areUserActionsBlocked,
     };
@@ -648,18 +655,30 @@ final class PatchbaySemanticsBridge {
     if (entry.generation != generation || !identical(entry.node.target, node)) {
       return PatchbaySemanticsResolution.rejected(
         'uiSemanticsGenerationStale',
-        details: <String, Object?>{'currentGeneration': entry.generation},
+        details: <String, Object?>{
+          'nodeId': nodeId,
+          'expectedGeneration': generation,
+          'currentGeneration': entry.generation,
+        },
       );
     }
+    // From here the nodeId path answers with the same candidate details as
+    // the identifier path: a caller who chose a node by id gets told why that
+    // node cannot take the action, not just that it cannot.
     final SemanticsData data = node.getSemanticsData();
     if (node.isInvisible || node.areUserActionsBlocked) {
-      return const PatchbaySemanticsResolution.rejected(
+      return PatchbaySemanticsResolution.rejected(
         'uiSemanticsActionBlocked',
+        details: _candidate(node, data),
       );
     }
     if (!data.hasAction(action.flutterAction)) {
-      return const PatchbaySemanticsResolution.rejected(
+      return PatchbaySemanticsResolution.rejected(
         'uiSemanticsActionUnavailable',
+        details: <String, Object?>{
+          ..._candidate(node, data),
+          'requestedAction': action.name,
+        },
       );
     }
     return PatchbaySemanticsResolution.resolved(
