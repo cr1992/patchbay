@@ -99,6 +99,85 @@ void main() {
           'connectPatchbayVmService',
         ]);
       });
+
+      // DG-060-02 冻结的分层关系，同样写在 golden 自己身上。逐名冻结 250 个 core
+      // 符号会让这个文件变成第二份 golden，所以这里冻结的是**集合之间的关系**：
+      // 它们才是裁决内容，而且 `--update` 无法自动满足其中任何一条。
+      test('三个 core 入口与两个 Flutter 入口维持 DG-060-02 的集合关系', () {
+        final decoded =
+            jsonDecode(File('$root/tool/api_surface.json').readAsStringSync())
+                as Map<String, Object?>;
+        Set<String> surfaceOf(String pkg, String library) => <String>{
+          ...((decoded[pkg]! as Map<String, Object?>)[library]!
+                  as List<Object?>)
+              .map((v) => v.toString()),
+        };
+
+        final consumer = surfaceOf('patchbay', 'lib/patchbay.dart');
+        final host = surfaceOf('patchbay', 'lib/patchbay_host.dart');
+        final protocol = surfaceOf('patchbay', 'lib/patchbay_protocol.dart');
+        final flutter = surfaceOf(
+          'patchbay_flutter',
+          'lib/patchbay_flutter.dart',
+        );
+        final flutterHost = surfaceOf(
+          'patchbay_flutter',
+          'lib/patchbay_flutter_host.dart',
+        );
+
+        // 1. host 是 consumer 的严格超集，多出来的恰好是 host-only 集合。
+        expect(host.containsAll(consumer), isTrue);
+        expect(host.difference(consumer), hasLength(44));
+
+        // 2. protocol 与另外两个入口互不相交——raw wire 不从默认面或 host 面泄漏。
+        expect(protocol.intersection(host), isEmpty);
+        expect(protocol.intersection(consumer), isEmpty);
+
+        // 3. 默认 Flutter 面 = core consumer 清单 + 四个 widget 侧自有符号。
+        expect(flutter.difference(consumer), <String>{
+          'PatchbayKey',
+          'PatchbayRoot',
+          'PatchbayRootController',
+          'PatchbayUiRegistry',
+        });
+
+        // 4. Flutter host 面 = core host 清单 ∪ Flutter 自有全集（48 个）。
+        expect(flutterHost.containsAll(host), isTrue);
+        expect(flutterHost.containsAll(flutter), isTrue);
+        expect(flutterHost.difference(host), hasLength(48));
+        expect(flutterHost.intersection(protocol), isEmpty);
+
+        // 5. 三个角色的代表符号各就各位：这几条是裁决里点名的边界。
+        for (final symbol in const <String>[
+          'PatchbayServiceHost',
+          'PatchbayInvocation',
+          'PatchbayAuditEvent',
+        ]) {
+          expect(consumer, isNot(contains(symbol)));
+          expect(flutter, isNot(contains(symbol)));
+          expect(host, contains(symbol));
+        }
+        for (final symbol in const <String>[
+          'PatchbayInvocationWire',
+          'PatchbayCatalogDigest',
+          'patchbayCanonicalJson',
+        ]) {
+          expect(consumer, isNot(contains(symbol)));
+          expect(flutter, isNot(contains(symbol)));
+          expect(host, isNot(contains(symbol)));
+          expect(protocol, contains(symbol));
+        }
+        for (final symbol in const <String>[
+          'PatchbayFlutterServiceHost',
+          'PatchbayFlutterBridge',
+          'PatchbayRevealPolicy',
+          'PatchbaySemanticsActionPolicy',
+          'PatchbayGesturePolicy',
+        ]) {
+          expect(flutter, isNot(contains(symbol)));
+          expect(flutterHost, contains(symbol));
+        }
+      });
     },
     skip: root == null ? '不在仓库工作树内（发布归档），surface 门禁不适用' : null,
   );
@@ -266,15 +345,102 @@ void main() {
       );
     });
 
-    test('N2：非封闭清单的包保持 0.4.1 口径，不因整库 re-export 判红', () {
+    // PB-060-02：封闭清单从 CLI 一个包扩到四个包。上一版这里断言的是反面
+    // ——`patchbay_flutter` 允许整库 re-export——那正是分层要消灭的那一行。
+    test('N3：四个发布包的无 show 跨包 re-export 一律判红', () {
       writeLibrary('patchbay', 'patchbay.dart', 'class Everything {}\n');
+      writeLibrary('patchbay', 'patchbay_host.dart', 'class HostOnly {}\n');
+      // 四个包各留一处无 show 的整库 re-export，包括 core 自己 re-export 自己的
+      // 另一个入口：分层之后「host 入口整库带上 consumer 入口」同样算绕过。
+      writeLibrary(
+        'patchbay',
+        'patchbay_protocol.dart',
+        "export 'package:patchbay/patchbay.dart';\n",
+      );
+      writeLibrary(
+        'patchbay_cli',
+        'patchbay_cli.dart',
+        "export 'package:patchbay/patchbay.dart';\n",
+      );
       writeLibrary(
         'patchbay_flutter',
         'patchbay_flutter.dart',
         "export 'package:patchbay/patchbay.dart';\nclass Bridge {}\n",
       );
+      writeLibrary(
+        'patchbay_transport',
+        'patchbay_transport.dart',
+        "export 'package:patchbay/patchbay.dart';\n",
+      );
+
+      final violations = tool.opaquePackageReexports(fixture.path);
+
+      expect(violations, hasLength(4));
+      for (final entry in const <String>[
+        'patchbay lib/patchbay_protocol.dart',
+        'patchbay_cli lib/patchbay_cli.dart',
+        'patchbay_flutter lib/patchbay_flutter.dart',
+        'patchbay_transport lib/patchbay_transport.dart',
+      ]) {
+        expect(
+          violations.where((v) => v.startsWith(entry)),
+          hasLength(1),
+          reason: '$entry 的整库 re-export 必须判红',
+        );
+      }
+    });
+
+    test('N3：四个包的带 show 跨包 re-export 都展开，且都不判红', () {
+      writeLibrary(
+        'patchbay',
+        'patchbay.dart',
+        'class Consumer {}\nclass NotShown {}\n',
+      );
+      writeLibrary(
+        'patchbay',
+        'patchbay_host.dart',
+        "export 'package:patchbay/patchbay.dart' show Consumer;\n"
+            'class HostOnly {}\n',
+      );
+      writeLibrary(
+        'patchbay_cli',
+        'patchbay_client.dart',
+        "export 'package:patchbay/patchbay_protocol.dart' show Request;\n",
+      );
+      writeLibrary(
+        'patchbay_flutter',
+        'patchbay_flutter_host.dart',
+        "export 'package:patchbay/patchbay_host.dart' show Consumer, HostOnly;\n"
+            'class Bridge {}\n',
+      );
+      writeLibrary(
+        'patchbay_transport',
+        'patchbay_transport.dart',
+        "export 'package:patchbay/patchbay_protocol.dart' show Request;\n"
+            'class DirectHost {}\n',
+      );
 
       expect(tool.opaquePackageReexports(fixture.path), isEmpty);
+
+      final surface = tool.computeSurface(fixture.path);
+
+      // 跨包 re-export 的符号名就写在 export 行上，因此不必解析对方包也能记账；
+      // 没有 show 的那部分（NotShown）不会跟着漏进来。
+      expect(surface['patchbay']!['lib/patchbay_host.dart'], <String>[
+        'Consumer',
+        'HostOnly',
+      ]);
+      expect(surface['patchbay_cli']!['lib/patchbay_client.dart'], <String>[
+        'Request',
+      ]);
+      expect(
+        surface['patchbay_flutter']!['lib/patchbay_flutter_host.dart'],
+        <String>['Bridge', 'Consumer', 'HostOnly'],
+      );
+      expect(
+        surface['patchbay_transport']!['lib/patchbay_transport.dart'],
+        <String>['DirectHost', 'Request'],
+      );
     });
   });
 }

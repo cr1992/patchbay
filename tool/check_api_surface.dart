@@ -15,7 +15,7 @@
 //
 // 封闭清单的包（见 `_closedSurfacePackages`）额外要求「每个 library 的集合都算得
 // 出来」：无 `show` 的 `export 'package:…'` 当场判红，`--update` 也挡，否则那一行
-// 就是一个 golden diff 恒为 0 的绕过口子。
+// 就是一个 golden diff 恒为 0 的绕过口子。PB-060-02 起四个发布包全在封闭清单里。
 //
 //   dart run tool/check_api_surface.dart            比对 golden
 //   dart run tool/check_api_surface.dart --update   重写 golden（需在 MR 中解释）
@@ -201,9 +201,11 @@ List<String> librariesOf(String repoRoot, String pkg) {
 /// 清单的证据。因此它们不允许出现无 `show` 的跨包整库 re-export——那一行会让对方
 /// 包的整张表进入本包公共面，而 golden diff 恒为 0。
 ///
-/// 另外三个包保持 0.4.1 口径：`patchbay_flutter` 本来就整库 re-export `patchbay`，
-/// PB-050-13 明确不动它们的公共面。
-const Set<String> _closedSurfacePackages = <String>{'patchbay_cli'};
+/// PB-050-13 只把 `patchbay_cli` 纳进来，另外三个包留着 0.4.1 口径；PB-060-02 把
+/// core 拆成 consumer / host / protocol 三个入口后，`patchbay_flutter.dart` 的整库
+/// re-export 正是分层要消灭的那一行，所以四个包一起纳入：现在**每个**发布包的每个
+/// 公开 library 都必须逐名 `show`，golden 才是那份清单的证据。
+const Set<String> _closedSurfacePackages = <String>{..._packages};
 
 /// 封闭清单包里所有算不出集合的跨包 re-export，人读格式，每行一条。
 List<String> opaquePackageReexports(String repoRoot) {
