@@ -7,6 +7,8 @@
 // that the CLI option surface still derives from a declaration rather than
 // from a second hand-maintained table, and that a malformed declaration takes
 // the whole catalog down instead of being dropped.
+import 'dart:io';
+
 import 'package:patchbay/patchbay.dart';
 import 'package:patchbay_cli/src/client.dart';
 import 'package:patchbay_cli/src/command_registry.dart';
@@ -424,6 +426,42 @@ void main() {
         );
       });
     }
+
+    test('every file that reads a catalog directly is a known reader', () {
+      // A source-level ratchet, because the failure mode this guards is a
+      // *new* reader, not a wrong one. PB-050-34 wired its validator into the
+      // dispatch path and quietly missed `patchbay catalog` and doctor;
+      // PB-050-40 then missed the walkthrough's per-screen re-read the same
+      // way. Enumerating the readers means the next one turns this red instead
+      // of shipping a second, laxer interpretation of the same document.
+      const Map<String, String> known = <String, String>{
+        'lib/src/commands/catalog_invoker.dart':
+            'the seam itself: read then validateCatalogDeclarations',
+        'lib/src/runners/manifest_runner.dart':
+            'per-screen re-read, validated inline',
+        'lib/src/doctor/doctor_runner.dart':
+            'reads first and judges second; patchbayCatalogFinding validates',
+        'lib/src/permission_recovery.dart':
+            'reads uiTargets only — never a command declaration, never a '
+            'dispatch, never a projection',
+      };
+      final Set<String> readers = <String>{
+        for (final FileSystemEntity entity in Directory(
+          'lib',
+        ).listSync(recursive: true))
+          if (entity is File &&
+              entity.path.endsWith('.dart') &&
+              entity.readAsStringSync().contains('connection.catalog()'))
+            entity.path.replaceAll(r'\', '/'),
+      };
+      expect(readers, known.keys.toSet());
+
+      expect(
+        File('lib/src/runners/manifest_runner.dart').readAsStringSync(),
+        contains('validateCatalogDeclarations(screenCatalog)'),
+        reason: 'the walkthrough re-read must clear the same bar as the first',
+      );
+    });
 
     test('every direct catalog reader goes through the same seam', () {
       // The PB-050-34 lesson this MR is meant not to repeat: a per-feature

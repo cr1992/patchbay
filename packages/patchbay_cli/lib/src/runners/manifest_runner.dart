@@ -5,6 +5,7 @@ import 'package:patchbay/patchbay_protocol.dart';
 
 import '../client.dart';
 import '../result.dart';
+import '../support/catalog_descriptor.dart';
 import '../ui_manifest.dart';
 
 const String manifestWalkthroughSchema = 'uiManifestWalkthroughReport';
@@ -375,6 +376,17 @@ abstract final class ManifestWalkthroughRunner {
       } else {
         try {
           screenCatalog = await connection.catalog().timeout(catalogTimeout);
+          // PB-050-40: a walkthrough re-reads the catalog once per screen, and
+          // this second document has to clear the same bar as the first. An
+          // App that starts publishing a declaration the CLI cannot interpret
+          // half way through a walk would otherwise be interpreted row by row
+          // here — the exact partial reading `outputProjection` exists to
+          // prevent — while `patchbay catalog` and every dispatched command
+          // refused the same host outright. The refusal is a typed protocol
+          // failure, so it escapes the per-screen loop instead of being
+          // recorded as one screen's `reasonCode`: a provider violation is not
+          // a property of the screen that happened to be next.
+          validateCatalogDeclarations(screenCatalog);
         } on TimeoutException {
           verificationFailure = localWalkthroughFailure(
             total.elapsed >= totalBudget
