@@ -196,6 +196,7 @@ final class PatchbayCommandDescriptor {
     this.retryPolicy,
     this.outputProjection,
     this.cliSyntax = const <PatchbayCliSyntax>[],
+    this.interactionModel,
   });
 
   final String name;
@@ -250,6 +251,14 @@ final class PatchbayCommandDescriptor {
   /// Build-time CLI syntax. It is intentionally absent from the wire form.
   final List<PatchbayCliSyntax> cliSyntax;
 
+  /// Optional DG-060-05 direct-target/user-like classification.
+  ///
+  /// Additive catalog-wire sibling, same shape as [responseSchema] and
+  /// [retryPolicy]: absent for every command outside the closed declaring
+  /// set, and for any host that predates the field. See
+  /// [PatchbayInteractionModel] for the full contract.
+  final PatchbayInteractionModel? interactionModel;
+
   /// Applies the only catalog fields a runtime adapter may specialize.
   ///
   /// The command identity and stable contract deliberately cannot be supplied
@@ -292,6 +301,7 @@ final class PatchbayCommandDescriptor {
       gates: gates ?? this.gates,
       outputProjection: outputProjection,
       cliSyntax: cliSyntax,
+      interactionModel: interactionModel,
     );
   }
 
@@ -327,6 +337,9 @@ final class PatchbayCommandDescriptor {
     }
     if (outputProjection case final PatchbayOutputProjection projection) {
       json['outputProjection'] = projection.toJson();
+    }
+    if (interactionModel case final PatchbayInteractionModel model) {
+      json['interactionModel'] = model.toJson();
     }
     return json;
   }

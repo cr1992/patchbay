@@ -5,6 +5,7 @@ import '../execution_evidence.dart';
 import '../generated/core_wire.g.dart';
 import '../output_projection.dart';
 import '../response_schema.dart';
+import '../ui_descriptor.dart';
 import 'host_models.dart';
 
 final class PatchbayCatalogValidity {
@@ -446,6 +447,17 @@ final class HostCatalogHandler {
           'name': rawName,
           'reason': 'invalidExecutionContract',
         });
+      }
+      if (entry.containsKey('interactionModel')) {
+        try {
+          PatchbayInteractionModel.fromCatalogRow(entry);
+        } on Object {
+          violations.add(<String, Object?>{
+            'index': index,
+            'name': rawName,
+            'reason': 'invalidInteractionModel',
+          });
+        }
       }
     }
     if (violations.isNotEmpty) {

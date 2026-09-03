@@ -35,6 +35,7 @@ PatchbayCommandDescriptor _ui(
   List<PatchbayCliSyntax> cliSyntax = const [],
   Set<String> gates = const {},
   PatchbayOutputProjection? outputProjection,
+  PatchbayInteractionModel? interactionModel,
 }) => PatchbayCommandDescriptor(
   name: name,
   summary: summary,
@@ -46,6 +47,7 @@ PatchbayCommandDescriptor _ui(
   cliSyntax: cliSyntax,
   gates: gates,
   outputProjection: outputProjection,
+  interactionModel: interactionModel,
 );
 
 final patchbayUiTextSetCommandDescriptor = _textDescriptor(
@@ -72,6 +74,7 @@ PatchbayCommandDescriptor _textDescriptor(
 ) => _ui(
   name,
   summary,
+  interactionModel: PatchbayInteractionModel.directTarget,
   parameters: <PatchbayParameterDescriptor>[
     _p('id', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -132,6 +135,7 @@ final patchbayUiSemanticsTreeCommandDescriptor = _ui(
 final patchbayUiSemanticsActionCommandDescriptor = _ui(
   'ui.semantics.action',
   'Invoke an allowed action on an observed Semantics node.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('nodeId', PatchbayParameterType.integer, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -174,6 +178,7 @@ final patchbayUiSemanticsActionCommandDescriptor = _ui(
 final patchbayUiSemanticsActionByIdentifierCommandDescriptor = _ui(
   'ui.semantics.actionByIdentifier',
   'Resolve a stable Semantics identifier and invoke an allowed action.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -216,6 +221,7 @@ final patchbayUiSemanticsActionByIdentifierCommandDescriptor = _ui(
 final patchbayUiSemanticsTapCommandDescriptor = _ui(
   'ui.semantics.tap',
   'Resolve a stable Semantics identifier and tap it in one request.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer),
@@ -319,6 +325,7 @@ PatchbayCommandDescriptor _gesture(
 }) => _ui(
   name,
   summary,
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     _p('identifier', PatchbayParameterType.string, required: true),
     _p('generation', PatchbayParameterType.integer, required: true),
@@ -358,6 +365,7 @@ final patchbayUiRevealCommandDescriptor = _ui(
   'ui.reveal',
   'Drive a scroll container until a Semantics identifier is mounted and '
       'exposed.',
+  interactionModel: PatchbayInteractionModel.userLike,
   parameters: <PatchbayParameterDescriptor>[
     const PatchbayParameterDescriptor(
       name: 'identifier',
