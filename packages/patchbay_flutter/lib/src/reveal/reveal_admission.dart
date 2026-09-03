@@ -128,16 +128,24 @@ PatchbayRevealTargetAdmission patchbayRevealTargetAdmission({
 /// 被裁剪、被盖住都不是 0 步终态——受理后的 `failed` payload 要求 `containers`
 /// 恒非空，而一次都没派发时它必然是空的。
 ///
-/// 它现在是 [patchbayRevealTargetAdmission] 的一个投影：引擎在步间只关心「露出
-/// 了没有」，恢复方向的分辨只发生在受理边界上。
+/// 它是 [patchbayRevealTargetAdmission] 的一个投影：引擎在步间只关心「露出了
+/// 没有」，恢复方向的分辨只发生在受理边界上。
+///
+/// **`isInvisible` / `areUserActionsBlocked` 在这里先行短路，不解析几何。** 这两
+/// 种节点无论如何都不构成成功终态，投影结果恒为 null；而完整分类要多付一次几何
+/// 解析和最多五次 `hitTestInView`，那是**只有受理边界才需要**的开销——步间路径
+/// 每一步都可能问一次，不该替一个注定为 null 的答案付这笔钱。
 PatchbayRevealOutcome? patchbayRevealedNow({
   required SemanticsOwner owner,
   required SemanticsNode? node,
   required PatchbaySemanticsBridge semantics,
-}) => node == null
-    ? null
-    : patchbayRevealTargetAdmission(
-        owner: owner,
-        node: node,
-        semantics: semantics,
-      ).outcome;
+}) {
+  if (node == null || node.areUserActionsBlocked || node.isInvisible) {
+    return null;
+  }
+  return patchbayRevealTargetAdmission(
+    owner: owner,
+    node: node,
+    semantics: semantics,
+  ).outcome;
+}

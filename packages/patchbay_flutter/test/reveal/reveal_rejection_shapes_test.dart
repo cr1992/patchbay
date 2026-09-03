@@ -17,10 +17,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patchbay_flutter/patchbay_flutter.dart';
 
 import 'reveal_fixtures.dart';
+
+/// 目标行上被问过多少次命中测试。
+///
+/// 五点采样是这条链上唯一会对目标行做 `hitTestInView` 的东西（用例里没有任何
+/// 指针事件），所以这个计数器就是「采样跑了没有」的直接证据。
+int targetHitTests = 0;
 
 /// 一行的高度之外，`revealApp` 的视口是 240 逻辑像素高：index 5 的行落在
 /// 300..360，因此在 cacheExtent 内被构建（已挂载）却完全在 paint clip 之外
@@ -28,7 +35,10 @@ import 'reveal_fixtures.dart';
 const int _clippedButMountedIndex = 5;
 
 void main() {
-  setUp(resetRevealCounters);
+  setUp(() {
+    resetRevealCounters();
+    targetHitTests = 0;
+  });
 
   group('目标零匹配', () {
     testWidgets('无可驱动容器 ⇒ uiRevealTargetNotFound，details 带 matchCount 0', (
@@ -292,6 +302,170 @@ void main() {
     });
   });
 
+  group('遮挡 × 显式容器：锚点解析先于遮挡分类', () {
+    // DG-060-05 明写「显式容器不存在/歧义继续沿用既有码」。调用方给的那个
+    // identifier 本身就是错的，先把它说清楚——否则一个 uiRevealTargetObscured
+    // 会让人以为 --container 已经写对了，只差挪开浮层。
+    testWidgets('目标被遮挡 + 容器不存在 ⇒ uiSemanticsIdentifierNotFound '
+        'role: container', (WidgetTester tester) async {
+      final PatchbayFlutterBridge bridge = revealBridge();
+      addTearDown(bridge.dispose);
+      await tester.pumpWidget(revealApp(_coveredExposedTarget()));
+
+      final PatchbayInvocation result = await runReveal(
+        tester,
+        bridge,
+        bridge.reveal.reveal(
+          identifier: revealTargetId,
+          container: 'reveal.missing',
+          timeoutMs: 60000,
+        ),
+      );
+
+      expect(result.rejection?.code, 'uiSemanticsIdentifierNotFound');
+      expect(result.rejection?.details['role'], 'container');
+      expect(result.rejection?.details['identifier'], 'reveal.missing');
+      expect(result.rejection?.details['matchCount'], 0);
+      expect(showOnScreenCalls, 0);
+    });
+
+    testWidgets('目标被遮挡 + 容器歧义 ⇒ uiSemanticsIdentifierAmbiguous '
+        'role: container', (WidgetTester tester) async {
+      final PatchbayFlutterBridge bridge = revealBridge();
+      addTearDown(bridge.dispose);
+      await tester.pumpWidget(revealApp(_coveredTargetWithDuplicateAnchors()));
+
+      final PatchbayInvocation result = await runReveal(
+        tester,
+        bridge,
+        bridge.reveal.reveal(
+          identifier: revealTargetId,
+          container: revealContainerId,
+          timeoutMs: 60000,
+        ),
+      );
+
+      expect(result.rejection?.code, 'uiSemanticsIdentifierAmbiguous');
+      expect(result.rejection?.details['role'], 'container');
+      expect(result.rejection?.details['identifier'], revealContainerId);
+      expect(showOnScreenCalls, 0);
+    });
+
+    testWidgets('目标被遮挡 + 容器有效且可驱动 ⇒ uiRevealTargetObscured，offset 不动', (
+      WidgetTester tester,
+    ) async {
+      // 锚点解析成功之后，遮挡分类才接手——而且仍然排在 policy、门与第一次派发
+      // 之前，所以一步都不滚。
+      final ScrollController controller = ScrollController();
+      addTearDown(controller.dispose);
+      final PatchbayFlutterBridge bridge = revealBridge();
+      addTearDown(bridge.dispose);
+      await tester.pumpWidget(
+        revealApp(_coveredExposedTarget(controller: controller)),
+      );
+
+      final PatchbayInvocation result = await runReveal(
+        tester,
+        bridge,
+        bridge.reveal.reveal(
+          identifier: revealTargetId,
+          container: revealContainerId,
+          maxSteps: 60,
+          timeoutMs: 60000,
+        ),
+      );
+
+      expect(result.rejection?.code, 'uiRevealTargetObscured');
+      expect(result.rejection?.details['identifier'], revealTargetId);
+      expect(result.rejection?.details['generation'], isA<int>());
+      expect(controller.offset, 0);
+      expect(showOnScreenCalls, 0);
+    });
+
+    testWidgets('目标被遮挡 + 容器有效但无可驱动节点 ⇒ uiRevealNoScrollableContainer '
+        'role: container', (WidgetTester tester) async {
+      // 「锚点内没有可驱动节点」和「锚点不存在」一样属于锚点解析失败：连要推哪块
+      // 区域都还没确定，就不该先谈遮挡。所以这里返回容器类码而不是
+      // uiRevealTargetObscured。
+      final PatchbayFlutterBridge bridge = revealBridge();
+      addTearDown(bridge.dispose);
+      await tester.pumpWidget(
+        revealApp(
+          _coveredExposedTarget(physics: const NeverScrollableScrollPhysics()),
+        ),
+      );
+
+      final PatchbayInvocation result = await runReveal(
+        tester,
+        bridge,
+        bridge.reveal.reveal(
+          identifier: revealTargetId,
+          container: revealContainerId,
+          timeoutMs: 60000,
+        ),
+      );
+
+      expect(result.rejection?.code, 'uiRevealNoScrollableContainer');
+      expect(result.rejection?.details['role'], 'container');
+      expect(result.rejection?.details['identifier'], revealContainerId);
+      expect(showOnScreenCalls, 0);
+    });
+  });
+
+  group('步间路径不为注定为 null 的答案付采样', () {
+    testWidgets('门 await 期间目标被 blockUserActions 屏蔽 ⇒ 步间不再采样，'
+        '受理后仍报 targetBlocked', (WidgetTester tester) async {
+      // `patchbayRevealedNow` 是引擎在步间用的投影：被屏蔽的节点无论如何都不是
+      // 成功终态，所以它必须在解析几何之前短路。这里让屏蔽**发生在门 await 期
+      // 间**——准入分类已经跑完（那次采样是受理边界该付的），随后 `_run` 的
+      // 步 0 判定拿到的就是一个已屏蔽节点。
+      final Completer<PatchbayGateDecision> gate =
+          Completer<PatchbayGateDecision>();
+      var opened = false;
+      final PatchbayFlutterBridge bridge = revealBridge(
+        gates: PatchbayGateEvaluator(
+          baseGate: () {
+            if (opened) return const PatchbayGateDecision.allow();
+            opened = true;
+            return gate.future;
+          },
+          consumerGate: (_) => const PatchbayGateDecision.allow(),
+        ),
+      );
+      addTearDown(bridge.dispose);
+      await tester.pumpWidget(revealApp(_countedTargetList(blocked: false)));
+
+      final Future<PatchbayInvocation> pending = bridge.reveal.reveal(
+        identifier: revealTargetId,
+        direction: PatchbayRevealDirection.forward,
+        maxSteps: 40,
+        timeoutMs: 60000,
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        targetHitTests,
+        greaterThan(0),
+        reason: '准入分类本来就要采样一次，否则这条用例的计数器是假的',
+      );
+
+      await tester.pumpWidget(revealApp(_countedTargetList(blocked: true)));
+      targetHitTests = 0;
+      gate.complete(const PatchbayGateDecision.allow());
+
+      final PatchbayInvocation result = await runReveal(
+        tester,
+        bridge,
+        pending,
+      );
+
+      expect(targetHitTests, 0, reason: '被屏蔽的节点在步间必须先行短路，不解析几何、不做命中测试');
+      expect(result.rejection, isNull);
+      expect(revealPayload(result)['reason'], 'targetBlocked');
+      expect(showOnScreenCalls, 0);
+    });
+  });
+
   group('受理之后不倒退成准入拒绝', () {
     testWidgets('滚动之后才发现的遮挡仍是 accepted payload 的 targetObscured', (
       WidgetTester tester,
@@ -465,11 +639,47 @@ Widget _blockedExposedTarget() => Semantics(
   ),
 );
 
-/// 目标在 index 0 且被一层铺满视口的不透明层盖住，列表仍可驱动。
-Widget _coveredExposedTarget({ScrollController? controller}) => Stack(
+/// 目标在 index 0 且被一层铺满视口的不透明层盖住，列表默认仍可驱动。
+Widget _coveredExposedTarget({
+  ScrollController? controller,
+  ScrollPhysics? physics,
+}) => Stack(
   fit: StackFit.expand,
   children: <Widget>[
-    revealList(itemCount: 40, targetIndex: 0, controller: controller),
+    revealList(
+      itemCount: 40,
+      targetIndex: 0,
+      controller: controller,
+      physics: physics,
+    ),
+    const Listener(
+      behavior: HitTestBehavior.opaque,
+      child: ColoredBox(color: Colors.black),
+    ),
+  ],
+);
+
+/// 同上，但 `revealContainerId` 在树上出现两次：显式锚点因此歧义。
+Widget _coveredTargetWithDuplicateAnchors() => Stack(
+  fit: StackFit.expand,
+  children: <Widget>[
+    Column(
+      children: <Widget>[
+        Expanded(child: revealList(itemCount: 40, targetIndex: 0)),
+        Expanded(
+          child: Semantics(
+            identifier: revealContainerId,
+            container: true,
+            child: ListView.builder(
+              itemExtent: revealRowExtent,
+              itemCount: 40,
+              itemBuilder: (BuildContext context, int index) =>
+                  Center(child: Text('other $index')),
+            ),
+          ),
+        ),
+      ],
+    ),
     const Listener(
       behavior: HitTestBehavior.opaque,
       child: ColoredBox(color: Colors.black),
@@ -513,3 +723,48 @@ Widget _clippedUnderNonDrivableAncestor() => Column(
     ),
   ],
 );
+
+/// 目标在 index 0（已挂载且完全曝光），行内埋一个命中测试计数器；[blocked] 决定
+/// 目标是否被 `blockUserActions` 屏蔽。列表可驱动。
+Widget _countedTargetList({required bool blocked}) => Semantics(
+  identifier: revealContainerId,
+  container: true,
+  child: ShowOnScreenRecorder(
+    child: ListView.builder(
+      itemExtent: revealRowExtent,
+      itemCount: 40,
+      itemBuilder: (BuildContext context, int index) {
+        if (index != 0) return Center(child: Text('row $index'));
+        final Widget row = Semantics(
+          identifier: revealTargetId,
+          button: true,
+          onTap: () {},
+          child: const _HitTestCounter(
+            child: Listener(
+              behavior: HitTestBehavior.opaque,
+              child: ColoredBox(color: Colors.blue),
+            ),
+          ),
+        );
+        return blocked ? Semantics(blockUserActions: true, child: row) : row;
+      },
+    ),
+  ),
+);
+
+/// 数一数这棵子树被问过多少次命中测试。
+final class _HitTestCounter extends SingleChildRenderObjectWidget {
+  const _HitTestCounter({required Widget super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderHitTestCounter();
+}
+
+final class _RenderHitTestCounter extends RenderProxyBox {
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    targetHitTests += 1;
+    return super.hitTest(result, position: position);
+  }
+}

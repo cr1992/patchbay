@@ -375,15 +375,25 @@ final class PatchbayRevealBridge {
   /// PB-050-35 / DG-060-05 把「没露出」拆成三个恢复方向，判定顺序如下，且顺序
   /// 本身是契约的一部分：
   ///
-  /// 1. 已挂载 + 几何上已曝光 + 被屏蔽或被盖住 ⇒ `uiRevealTargetObscured`。
-  ///    它排在容器解析之前，因为滚动穿不透覆盖层——即使调用方显式给了
-  ///    `--container`，推那个容器也只会白白花掉预算并把真正的原因埋掉。
-  /// 2. 零匹配 + 没有可驱动容器、也没有显式授权容器可继续查找 ⇒
+  /// 1. **显式 `--container` 先解析。** 锚点不存在、锚点歧义、锚点内滚动节点歧义
+  ///    与锚点内无可驱动节点，一律沿用既有码（前两者是 `uiSemantics*`，后两者是
+  ///    `uiRevealContainerAmbiguous` / `uiRevealNoScrollableContainer` 带
+  ///    `role: container`），并**优先于**遮挡分类。裁决明写「显式容器不存在/歧义
+  ///    继续沿用既有码」：调用方给的那个 identifier 本身就是错的，先把它说清楚，
+  ///    否则一个 `uiRevealTargetObscured` 会让人以为 `--container` 写对了。
+  ///    同理，锚点解析失败时也不去谈遮挡——连要推哪块区域都还没确定。
+  /// 2. 已挂载 + 几何上已曝光 + 被屏蔽或被盖住 ⇒ `uiRevealTargetObscured`。
+  ///    锚点已解析成功（或调用方压根没给 `--container`）之后判定，且排在候选容器
+  ///    搜索与 policy / 门之前：滚动穿不透覆盖层，推容器只会白花预算并把真正的
+  ///    原因埋掉。
+  /// 3. 零匹配 + 没有可驱动容器、也没有显式授权容器可继续查找 ⇒
   ///    `uiRevealTargetNotFound`。恢复方向是改 identifier 或开放容器。
-  /// 3. 已挂载但尚未曝光 + 没有可驱动祖先 ⇒ `uiRevealNoScrollableContainer`。
+  /// 4. 已挂载但尚未曝光 + 没有可驱动祖先 ⇒ `uiRevealNoScrollableContainer`。
   ///
-  /// 「完全剪裁出 viewport / `isInvisible` / 零可见面积」不进第 1 条：它是
-  /// reveal 的正常输入，有容器就继续滚，没容器才落到第 3 条。
+  /// 「完全剪裁出 viewport / `isInvisible` / 零可见面积」不进第 2 条：它是
+  /// reveal 的正常输入，有容器就继续滚，没容器才落到第 4 条。
+  ///
+  /// 三条判定全部发生在第一次 scroll 派发之前，因此都不消耗 step。
   _Admission _admit({
     required String id,
     required SemanticsNode root,
@@ -394,24 +404,20 @@ final class PatchbayRevealBridge {
     // 非空当且仅当 [target] 非空——两者在调用点一起产生，见 `reveal`。
     required PatchbayRevealTargetAdmission? classified,
   }) {
-    if (target != null && classified!.obscured) {
-      return _Admission.rejected(
-        _rejected(
-          id,
-          'uiRevealTargetObscured',
-          details: <String, Object?>{
-            'identifier': identifier,
-            'generation': _semantics.observe(target).generation,
-          },
-          notice:
-              'The target is mounted and geometrically exposed, but user '
-              'actions on it are blocked or every fixed sample point is '
-              'covered. Scrolling cannot reach through that.',
-        ),
-      );
-    }
     if (container != null) {
-      return _admitAnchored(id, root, container, direction);
+      final _Admission anchored = _admitAnchored(
+        id,
+        root,
+        container,
+        direction,
+      );
+      // 锚点没解析出来就照它的既有码回答；解析出来了才谈目标遮挡。
+      if (anchored.anchor == null) return anchored;
+      return _obscuredRejection(id, identifier, target, classified) ?? anchored;
+    }
+    if (_obscuredRejection(id, identifier, target, classified)
+        case final _Admission obscured) {
+      return obscured;
     }
     final List<SemanticsNode> candidates = target == null
         // 目标未挂载：没有祖先链可用，全树只有一个可驱动滚动节点时才用它。
@@ -464,6 +470,33 @@ final class PatchbayRevealBridge {
       );
     }
     return _Admission.anchor(_anchorOf(candidates.first));
+  }
+
+  /// 已挂载且几何上已曝光的目标被屏蔽或被盖住时的拒绝，否则 null。
+  ///
+  /// 提成一个方法是因为它有两个调用点（给了 `--container` 与没给），而两个调用
+  /// 点上它的**位置不同**——见 [_admit] 的顺序说明。
+  _Admission? _obscuredRejection(
+    String id,
+    String identifier,
+    SemanticsNode? target,
+    PatchbayRevealTargetAdmission? classified,
+  ) {
+    if (target == null || !classified!.obscured) return null;
+    return _Admission.rejected(
+      _rejected(
+        id,
+        'uiRevealTargetObscured',
+        details: <String, Object?>{
+          'identifier': identifier,
+          'generation': _semantics.observe(target).generation,
+        },
+        notice:
+            'The target is mounted and geometrically exposed, but user '
+            'actions on it are blocked or every fixed sample point is '
+            'covered. Scrolling cannot reach through that.',
+      ),
+    );
   }
 
   _Admission _admitAnchored(

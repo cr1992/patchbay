@@ -790,7 +790,12 @@ $ patchbay help <topic>                     # 帮助由声明生成
 | `uiRevealTargetObscured` | 目标唯一挂载、几何上已经露出来了，却被 `blockUserActions` 或五点采样判为被盖住；details 带 `generation` | 处理挡在前面的 modal / 浮层。**不要**改成加大 `--max-steps`：滚动穿不透它，Patchbay 一步都不会派发 |
 | `uiRevealNoScrollableContainer` | 目标唯一挂载但还没露出来，祖先链上没有可驱动容器；或 `--container` 指的锚点里没有可驱动节点（details 另带 `role: container`） | 修 / 开放滚动容器，或换一个锚点 |
 
-identifier 匹配到多个仍是 `uiSemanticsIdentifierAmbiguous`；`--container` 本身不存在或有歧义沿用既有码。
+identifier 匹配到多个仍是 `uiSemanticsIdentifierAmbiguous`。**给了 `--container` 时先判锚点**：锚点
+不存在、有歧义、锚点内滚动节点有歧义或锚点内没有可驱动节点，一律沿用既有码（前两者带
+`role: container` 的 `uiSemantics*`，后两者是 `uiRevealContainerAmbiguous` /
+`uiRevealNoScrollableContainer`），并优先于遮挡判定——你给的那个 identifier 本身就是错的，先改它；
+只有锚点解析成功之后，被盖住的目标才换来 `uiRevealTargetObscured`。
+
 **目标完全滚出视口不算被遮挡**——那正是 reveal 要解决的事，有可驱动容器就继续滚。同理，进入滚动之后
 才发现的遮挡、目标消失或滚到底仍找不到，都留在成功受理的回包里当 `reason`，不会倒退成上面这三个
 准入拒绝码。
