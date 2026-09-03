@@ -15,6 +15,7 @@
 <p align="center">
   <a href="#what-it-solves">Use cases</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="docs/quickstart.md">10-minute path</a> ·
   <a href="#what-you-can-do">Capabilities</a> ·
   <a href="#architecture-and-packages">Architecture</a> ·
   <a href="docs/guide.md">Usage guide</a> ·
@@ -48,9 +49,12 @@ debugging toolchain is the two of them used together.
 
 ## Quick Start
 
-The shortest path below runs over VM Service. For the full treatment of gates, domain commands,
-session discovery, and direct HTTP integration, see the [usage guide](docs/guide.md)
-(currently in Chinese).
+The shortest path below runs over VM Service and adds Patchbay to your own app. If you just want
+to see Patchbay work first, against the app already checked into this repository, the
+[10-minute quick path](docs/quickstart.md) gets you a `snapshot`, a safe `ui perform` write, and a
+`capture` without writing any Dart. For the full treatment of gates, domain commands, session
+discovery, and direct HTTP integration, see the [usage guide](docs/guide.md) (currently in
+Chinese).
 
 ### 1. Add the Flutter dependency
 
@@ -204,7 +208,7 @@ $ patchbay identity
 $ patchbay --json snapshot
 $ patchbay --wait exec example.job.run
 $ patchbay ui semantics tree
-$ patchbay ui tap login.submit
+$ patchbay ui perform tap semantics:login.submit <generation> --via semantics
 $ patchbay --output screen.png capture root
 $ patchbay logs tail
 $ patchbay repl < commands.txt
@@ -265,8 +269,10 @@ of it enters these four general-purpose packages.
 
 ## Documentation
 
-Long-form documents under `docs/` are currently in Chinese only.
+Long-form documents under `docs/` are currently in Chinese only, except the quick path below.
 
+- **[10-minute quick path](docs/quickstart.md)** — install, `identity`, `catalog`, `snapshot`, a
+  safe `ui perform` write, and `capture`, using only this repository's own example app (English)
 - **[Usage guide](docs/guide.md)** — installation, app integration, CLI manual, exit codes, and boundaries (in Chinese)
 - **[Design](docs/design.md)** — architecture, the six design positions, and transport selection (in Chinese)
 - **[Core package](packages/patchbay/README.md)** — protocol, envelopes, gates, jobs, and blobs

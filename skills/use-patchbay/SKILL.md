@@ -11,6 +11,9 @@ runtime, plugin, launcher, or permission grant.
 
 ## Route the task
 
+- If nothing has been proven to work yet — no consumer App, or you just need a fast sanity check —
+  run the repository's own [10-minute quick path](../../docs/quickstart.md) against its bundled
+  example App before touching a real consumer integration.
 - If the consumer has not installed the Skill, CLI, or App dependency, read [INSTALL.md](INSTALL.md).
 - If session selection or connection is failing, start with the generated `doctor` command below.
 - If the user wants to inspect state, establish identity, read the live catalog, and request only the
@@ -85,9 +88,11 @@ CLI connection options and supply the running App's VM Service URI without persi
 ## Disclosure order
 
 1. Use this entrypoint to select the workflow and retain safety boundaries.
-2. Use the generated starter commands for connection and read-only facts.
-3. Use live catalog, descriptor, and help output for command-specific facts.
-4. Load focused installation or integration documentation only when that work is actually required.
-5. Load the complete guide or full artifacts only for deep reference and evidence review.
+2. When nothing is proven to work yet, use the [10-minute quick path](../../docs/quickstart.md)
+   against the bundled example App rather than guessing at a real consumer's setup.
+3. Use the generated starter commands for connection and read-only facts.
+4. Use live catalog, descriptor, and help output for command-specific facts.
+5. Load focused installation or integration documentation only when that work is actually required.
+6. Load the complete guide or full artifacts only for deep reference and evidence review.
 
 If a lower layer answers the question, stop there.
