@@ -28,7 +28,19 @@ set -o pipefail
 # 于是读到一个未定义变量并以 127 静默退出——没有报错行，表现为"脚本跑到某处就没声了"。
 # 预检脚本开着 `set -u`，所以这条不是风格问题而是可运行性问题。
 
-PATCHBAY_REPO_ROOT="${PATCHBAY_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# 自定位仓库根。本文件只被 source：bash 下 BASH_SOURCE 指向本文件；zsh 没有 BASH_SOURCE，
+# 但 source 期间 $0 就是本文件（FUNCTION_ARGZERO，zsh 默认开启）。定位结果必须当场校验——
+# 否则算错一级目录后第一处报错会是"example 目录不存在 / flutter devices 看不到设备"，与真实
+# 原因（shell 不同）毫无关系。显式设置的 PATCHBAY_REPO_ROOT 永远优先于自定位。
+_patchbay_session_self="${BASH_SOURCE[0]:-$0}"
+PATCHBAY_REPO_ROOT="${PATCHBAY_REPO_ROOT:-$(cd "$(dirname "$_patchbay_session_self")/.." 2>/dev/null && pwd)}"
+unset _patchbay_session_self
+if [ ! -f "$PATCHBAY_REPO_ROOT/tool/example_session.sh" ] ||
+   [ ! -d "$PATCHBAY_REPO_ROOT/packages/patchbay_flutter/example" ]; then
+  echo "[session] 无法定位仓库根（得到：${PATCHBAY_REPO_ROOT:-<空>}）。" >&2
+  echo "[session] 请在 bash 或 zsh 里从仓库检出内 source 本文件，或先 export PATCHBAY_REPO_ROOT=<仓库根>。" >&2
+  return 1
+fi
 PATCHBAY_EXAMPLE_DIR="$PATCHBAY_REPO_ROOT/packages/patchbay_flutter/example"
 PATCHBAY_CLI_DIR="$PATCHBAY_REPO_ROOT/packages/patchbay_cli"
 

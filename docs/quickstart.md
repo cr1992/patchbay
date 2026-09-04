@@ -105,6 +105,10 @@ commands in steps 2 through 6 through its `example_session_cli` wrapper instead 
 `--session` mechanism [Automatic session discovery](guide.md#6-会话自动发现可选) describes. Call
 `example_session_stop` when you're done to end the app process and clean up the session record.
 
+The helper locates this checkout on its own whether you source it from bash or zsh. If it stops
+with `[session] 无法定位仓库根` instead, set `PATCHBAY_REPO_ROOT` to the root directory of this
+checkout and source it again — an explicit `PATCHBAY_REPO_ROOT` always wins over auto-detection.
+
 ## 2. Say hello: `identity`
 
 ```console
