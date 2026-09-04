@@ -536,6 +536,78 @@ void main() {
       bridge.semantics.dispose();
     });
 
+    testWidgets('锚点还在、锚点下的滚动节点已经换了一个 ⇒ 仍判 null', (WidgetTester tester) async {
+      final PatchbayFlutterBridge bridge = revealRecordingBridge(
+        RevealCallLog(),
+      );
+      addTearDown(bridge.dispose);
+      await tester.pumpWidget(
+        revealApp(
+          revealList(
+            itemCount: 40,
+            targetIndex: 20,
+            listKey: const ValueKey<int>(1),
+          ),
+        ),
+      );
+      final SemanticsOwner owner = (await pumpReveal(
+        tester,
+        bridge.semantics.ensureOwner(),
+      ))!;
+      final int pinnedNodeId = patchbayRevealScrollNodeUnder(
+        owner.rootSemanticsNode!,
+        revealContainerId,
+      )!.id;
+
+      // 换一个 listKey 就换一整棵 `ListView` 子树，因而换一个滚动 SemanticsNode：
+      // `--container` 锚点照样解析得出来，解析到的却已经不是被 pin 的那一个。
+      await tester.pumpWidget(
+        revealApp(
+          revealList(
+            itemCount: 40,
+            targetIndex: 20,
+            listKey: const ValueKey<int>(2),
+          ),
+        ),
+      );
+      await tester.pump();
+      final SemanticsNode replaced = patchbayRevealScrollNodeUnder(
+        owner.rootSemanticsNode!,
+        revealContainerId,
+      )!;
+      expect(replaced.id, isNot(pinnedNodeId), reason: '前置条件：锚点下已经是另一个滚动节点');
+      final int replacedGeneration = bridge.semantics
+          .observe(replaced)
+          .generation;
+
+      // 这一格单测的是 nodeId 守卫本身，所以 generation 故意喂**对**的那一个：
+      // 去掉 `node.id != nodeId` 之后，代际检查会放行，函数就会把另一块区域
+      // 当成被授权的那一块交回去。
+      expect(
+        patchbayRevealResolveLayerNode(
+          owner: owner,
+          semantics: bridge.semantics,
+          anchorIdentifier: revealContainerId,
+          nodeId: pinnedNodeId,
+          generation: replacedGeneration,
+        ),
+        isNull,
+        reason: '锚点解析到的节点 id 与 pin 不符时不得放行',
+      );
+      expect(
+        patchbayRevealResolveLayerNode(
+          owner: owner,
+          semantics: bridge.semantics,
+          anchorIdentifier: revealContainerId,
+          nodeId: replaced.id,
+          generation: replacedGeneration,
+        ),
+        same(replaced),
+        reason: '对照组：id 与代际都对得上才解析成功',
+      );
+      bridge.semantics.dispose();
+    });
+
     testWidgets('进展观察：before 缺失或非有限位移一律归零，extent 增长单独成立', (
       WidgetTester tester,
     ) async {
