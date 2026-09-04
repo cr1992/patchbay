@@ -6,7 +6,7 @@
 
 | 版本锚点 | 证据 | 证明范围 | 未证明范围 / 当前边界 |
 |---|---|---|---|
-| 0.6.0 | [接入漏斗记录模板](0.6.0-onboarding-funnel.md) | 只是记录模板：固定了受试者类型、候选 SHA、设备/模拟器、三段用时、失败点与实际读取层级的字段与选取要求 | 待量测——两行「记录」表尚未填入真实的无先验用户/Agent 数据，此前不能引用本文件宣称漏斗量测已完成 |
+| 0.6.0 | [接入漏斗记录模板](0.6.0-onboarding-funnel.md) | 无先验 Agent 已按同一候选 SHA 量测一次：五步（identity→catalog→snapshot→`ui perform`→`capture`）逐字照抄文档命令、一次成功、零 `error.code` | 10 分钟目标未达成（997s 到首次 capture）；无先验用户一行仍待量测；量测暴露的两处 quickstart 文档缺口已随本 MR 修复，但修复后未重新复测 |
 | 0.6.0 | [reveal 预算门求值顺序](0.6.0-reveal-budget-order.md) | 有可驱动容器时 `_run` 可达且预算门逐项拒绝；两条 `_admit` 短路路径完全不评估 policy 预算，且吞掉的是整个预算门而非某一字段；DG-060-05 据此裁决保持两层预算并接受本对照替代设备会话 | `flutter_test` 合成滚动与语义树，不是设备事实；modal、懒加载与真实滚动现场仍待设备/consumer 验收 |
 | 0.5.0 | [最低 Flutter / Dart SDK 组合](0.5.0-flutter-sdk-floor.md) | Flutter 3.44.0 / Dart 3.12.0 是首个已完整 resolve、analyze、test 且满足 identifier 安全语义的 stable 组合 | 不外推到更早 SDK、未来 SDK 或设备端业务验收 |
 | 0.5.0 | [接入漏斗只读闭环](0.5.0-onboarding-skill-acceptance.md) | 干净检出按 INSTALL + Skill 在 iOS 模拟器完成 identity、catalog、describe 与 snapshot | 只读、单模拟器；不证明安全写操作、capture、Android 或真实无先验用户体验 |
