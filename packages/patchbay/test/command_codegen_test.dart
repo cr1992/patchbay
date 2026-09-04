@@ -23,7 +23,10 @@ void main() {
 
       expect(await _run(contract, output, '--write'), 0);
       final String generated = output.readAsStringSync();
-      expect(generated, contains("import 'package:patchbay/patchbay.dart';"));
+      expect(
+        generated,
+        contains("import 'package:patchbay/patchbay_host.dart';"),
+      );
       expect(generated, isNot(contains('patchbay_flutter')));
       // The generator must emit only vocabulary the contract declares — no
       // naming from whatever codebase it was extracted from may survive into

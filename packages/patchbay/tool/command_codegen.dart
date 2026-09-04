@@ -171,11 +171,7 @@ final class _Contract {
       throw const FormatException('unsupported command contractVersion');
     }
     final String apiPrefix = _typePrefix(json['apiPrefix'], 'apiPrefix');
-    final String descriptorImport =
-        _choice(json['descriptorImport'], 'descriptorImport', const {
-          'package:patchbay/patchbay.dart',
-          'package:patchbay_flutter/patchbay_flutter.dart',
-        });
+    final String descriptorImport = _descriptorImport(json['descriptorImport']);
     final List<String> permissions = _vocabulary(
       json['permissions'],
       'permissions',
@@ -729,6 +725,34 @@ String _nonEmpty(Object? value, String path) {
     throw FormatException('$path must be a non-empty string');
   }
   return value;
+}
+
+// BUG-20260904-01：生成的命令代码是 **host 侧**代码——它构造 `PatchbayRejection`，
+// 而调用它的派发器构造 `PatchbayInvocation`，两者在 PB-060-02 的分层里都是 host-only。
+// 因此 `descriptorImport` 只能是 host 入口。0.5.x 合约填的是默认 consumer 面，那两个
+// 值现在会产出编不过的代码，所以在这里逐值拒绝并给出唯一替代，而不是让它一路生成到
+// 接入方的 analyze 才炸——接入方拿到的是带 DO-NOT-MODIFY 标记的文件，改不了。
+const Map<String, String> _legacyDescriptorImports = <String, String>{
+  'package:patchbay/patchbay.dart': 'package:patchbay/patchbay_host.dart',
+  'package:patchbay_flutter/patchbay_flutter.dart':
+      'package:patchbay_flutter/patchbay_flutter_host.dart',
+};
+
+const Set<String> _descriptorImports = <String>{
+  'package:patchbay/patchbay_host.dart',
+  'package:patchbay_flutter/patchbay_flutter_host.dart',
+};
+
+String _descriptorImport(Object? value) {
+  final String text = _nonEmpty(value, 'descriptorImport');
+  final String? replacement = _legacyDescriptorImports[text];
+  if (replacement != null) {
+    throw FormatException(
+      'descriptorImport $text is a consumer entry, but generated command code '
+      'is host-side (it constructs PatchbayRejection). Use $replacement.',
+    );
+  }
+  return _choice(value, 'descriptorImport', _descriptorImports);
 }
 
 String _choice(Object? value, String path, Set<String> choices) {
