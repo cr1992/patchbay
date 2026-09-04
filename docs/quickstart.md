@@ -15,7 +15,10 @@ it does not work that way.
 `>=3.44.0`) and a Flutter target you can normally `flutter run` against — simulator, emulator,
 physical device, or desktop all work, since Patchbay only needs the Dart VM Service URI that
 `flutter run` prints, not a specific platform. A clean checkout of this repository. The 10-minute
-budget assumes that toolchain already works and `flutter run`'s first build is not unusually slow.
+budget assumes that toolchain already works, `flutter run`'s first build is not unusually slow, and
+the example's mobile platform directory already exists or you take the non-interactive path in
+step 1 below — generating that directory from scratch (see step 1) is a one-time cost on top of
+the budget.
 
 If any step below fails to connect at all, run `patchbay doctor` first — it checks session,
 connection, catalog and app lifecycle in one pass and reports which one broke; see
@@ -39,6 +42,29 @@ $ export PATH="$PWD/packages/patchbay_cli/build:$PATH"
 `Built .../build/patchbay (N.N MiB)` from the build script. `patchbay --help` should now print the
 command group list from any directory.
 
+**The bundled example ships with no platform directory.** This is a four-package repository, not a
+maintained Flutter app project — `example/.gitignore` excludes `ios/`, `android/`, and the other
+platform folders on purpose, so a simulator, emulator, or physical device target does not exist yet
+in a fresh checkout. Generate the one you need, once, from inside
+`packages/patchbay_flutter/example`:
+
+```console
+$ (cd packages/patchbay_flutter/example && flutter create --platforms=ios .)   # or --platforms=android
+```
+
+`flutter create` runs its own `pub get` outside the checked-in lockfile, which can bump a transitive
+dependency in `pubspec.lock` and add a template `test/widget_test.dart` that does not match this
+example's own `main.dart`. Both are side effects of the generator, not changes you meant to make —
+undo them before committing anything from this checkout:
+
+```console
+$ git checkout -- packages/patchbay_flutter/example/pubspec.lock
+$ rm -f packages/patchbay_flutter/example/test/widget_test.dart
+```
+
+(The non-interactive path below performs the same generation for you and warns you on stderr if it
+touches `pubspec.lock`, so you can skip doing this by hand if you use it.)
+
 Now run the bundled example app and copy the VM Service URI it prints:
 
 ```console
@@ -52,9 +78,36 @@ app showing a counter and a "Debug note" text field. Copy that URI — it change
 `flutter run`, and it carries authentication material, so keep it out of scripts, shell history
 files, and anything you commit.
 
-**If this doesn't work:** these are Flutter-level failures (no device found, build error), not
-Patchbay's — resolve them with ordinary `flutter doctor` / `flutter run` troubleshooting before
-continuing.
+**If this doesn't work:** an error like `No application found for TargetPlatform.ios. Is your
+project missing an ios/Runner/Info.plist?` (or the Android equivalent) means the platform directory
+above is still missing — go back and generate it. Anything else at this step is an ordinary
+Flutter-level failure (no device found, build error), not Patchbay's — resolve it with `flutter
+doctor` / `flutter run` troubleshooting before continuing.
+
+### Non-interactive path (scripts and agents)
+
+An agent or a script cannot drive the interactive `flutter run` above: the process stays in the
+foreground and never returns, and copying a URI out of its stdout by hand does not scale. Source
+the repository's own session helper instead — it also generates the platform directory for you, so
+it replaces both this step and the one above:
+
+```console
+$ source tool/example_session.sh
+$ example_session_start <device-id>
+```
+
+`<device-id>` is whatever `flutter devices` lists for your target (an adb serial for Android, a
+`xcrun simctl list devices` UDID for an iOS Simulator); omit it to use the first online adb device.
+On success it prints `[session] 会话已就绪：<id>` and exports `PATCHBAY_SESSION_ID` (and
+`PATCHBAY_SESSION_DIR`) — the URI itself is never printed and never touches shell history. Run the
+commands in steps 2 through 6 through its `example_session_cli` wrapper instead of a bare
+`patchbay --ws-uri` call, for example `example_session_cli --json catalog`; it forwards to the same
+`--session` mechanism [Automatic session discovery](guide.md#6-会话自动发现可选) describes. Call
+`example_session_stop` when you're done to end the app process and clean up the session record.
+
+The helper locates this checkout on its own whether you source it from bash or zsh. If it stops
+with `[session] 无法定位仓库根` instead, set `PATCHBAY_REPO_ROOT` to the root directory of this
+checkout and source it again — an explicit `PATCHBAY_REPO_ROOT` always wins over auto-detection.
 
 ## 2. Say hello: `identity`
 
