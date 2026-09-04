@@ -173,6 +173,16 @@ gate → 门后复核 → handler → response validation 六段只靠局部变�
 绕过；现在整组 reveal 实现文件的 `performAction` 调用点合计仍须恰好一个，且必须落在派发
 阶段那一个文件里，清单在测试里显式登记。PB-050-38 其余四个热点在各自的 MR 里处理，本条
 不代它们下判断。
+| `patchbay/lib/src/host/snapshot_payload.dart` | 613 → 111 行 | 冻结一次 snapshot 的五段处理各自独立成文件（`snapshot_payload_limits` 限额模型与两类拒绝的成型 / `snapshot_payload_path` 结构路径与展开 occurrence 记账 / `snapshot_payload_bytes` 有界字节 sink / `snapshot_payload_freeze` 冻结遍历 / `snapshot_payload_canonical` canonical 序列化），门面只留对外类型、四段的调用顺序与 fault → violation 的唯一边界翻译点 |
+
+依据不是它长，而是这五段**中间没有一个能单独构造**：验证「字节越界该报 PB-050-01 的
+契约失败还是 PB-050-02 的资源拒绝」只能造一份真的超预算 payload 从 `freeze` 整条打进去，
+验证「共享子树第二次出现是否重新计费」还得先绕过深度与字节两条闸。拆分保持外部语义逐
+字节不变，由 `test/host/snapshot_payload_characterization_test.dart` 在拆分前后各跑一次
+钉住（冻结体顺序与不可变性、canonical 字节、六种 failure 的 details 键序、两类预算分工、
+token 与阶段钩子），`test/host/snapshot_payload_stage_units_test.dart` 则逐阶段注入失败
+证明它们真的分开了——遍历与 canonical 的 sink、遍历的出现次数计数器都是构造参数接缝，
+失败注入不必再造超大 payload。单个新文件最大 252 行。
 
 **已复核，维持现状**：
 
