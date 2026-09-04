@@ -149,6 +149,30 @@ gate → 门后复核 → handler → response validation 六段只靠局部变�
 `test/service_host_stage_units_test.dart` 逐个单元注入失败。PB-050-38 还有三个热点
 （`reveal_engine` / `host_invoker` / `snapshot_payload`）在后续 MR 里各自处理，本条不代它们
 下判断。
+| `patchbay_flutter/lib/src/reveal/reveal_engine.dart` | 754 → 371 行 | 步循环的六个阶段各自独立成文件（`reveal_container_facts` / `reveal_layer` / `reveal_observation_stage` / `reveal_step_stage` / `reveal_escalation_stage` / `reveal_outcome_stage`），引擎只留一步的固定序列、升层时机与终态选择 |
+
+依据是「必须拆分」第 1 条：`_step`（76 行）把全局预算门 → 容器级预算 → 生命周期闸 →
+容器重解析 → policy 复核 → 门 → 派发 → 帧等待 → 步后判定串成一条只靠局部变量连起来的
+链，任何一段都无法单独失败注入。拆分保持外部语义逐字节不变，由
+`test/reveal/reveal_engine_characterization_test.dart` 在拆分前后各跑一次钉住——它比既有
+四个 reveal 测试文件多钉三样：终态 payload 的**逐字节**形状（`jsonEncode`，含
+`containers[]` 元素键序与「哪些字段不出现」）、每步 policy 与门的**调用次数**（DG-060-04
+冻结了逐步重评，次数因此是外部语义），以及容器记录的条数、顺序与升层发生在第几步。
+`test/reveal/reveal_engine_stage_units_test.dart` 则逐阶段注入失败证明它们真的分开了，
+其中「owner 没有语义根」「`scrollPosition` 缺失」「候选已访问」等格子在端到端路径上要摆出
+一棵会在特定时刻塌掉的树才碰得到，拆分之后第一次拿到直接覆盖。
+
+让步结构另由 `test/reveal/reveal_engine_microtask_depth_test.dart` 钉住。reveal 的授权模型
+建立在「哪些事之间没有让步窗口」上——`门与 performAction 之间没有任何 await/yield`——所以
+拆分不得改变让步点数：无帧路径量真实微任务轮次（2 / 3 / 3 / 3），帧驱动路径量「门放行到
+派发之间恰好一轮」与「policy 与门之间没有微任务边界」。`PatchbayFrameObserver` 是
+`final class`、测试替换不掉，帧驱动路径因此拿不到纯微任务计数，改以引擎观察帧数加调用
+次数补齐。
+
+机制唯一性的机检同步收紧：原来只盯 `reveal_engine.dart` 一个文件，把派发挪进兄弟文件就能
+绕过；现在整组 reveal 实现文件的 `performAction` 调用点合计仍须恰好一个，且必须落在派发
+阶段那一个文件里，清单在测试里显式登记。PB-050-38 其余四个热点在各自的 MR 里处理，本条
+不代它们下判断。
 
 **已复核，维持现状**：
 

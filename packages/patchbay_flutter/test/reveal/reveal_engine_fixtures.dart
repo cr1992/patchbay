@@ -483,3 +483,90 @@ class _RevealNestedSyntheticScrollState
     ),
   );
 }
+
+// ------------------------------------------------------------ 轴与极性探针
+
+/// 可配置的滚动语义探针：直接指定暴露哪些同轴 action 与端点位置。
+///
+/// `reveal_container_facts.dart` 的三个纯函数吃的是 `SemanticsData`，而
+/// `SemanticsData` 只能由框架产出，构造不出来。这个探针把「暴露哪些 action、
+/// `pixels` 停在哪儿」变成 widget 参数，于是轴判定、端点极性与可驱动判定的边界
+/// 情形可以逐格摆出来，不必先造一棵会滚的真实列表。
+final class RevealAxisProbe extends SingleChildRenderObjectWidget {
+  const RevealAxisProbe({
+    super.key,
+    this.up = false,
+    this.down = false,
+    this.left = false,
+    this.right = false,
+    this.position,
+    this.min,
+    this.max,
+    this.identifier = revealContainerId,
+  }) : super(child: const SizedBox.expand());
+
+  final bool up;
+  final bool down;
+  final bool left;
+  final bool right;
+  final double? position;
+  final double? min;
+  final double? max;
+  final String identifier;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      RevealAxisProbeRenderBox(this);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    RevealAxisProbeRenderBox renderObject,
+  ) => renderObject.spec = this;
+}
+
+final class RevealAxisProbeRenderBox extends RenderProxyBox {
+  RevealAxisProbeRenderBox(this._spec);
+
+  RevealAxisProbe _spec;
+  set spec(RevealAxisProbe value) {
+    _spec = value;
+    markNeedsSemanticsUpdate();
+  }
+
+  @override
+  void describeSemanticsConfiguration(SemanticsConfiguration config) {
+    super.describeSemanticsConfiguration(config);
+    config.isSemanticBoundary = true;
+    config.identifier = _spec.identifier;
+    // 三个 setter 都断言非空，所以「缺失」只能通过**不赋值**表达——那正是
+    // 「端点信息不足」这一格要摆出来的输入。
+    if (_spec.position case final double position) {
+      config.scrollPosition = position;
+    }
+    if (_spec.min case final double min) config.scrollExtentMin = min;
+    if (_spec.max case final double max) config.scrollExtentMax = max;
+    if (_spec.up) config.onScrollUp = () {};
+    if (_spec.down) config.onScrollDown = () {};
+    if (_spec.left) config.onScrollLeft = () {};
+    if (_spec.right) config.onScrollRight = () {};
+  }
+}
+
+/// 找到 [root] 子树里带 [identifier] 的唯一节点。
+SemanticsNode revealNodeWith(SemanticsNode root, String identifier) {
+  final List<SemanticsNode> found = <SemanticsNode>[];
+  void walk(SemanticsNode node) {
+    if (node.getSemanticsData().identifier == identifier) found.add(node);
+    node.visitChildren((SemanticsNode child) {
+      walk(child);
+      return true;
+    });
+  }
+
+  walk(root);
+  if (found.length != 1) {
+    throw StateError('expected exactly one "$identifier", got ${found.length}');
+  }
+  return found.single;
+}
