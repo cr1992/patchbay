@@ -105,9 +105,19 @@ commands in steps 2 through 6 through its `example_session_cli` wrapper instead 
 `--session` mechanism [Automatic session discovery](guide.md#6-会话自动发现可选) describes. Call
 `example_session_stop` when you're done to end the app process and clean up the session record.
 
+The helper's own status lines are written in Chinese and all start with `[session]`; they are
+progress and warnings from the helper, not Patchbay responses, and none of them carries an
+`error.code`.
+
 The helper locates this checkout on its own whether you source it from bash or zsh. If it stops
 with `[session] 无法定位仓库根` instead, set `PATCHBAY_REPO_ROOT` to the root directory of this
 checkout and source it again — an explicit `PATCHBAY_REPO_ROOT` always wins over auto-detection.
+
+**If your runner starts a fresh shell per command** (most agent hosts do), the exported
+`PATCHBAY_SESSION_ID` does not survive to the next command. Keep the id from the
+`[session] 会话已就绪：<id>` line, then in each later shell `source tool/example_session.sh` and
+`export PATCHBAY_SESSION_ID=<id>` before calling `example_session_cli`; `PATCHBAY_SESSION_DIR`
+re-derives itself from the checkout, so you only have to carry the id.
 
 ## 2. Say hello: `identity`
 
@@ -119,10 +129,11 @@ $ patchbay --ws-uri "$WS_URI" identity
 (`export`ing it once avoids retyping the URI in every command below; nothing about that variable
 is Patchbay-specific.)
 
-**You'll see:** the runtime identity handshake — `applicationId` (`dev.patchbay.example` for this
-example), `appInstanceId`, `isolateId`, `schemaVersion`, `serverVersion`, and the `features` this
-host declares. Exit code `0` and no `error` field means the minimal read-only path is already
-working.
+**You'll see:** one human-readable line naming the app and the instance it handed you — for this
+example `dev.patchbay.example instance=<id>`. That is the whole point of this step: exit code `0`
+and no `error` means the minimal read-only path is already working. Add `--json` (as every step
+below does) when you want the full handshake instead — `applicationId`, `appInstanceId`,
+`isolateId`, `schemaVersion`, `serverVersion` and the `features` this host declares.
 
 **If it fails:** exit `3` means no valid connection — the most common cause at this step is a
 stale URI (each `flutter run` mints a new one); re-copy it. Exit `4` means a schema/identity
