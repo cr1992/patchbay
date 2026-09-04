@@ -349,6 +349,21 @@ void main() {
       expect(patchbayUiDecodeFailureReason(StateError('x')), 'StateError');
     });
 
+    test('共享的判据表不可写', () {
+      // 拆分把它从类私有 `static final` 搬成包内可见的 top-level：判据是全进程共享的
+      // 一份，任何一处写进去都会静默改掉其他所有命令的拒绝形状。
+      expect(
+        () => patchbayUiArgumentShapes['ui.semantics.tap'] =
+            PatchbayUiArgumentShape(const <PatchbayParameterDescriptor>[]),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => patchbayUiArgumentShapes.remove('ui.text.set'),
+        throwsUnsupportedError,
+      );
+      expect(patchbayUiArgumentShapes.containsKey('ui.text.set'), isTrue);
+    });
+
     test('声明表单独构造：三类指名各自有序', () {
       final PatchbayUiArgumentShape shape = PatchbayUiArgumentShape(
         const <PatchbayParameterDescriptor>[

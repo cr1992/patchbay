@@ -1,8 +1,15 @@
 // PB-050-38：UI 命令的**声明阶段**——这个 host 发布哪几条命令、每条长什么样。
 //
 // 这里只有静态声明加运行期覆写，没有任何 handler、桥或现场状态：descriptor 是目录
-// 里那份「调用方读得到的事实」，DG-060-04 冻结的口径是它**只能**声明 `gates`、
-// `sideEffect` 与 `interactionModel`，动态 policy 一律不进 wire。
+// 里那份「调用方读得到的事实」。它承载的静态字段就是本表里出现的这些——命令身份
+// （`name` / `summary` / `plane`）、执行语义（`mode` / `sideEffect` / `factSources` /
+// `weakConfirmationCompletes`）、准入声明（`gates`）、参数形状（`parameters`）、
+// 交互模型（`interactionModel`），以及答复与输出契约（`responseSchema` 见 `ui.reveal`，
+// `outputProjection` 见 `ui.semantics.tree` / `ui.capture`）。
+//
+// DG-060-04 冻结的那条口径管的是**另一件事**：动态 policy（semantics action、gesture、
+// reveal 那三个构造注入的 callback）一律不进 wire。把现场 callback 的判断序列化进目录，
+// 等于把「此刻这个 callback 会怎么答」伪装成目录里的静态事实。
 //
 // 顺序是契约的一部分，而不是排版：注册表按位置把第 N 个 descriptor 配给第 N 个
 // handler（见 `flutter_ui_registration.dart`），所以这张表的次序必须与

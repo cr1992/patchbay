@@ -86,16 +86,23 @@ String patchbayUiDecodeFailureReason(Object failure) => switch (failure) {
 ///
 /// 运行期覆写（gates、参数默认）与这张表无关，所以它按空覆写建一次就够：覆写只改
 /// 门与缺省值，不改参数的名字、必填与类型，而这三项才是拒绝要指名的东西。
+///
+/// 拆分前它是类私有的 `static final`，包内谁也改不着；搬成 top-level 之后可见性扩到
+/// 整个 `lib/src/`，所以这里显式封成不可变——拒绝判据是全进程共享的一份，任何一处
+/// 写进去都会静默改掉其他所有命令的拒绝形状。`final` 的懒初始化语义不受影响：首次
+/// 读取时才建表。
 final Map<String, PatchbayUiArgumentShape> patchbayUiArgumentShapes =
-    <String, PatchbayUiArgumentShape>{
-      for (final PatchbayCommandDescriptor descriptor
-          in patchbayFlutterUiCommandDescriptors(
-            captureGates: const <String>{},
-            keepAwakeGates: const <String>{},
-            inspectPolicy: const PatchbayInspectPolicy(),
-          ))
-        descriptor.name: PatchbayUiArgumentShape(descriptor.parameters),
-    };
+    Map<String, PatchbayUiArgumentShape>.unmodifiable(
+      <String, PatchbayUiArgumentShape>{
+        for (final PatchbayCommandDescriptor descriptor
+            in patchbayFlutterUiCommandDescriptors(
+              captureGates: const <String>{},
+              keepAwakeGates: const <String>{},
+              inspectPolicy: const PatchbayInspectPolicy(),
+            ))
+          descriptor.name: PatchbayUiArgumentShape(descriptor.parameters),
+      },
+    );
 
 /// One command's declared parameters, reduced to what a rejection has to name.
 ///
