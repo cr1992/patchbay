@@ -840,7 +840,14 @@ void main() {
     },
     // GH 共享 runner 冷启时真实 VM Service 拉起可超 30s（main 首跑实测翻车）。
     // 显式标注会压过 dart test --timeout 的默认值，上限必须写在这里。
-    timeout: const Timeout(Duration(seconds: 120)),
+    //
+    // 本用例是这一族里唯一一个把 CLI 当真实子进程反复拉起的：一次会话内约 20 次
+    // `dart run bin/patchbay.dart`，每次都要付一遍 VM 启动与内核加载。空载单跑实测
+    // 112s，对 120s 只剩 8s 余量；`repo_tasks.dart check` 把四个包的 test 连跑、同包内
+    // 测试文件又并发时，实测稳定在 120.000s 精确超时。按仓内既有分类法这是 A 类
+    // （真实子进程冷启动的安全余量，不是被测机制）——预算在这里是挂死护栏，不是性能门，
+    // 因此按空载实测的两倍余量放宽；真正挂死仍会失败。
+    timeout: const Timeout(Duration(seconds: 240)),
   );
 }
 
