@@ -6,7 +6,7 @@
 
 | 版本锚点 | 证据 | 证明范围 | 未证明范围 / 当前边界 |
 |---|---|---|---|
-| 0.6.0 | [候选 example 预检与 profile smoke](0.6.0-candidate-example-precheck.md) | 固定候选 SHA（`dev/0.6.0` 头）在 iPhone 17 Pro 模拟器 debug 构建下，`example_precheck.sh` 99 步全绿——协议/CLI/host 三方接线、reveal 双路径、锚定手势遮挡拒绝均端到端打通 | profile smoke 未执行：iOS Simulator 对 profile/release 构建有 Flutter 工具链固有限制（非候选缺陷），需真实 iOS 设备或改用 Android 目标补跑；Android/HarmonyOS、接入方业务语义、真实滚动遮挡现场均不在证明范围 |
+| 0.6.0 | [候选 example 预检与 profile smoke](0.6.0-candidate-example-precheck.md) | 固定候选 SHA（`dev/0.6.0` 头）在 iPhone 17 Pro 模拟器 debug 构建下 `example_precheck.sh` 99 步全绿，且在 Android 16 真机上 debug 预检 110 步与 profile smoke 17 步均全绿——补齐了 iOS Simulator 无法覆盖的 profile 会话设备证据（`ui.inspect` 类型化拒绝、reveal 不依赖 debug-only API、`capture` 不复现历史退出 3） | iOS 真机上的 profile smoke 仍未执行（iOS Simulator 对 profile/release 构建有 Flutter 工具链固有限制，非候选缺陷）；HarmonyOS、接入方业务语义、真实滚动遮挡现场、完整权限矩阵均不在证明范围 |
 | 0.6.0 | [接入漏斗记录模板](0.6.0-onboarding-funnel.md) | 只是记录模板：固定了受试者类型、候选 SHA、设备/模拟器、三段用时、失败点与实际读取层级的字段与选取要求 | 待量测——两行「记录」表尚未填入真实的无先验用户/Agent 数据，此前不能引用本文件宣称漏斗量测已完成 |
 | 0.6.0 | [reveal 预算门求值顺序](0.6.0-reveal-budget-order.md) | 有可驱动容器时 `_run` 可达且预算门逐项拒绝；两条 `_admit` 短路路径完全不评估 policy 预算，且吞掉的是整个预算门而非某一字段；DG-060-05 据此裁决保持两层预算并接受本对照替代设备会话 | `flutter_test` 合成滚动与语义树，不是设备事实；modal、懒加载与真实滚动现场仍待设备/consumer 验收 |
 | 0.5.0 | [最低 Flutter / Dart SDK 组合](0.5.0-flutter-sdk-floor.md) | Flutter 3.44.0 / Dart 3.12.0 是首个已完整 resolve、analyze、test 且满足 identifier 安全语义的 stable 组合 | 不外推到更早 SDK、未来 SDK 或设备端业务验收 |
