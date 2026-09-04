@@ -38,9 +38,9 @@
     "packages/patchbay_flutter/example/lib/main.dart": 620,
     "packages/patchbay_flutter/lib/src/capture_bridge.dart": 658,
     "packages/patchbay_flutter/lib/src/flutter_bridge.dart": 606,
-    "packages/patchbay_flutter/lib/src/flutter_service_host.dart": 680,
+    "packages/patchbay_flutter/lib/src/flutter_service_host.dart": 160,
     "packages/patchbay_flutter/lib/src/gesture/gesture_bridge.dart": 688,
-    "packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart": 738,
+    "packages/patchbay_flutter/lib/src/semantics/semantics_bridge.dart": 660,
     "packages/patchbay_flutter/test/capture_test.dart": 701,
     "packages/patchbay_flutter/test/inspect_bridge_test.dart": 727,
     "packages/patchbay_transport/test/direct_transport_test.dart": 749
