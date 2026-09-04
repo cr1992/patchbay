@@ -12,6 +12,11 @@
 // 契约失败回显的 `path` 就是它，因此「写这一段字节时算站在哪个节点上」由调用方负责，
 // sink 只负责如实引用。
 //
+// 一个 sink 服务**一次** payload：计费是累计的，[PatchbaySnapshotBoundedByteSink.takeBytes]
+// 只排空已保留的字节，不重置计费。复用同一个实例接着写，等于让第二份 payload 继承第一份
+// 已经花掉的预算——这是刻意的（注入场景要靠它预置「已经写掉多少」），但也意味着生产路径
+// 上每次冻结都必须新建 sink。
+//
 // 本文件不出现在包的 barrel 里，全部符号都是包内实现，不构成公共 API。
 import 'dart:convert';
 import 'dart:typed_data';
@@ -23,6 +28,11 @@ final class PatchbaySnapshotBoundedByteSink extends ByteConversionSinkBase {
     : _builder = retainBytes ? BytesBuilder(copy: false) : null;
 
   final PatchbaySnapshotPayloadLimits _limits;
+
+  /// 本 sink 判红所依据的那份限额。
+  ///
+  /// 暴露它是为了让上游阶段能在构造时自检「注入进来的 sink 和我说的是同一份预算」。
+  PatchbaySnapshotPayloadLimits get limits => _limits;
   final BytesBuilder? _builder;
   var _length = 0;
   String currentPath = r'$';
@@ -59,7 +69,10 @@ final class PatchbaySnapshotBoundedByteSink extends ByteConversionSinkBase {
     _builder?.add(chunk.sublist(start, end));
   }
 
-  /// 已经写入并计费的字节数。
+  /// 本 sink **累计**写入并计费的字节数。
+  ///
+  /// 它随 [takeBytes] 排空字节而**不**归零：预算是按 sink 实例累计的，不是按
+  /// takeBytes 之间的区段。
   int get length => _length;
 
   /// 容器的开括号。JSON 结构字符只有这一处定义，两个遍历共用同一份。
@@ -86,6 +99,9 @@ final class PatchbaySnapshotBoundedByteSink extends ByteConversionSinkBase {
     input.close();
   }
 
+  /// 取走已保留的字节（不保留字节的 sink 返回空）。
+  ///
+  /// 只排空缓冲，**不重置** [length]：预算已经花掉的部分不会因为取走产物而退还。
   Uint8List takeBytes() => _builder?.takeBytes() ?? Uint8List(0);
 }
 

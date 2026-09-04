@@ -25,11 +25,22 @@ import 'snapshot_payload_limits.dart';
 import 'snapshot_payload_path.dart';
 
 final class PatchbaySnapshotFreezingTraversal {
+  /// 注入的 sink / 计数器必须与 [limits] **同预算**：接缝是为了预置状态和观察调用，
+  /// 不是第二个预算真值源。否则「这次冻结按哪条预算判红」会取决于调用方恰好注入了
+  /// 什么，而 [limits] 沦为摆设。
   PatchbaySnapshotFreezingTraversal(
     this.limits, {
     PatchbaySnapshotBoundedByteSink? sink,
     PatchbaySnapshotOccurrenceCounter? occurrences,
-  }) : _bytes = sink ?? PatchbaySnapshotBoundedByteSink(limits),
+  }) : assert(
+         sink == null || sink.limits.sameBudgetsAs(limits),
+         'injected byte sink must share the traversal budgets',
+       ),
+       assert(
+         occurrences == null || occurrences.limits.sameBudgetsAs(limits),
+         'injected occurrence counter must share the traversal budgets',
+       ),
+       _bytes = sink ?? PatchbaySnapshotBoundedByteSink(limits),
        _occurrences = occurrences ?? PatchbaySnapshotOccurrenceCounter(limits);
 
   final PatchbaySnapshotPayloadLimits limits;

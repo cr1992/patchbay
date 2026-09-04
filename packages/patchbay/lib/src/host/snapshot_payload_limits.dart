@@ -59,6 +59,17 @@ final class PatchbaySnapshotPayloadLimits {
   /// resource rejection the caller can retry against a smaller snapshot.
   int get maxRunCanonicalBytes => _maxRunCanonicalBytes ?? maxCanonicalBytes;
 
+  /// 两份限额的**预算取值**是否逐条一致。
+  ///
+  /// 用于阶段接缝的自检：注入进遍历或序列化的 sink / 计数器必须与调用方声称的那份
+  /// 限额同预算，否则同一次冻结会出现两个真值源，`limits` 沦为摆设而实际判红的是
+  /// 注入对象自带的预算。
+  bool sameBudgetsAs(PatchbaySnapshotPayloadLimits other) =>
+      maxContainerDepth == other.maxContainerDepth &&
+      maxExpandedOccurrences == other.maxExpandedOccurrences &&
+      maxCanonicalBytes == other.maxCanonicalBytes &&
+      maxRunCanonicalBytes == other.maxRunCanonicalBytes;
+
   PatchbaySnapshotPayloadLimits withRunCanonicalBytes(int bytes) =>
       PatchbaySnapshotPayloadLimits(
         maxContainerDepth: maxContainerDepth,

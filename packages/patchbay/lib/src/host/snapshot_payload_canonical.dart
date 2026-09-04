@@ -19,10 +19,16 @@ import 'snapshot_payload_limits.dart';
 import 'snapshot_payload_path.dart';
 
 final class PatchbaySnapshotCanonicalJsonWriter {
+  /// 注入的 sink 必须与 [limits] **同预算**：接缝用来预置状态和观察调用，不是第二个
+  /// 预算真值源。
   PatchbaySnapshotCanonicalJsonWriter(
     PatchbaySnapshotPayloadLimits limits, {
     PatchbaySnapshotBoundedByteSink? sink,
-  }) : _sink =
+  }) : assert(
+         sink == null || sink.limits.sameBudgetsAs(limits),
+         'injected byte sink must share the writer budgets',
+       ),
+       _sink =
            sink ?? PatchbaySnapshotBoundedByteSink(limits, retainBytes: true);
 
   final PatchbaySnapshotBoundedByteSink _sink;
@@ -39,6 +45,16 @@ final class PatchbaySnapshotCanonicalJsonWriter {
         if (value is Map<String, Object?>) {
           _sink.writeContainerOpen(isMap: true);
           frames.add(_CanonicalMapFrame(value, pendingPath));
+        } else if (value is Map<Object?, Object?>) {
+          // 管线内不可达：冻结遍历产出的每一层都是 `Map<String, Object?>`，非字符串
+          // key 在那一段就已按 `nonStringKey` 判红。但本类是可以单独构造的，不显式
+          // 拒绝的话，一份 `Map<Object?, Object?>` 会掉进标量分支被 JSON 编码器按
+          // **插入顺序**写出去——一个悄悄不排序、也不报错的 canonical，比抛错危险得多。
+          throw ArgumentError.value(
+            value.runtimeType.toString(),
+            'root',
+            'canonical writer only accepts a frozen Map<String, Object?>',
+          );
         } else if (value is List<Object?>) {
           _sink.writeContainerOpen(isMap: false);
           frames.add(_CanonicalListFrame(value, pendingPath));

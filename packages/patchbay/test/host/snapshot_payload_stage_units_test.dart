@@ -260,6 +260,21 @@ void main() {
       expect(_utf8(sink.takeBytes()), '{"k":1,"k2":[]}');
     });
 
+    test('takeBytes 排空字节但不退还预算', () {
+      final PatchbaySnapshotBoundedByteSink sink =
+          PatchbaySnapshotBoundedByteSink(_limits(bytes: 8), retainBytes: true);
+
+      sink.add(const <int>[1, 2, 3, 4, 5, 6]);
+      expect(sink.takeBytes(), hasLength(6));
+      expect(sink.takeBytes(), isEmpty);
+      // 计费是按 sink 实例累计的，不是按两次 takeBytes 之间的区段。
+      expect(sink.length, 6);
+      expect(
+        () => sink.add(const <int>[1, 2, 3]),
+        throwsA(isA<PatchbaySnapshotPayloadFault>()),
+      );
+    });
+
     test('超长字符串在写到一半时就撞上预算', () {
       final PatchbaySnapshotBoundedByteSink sink =
           PatchbaySnapshotBoundedByteSink(_limits(bytes: 16));
@@ -273,39 +288,100 @@ void main() {
   });
 
   group('阶段四：冻结遍历', () {
-    test('用的是注入进来的 sink，而不是自己按 limits 造的那个', () {
-      final PatchbaySnapshotFreezingTraversal traversal =
-          PatchbaySnapshotFreezingTraversal(
-            _limits(),
-            sink: PatchbaySnapshotBoundedByteSink(_limits(bytes: 7)),
-          );
+    test('用的是注入进来的 sink，而不是自己新造一个', () {
+      // 同一份 limits：接缝不引入第二个预算真值源，区别只在这个 sink 已经花掉过预算。
+      final PatchbaySnapshotPayloadLimits limits = _limits(bytes: 32);
+      final Map<String, Object?> payload = <String, Object?>{
+        'zzz': 1,
+        'aaa': 2,
+      };
 
+      // 不注入时整份 payload（17 字节）远在预算内。
+      expect(
+        PatchbaySnapshotFreezingTraversal(limits).freeze(payload),
+        payload,
+      );
+
+      final PatchbaySnapshotBoundedByteSink spent =
+          PatchbaySnapshotBoundedByteSink(limits)
+            ..add(List<int>.filled(25, 0x20));
       final PatchbaySnapshotPayloadFault fault = _faultOf(
-        () => traversal.freeze(<String, Object?>{'zzz': 1, 'aaa': 2}),
+        () => PatchbaySnapshotFreezingTraversal(
+          limits,
+          sink: spent,
+        ).freeze(payload),
       );
 
       expect(fault.details['limitKind'], 'canonicalBytes');
-      expect(fault.details['limit'], 7);
+      expect(fault.details['limit'], 32);
+      expect(fault.details['observed'], 33);
       // 插入顺序，不是 canonical 顺序——这一趟走的是 consumer 给的顺序。
       expect(fault.details['path'], r'$.zzz');
     });
 
-    test('用的是注入进来的计数器，而不是自己按 limits 造的那个', () {
-      final PatchbaySnapshotFreezingTraversal traversal =
-          PatchbaySnapshotFreezingTraversal(
-            _limits(),
-            occurrences: PatchbaySnapshotOccurrenceCounter(
-              _limits(occurrences: 2),
-            ),
-          );
+    test('用的是注入进来的计数器，而不是自己新造一个', () {
+      final PatchbaySnapshotPayloadLimits limits = _limits(occurrences: 8);
+      final Map<String, Object?> payload = <String, Object?>{'a': 1};
 
+      expect(
+        PatchbaySnapshotFreezingTraversal(limits).freeze(payload),
+        payload,
+      );
+
+      final PatchbaySnapshotOccurrenceCounter spent =
+          PatchbaySnapshotOccurrenceCounter(limits);
+      for (var i = 0; i < 6; i++) {
+        spent.count(PatchbaySnapshotPath.root);
+      }
       final PatchbaySnapshotPayloadFault fault = _faultOf(
-        () => traversal.freeze(<String, Object?>{'a': 1}),
+        () => PatchbaySnapshotFreezingTraversal(
+          limits,
+          occurrences: spent,
+        ).freeze(payload),
       );
 
       expect(fault.details['limitKind'], 'expandedNodes');
-      expect(fault.details['limit'], 2);
+      expect(fault.details['limit'], 8);
+      expect(fault.details['observed'], 9);
       expect(fault.details['path'], r'$.a');
+    });
+
+    test('注入物的预算与 limits 不一致会被当场拒绝', () {
+      expect(
+        () => PatchbaySnapshotFreezingTraversal(
+          _limits(),
+          sink: PatchbaySnapshotBoundedByteSink(_limits(bytes: 8)),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => PatchbaySnapshotFreezingTraversal(
+          _limits(),
+          occurrences: PatchbaySnapshotOccurrenceCounter(
+            _limits(occurrences: 2),
+          ),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+      // 预算逐条相等即可，不要求是同一个对象。
+      expect(
+        () => PatchbaySnapshotFreezingTraversal(
+          _limits(),
+          sink: PatchbaySnapshotBoundedByteSink(_limits()),
+          occurrences: PatchbaySnapshotOccurrenceCounter(_limits()),
+        ),
+        returnsNormally,
+      );
+      // 只收紧运行预算也算不一致——它决定的是拒绝类型。
+      expect(
+        () => PatchbaySnapshotFreezingTraversal(
+          _limits(bytes: 64),
+          sink: PatchbaySnapshotBoundedByteSink(
+            _limits(bytes: 64, runBytes: 32),
+          ),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
     });
 
     test('计费顺序是容器 → key → 值', () {
@@ -462,18 +538,73 @@ void main() {
     });
 
     test('用的是注入进来的 sink', () {
+      final PatchbaySnapshotPayloadLimits limits = _limits(bytes: 16);
+      final Map<String, Object?> payload = <String, Object?>{'a': 1};
+
+      expect(
+        _utf8(PatchbaySnapshotCanonicalJsonWriter(limits).encode(payload)),
+        '{"a":1}',
+      );
+
+      final PatchbaySnapshotBoundedByteSink spent =
+          PatchbaySnapshotBoundedByteSink(limits, retainBytes: true)
+            ..add(List<int>.filled(12, 0x20));
       final PatchbaySnapshotPayloadFault fault = _faultOf(
+        () => PatchbaySnapshotCanonicalJsonWriter(
+          limits,
+          sink: spent,
+        ).encode(payload),
+      );
+
+      expect(fault.details['limitKind'], 'canonicalBytes');
+      expect(fault.details['limit'], 16);
+    });
+
+    test('注入 sink 的预算与 limits 不一致会被当场拒绝', () {
+      expect(
         () => PatchbaySnapshotCanonicalJsonWriter(
           _limits(),
           sink: PatchbaySnapshotBoundedByteSink(
             _limits(bytes: 4096, runBytes: 3),
             retainBytes: true,
           ),
-        ).encode(<String, Object?>{'a': 1}),
+        ),
+        throwsA(isA<AssertionError>()),
       );
+    });
 
-      expect(fault.kind, PatchbaySnapshotPayloadViolationKind.runBudget);
-      expect(fault.details['maxSnapshotBytes'], 3);
+    test('非 string-key 的 map 被显式拒绝，而不是悄悄按插入顺序编码', () {
+      final PatchbaySnapshotPayloadLimits limits = _limits();
+
+      expect(
+        () => PatchbaySnapshotCanonicalJsonWriter(
+          limits,
+        ).encode(<Object?, Object?>{'b': 1, 'a': 2}),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        () => PatchbaySnapshotCanonicalJsonWriter(limits).encode(
+          <String, Object?>{
+            'nested': <Object?, Object?>{'b': 1},
+          },
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        () => PatchbaySnapshotCanonicalJsonWriter(limits).encode(<Object?>[
+          <Object?, Object?>{'b': 1},
+        ]),
+        throwsA(isA<ArgumentError>()),
+      );
+      // 冻结遍历产出的类型照常通过。
+      expect(
+        _utf8(
+          PatchbaySnapshotCanonicalJsonWriter(limits).encode(
+            Map<String, Object?>.unmodifiable(<String, Object?>{'a': 1}),
+          ),
+        ),
+        '{"a":1}',
+      );
     });
 
     test('越界路径按 canonical 顺序，而不是插入顺序', () {
