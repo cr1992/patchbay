@@ -11,9 +11,11 @@
 
 - 9 个曾被 600 行阈值判红的文件里，7 个的长度来自"成员多且同构"（24 个 finding 构造函数、
   18 个 `_check*`、25 个 bridge 操作），按行数拆开只会把兄弟成员打散，可读性变差；
-- 与此同时，`flutter_service_host.dart`（680 行，在 800 线以下）里藏着一个 **254 行的函数**，
-  `command_dispatcher.dart` 里藏着 216 行，`execution_evidence.dart` 里 215 行——
-  这些是真正的职责堆叠，而任何文件行数阈值都抓不到它们。
+- 与此同时，当时的 `flutter_service_host.dart`（680 行，在 800 线以下）里藏着一个
+  **254 行的函数**，`command_dispatcher.dart` 里藏着 216 行，`execution_evidence.dart`
+  里 215 行——这些是真正的职责堆叠，而任何文件行数阈值都抓不到它们。（那个 254 行的
+  函数已由 PB-050-38 拆掉，见下文「已拆分」；这里保留它作为「行数抓不到职责堆叠」的
+  实测样本。）
 
 所以：**体积指标一律只作警戒线，不作判红条件**。命中警戒线意味着"这里值得看一眼"，
 不意味着"这里必须改"。
@@ -119,15 +121,75 @@ element model 校验**入口自足**——每个公共 library 导出符号的�
 逐字节不变，由 `test/bridge/semantics_pipeline_characterization_test.dart` 在拆分前后各跑一次
 钉住。PB-050-38 还有四个热点（`flutter_service_host` / `reveal_engine` / `host_invoker` /
 `snapshot_payload`）在后续 MR 里各自处理，本条不代它们下判断。
+| `patchbay/lib/src/host/host_invoker.dart` | 787 → 387 行 | admission pipeline 的七个阶段各自独立成文件（`invocation_catalog_stage` / `invocation_input_stage` / `invocation_gate_stage` / `invocation_handler_stage` / `invocation_response_stage` / `invocation_audit_stage` / `external_invocation_ledger`，另有共用的 `invocation_rejections` 与 `invocation_admission_state`），invoker 只留公共门面、按 DG-060-04 冻结顺序的编排与「一次调用只落一条审计」的记账规则 |
+
+依据是「必须拆分」第 1 条：`_dispatchInvoke`（130 行）把 catalog → sensitive input →
+gate → 门后复核 → handler → response validation 六段只靠局部变量串起来，任何一段都无法
+单独失败注入。拆分保持外部语义逐字节不变，由
+`test/host/host_invoker_pipeline_characterization_test.dart` 在拆分前后各跑一次钉住，
+`test/host/host_invoker_stage_units_test.dart` 则逐阶段注入失败证明它们真的分开了——
+其中两条分支端到端不可达、拆分后才第一次拿到覆盖，而「不可达」各有其因：门拒绝里的
+`priorRequestObserved` 是**因为** external preflight 排在门之前，命中账本记录时总会先重放
+或先拒，门看不到已有记录；账本的 `requestLedgerFull` 是**因为** `slotCapacity` 与
+`InvocationCoordinator.activeOwnerCapacity` 同为 256，并发调用总先撞上后者。两处常量都写了
+互指注释：若不再相等，该拒绝码变为可达，须补端到端测试。让步结构另由
+`test/host/host_invoker_microtask_depth_test.dart` 以实测微任务轮次钉住（4 / 6 / 3，与拆分前
+同值）——取消信号只能在让步窗口插入，多一个窗口就是改变了取消的观察时机。PB-050-38 其余四个热点在各自的 MR 里处理，本条不代它们下判断。
+**已拆分**（PB-050-38，按职责阶段拆而不是按行数横切）：
+
+| 位置 | 拆分前后 | 拆法 |
+|---|---|---|
+| `patchbay_flutter/lib/src/flutter_service_host.dart` | 950 → 160 行 | 七个包内单元各自成文件：`flutter_ui_command_descriptors`（命令声明与运行期覆写）、`flutter_ui_argument_decoders`（解码）、`flutter_ui_rejection`（拒绝投影）、`flutter_ui_registration`（descriptor↔handler 按位置配对，两端守数量）、`flutter_ui_command_bindings`（八个命令族各自到桥的派发）、`flutter_ui_catalog`（uiTargets 投影）、`flutter_host_assembly`（注册表合并、缺省源与 features）；host 只留公共门面与构造转交 |
+
+这条推翻了下面「已复核，维持现状」里对 `_uiCommandRegistry` 的旧判断。旧判断读的是控制流
+密度——254 行只有 7 个 return、11 个 if，看起来只是一张声明式装配表；换成「一个函数是否串起
+多个阶段」来读就不成立：声明装配、参数解码、拒绝投影、descriptor↔handler 配对与 23 条命令
+各自的桥派发五件事挤在同一个函数里，任何一件都无法脱离整台 host 单独构造或注入失败。拆分保持
+外部语义逐字节不变，由 `test/service_host_characterization_test.dart` 在拆分前后各跑一次钉住，
+`test/service_host_stage_units_test.dart` 逐个单元注入失败。PB-050-38 还有三个热点
+（`reveal_engine` / `host_invoker` / `snapshot_payload`）在后续 MR 里各自处理，本条不代它们
+下判断。
+| `patchbay_flutter/lib/src/reveal/reveal_engine.dart` | 754 → 371 行 | 步循环的六个阶段各自独立成文件（`reveal_container_facts` / `reveal_layer` / `reveal_observation_stage` / `reveal_step_stage` / `reveal_escalation_stage` / `reveal_outcome_stage`），引擎只留一步的固定序列、升层时机与终态选择 |
+
+依据是「必须拆分」第 1 条：`_step`（76 行）把全局预算门 → 容器级预算 → 生命周期闸 →
+容器重解析 → policy 复核 → 门 → 派发 → 帧等待 → 步后判定串成一条只靠局部变量连起来的
+链，任何一段都无法单独失败注入。拆分保持外部语义逐字节不变，由
+`test/reveal/reveal_engine_characterization_test.dart` 在拆分前后各跑一次钉住——它比既有
+四个 reveal 测试文件多钉三样：终态 payload 的**逐字节**形状（`jsonEncode`，含
+`containers[]` 元素键序与「哪些字段不出现」）、每步 policy 与门的**调用次数**（DG-060-04
+冻结了逐步重评，次数因此是外部语义），以及容器记录的条数、顺序与升层发生在第几步。
+`test/reveal/reveal_engine_stage_units_test.dart` 则逐阶段注入失败证明它们真的分开了，
+其中「owner 没有语义根」「`scrollPosition` 缺失」「候选已访问」等格子在端到端路径上要摆出
+一棵会在特定时刻塌掉的树才碰得到，拆分之后第一次拿到直接覆盖。
+
+让步结构另由 `test/reveal/reveal_engine_microtask_depth_test.dart` 钉住。reveal 的授权模型
+建立在「哪些事之间没有让步窗口」上——`门与 performAction 之间没有任何 await/yield`——所以
+拆分不得改变让步点数：无帧路径量真实微任务轮次（2 / 3 / 3 / 3），帧驱动路径量「门放行到
+派发之间恰好一轮」与「policy 与门之间没有微任务边界」。`PatchbayFrameObserver` 是
+`final class`、测试替换不掉，帧驱动路径因此拿不到纯微任务计数，改以引擎观察帧数加调用
+次数补齐。
+
+机制唯一性的机检同步收紧：原来只盯 `reveal_engine.dart` 一个文件，把派发挪进兄弟文件就能
+绕过；现在整组 reveal 实现文件的 `performAction` 调用点合计仍须恰好一个，且必须落在派发
+阶段那一个文件里，清单在测试里显式登记。PB-050-38 其余四个热点在各自的 MR 里处理，本条
+不代它们下判断。
+| `patchbay/lib/src/host/snapshot_payload.dart` | 613 → 111 行 | 冻结一次 snapshot 的五段处理各自独立成文件（`snapshot_payload_limits` 限额模型与两类拒绝的成型 / `snapshot_payload_path` 结构路径与展开 occurrence 记账 / `snapshot_payload_bytes` 有界字节 sink / `snapshot_payload_freeze` 冻结遍历 / `snapshot_payload_canonical` canonical 序列化），门面只留对外类型、四段的调用顺序与 fault → violation 的唯一边界翻译点 |
+
+依据不是它长，而是这五段**中间没有一个能单独构造**：验证「字节越界该报 PB-050-01 的
+契约失败还是 PB-050-02 的资源拒绝」只能造一份真的超预算 payload 从 `freeze` 整条打进去，
+验证「共享子树第二次出现是否重新计费」还得先绕过深度与字节两条闸。拆分保持外部语义逐
+字节不变，由 `test/host/snapshot_payload_characterization_test.dart` 在拆分前后各跑一次
+钉住（冻结体顺序与不可变性、canonical 字节、六种 failure 的 details 键序、两类预算分工、
+token 与阶段钩子），`test/host/snapshot_payload_stage_units_test.dart` 则逐阶段注入失败
+证明它们真的分开了——遍历与 canonical 的 sink、遍历的出现次数计数器都是构造参数接缝，
+失败注入不必再造超大 payload。单个新文件最大 252 行。
 
 **已复核，维持现状**：
 
 - 因文件长度被点过名的 `manifest_parser` / `gesture_bridge` /
   `artifact_service` / `trace_store` / `doctor_checks` / `release_checker`——
   长度来自同构成员集合与内聚类，属「不该拆分」第 1、2 条；
-- `flutter_service_host` 的 `_uiCommandRegistry`（254 行）与 `command_codegen` 的
-  `_render`（208 行）——声明式装配与模板拼装，控制流稀疏（前者 254 行只有 7 个 return、
-  11 个 if），拆开不会更好读。
+- `command_codegen` 的 `_render`（208 行）——模板拼装，控制流稀疏，拆开不会更好读。
 
 ## 0.5.0 RC 审计（2026-08-28）
 

@@ -1,0 +1,624 @@
+// PB-050-38：snapshot payload 冻结器的表征测试。
+//
+// 这份测试的作用不是「补覆盖」，而是在按阶段拆分之前把**外部可观察的每一类结果**
+// 逐字节钉住：冻结体的对象顺序与不可变性、canonical 字节（含 key 排序与分隔符）、
+// 每一种拒绝的 details 键序与取值、违规 token 语义，以及 freeze 自己不让出执行权
+// 这一事实。拆分前后各跑一次，两次都必须全绿——任何一条变红都说明这不再是零语义
+// 变化的重构。
+//
+// 既有的 `snapshot_provider_boundary_test.dart` / `snapshot_resource_budget_test.dart`
+// 从 host 的角度覆盖同一批规则；这里刻意只对 `PatchbaySnapshotPayloadFreezer` 说话，
+// 因为拆分动的正是它内部的阶段边界。
+import 'dart:async';
+import 'dart:collection';
+import 'dart:convert';
+
+import 'package:patchbay/src/host/snapshot_payload.dart';
+import 'package:test/test.dart';
+
+PatchbaySnapshotPayloadLimits _limits({
+  int depth = patchbaySnapshotMaxContainerDepth,
+  int occurrences = patchbaySnapshotMaxExpandedOccurrences,
+  int bytes = patchbaySnapshotMaxCanonicalBytes,
+  int? runBytes,
+}) => PatchbaySnapshotPayloadLimits(
+  maxContainerDepth: depth,
+  maxExpandedOccurrences: occurrences,
+  maxCanonicalBytes: bytes,
+  maxRunCanonicalBytes: runBytes,
+);
+
+PatchbaySnapshotPayloadViolation _violationWith(
+  PatchbaySnapshotPayloadFreezer freezer,
+  Object? payload, {
+  Object? token,
+}) {
+  try {
+    freezer.freeze(payload, violationToken: token);
+  } on PatchbaySnapshotPayloadViolation catch (error) {
+    return error;
+  }
+  fail('expected a snapshot payload violation');
+}
+
+PatchbaySnapshotPayloadViolation _violationOf(Object? payload) =>
+    _violationWith(const PatchbaySnapshotPayloadFreezer(), payload);
+
+Map<String, Object?> _map(Object? value) => value! as Map<String, Object?>;
+
+List<Object?> _list(Object? value) => value! as List<Object?>;
+
+Map<String, Object?> _nest(int depth) {
+  Map<String, Object?> node = <String, Object?>{'leaf': 1};
+  for (var i = 0; i < depth; i++) {
+    node = <String, Object?>{'k': node};
+  }
+  return node;
+}
+
+final class _ThrowingKeysMap extends MapBase<String, Object?> {
+  _ThrowingKeysMap(this.error);
+
+  final Object error;
+
+  @override
+  Iterable<String> get keys => throw error;
+
+  @override
+  Object? operator [](Object? key) => null;
+
+  @override
+  void operator []=(String key, Object? value) =>
+      throw UnsupportedError('read-only test map');
+
+  @override
+  void clear() => throw UnsupportedError('read-only test map');
+
+  @override
+  Object? remove(Object? key) => throw UnsupportedError('read-only test map');
+}
+
+final class _Opaque {
+  const _Opaque();
+
+  @override
+  String toString() => throw StateError('toString must not be called');
+}
+
+void main() {
+  group('冻结结果', () {
+    test('嵌套容器保留插入顺序，canonical 按 key 排序', () {
+      final Map<String, Object?> source = <String, Object?>{
+        'z': <Object?>[true, null, 1.5],
+        'a': <String, Object?>{'second': 2, 'first': 1},
+      };
+
+      final PatchbayFrozenSnapshotPayload frozen =
+          const PatchbaySnapshotPayloadFreezer().freeze(source);
+
+      expect(frozen.body.keys, <String>['z', 'a']);
+      expect(_map(frozen.body['a']).keys, <String>['second', 'first']);
+      expect(_list(frozen.body['z']), <Object?>[true, null, 1.5]);
+      expect(
+        frozen.canonical,
+        '{"a":{"first":1,"second":2},"z":[true,null,1.5]}',
+      );
+      expect(frozen.canonicalBytes, utf8.encode(frozen.canonical).length);
+      expect(frozen.canonicalBytes, 48);
+    });
+
+    test('key 排序按 UTF-16 code unit，不是大小写不敏感序', () {
+      final PatchbayFrozenSnapshotPayload frozen =
+          const PatchbaySnapshotPayloadFreezer().freeze(<String, Object?>{
+            'a': 1,
+            'B': 2,
+            'Z': 3,
+            'b': 4,
+            '': 5,
+            'é': 6,
+          });
+
+      expect(frozen.canonical, '{"":5,"B":2,"Z":3,"a":1,"b":4,"é":6}');
+      expect(frozen.canonicalBytes, utf8.encode(frozen.canonical).length);
+    });
+
+    test('标量的 canonical 形态逐字节固定', () {
+      final PatchbayFrozenSnapshotPayload frozen =
+          const PatchbaySnapshotPayloadFreezer().freeze(<String, Object?>{
+            'int': 42,
+            'negative': -7,
+            'zero': 0,
+            'double': 1.0,
+            'small': 0.5,
+            'exp': 1e21,
+            'big': 9007199254740993,
+            'true': true,
+            'false': false,
+            'null': null,
+            'empty': '',
+            'emptyMap': <String, Object?>{},
+            'emptyList': <Object?>[],
+          });
+
+      expect(
+        frozen.canonical,
+        '{"big":9007199254740993,"double":1.0,"empty":"","emptyList":[],'
+        '"emptyMap":{},"exp":1e+21,"false":false,"int":42,"negative":-7,'
+        '"null":null,"small":0.5,"true":true,"zero":0}',
+      );
+    });
+
+    test('字符串转义与多字节字符逐字节固定', () {
+      final PatchbayFrozenSnapshotPayload frozen =
+          const PatchbaySnapshotPayloadFreezer().freeze(<String, Object?>{
+            'quote"and\\slash': 'tab\tnewline\nnul\u0000',
+            '中': '🙂',
+          });
+
+      expect(
+        frozen.canonical,
+        '{"quote\\"and\\\\slash":"tab\\tnewline\\nnul\\u0000","中":"🙂"}',
+      );
+      expect(frozen.canonicalBytes, utf8.encode(frozen.canonical).length);
+      expect(frozen.canonicalBytes, 60);
+    });
+
+    test('冻结体与其后代都不可再写', () {
+      final PatchbayFrozenSnapshotPayload frozen =
+          const PatchbaySnapshotPayloadFreezer().freeze(<String, Object?>{
+            'nested': <String, Object?>{
+              'list': <Object?>[
+                <String, Object?>{'deep': 1},
+              ],
+            },
+          });
+
+      expect(() => frozen.body['x'] = 1, throwsA(isA<UnsupportedError>()));
+      final Map<String, Object?> nested = _map(frozen.body['nested']);
+      expect(() => nested['x'] = 1, throwsA(isA<UnsupportedError>()));
+      final List<Object?> list = _list(nested['list']);
+      expect(() => list.add(1), throwsA(isA<UnsupportedError>()));
+      expect(() => _map(list.first)['x'] = 1, throwsA(isA<UnsupportedError>()));
+    });
+
+    test('冻结后 consumer 再改原图不影响结果', () {
+      final Map<String, Object?> inner = <String, Object?>{'v': 1};
+      final List<Object?> items = <Object?>[inner];
+      final Map<String, Object?> source = <String, Object?>{'items': items};
+
+      final PatchbayFrozenSnapshotPayload frozen =
+          const PatchbaySnapshotPayloadFreezer().freeze(source);
+      inner['v'] = 2;
+      items.add('late');
+      source['extra'] = true;
+
+      expect(frozen.canonical, '{"items":[{"v":1}]}');
+      expect(frozen.body.keys, <String>['items']);
+    });
+
+    test('同一子树重复出现会被展开成两棵独立子树', () {
+      final Map<String, Object?> shared = <String, Object?>{'v': 1};
+      final PatchbayFrozenSnapshotPayload frozen =
+          const PatchbaySnapshotPayloadFreezer().freeze(<String, Object?>{
+            'a': shared,
+            'b': shared,
+          });
+
+      expect(frozen.canonical, '{"a":{"v":1},"b":{"v":1}}');
+      expect(identical(frozen.body['a'], frozen.body['b']), isFalse);
+    });
+  });
+
+  group('拒绝形状', () {
+    test('非字符串 key 停在父路径并只报运行时类型', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationOf(
+        <String, Object?>{
+          'outer': <Object?, Object?>{7: 'v'},
+        },
+      );
+
+      expect(violation.kind, PatchbaySnapshotPayloadViolationKind.contract);
+      expect(violation.details.keys, <String>[
+        'reason',
+        'failure',
+        'path',
+        'type',
+      ]);
+      expect(violation.details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'nonStringKey',
+        'path': r'$.outer',
+        'type': 'int',
+      });
+    });
+
+    test('不支持的值类型不调用 toString', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationOf(
+        <String, Object?>{
+          'list': <Object?>[const _Opaque()],
+        },
+      );
+
+      expect(violation.details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'unsupportedType',
+        'path': r'$.list[0]',
+        'type': '_Opaque',
+      });
+    });
+
+    test('非有限数在自己的路径上被拒', () {
+      for (final double value in <double>[
+        double.nan,
+        double.infinity,
+        double.negativeInfinity,
+      ]) {
+        final PatchbaySnapshotPayloadViolation violation = _violationOf(
+          <String, Object?>{'n': value},
+        );
+        expect(violation.details, <String, Object?>{
+          'reason': 'snapshotPayloadInvalid',
+          'failure': 'nonFiniteNumber',
+          'path': r'$.n',
+        });
+      }
+    });
+
+    test('直接与间接环都在进入点被拒', () {
+      final Map<String, Object?> direct = <String, Object?>{};
+      direct['self'] = direct;
+      expect(_violationOf(direct).details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'cycleDetected',
+        'path': r'$.self',
+      });
+
+      final Map<String, Object?> outer = <String, Object?>{};
+      final List<Object?> middle = <Object?>[outer];
+      outer['mid'] = middle;
+      expect(_violationOf(outer).details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'cycleDetected',
+        'path': r'$.mid[0]',
+      });
+    });
+
+    test('不安全的 key 之后不再追加后代路径', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationOf(
+        <String, Object?>{
+          'ok': <String, Object?>{
+            '0-unsafe': <String, Object?>{'deep': const _Opaque()},
+          },
+        },
+      );
+
+      expect(violation.details['path'], r'$.ok');
+    });
+
+    test('超长 key 同样使路径停在父节点', () {
+      final String longKey = 'k' * 129;
+      final PatchbaySnapshotPayloadViolation violation = _violationOf(
+        <String, Object?>{
+          'ok': <String, Object?>{longKey: const _Opaque()},
+        },
+      );
+
+      expect(violation.details['path'], r'$.ok');
+    });
+
+    test('深度上限内合法，上限 +1 被拒且路径可读', () {
+      final PatchbaySnapshotPayloadFreezer freezer =
+          PatchbaySnapshotPayloadFreezer(limits: _limits(depth: 3));
+
+      expect(freezer.freeze(_nest(3)).canonical, isNotEmpty);
+
+      final PatchbaySnapshotPayloadViolation violation = _violationWith(
+        freezer,
+        _nest(4),
+      );
+      expect(violation.details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'nestingTooDeep',
+        'path': r'$.k.k.k.k',
+      });
+    });
+
+    test('展开 occurrence 上限的 details 键序与取值固定', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationWith(
+        PatchbaySnapshotPayloadFreezer(limits: _limits(occurrences: 2)),
+        <String, Object?>{'a': 1},
+      );
+
+      expect(violation.kind, PatchbaySnapshotPayloadViolationKind.contract);
+      expect(violation.details.keys, <String>[
+        'reason',
+        'failure',
+        'path',
+        'limitKind',
+        'limit',
+        'observed',
+      ]);
+      expect(violation.details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'payloadTooLarge',
+        'path': r'$.a',
+        'limitKind': 'expandedNodes',
+        'limit': 2,
+        'observed': 3,
+      });
+    });
+
+    test('canonical 字节天花板报告的是天花板本身而不是实际长度', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationWith(
+        PatchbaySnapshotPayloadFreezer(limits: _limits(bytes: 5)),
+        <String, Object?>{'a': 1},
+      );
+
+      expect(violation.kind, PatchbaySnapshotPayloadViolationKind.contract);
+      expect(violation.details.keys, <String>[
+        'reason',
+        'failure',
+        'path',
+        'limitKind',
+        'limit',
+        'observed',
+      ]);
+      expect(violation.details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'payloadTooLarge',
+        'path': r'$.a',
+        'limitKind': 'canonicalBytes',
+        'limit': 5,
+        'observed': 6,
+      });
+    });
+
+    test('闭合括号越界时路径回到所属容器', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationWith(
+        PatchbaySnapshotPayloadFreezer(limits: _limits(bytes: 6)),
+        <String, Object?>{'a': 1},
+      );
+
+      expect(violation.details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'payloadTooLarge',
+        'path': r'$',
+        'limitKind': 'canonicalBytes',
+        'limit': 6,
+        'observed': 7,
+      });
+    });
+
+    test('运行预算越界只报两个计数，不带路径', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationWith(
+        PatchbaySnapshotPayloadFreezer(
+          limits: _limits(bytes: 4096, runBytes: 6),
+        ),
+        <String, Object?>{'a': 1},
+      );
+
+      expect(violation.kind, PatchbaySnapshotPayloadViolationKind.runBudget);
+      expect(violation.details.keys, <String>[
+        'encodedBytesAtLeast',
+        'maxSnapshotBytes',
+      ]);
+      expect(violation.details, <String, Object?>{
+        'encodedBytesAtLeast': 7,
+        'maxSnapshotBytes': 6,
+      });
+    });
+
+    test('字节预算按插入顺序计费，路径不是 canonical 顺序', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationWith(
+        PatchbaySnapshotPayloadFreezer(limits: _limits(bytes: 7)),
+        <String, Object?>{'zzz': 1, 'aaa': 2},
+      );
+
+      expect(violation.details['path'], r'$.zzz');
+    });
+
+    test('根不是 map 时按 unsupportedType 收敛到根路径', () {
+      expect(_violationOf(42).details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'unsupportedType',
+        'path': r'$',
+        'type': 'int',
+      });
+      expect(_violationOf(null).details['type'], 'Null');
+      expect(_violationOf(<Object?>[1]).details['failure'], 'unsupportedType');
+      expect(_violationOf(<Object?>[1]).details['path'], r'$');
+    });
+
+    test('遍历中途抛出的任意异常收敛成根路径上的 unsupportedType', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationOf(
+        <String, Object?>{
+          'boom': _ThrowingKeysMap(const FormatException('secret')),
+        },
+      );
+
+      expect(violation.kind, PatchbaySnapshotPayloadViolationKind.contract);
+      expect(violation.details, <String, Object?>{
+        'reason': 'snapshotPayloadInvalid',
+        'failure': 'unsupportedType',
+        'path': r'$',
+        'type': 'FormatException',
+      });
+    });
+
+    test('StackOverflowError 之外的 Error 同样被收敛而不是逃逸', () {
+      final PatchbaySnapshotPayloadViolation violation = _violationOf(
+        <String, Object?>{'boom': _ThrowingKeysMap(StateError('x'))},
+      );
+
+      expect(violation.details['type'], 'StateError');
+    });
+  });
+
+  group('违规 token', () {
+    test('调用方给的 token 认得出自己的违规', () {
+      final Object token = Object();
+      final PatchbaySnapshotPayloadViolation violation = _violationWith(
+        const PatchbaySnapshotPayloadFreezer(),
+        <String, Object?>{'n': double.nan},
+        token: token,
+      );
+
+      expect(violation.belongsTo(token), isTrue);
+      expect(violation.belongsTo(Object()), isFalse);
+    });
+
+    test('不给 token 时每次冻结都是一个只属于自己的新 token', () {
+      final PatchbaySnapshotPayloadViolation first = _violationOf(
+        <String, Object?>{'n': double.nan},
+      );
+      final PatchbaySnapshotPayloadViolation second = _violationOf(
+        <String, Object?>{'n': double.nan},
+      );
+
+      expect(first.belongsTo(second), isFalse);
+      expect(first.belongsTo(first), isFalse);
+    });
+  });
+
+  group('限额模型', () {
+    test('生产常量与默认运行预算', () {
+      const PatchbaySnapshotPayloadLimits limits =
+          PatchbaySnapshotPayloadLimits.production;
+
+      expect(limits.maxContainerDepth, 128);
+      expect(limits.maxExpandedOccurrences, 2 * 1024 * 1024);
+      expect(limits.maxCanonicalBytes, 4 * 1024 * 1024);
+      expect(limits.maxRunCanonicalBytes, limits.maxCanonicalBytes);
+      expect(patchbaySnapshotMaxContainerDepth, 128);
+      expect(patchbaySnapshotMaxExpandedOccurrences, 2 * 1024 * 1024);
+      expect(patchbaySnapshotMaxCanonicalBytes, 4 * 1024 * 1024);
+    });
+
+    test('withRunCanonicalBytes 只能收紧，收不紧就取天花板', () {
+      const PatchbaySnapshotPayloadLimits limits =
+          PatchbaySnapshotPayloadLimits.production;
+
+      expect(limits.withRunCanonicalBytes(1024).maxRunCanonicalBytes, 1024);
+      expect(
+        limits
+            .withRunCanonicalBytes(limits.maxCanonicalBytes)
+            .maxRunCanonicalBytes,
+        limits.maxCanonicalBytes,
+      );
+      expect(
+        limits
+            .withRunCanonicalBytes(limits.maxCanonicalBytes + 1)
+            .maxRunCanonicalBytes,
+        limits.maxCanonicalBytes,
+      );
+      final PatchbaySnapshotPayloadLimits narrowed = limits
+          .withRunCanonicalBytes(1024);
+      expect(narrowed.maxContainerDepth, limits.maxContainerDepth);
+      expect(narrowed.maxExpandedOccurrences, limits.maxExpandedOccurrences);
+      expect(narrowed.maxCanonicalBytes, limits.maxCanonicalBytes);
+      expect(narrowed.withRunCanonicalBytes(4096).maxRunCanonicalBytes, 4096);
+    });
+  });
+
+  group('阶段与让步点', () {
+    test('有效载荷按 beforeFreeze → beforeCanonical 各触发一次', () {
+      final List<PatchbaySnapshotPayloadStage> stages =
+          <PatchbaySnapshotPayloadStage>[];
+
+      PatchbaySnapshotPayloadFreezer(
+        testStageHook: stages.add,
+      ).freeze(<String, Object?>{'a': 1});
+
+      expect(stages, <PatchbaySnapshotPayloadStage>[
+        PatchbaySnapshotPayloadStage.beforeFreeze,
+        PatchbaySnapshotPayloadStage.beforeCanonical,
+      ]);
+    });
+
+    test('冻结阶段就越界时 canonical 阶段根本不开始', () {
+      final List<PatchbaySnapshotPayloadStage> stages =
+          <PatchbaySnapshotPayloadStage>[];
+
+      _violationWith(
+        PatchbaySnapshotPayloadFreezer(
+          limits: _limits(bytes: 4096, runBytes: 6),
+          testStageHook: stages.add,
+        ),
+        <String, Object?>{'a': 1},
+      );
+
+      expect(stages, <PatchbaySnapshotPayloadStage>[
+        PatchbaySnapshotPayloadStage.beforeFreeze,
+      ]);
+    });
+
+    test('阶段钩子自己抛出也收敛成类型化违规', () {
+      for (final PatchbaySnapshotPayloadStage stage
+          in PatchbaySnapshotPayloadStage.values) {
+        final PatchbaySnapshotPayloadViolation violation = _violationWith(
+          PatchbaySnapshotPayloadFreezer(
+            testStageHook: (PatchbaySnapshotPayloadStage observed) {
+              if (observed == stage) throw const FormatException('hook');
+            },
+          ),
+          <String, Object?>{'a': 1},
+        );
+
+        expect(violation.details, <String, Object?>{
+          'reason': 'snapshotPayloadInvalid',
+          'failure': 'unsupportedType',
+          'path': r'$',
+          'type': 'FormatException',
+        });
+      }
+    });
+
+    test('freeze 全程不排任何微任务或定时器', () {
+      var microtasks = 0;
+      var timers = 0;
+      final ZoneSpecification spec = ZoneSpecification(
+        scheduleMicrotask:
+            (Zone self, ZoneDelegate parent, Zone zone, void Function() f) {
+              microtasks++;
+              parent.scheduleMicrotask(zone, f);
+            },
+        createTimer:
+            (
+              Zone self,
+              ZoneDelegate parent,
+              Zone zone,
+              Duration duration,
+              void Function() f,
+            ) {
+              timers++;
+              return parent.createTimer(zone, duration, f);
+            },
+        createPeriodicTimer:
+            (
+              Zone self,
+              ZoneDelegate parent,
+              Zone zone,
+              Duration period,
+              void Function(Timer) f,
+            ) {
+              timers++;
+              return parent.createPeriodicTimer(zone, period, f);
+            },
+      );
+
+      late final PatchbayFrozenSnapshotPayload frozen;
+      runZoned(() {
+        frozen = const PatchbaySnapshotPayloadFreezer().freeze(
+          <String, Object?>{
+            'deep': _nest(32),
+            'wide': List<Object?>.generate(64, (int i) => i),
+          },
+        );
+      }, zoneSpecification: spec);
+
+      expect(microtasks, 0);
+      expect(timers, 0);
+      expect(frozen.canonicalBytes, greaterThan(0));
+    });
+  });
+}

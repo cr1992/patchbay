@@ -20,12 +20,46 @@ import 'reveal_fixtures.dart';
 const String _engineSource = 'lib/src/reveal/reveal_engine.dart';
 const String _bridgeSource = 'lib/src/reveal/reveal_bridge.dart';
 
+const String _revealDir = 'lib/src/reveal';
+
+/// 派发阶段：整个 reveal 唯一允许出现 `performAction` 的文件。
+const String _dispatchSource = 'lib/src/reveal/reveal_step_stage.dart';
+
+/// `lib/src/reveal/` 下的**全部** `.dart` 实现文件。
+///
+/// PB-050-38 把引擎按阶段拆成多个文件之后，机制唯一性必须扫整组实现而不是单个
+/// 文件——否则把派发挪进兄弟文件就能绕过。
+///
+/// **遍历目录，不用硬编码清单**：清单本身就是一个绕过口子——新建一个没登记的
+/// `reveal_*.dart` 把派发放进去，清单照样绿。目录扫描让新增实现文件自动进入
+/// 扫描范围，作者不需要、也没办法在测试里替它豁免。
+List<String> _revealSources() =>
+    Directory(_revealDir)
+        .listSync()
+        .whereType<File>()
+        .map((File file) => file.path)
+        .where((String path) => path.endsWith('.dart'))
+        .toList(growable: false)
+      ..sort();
+
 void main() {
   setUp(resetRevealCounters);
 
   group('机制唯一性', () {
+    test('目录扫描确实罩住了整组实现（否则下面两条是空的）', () {
+      final List<String> sources = _revealSources();
+      expect(sources, contains(_engineSource));
+      expect(sources, contains(_bridgeSource));
+      expect(sources, contains(_dispatchSource));
+      expect(
+        sources.length,
+        greaterThanOrEqualTo(10),
+        reason: '扫描根目录写错时清单会塌成空的，两条机检就变成恒真：\$sources',
+      );
+    });
+
     test('reveal 的实现代码里不存在 showOnScreen（注释可以谈论它）', () {
-      for (final String path in <String>[_engineSource, _bridgeSource]) {
+      for (final String path in _revealSources()) {
         expect(
           _code(path),
           isNot(contains('showOnScreen')),
@@ -35,17 +69,25 @@ void main() {
     });
 
     test('performAction 只有一个调用点，派发的 action 只能来自同轴 action 对', () {
-      final String source = File(_engineSource).readAsStringSync();
+      // 全组合计恰好一次，而且落在派发阶段那一个文件里。
+      final List<String> sources = _revealSources();
       expect(
-        'performAction('.allMatches(source).length,
-        1,
+        <String, int>{
+          for (final String path in sources)
+            path: 'performAction('
+                .allMatches(File(path).readAsStringSync())
+                .length,
+        },
+        <String, int>{
+          for (final String path in sources)
+            path: path == _dispatchSource ? 1 : 0,
+        },
         reason: '多一个派发点就多一条接入方看不见的驱动通道',
       );
       expect(
-        source,
-        contains('_owner.performAction(layer.nodeId, action.flutterAction)'),
+        File(_dispatchSource).readAsStringSync(),
+        contains('owner.performAction(nodeId, action.flutterAction)'),
       );
-      expect(_code(_bridgeSource), isNot(contains('performAction(')));
 
       // action 只可能是 `PatchbayRevealAxis` 里的那两个之一，两条轴合起来正好是
       // 四个 scroll action，一个都不多。
@@ -108,7 +150,11 @@ void main() {
   group('封闭词表', () {
     test('受理后 reason 恰好 13 个，且引擎里出现的每一个都在表内', () {
       expect(PatchbayRevealReason.values, hasLength(13));
-      final String source = File(_engineSource).readAsStringSync();
+      final String source = _revealSources()
+          .where((String path) => path != 'lib/src/reveal/reveal_models.dart')
+          .map(File.new)
+          .map((File file) => file.readAsStringSync())
+          .join('\n');
       final Set<String> used = RegExp(r'PatchbayRevealReason\.([A-Za-z]+)')
           .allMatches(source)
           .map((RegExpMatch match) => match.group(1)!)

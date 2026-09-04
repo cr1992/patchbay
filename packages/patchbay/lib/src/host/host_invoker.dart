@@ -1,22 +1,38 @@
+// PB-050-38 / DG-060-04：core host 的调用入口与 admission pipeline **编排**。
+//
+// 本文件只剩三件事：公共门面（`dispatchInvoke*` / `cancelInvocation` / 两个
+// drain）、按冻结顺序把各阶段串起来，以及「一次调用只落一条审计」这条记账规则。
+// 每个阶段本身住在自己的文件里，可以脱离 host 单独构造与单独失败注入：
+//
+//   `invocation_catalog_stage.dart`   catalog validity 与 descriptor 查找
+//   `invocation_input_stage.dart`     sensitive input 判定与转发形态
+//   `invocation_gate_stage.dart`      base gate / descriptor gate 与门后复核
+//   `invocation_handler_stage.dart`   handler 调用与其两侧的取消复核
+//   `invocation_response_stage.dart`  信封结构与 schema / 执行证据校验
+//   `invocation_audit_stage.dart`     审计投影、环形上限与投递
+//   `external_invocation_ledger.dart` external 的 requestId 账本与槽位
+//
+// 顺序是 DG-060-04 冻结的，不是实现细节：catalog validity → sensitive input →
+// base gate → descriptor gate →（handler 侧 UI decision 回传）→ response
+// validation → audit projection。
 import 'dart:async';
-import 'dart:convert';
 
 import '../audit.dart';
-import '../catalog_digest.dart';
-import '../command_descriptor.dart';
 import '../command_registry.dart';
-import '../execution_evidence.dart';
-import '../gate_admission_scope.dart';
 import '../gates.dart';
-import '../generated/core_wire.g.dart';
-import '../invocation.dart';
 import '../invocation_cancellation.dart';
-import '../response_schema.dart';
-import 'audit_dispatcher.dart';
-import 'audit_execution_details.dart';
+import 'external_invocation_ledger.dart';
 import 'host_catalog.dart';
 import 'host_models.dart';
+import 'invocation_admission_state.dart';
+import 'invocation_audit_stage.dart';
+import 'invocation_catalog_stage.dart';
 import 'invocation_coordinator.dart';
+import 'invocation_gate_stage.dart';
+import 'invocation_handler_stage.dart';
+import 'invocation_input_stage.dart';
+import 'invocation_rejections.dart';
+import 'invocation_response_stage.dart';
 
 final class HostInvokerHandler {
   HostInvokerHandler({
@@ -46,14 +62,11 @@ final class HostInvokerHandler {
         'provide exactly one of invokeSource or invokeWithContext',
       );
     }
-    validateAuditQueueCapacity(auditQueueCapacity);
-    _auditDispatcher = auditSink == null
-        ? null
-        : AuditDispatcher(
-            sink: auditSink,
-            capacity: auditQueueCapacity,
-            onError: onAuditSinkError,
-          );
+    _audit = PatchbayInvocationAuditLedger(
+      sink: auditSink,
+      onSinkError: onAuditSinkError,
+      capacity: auditQueueCapacity,
+    );
   }
 
   final PatchbayInvocationSource? _invoke;
@@ -68,35 +81,24 @@ final class HostInvokerHandler {
   /// an internal scope that removes already-admitted stages from bridge-local
   /// evaluation.
   final PatchbayGateEvaluator? _domainGates;
-  late final AuditDispatcher? _auditDispatcher;
-  Future<PatchbayAuditDrainResult>? _emptyAuditDrain;
+  late final PatchbayInvocationAuditLedger _audit;
   final InvocationCoordinator _invocations;
 
-  final List<PatchbayAuditEvent> _auditLedger = <PatchbayAuditEvent>[];
-  var _nextAuditSequence = 1;
-  final Map<(String, String), PatchbayExternalInvocationRecord>
-  _externalInvocations = <(String, String), PatchbayExternalInvocationRecord>{};
+  late final PatchbayExternalInvocationLedger _external =
+      PatchbayExternalInvocationLedger(invoke: _invokeExternal);
 
-  List<PatchbayAuditEvent> get auditEvents =>
-      List<PatchbayAuditEvent>.unmodifiable(_auditLedger);
+  late final PatchbayInvocationGateStage _gateStage =
+      PatchbayInvocationGateStage(
+        gates: _domainGates,
+        readCatalog: _catalogHandler.readInvocationCatalog,
+        priorRequestObserved: _external.contains,
+      );
+
+  List<PatchbayAuditEvent> get auditEvents => _audit.events;
 
   Future<PatchbayAuditDrainResult> drainAudit({
     Duration timeout = const Duration(seconds: 2),
-  }) {
-    final AuditDispatcher? dispatcher = _auditDispatcher;
-    if (dispatcher != null) return dispatcher.drain(timeout);
-    final Future<PatchbayAuditDrainResult>? existing = _emptyAuditDrain;
-    if (existing != null) return existing;
-    validateAuditDrainTimeout(timeout);
-    return _emptyAuditDrain = Future<PatchbayAuditDrainResult>.value(
-      const PatchbayAuditDrainResult(
-        outcome: PatchbayAuditDrainOutcome.drained,
-        settledCount: 0,
-        overflowDroppedCount: 0,
-        abandonedCount: 0,
-      ),
-    );
-  }
+  }) => _audit.drain(timeout);
 
   Future<Map<String, Object?>> dispatchInvoke(
     String command,
@@ -127,7 +129,8 @@ final class HostInvokerHandler {
           ownerToken: ownerToken,
         );
     if (externalReplay != null) return externalReplay;
-    final _InvocationAuditState auditState = _InvocationAuditState();
+    final PatchbayInvocationAuditState auditState =
+        PatchbayInvocationAuditState();
     return _invocations.start(
       command: command,
       requestId: requestId,
@@ -146,10 +149,10 @@ final class HostInvokerHandler {
       onCancellationResponse: (Map<String, Object?> response) {
         if (auditState.recorded) return;
         auditState.recorded = true;
-        _recordAudit(
+        _audit.record(
           command: command,
           requestId: requestId,
-          arguments: withoutStdinProvenance(arguments),
+          arguments: patchbayWithoutStdinProvenance(arguments),
           gateResult: auditState.gateResult,
           response: response,
           admissionStage: auditState.admissionStage,
@@ -159,30 +162,21 @@ final class HostInvokerHandler {
     );
   }
 
+  /// 账本先于编排：命中已有记录时不再新开一次调用。
   PatchbayHostInvocationHandle? _preflightExternalInvocation(
     String command,
     Map<String, Object?> arguments,
     String requestId, {
     required String? ownerToken,
   }) {
-    if (_registry.handles(command)) return null;
-    final PatchbayExternalInvocationRecord? existing =
-        _externalInvocations[(command, requestId)];
-    if (existing == null) return null;
-    final String rawDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
-      arguments,
-    ]).value;
-    final String forwardedDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
-      withoutStdinProvenance(arguments),
-    ]).value;
-    final bool sameArguments =
-        existing.argumentDigest == rawDigest ||
-        existing.argumentDigest == forwardedDigest;
-    final bool sameOwner =
-        ownerToken == null || existing.ownerToken == ownerToken;
-    if (sameArguments && existing.idempotent && sameOwner) {
-      final Future<Map<String, Object?>> response =
-          existing.servedResponse.future;
+    final PatchbayExternalPreflight preflight = _external.preflight(
+      command: command,
+      arguments: arguments,
+      requestId: requestId,
+      registryOwned: _registry.handles(command),
+      ownerToken: ownerToken,
+    );
+    if (preflight.replay case final Future<Map<String, Object?>> response) {
       return PatchbayHostInvocationHandle(
         response: response,
         lifecycle: response.then<void>(
@@ -191,32 +185,35 @@ final class HostInvokerHandler {
         ),
       );
     }
-    final Map<String, Object?> rejection = _externalDuplicateRejection(
-      requestId,
-      !sameArguments || !sameOwner ? 'requestIdConflict' : 'duplicateRequestId',
-    );
-    _recordAudit(
-      command: command,
-      requestId: requestId,
-      arguments: withoutStdinProvenance(arguments),
-      gateResult: 'notEvaluated',
-      response: rejection,
-      // The ledger is consulted before any gate, so no gate was reached.
-      admissionStage: 'dispatch',
-      gateDisposition: 'notReached',
-    );
-    return PatchbayHostInvocationHandle(
-      response: Future<Map<String, Object?>>.value(rejection),
-      lifecycle: Future<void>.value(),
-    );
+    if (preflight.rejection case final Map<String, Object?> rejection) {
+      _audit.record(
+        command: command,
+        requestId: requestId,
+        arguments: patchbayWithoutStdinProvenance(arguments),
+        gateResult: 'notEvaluated',
+        response: rejection,
+        // The ledger is consulted before any gate, so no gate was reached.
+        admissionStage: 'dispatch',
+        gateDisposition: 'notReached',
+      );
+      return PatchbayHostInvocationHandle(
+        response: Future<Map<String, Object?>>.value(rejection),
+        lifecycle: Future<void>.value(),
+      );
+    }
+    return null;
   }
 
+  /// 一次调用只落一条审计，且落的是**实际送出**的那份应答。
+  ///
+  /// 取消冻结应答会顶掉 handler 的结果，重放则根本不再记账；账本持有者还要把送出
+  /// 的应答回填进记录，好让后续幂等重放取回同一份事实。
   Future<Map<String, Object?>> _dispatchAndAudit(
     String command,
     Map<String, Object?> arguments,
     String requestId,
     PatchbayInvocationContext context, {
-    required _InvocationAuditState auditState,
+    required PatchbayInvocationAuditState auditState,
     required String? ownerToken,
   }) async {
     var recordAudit = true;
@@ -239,10 +236,10 @@ final class HostInvokerHandler {
           _invocations.frozenCancellationResponse(command, requestId) ?? result;
       if (recordAudit && !auditState.recorded) {
         auditState.recorded = true;
-        _recordAudit(
+        _audit.record(
           command: command,
           requestId: requestId,
-          arguments: withoutStdinProvenance(arguments),
+          arguments: patchbayWithoutStdinProvenance(arguments),
           gateResult: auditState.gateResult,
           response: served,
           admissionStage: auditState.admissionStage,
@@ -250,9 +247,7 @@ final class HostInvokerHandler {
         );
       }
       if (externalDisposition == 'owner') {
-        _externalInvocations[(command, requestId)]?.servedResponse.complete(
-          served,
-        );
+        _external.settleOwner(command, requestId, served);
       }
       return served;
     } catch (error, stackTrace) {
@@ -260,15 +255,12 @@ final class HostInvokerHandler {
           .frozenCancellationResponse(command, requestId);
       if (frozen != null) {
         if (externalDisposition == 'owner') {
-          _externalInvocations[(command, requestId)]?.servedResponse.complete(
-            frozen,
-          );
+          _external.settleOwner(command, requestId, frozen);
         }
         return frozen;
       }
       if (externalDisposition == 'owner') {
-        _externalInvocations[(command, requestId)]?.servedResponse
-            .completeError(error, stackTrace);
+        _external.failOwner(command, requestId, error, stackTrace);
       }
       rethrow;
     }
@@ -291,6 +283,8 @@ final class HostInvokerHandler {
     Duration timeout = const Duration(seconds: 2),
   }) => _invocations.drain(timeout);
 
+  /// DG-060-04 冻结的阶段顺序，逐段串起来——本方法**只**负责顺序与阶段之间的
+  /// 传递，任何一段的判据都不在这里。
   Future<Map<String, Object?>> _dispatchInvoke(
     String command,
     Map<String, Object?> arguments,
@@ -299,489 +293,100 @@ final class HostInvokerHandler {
     required void Function(String disposition) onExternalDisposition,
     required PatchbayInvocationContext context,
     required String? ownerToken,
-    _InvocationAuditState? audit,
+    PatchbayInvocationAuditState? audit,
   }) async {
     if (requestId.isEmpty) {
       throw ArgumentError.value(requestId, 'requestId', 'must not be empty');
     }
-    final PatchbayCatalogValidity catalog = await _catalogHandler
-        .readInvocationCatalog();
-    final Map<String, Object?>? cancelledAfterCatalog = _invocations
-        .frozenCancellationResponse(command, requestId);
-    if (cancelledAfterCatalog != null) return cancelledAfterCatalog;
-    if (catalog.violation case final Map<String, Object?> reason) {
-      return _invalidInvocationEnvelope(
-        requestId,
-        'catalogUnavailable',
-        <String, Object?>{'catalog': reason},
-      );
-    }
-    final PatchbayCommandPolicy policy =
-        catalog.commandPolicies[command] ??
-        const PatchbayCommandPolicy.undeclared();
-    final Map<String, Object?> forwarded;
-    if (arguments.isEmpty) {
-      forwarded = arguments;
-    } else {
-      audit?.admissionStage = 'inputPolicy';
-      final List<String> violations = policy.sensitiveViolations(arguments);
-      if (violations.isNotEmpty) {
-        return PatchbayInvocation.rejected(
+    final PatchbayCatalogAdmission catalog =
+        await patchbayAdmitInvocationCatalog(
+          readCatalog: _catalogHandler.readInvocationCatalog,
+          command: command,
           requestId: requestId,
-          rejection: PatchbayRejection(
-            code: 'sensitiveInputRequiresStdin',
-            notice: 'Sensitive arguments are accepted only from stdin.',
-            details: <String, Object?>{'parameters': violations},
-          ),
-        ).toJson();
-      }
-      forwarded = policy.retainsStdinProvenance
-          ? arguments
-          : withoutStdinProvenance(arguments);
-    }
-    final bool requiresCoreAdmission =
-        policy.writesSideEffect || policy.declaredGates.isNotEmpty;
-    final bool coreGateEvaluated =
-        requiresCoreAdmission && _domainGates != null;
-    if (requiresCoreAdmission) {
-      final Map<String, Object?>? refusal = await _admitCommand(
-        command,
-        requestId,
-        policy,
-        onGateResult: onGateResult,
-        audit: audit,
-      );
-      if (refusal != null) return refusal;
-    }
-    audit?.admissionStage = 'dispatch';
-    final Map<String, Object?>? cancelledBeforeHandler = _invocations
-        .frozenCancellationResponse(command, requestId);
-    if (cancelledBeforeHandler != null) return cancelledBeforeHandler;
-    final Map<String, Object?>? registered =
-        await runInPatchbayGateAdmissionScope<Map<String, Object?>?>(
-          skipBase: coreGateEvaluated || !policy.writesSideEffect,
-          admittedGateIds: coreGateEvaluated
-              ? policy.declaredGates
-              : const <String>{},
-          onGateResult: onGateResult,
-          onGateDisposition: (String value) {
-            audit?.gateDisposition = value;
-          },
-          onAdmissionStage: (String value) {
-            audit?.admissionStage = value;
-          },
-          body: () => _registry.tryDispatch(
-            command,
-            forwarded,
-            requestId,
-            onGateResult: (String value) {
-              // A registration with no legacy `_gate` reports `notDeclared`
-              // before entering its handler. Do not let that erase a core
-              // result; dynamic handler gates report through the scope above.
-              if (!coreGateEvaluated ||
-                  value == 'passed' ||
-                  value == 'rejected') {
-                onGateResult(value);
-                if (audit != null &&
-                    patchbayAuditGateDispositions.contains(value)) {
-                  audit.gateDisposition = value;
-                }
-              }
-            },
-            context: context,
-          ),
+          frozenCancellationResponse: () =>
+              _invocations.frozenCancellationResponse(command, requestId),
         );
-    final Map<String, Object?> result;
-    if (registered != null) {
-      result = registered;
-    } else {
-      result = await _dispatchExternal(
-        command,
-        forwarded,
-        requestId,
-        context: context,
-        ownerToken: ownerToken,
-        onDisposition: onExternalDisposition,
-        retryPolicy: catalog.retryPolicies[command],
-      );
+    if (catalog.response case final Map<String, Object?> response) {
+      return response;
     }
-    final Map<String, Object?>? cancelledAfterHandler = _invocations
-        .frozenCancellationResponse(command, requestId);
-    if (cancelledAfterHandler != null) return cancelledAfterHandler;
-    final String? handlerAdmissionStage = audit?.admissionStage;
-    final PatchbayInvocationWire wire;
-    try {
-      audit?.admissionStage = 'responseValidation';
-      wire = PatchbayInvocationWire.fromJson(result);
-    } on FormatException {
-      return _invalidInvocationEnvelope(requestId, 'malformedEnvelope');
-    }
-    if (wire.schemaVersion != 1) {
-      return _invalidInvocationEnvelope(requestId, 'schemaVersionMismatch');
-    }
-    if (wire.requestId != requestId) {
-      return _invalidInvocationEnvelope(requestId, 'requestIdMismatch');
-    }
-    final String? semanticViolation = _invocationSemanticViolation(wire);
-    if (semanticViolation != null) {
-      return _invalidInvocationEnvelope(requestId, semanticViolation);
-    }
-    if (registered != null &&
-        wire.admission == PatchbayAdmissionWire.rejected &&
-        (handlerAdmissionStage == 'uiPreflight' ||
-            handlerAdmissionStage == 'operationPolicy')) {
-      audit?.admissionStage = handlerAdmissionStage!;
-    }
-    final PatchbayResponseSchema? responseSchema =
-        catalog.responseSchemas[command];
-    final PatchbayExecutionContract? executionContract =
-        catalog.executionContracts[command];
-    PatchbayExecutionValidationResult executionValidation =
-        const PatchbayExecutionValidationResult();
-    if (wire.admission == PatchbayAdmissionWire.accepted) {
-      if (responseSchema != null) {
-        final List<PatchbayResponseValidationIssue> issues =
-            validatePatchbayResponsePayload(
-              responseSchema.accepted,
-              wire.payload,
-            );
-        if (issues.isNotEmpty) {
-          return <String, Object?>{
-            ..._responseSchemaViolation(requestId, issues),
-            'schemaMode': 'validated',
-          };
-        }
-      }
-      if (executionContract != null) {
-        executionValidation = validatePatchbayExecutionEvidence(
-          executionContract,
-          wire.payload,
-          nowMs: DateTime.now().millisecondsSinceEpoch,
-        );
-        if (executionValidation.issues.isNotEmpty) {
-          return <String, Object?>{
-            ..._responseSchemaViolation(requestId, executionValidation.issues),
-            'schemaMode': responseSchema == null
-                ? 'legacyUnvalidated'
-                : 'validated',
-          };
-        }
-      }
-    }
-    return _withExecutionDetails(<String, Object?>{
-      ...result,
-      'schemaMode': responseSchema == null ? 'legacyUnvalidated' : 'validated',
-    }, executionValidation);
-  }
+    final PatchbayCatalogValidity validity = catalog.validity!;
+    final PatchbayCommandPolicy policy = catalog.policy;
 
-  /// The shared admission gate for registry-owned and external commands.
-  ///
-  /// It sits after the sensitive-stdin check and before routing, and returns
-  /// the rejection envelope to serve, or null to continue dispatching.
-  ///
-  /// The gate is an authorization judgement, so it runs before the external
-  /// requestId ledger is consulted: every admission crosses it, including a
-  /// retry of a request that was already served. It also runs before a ledger
-  /// slot is reserved, so a slow gate cannot starve unrelated commands into
-  /// `requestLedgerFull`.
-  Future<Map<String, Object?>?> _admitCommand(
-    String command,
-    String requestId,
-    PatchbayCommandPolicy policy, {
-    required void Function(String result) onGateResult,
-    _InvocationAuditState? audit,
-  }) async {
-    audit?.admissionStage = policy.writesSideEffect
-        ? 'baseGate'
-        : 'descriptorGate';
-    final PatchbayGateEvaluator? gates = _domainGates;
-    if (gates == null) {
-      // No declaration, no evaluator, nothing to enforce: byte-for-byte what
-      // the host did before this gate existed.
-      if (policy.declaredGates.isEmpty) return null;
-      // A declared gate on a host that has no evaluator is an unsatisfiable
-      // contract — the gate can never pass. Saying so is the only answer that
-      // keeps "declared but never enforced" from existing at all.
-      onGateResult('rejected');
-      audit
-        ?..admissionStage = 'descriptorGate'
-        ..gateDisposition = 'rejected';
-      return _domainGateRejection(
-        command: command,
-        requestId: requestId,
-        code: 'consumerGateRejected',
-        gateId: (policy.declaredGates.toList()..sort()).first,
-        reason: 'gateEvaluatorUnavailable',
-      );
+    final PatchbayInputAdmission input = patchbayAdmitInvocationInput(
+      requestId: requestId,
+      policy: policy,
+      arguments: arguments,
+      audit: audit,
+    );
+    if (input.rejection case final Map<String, Object?> rejection) {
+      return rejection;
     }
-    final PatchbayGateRejection? rejection =
-        await runInPatchbayGateAdmissionScope<PatchbayGateRejection?>(
-          skipBase: !policy.writesSideEffect,
-          admittedGateIds: const <String>{},
-          body: () => gates.evaluate(policy.declaredGates),
+
+    // 不需要过门的命令在这里**同步**短路：`await` 只在真的要过门时求值。多让出一个
+    // 微任务就多一个取消信号能插进来的窗口，会改变只读命令的取消观察时机。
+    final PatchbayGateAdmission gate =
+        PatchbayInvocationGateStage.requiresCoreAdmission(policy)
+        ? await _gateStage.admit(
+            command: command,
+            requestId: requestId,
+            policy: policy,
+            onGateResult: onGateResult,
+            audit: audit,
+          )
+        : PatchbayInvocationGateStage.admissionNotRequired;
+    if (gate.refusal case final Map<String, Object?> refusal) return refusal;
+
+    final PatchbayHandlerDispatch dispatch =
+        await patchbayDispatchInvocationHandler(
+          registry: _registry,
+          command: command,
+          forwarded: input.forwarded,
+          requestId: requestId,
+          context: context,
+          policy: policy,
+          coreGateEvaluated: gate.coreGateEvaluated,
+          onGateResult: onGateResult,
+          frozenCancellationResponse: () =>
+              _invocations.frozenCancellationResponse(command, requestId),
+          dispatchExternal: () => _external.dispatch(
+            command: command,
+            arguments: input.forwarded,
+            requestId: requestId,
+            retryPolicy: validity.retryPolicies[command],
+            onDisposition: onExternalDisposition,
+            context: context,
+            ownerToken: ownerToken,
+          ),
+          audit: audit,
         );
-    if (rejection != null) {
-      onGateResult('rejected');
-      // `patchbay.base` is the evaluator's own marker for the non-optional host
-      // gate; anything else is a consumer-declared gate id.
-      audit
-        ?..admissionStage = rejection.gateId == 'patchbay.base'
-            ? 'baseGate'
-            : 'descriptorGate'
-        ..gateDisposition = 'rejected';
-      return _domainGateRejection(
-        command: command,
-        requestId: requestId,
-        code: rejection.code,
-        gateId: rejection.gateId,
-        notice: rejection.notice,
-      );
+    if (dispatch.frozenResponse case final Map<String, Object?> frozen) {
+      return frozen;
     }
-    onGateResult('passed');
-    audit
-      ?..admissionStage = 'descriptorGate'
-      ..gateDisposition = policy.declaredGates.isEmpty
-          ? 'notDeclared'
-          : 'passed';
-    // A consumer gate may await, and a versioned provider can advance its
-    // revision meanwhile. Re-read and compare the two facts the decision was
-    // taken from; on a revision cache hit this costs one synchronous getter.
-    audit?.admissionStage = 'postAwaitRecheck';
-    final PatchbayCatalogValidity recheck = await _catalogHandler
-        .readInvocationCatalog();
-    if (recheck.violation case final Map<String, Object?> reason) {
-      return _invalidInvocationEnvelope(
-        requestId,
-        'catalogUnavailable',
-        <String, Object?>{'catalog': reason},
-      );
-    }
-    final PatchbayCommandPolicy current =
-        recheck.commandPolicies[command] ??
-        const PatchbayCommandPolicy.undeclared();
-    if (policy.sameGatePolicy(current)) return null;
-    // Drift is reported as-is and the caller re-sends. Re-evaluating against
-    // the new declaration would make one call an unbounded gate loop and leave
-    // the caller unable to say which declaration it finally passed.
-    return _invalidInvocationEnvelope(
-      requestId,
-      'catalogGateDrift',
-      <String, Object?>{'command': command},
+
+    return patchbayValidateInvocationResponse(
+      result: dispatch.result,
+      requestId: requestId,
+      registered: dispatch.registered,
+      responseSchema: validity.responseSchemas[command],
+      executionContract: validity.executionContracts[command],
+      nowMs: () => DateTime.now().millisecondsSinceEpoch,
+      audit: audit,
     );
   }
 
-  /// A gate rejection in the shape the UI plane already uses.
-  ///
-  /// `priorRequestObserved` is the one extra fact: because the gate runs
-  /// before ledger replay, a caller retrying an already-served requestId can
-  /// receive a rejection for work that *did* happen. Without this flag it
-  /// could read the rejection as "nothing happened", pick a fresh requestId
-  /// and cause a second effect. The flag says only that this requestId was
-  /// admitted before — never what it did, or with which arguments.
-  Map<String, Object?> _domainGateRejection({
-    required String command,
-    required String requestId,
-    required String code,
-    required String gateId,
-    String? notice,
-    String? reason,
-  }) => PatchbayInvocation.rejected(
-    requestId: requestId,
-    rejection: PatchbayRejection(
-      code: code,
-      notice: notice,
-      details: <String, Object?>{
-        'gateId': gateId,
-        if (reason != null) 'reason': reason,
-        if (_externalInvocations.containsKey((command, requestId)))
-          'priorRequestObserved': true,
-      },
-    ),
-  ).toJson();
-
-  Future<Map<String, Object?>> _dispatchExternal(
+  Future<Map<String, Object?>> _invokeExternal(
     String command,
     Map<String, Object?> arguments,
-    String requestId, {
-    required PatchbayRetryPolicy? retryPolicy,
-    required void Function(String disposition) onDisposition,
-    required PatchbayInvocationContext context,
-    required String? ownerToken,
-  }) async {
-    final (String, String) key = (command, requestId);
-    final String argumentDigest = PatchbayCatalogDigest.ofCommands(<Object?>[
-      arguments,
-    ]).value;
-    final PatchbayExternalInvocationRecord? existing =
-        _externalInvocations[key];
-    if (existing != null) {
-      if (existing.argumentDigest != argumentDigest) {
-        onDisposition('rejection');
-        return _externalDuplicateRejection(requestId, 'requestIdConflict');
-      }
-      if (!existing.idempotent) {
-        onDisposition('rejection');
-        return _externalDuplicateRejection(requestId, 'duplicateRequestId');
-      }
-      onDisposition('replay');
-      return existing.response;
-    }
-    if (!_reserveExternalInvocationSlot()) {
-      onDisposition('rejection');
-      return _externalDuplicateRejection(requestId, 'requestLedgerFull');
-    }
-    onDisposition('owner');
-    final PatchbayExternalInvocationRecord record =
-        PatchbayExternalInvocationRecord(
-          argumentDigest: argumentDigest,
-          idempotent: retryPolicy != null,
-          ownerToken: ownerToken,
-        );
-    _externalInvocations[key] = record;
-    record.response = () async {
-      try {
-        final PatchbayContextInvocationSource? contextSource =
-            _invokeWithContext;
-        return _freezeJsonMap(
-          await (contextSource == null
-              ? _invoke!(command, arguments, requestId)
-              : contextSource(command, arguments, requestId, context)),
-        );
-      } finally {
-        record.settled = true;
-      }
-    }();
-    return record.response;
-  }
-
-  bool _reserveExternalInvocationSlot() {
-    if (_externalInvocations.length < 256) return true;
-    for (final MapEntry<(String, String), PatchbayExternalInvocationRecord>
-        entry
-        in _externalInvocations.entries) {
-      if (!entry.value.settled) continue;
-      _externalInvocations.remove(entry.key);
-      return true;
-    }
-    return false;
-  }
-
-  static Map<String, Object?> _externalDuplicateRejection(
     String requestId,
-    String code,
-  ) => PatchbayInvocation.rejected(
-    requestId: requestId,
-    rejection: PatchbayRejection(code: code),
-  ).toJson();
-
-  static Map<String, Object?> _freezeJsonMap(Map<String, Object?> value) =>
-      Map<String, Object?>.from(
-        jsonDecode(jsonEncode(value)) as Map<String, dynamic>,
-      );
-
-  void _recordAudit({
-    required String command,
-    required String requestId,
-    required Map<String, Object?> arguments,
-    required String gateResult,
-    required Map<String, Object?> response,
-    String admissionStage = 'dispatch',
-    String gateDisposition = 'notReached',
-  }) {
-    final PatchbayAuditEvent event = projectAuditEventAndReportDefects(
-      dispatcher: _auditDispatcher,
-      command: command,
-      requestId: requestId,
-      arguments: arguments,
-      gateResult: gateResult,
-      response: response,
-      admissionStage: admissionStage,
-      gateDisposition: gateDisposition,
-    );
-    if (_auditLedger.length == 256) _auditLedger.removeAt(0);
-    _auditLedger.add(event);
-    _auditDispatcher?.enqueue(event, _nextAuditSequence);
-    _nextAuditSequence += 1;
-  }
-
-  static Map<String, Object?> _invalidInvocationEnvelope(
-    String requestId,
-    String reason, [
-    Map<String, Object?> details = const <String, Object?>{},
-  ]) => PatchbayInvocation.rejected(
-    requestId: requestId,
-    rejection: PatchbayRejection(
-      code: 'providerProtocolViolation',
-      details: <String, Object?>{'reason': reason, ...details},
-    ),
-  ).toJson();
-
-  static Map<String, Object?> _responseSchemaViolation(
-    String requestId,
-    List<PatchbayResponseValidationIssue> issues,
+    PatchbayInvocationContext context,
   ) {
-    final PatchbayResponseValidationIssue first = issues.first;
-    return _invalidInvocationEnvelope(
-      requestId,
-      first.reason,
-      <String, Object?>{
-        'field': first.field,
-        if (first.expected != null) 'expected': first.expected!,
-        'violations': issues
-            .map((PatchbayResponseValidationIssue issue) => issue.toJson())
-            .toList(growable: false),
-      },
-    );
-  }
-
-  static Map<String, Object?> _withExecutionDetails(
-    Map<String, Object?> response,
-    PatchbayExecutionValidationResult validation,
-  ) {
-    if (!validation.legacyDispatchedConflict) return response;
-    final Object? existing = response['details'];
-    return <String, Object?>{
-      ...response,
-      'details': <String, Object?>{
-        if (existing is Map<Object?, Object?>)
-          for (final MapEntry<Object?, Object?> entry in existing.entries)
-            if (entry.key is String) entry.key! as String: entry.value,
-        'legacyDispatchedConflict': true,
-      },
-    };
-  }
-
-  static String? _invocationSemanticViolation(PatchbayInvocationWire wire) {
-    if (wire.requestId.isEmpty) return 'emptyRequestId';
-    if (wire.jobId != null && wire.jobId!.isEmpty) return 'emptyJobId';
-    switch (wire.admission) {
-      case PatchbayAdmissionWire.accepted:
-        if (wire.rejection != null) return 'acceptedWithRejection';
-      case PatchbayAdmissionWire.rejected:
-        final PatchbayRejectionWire? rejection = wire.rejection;
-        if (rejection == null) return 'rejectedWithoutRejection';
-        if (rejection.code.isEmpty) return 'emptyRejectionCode';
-        if (wire.jobId != null) return 'rejectedWithJobId';
-        if (wire.payload.isNotEmpty) return 'rejectedWithPayload';
-        if (wire.notice != rejection.notice) return 'rejectionNoticeMismatch';
-    }
-    return null;
+    final PatchbayContextInvocationSource? contextSource = _invokeWithContext;
+    return contextSource == null
+        ? _invoke!(command, arguments, requestId)
+        : contextSource(command, arguments, requestId, context);
   }
 
   static Map<String, Object?> withoutStdinProvenance(
     Map<String, Object?> arguments,
-  ) => arguments.containsKey('inputWasStdin')
-      ? (Map<String, Object?>.of(arguments)..remove('inputWasStdin'))
-      : arguments;
-}
-
-final class _InvocationAuditState {
-  String gateResult = 'notEvaluated';
-
-  /// Where the pipeline currently stands. Overwritten as each stage is entered,
-  /// so whatever value survives is the stage the invocation stopped at — no
-  /// separate "did we get past X" bookkeeping to keep in sync.
-  String admissionStage = 'catalog';
-  String gateDisposition = 'notReached';
-  bool recorded = false;
+  ) => patchbayWithoutStdinProvenance(arguments);
 }
