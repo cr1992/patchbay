@@ -1211,7 +1211,6 @@
       "PatchbaySemanticsTargetResolver",
       "PatchbayUiArgumentShape",
       "PatchbayUiRegistrationBuilder",
-      "on",
       "patchbayBindNavigationCommands",
       "patchbayBindUiCaptureCommands",
       "patchbayBindUiGestureCommands",
